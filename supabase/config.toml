@@ -1,0 +1,76 @@
+project_id = "tzbfgwpckrfbqcolqxtm"
+
+[functions.fix-converted-contacts]
+verify_jwt = false
+
+[functions.insert-lead]
+verify_jwt = false
+
+[functions.api-proxy]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = true
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.auto-schedule]
+verify_jwt = false
+
+[functions.validate-contract-signature]
+verify_jwt = false
+
+[functions.generate-contract-pdf]
+verify_jwt = true
+
+[functions.fetch-holidays]
+verify_jwt = false
+
+
+[functions.create-lead]
+verify_jwt = false
+
+
+[functions.get-campaign-form]
+verify_jwt = false
+
+[functions.get-form-data]
+verify_jwt = false
+
+[functions.update-lead]
+verify_jwt = false
+
+[functions.get-campaign-districts]
+verify_jwt = false
+
+[functions.suggest-schedule-assignee]
+verify_jwt = false
+
+[functions.send-proposal-email]
+verify_jwt = true
+
+[functions.send-verification-code]
+verify_jwt = false
+
+
+[functions.generate-proposal-ai]
+verify_jwt = true
+
+[functions.pipeline-automation]
+verify_jwt = false
+
+[functions.send-quote-email]
+verify_jwt = true
+
+[functions.backfill-entity-names]
+verify_jwt = false
+
+[functions.process-scheduled-emails]
+verify_jwt = false
+
+[functions.trigger-email-template]
+verify_jwt = false

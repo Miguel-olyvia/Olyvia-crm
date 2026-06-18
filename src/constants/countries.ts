@@ -1,0 +1,30 @@
+export const COUNTRIES = [
+  "Portugal",
+  "Spain",
+  "France",
+  "Germany",
+  "United Kingdom",
+  "Italy",
+  "Netherlands",
+  "Belgium",
+  "Switzerland",
+  "Austria",
+  "Poland",
+  "Sweden",
+  "Denmark",
+  "Norway",
+  "Finland",
+  "Ireland",
+  "Czech Republic",
+  "Greece",
+  "Romania",
+  "Hungary",
+  "United States",
+  "Canada",
+  "Brazil",
+  "Mexico",
+  "Argentina",
+  "Other"
+] as const;
+
+export type Country = typeof COUNTRIES[number];
