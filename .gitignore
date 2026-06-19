@@ -45,3 +45,9 @@ ficheiros/
 src.zip
 supabase/.temp/
 -
+
+# Removed from repo, kept locally
+eliminar/
+eliminar.md
+audit-complete-2026-06-12.md
+complete-claude.md
