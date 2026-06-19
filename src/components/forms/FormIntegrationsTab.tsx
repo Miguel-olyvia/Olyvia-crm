@@ -83,10 +83,10 @@ export function FormIntegrationsTab({
   const [defaultLocale, setDefaultLocale] = useState(DEFAULT_FORM_LOCALE);
   const [activeLocales, setActiveLocales] = useState<string[]>([DEFAULT_FORM_LOCALE]);
   
-  // Use the published URL for public forms (not the preview URL which requires auth)
-  const publishedUrl = "https://olyvia.lovable.app";
+  // Use the current deployment's own origin for public forms (not the preview URL which requires auth)
+  const publishedUrl = window.location.origin;
   const baseUrl = publishedUrl;
-  const projectId = "jfuyxszlgetnmdwfdmgw";
+  const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
   const apiUrl = `https://${projectId}.supabase.co/functions/v1`;
 
   // Load campaigns associated with the form

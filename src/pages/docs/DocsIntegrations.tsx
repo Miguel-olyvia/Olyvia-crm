@@ -127,7 +127,7 @@ Headers:
                 </p>
                 <div className="bg-zinc-900 text-zinc-100 p-4 rounded-lg overflow-x-auto">
                   <pre className="text-sm">
-{`<script src="https://olyvia.lovable.app/embed.js"></script>
+{`<script src="${window.location.origin}/embed.js"></script>
 <div 
   id="olyvia-lead-form"
   data-form-id="uuid-do-formulario"
@@ -155,8 +155,8 @@ Headers:
                 </p>
                 <div className="bg-zinc-900 text-zinc-100 p-4 rounded-lg overflow-x-auto">
                   <pre className="text-sm">
-{`<iframe 
-  src="https://olyvia.lovable.app/form/{form_id}?source=Website&campaign_id={campaign_id}"
+{`<iframe
+  src="${window.location.origin}/form/{form_id}?source=Website&campaign_id={campaign_id}"
   width="100%" 
   height="600" 
   frameborder="0"

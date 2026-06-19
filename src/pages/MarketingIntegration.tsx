@@ -63,8 +63,8 @@ interface CampaignToken {
   usage_count: number;
 }
 
-const BASE_URL = "https://jfuyxszlgetnmdwfdmgw.supabase.co/functions/v1";
-const APP_URL = "https://olyvia.lovable.app";
+const BASE_URL = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/functions/v1`;
+const APP_URL = window.location.origin;
 
 // Helper to render Lucide icons dynamically
 const DynamicIcon = ({ name, className = "h-4 w-4", style }: { name: string; className?: string; style?: React.CSSProperties }) => {

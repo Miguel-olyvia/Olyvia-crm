@@ -65,7 +65,7 @@ export default function DocsEmbedWidget() {
                   id="domain"
                   value={customDomain}
                   onChange={(e) => setCustomDomain(e.target.value)}
-                  placeholder="https://olyvia.lovable.app"
+                  placeholder={window.location.origin}
                 />
                 <p className="text-xs text-muted-foreground">
                   Use o seu domínio personalizado se tiver um configurado
