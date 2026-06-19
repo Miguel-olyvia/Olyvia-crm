@@ -38,8 +38,8 @@ CLAUDE.md
 task-done.ps1
 
 # Documentation lives outside the Git repository in ../vault
-docs/
-ficheiros/
+/docs/
+/ficheiros/
 
 .env
 src.zip
