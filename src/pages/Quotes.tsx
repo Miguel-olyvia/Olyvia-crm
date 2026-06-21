@@ -211,6 +211,7 @@ export default function Quotes() {
   const [dashboardStats, setDashboardStats] = useState<{
     total: number; rascunho: number; enviado: number; aceite: number; perdido: number; finalizado: number; rejeitado: number; outros: number;
     totalValue: number; avgValue: number; taxaAceitacao: number; avgAcceptTime: number;
+    rascunhoValue: number; enviadoValue: number;
     aceiteValue: number; perdidoValue: number; finalizadoValue: number; rejeitadoValue: number; outrosValue: number;
   } | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -313,48 +314,61 @@ export default function Quotes() {
     resolveRootOrg();
   }, [activeCompany?.id]);
 
-  // Fetch dashboard stats independently (all quotes, no pagination)
+  // Fetch dashboard stats via RPC (KPIs sempre correctos) + query separada para visualizacoes
   const fetchDashboardStats = useCallback(async () => {
     if (!activeCompany?.id) return;
     setStatsLoading(true);
     setStatsError(null);
     try {
-      let query = supabase.from("quotes").select("id, estado, total, created_at, updated_at, accepted_at, validade_dias, assigned_to").is("deleted_at", null).limit(10000);
+      // KPIs via RPC — agrega no servidor independentemente do volume de registos
+      const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
+        p_org_id:        activeCompany.id,
+        p_is_parent_org: isParentOrg,
+        p_root_org_id:   isParentOrg ? activeCompany.id : null,
+      });
+      if (kpiError) throw kpiError;
+      const kpi = kpiData as any;
+      setDashboardStats({
+        total:           kpi.total           ?? 0,
+        rascunho:        kpi.rascunho        ?? 0,
+        enviado:         kpi.enviado         ?? 0,
+        aceite:          kpi.aceite          ?? 0,
+        perdido:         kpi.perdido         ?? 0,
+        finalizado:      kpi.finalizado      ?? 0,
+        rejeitado:       kpi.rejeitado       ?? 0,
+        outros:          kpi.outros          ?? 0,
+        totalValue:      kpi.totalValue      ?? 0,
+        rascunhoValue:   kpi.rascunhoValue   ?? 0,
+        enviadoValue:    kpi.enviadoValue    ?? 0,
+        aceiteValue:     kpi.aceiteValue     ?? 0,
+        perdidoValue:    kpi.perdidoValue    ?? 0,
+        finalizadoValue: kpi.finalizadoValue ?? 0,
+        rejeitadoValue:  kpi.rejeitadoValue  ?? 0,
+        outrosValue:     kpi.outrosValue     ?? 0,
+        avgValue:        kpi.avgValue        ?? 0,
+        taxaAceitacao:   kpi.taxaAceitacao   ?? 0,
+        avgAcceptTime:   kpi.avgAcceptTime   ?? 0,
+      });
+
+      // Query separada com limite para graficos/visualizacoes no dashboard
+      let vizQuery = supabase
+        .from("quotes")
+        .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false })
+        .limit(500);
       if (isParentOrg) {
-        query = query.eq("root_organization_id", activeCompany.id);
+        vizQuery = vizQuery.eq("root_organization_id", activeCompany.id);
       } else {
-        query = query.eq("organization_id", activeCompany.id);
+        vizQuery = vizQuery.eq("organization_id", activeCompany.id);
       }
-      const { data, error } = await query;
-      if (error) throw error;
-      const all = data || [];
-      setAllQuotesForDashboard(all.map((q: any) => ({
+      const { data: vizData, error: vizError } = await vizQuery;
+      if (vizError) throw vizError;
+      setAllQuotesForDashboard((vizData || []).map((q: any) => ({
         id: q.id, estado: q.estado, total: q.total, created_at: q.created_at,
         accepted_at: q.accepted_at ?? null, validade_dias: q.validade_dias ?? null,
         assigned_to: q.assigned_to,
       })));
-      const total = all.length;
-      const rascunho = all.filter(q => q.estado === 'rascunho').length;
-      const enviado = all.filter(q => q.estado === 'enviado').length;
-      const aceite = all.filter(q => q.estado === 'aceite').length;
-      const perdido = all.filter(q => q.estado === 'perdido').length;
-      const finalizado = all.filter(q => q.estado === 'finalizado').length;
-      const rejeitado = all.filter(q => q.estado === 'rejeitado').length;
-      const outros = all.filter(q => !['rascunho', 'enviado', 'aceite', 'perdido', 'finalizado', 'rejeitado'].includes(q.estado || '')).length;
-      const totalValue = all.reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const aceiteValue = all.filter(q => q.estado === 'aceite').reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const perdidoValue = all.filter(q => q.estado === 'perdido').reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const finalizadoValue = all.filter(q => q.estado === 'finalizado').reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const rejeitadoValue = all.filter(q => q.estado === 'rejeitado').reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const outrosValue = all.filter(q => !['rascunho', 'enviado', 'aceite', 'perdido', 'finalizado', 'rejeitado'].includes(q.estado || '')).reduce((s, q) => s + (parseFloat(String(q.total)) || 0), 0);
-      const avgValue = total > 0 ? totalValue / total : 0;
-      const taxaAceitacao = total > 0 ? Math.round((aceite / total) * 100) : 0;
-      // Only count won quotes with an accepted_at timestamp; otherwise the average grows indefinitely.
-      const aceitedQuotes = all.filter(q => ['aceite', 'finalizado'].includes(q.estado) && q.accepted_at);
-      const avgAcceptTime = aceitedQuotes.length > 0
-        ? Math.round(aceitedQuotes.reduce((s, q) => s + differenceInDays(parseISO(q.accepted_at!), parseISO(q.created_at)), 0) / aceitedQuotes.length)
-        : 0;
-      setDashboardStats({ total, rascunho, enviado, aceite, perdido, finalizado, rejeitado, outros, totalValue, avgValue, taxaAceitacao, avgAcceptTime, aceiteValue, perdidoValue, finalizadoValue, rejeitadoValue, outrosValue });
     } catch (err: any) {
       console.error("Error fetching dashboard stats:", err);
       setStatsError(err?.message ?? "Erro ao carregar estatísticas");
@@ -1002,7 +1016,7 @@ export default function Quotes() {
         case 'quote_number': comparison = (a.quote_number || '').localeCompare(b.quote_number || ''); break;
         case 'client': comparison = getClientNameString(a).localeCompare(getClientNameString(b)); break;
         case 'estado': comparison = a.estado.localeCompare(b.estado); break;
-        case 'valor': comparison = (linesAgg[a.id]?.totalValue || 0) - (linesAgg[b.id]?.totalValue || 0); break;
+        case 'valor': comparison = ((a as any).total || linesAgg[a.id]?.totalValue || 0) - ((b as any).total || linesAgg[b.id]?.totalValue || 0); break;
         case 'margem': comparison = (linesAgg[a.id]?.margin || 0) - (linesAgg[b.id]?.margin || 0); break;
         case 'created_at':
         default: comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime(); break;
@@ -1091,14 +1105,26 @@ export default function Quotes() {
   const handleAcceptQuote = async (quote: Quote) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { error } = await supabase.from("quotes").update({ estado: 'aceite' }).eq("id", quote.id);
+    const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
     if (!error) {
       try {
-        await supabase.functions.invoke('execute-workflow', {
+        const { data: wfData, error: wfError } = await supabase.functions.invoke('execute-workflow', {
           body: { source_entity: 'quote', entity_id: quote.id, new_stage_id: 'aceite', old_stage_id: quote.estado, organization_id: activeCompany?.id || "", triggered_by: user.id },
         });
-      } catch (wfErr) { console.error("Quote workflow error:", wfErr); }
-      toast({ title: "Orçamento aceite", description: "O workflow automático foi disparado para criar a proposta." });
+        console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
+        if (wfError) {
+          toast({ title: "Orçamento aceite", description: `Atenção: erro no workflow — ${wfError.message}`, variant: "destructive" });
+        } else if (wfData && (wfData as any).stageActions === 0) {
+          const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
+          const errLog = logs?.find(l => l.status === "error");
+          toast({ title: "Orçamento aceite", description: errLog ? `Proposta não criada: ${errLog.message}` : "Workflow executado mas sem ações (verifique configuração).", variant: "destructive" });
+        } else {
+          toast({ title: "Orçamento aceite", description: "Proposta criada automaticamente." });
+        }
+      } catch (wfErr: any) {
+        console.error("Quote workflow error:", wfErr);
+        toast({ title: "Orçamento aceite", description: `Erro no workflow: ${wfErr?.message || wfErr}`, variant: "destructive" });
+      }
       fetchQuotes();
     }
   };
@@ -1510,6 +1536,18 @@ export default function Quotes() {
         {/* Content Area */}
         {viewMode === 'dashboard' ? (
           <QuotesDashboardView
+            rpcStatusCounts={dashboardStats ? {
+              rascunho: dashboardStats.rascunho, enviado: dashboardStats.enviado,
+              aceite: dashboardStats.aceite, perdido: dashboardStats.perdido,
+              finalizado: dashboardStats.finalizado, rejeitado: dashboardStats.rejeitado,
+              outros: dashboardStats.outros,
+            } : undefined}
+            rpcStatusValues={dashboardStats ? {
+              rascunhoValue: dashboardStats.rascunhoValue, enviadoValue: dashboardStats.enviadoValue,
+              aceiteValue: dashboardStats.aceiteValue, perdidoValue: dashboardStats.perdidoValue,
+              finalizadoValue: dashboardStats.finalizadoValue, rejeitadoValue: dashboardStats.rejeitadoValue,
+              outrosValue: dashboardStats.outrosValue,
+            } : undefined}
             quotes={allQuotesForDashboard.map(q => ({
               id: q.id,
               quote_number: null,
@@ -1643,12 +1681,28 @@ export default function Quotes() {
                             </TableCell>
                             {/* Value */}
                             <TableCell>
-                              <span className={cn("font-bold text-sm tabular-nums", quote.estado === 'perdido' && "line-through text-muted-foreground")}>
-                                {formatCurrency(agg?.totalValue || 0)}
-                              </span>
-                              {agg && agg.totalWithIva > 0 && agg.totalWithIva !== agg.totalValue && (
-                                <span className="block text-[10px] text-muted-foreground tabular-nums">
-                                  c/ IVA: {formatCurrency(agg.totalWithIva)}
+                              {(() => {
+                                const hasFees = ((quote as any).total_fees || 0) > 0;
+                                const primaryVal = hasFees
+                                  ? ((quote as any).total || 0)
+                                  : (agg?.totalValue || (quote as any).total || 0);
+                                const secondaryVal = hasFees ? null : (agg?.totalWithIva || 0);
+                                return (
+                                  <>
+                                    <span className={cn("font-bold text-sm tabular-nums", quote.estado === 'perdido' && "line-through text-muted-foreground")}>
+                                      {formatCurrency(primaryVal)}
+                                    </span>
+                                    {!hasFees && secondaryVal > 0 && secondaryVal !== primaryVal && (
+                                      <span className="block text-[10px] text-muted-foreground tabular-nums">
+                                        c/ IVA: {formatCurrency(secondaryVal)}
+                                      </span>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                              {((quote as any).desconto_global_percent || 0) > 0 && (
+                                <span className="block text-[10px] text-orange-500 dark:text-orange-400 tabular-nums">
+                                  Desc. global: {(quote as any).desconto_global_percent}%
                                 </span>
                               )}
                             </TableCell>

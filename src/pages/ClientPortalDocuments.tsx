@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ function resolveDocBucket(fileUrl: string): string | null {
 }
 
 const ClientPortalDocuments = () => {
+  const { toast } = useToast();
   const [documents, setDocuments] = useState<PortalDocument[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -183,31 +185,35 @@ const ClientPortalDocuments = () => {
               const handleDownload = async (e: React.MouseEvent) => {
                 e.preventDefault();
                 try {
-                  let downloadUrl = doc.url;
-                  // If file lives in a private storage bucket, resolve a signed URL
                   if (doc.bucket && !/^https?:\/\//i.test(doc.url)) {
-                    const { data: signed, error: signErr } = await supabase
-                      .storage
-                      .from(doc.bucket)
-                      .createSignedUrl(doc.url, 60, { download: doc.name });
-                    if (signErr || !signed?.signedUrl) throw signErr || new Error("signed url failed");
-                    downloadUrl = signed.signedUrl;
+                    // Bucket privado — usar download() com auth (evita signed URL que pode falhar no portal)
+                    const { data, error } = await supabase.storage.from(doc.bucket).download(doc.url);
+                    if (error || !data) throw error || new Error("download failed");
+                    const blobUrl = URL.createObjectURL(data);
+                    const a = document.createElement("a");
+                    a.href = blobUrl;
+                    a.download = doc.name || "documento";
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+                    return;
                   }
-                  const res = await fetch(downloadUrl);
+                  // URL pública completa (ex: proposals.document_url)
+                  const res = await fetch(doc.url);
                   if (!res.ok) throw new Error(`HTTP ${res.status}`);
                   const blob = await res.blob();
                   const blobUrl = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = blobUrl;
-                  a.download = doc.name;
+                  a.download = doc.name || "documento";
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);
                   setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
                 } catch (err) {
                   console.error("download failed", err);
-                  // Fallback: open in new tab
-                  window.open(doc.url, "_blank", "noopener,noreferrer");
+                  toast({ title: "Erro ao descarregar", description: "Não foi possível descarregar o documento.", variant: "destructive" });
                 }
               };
               return (

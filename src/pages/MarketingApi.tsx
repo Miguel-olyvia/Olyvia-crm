@@ -37,7 +37,7 @@ interface ApiEndpoint {
   headers?: { name: string; value: string; required: boolean; description: string }[];
 }
 
-const BASE_URL = "https://jfuyxszlgetnmdwfdmgw.supabase.co/functions/v1";
+const BASE_URL = `https://${import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/functions/v1`;
 
 const endpoints: ApiEndpoint[] = [
   {

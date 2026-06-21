@@ -149,72 +149,32 @@ export default function QuoteModels() {
 
   const handleDuplicate = async (templateId: string) => {
     try {
-      // Get template data
-      const { data: template, error: templateError } = await supabase
-        .from("quote_templates")
-        .select("*")
-        .eq("id", templateId)
-        .single();
-
-      if (templateError) throw templateError;
-
-      // Get template items
-      const { data: items, error: itemsError } = await supabase
-        .from("quote_template_items")
-        .select("*")
-        .eq("template_id", templateId);
-
-      if (itemsError) throw itemsError;
-
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
         toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador. Faça login novamente.", variant: "destructive" });
         return;
       }
 
-      // Create new template
-      const { data: newTemplate, error: newTemplateError } = await supabase
+      const { data: tmpl, error: tmplError } = await supabase
         .from("quote_templates")
-        .insert({
-          name: `${template.name} (Copy)`,
-          codigo: `${template.codigo}_copy_${Date.now()}`,
-          description: template.description,
-          active: false,
-          created_by: businessUserId,
-        })
-        .select()
+        .select("name, codigo")
+        .eq("id", templateId)
         .single();
+      if (tmplError) throw tmplError;
 
-      if (newTemplateError) throw newTemplateError;
-
-      // Copy template items
-      if (items && items.length > 0) {
-        const newItems = items.map(item => ({
-          template_id: newTemplate.id,
-          product_id: item.product_id,
-          service_id: item.service_id,
-          item_type: item.item_type,
-          default_qt: item.default_qt,
-          required: item.required,
-          ordem: item.ordem,
-        }));
-
-        const { error: insertError } = await supabase
-          .from("quote_template_items")
-          .insert(newItems);
-
-        if (insertError) throw insertError;
-      }
+      const { error } = await supabase.rpc("duplicate_quote_template", {
+        p_template_id: templateId,
+        p_org_id:      activeCompany!.id,
+        p_user_id:     businessUserId,
+        p_new_name:    `${tmpl.name} (Copy)`,
+        p_new_codigo:  `${tmpl.codigo}_copy_${Date.now()}`,
+      });
+      if (error) throw error;
 
       toast({
         title: t('quoteTemplates.toast.duplicateSuccess'),
         description: t('quoteTemplates.toast.duplicateSuccessDesc'),
       });
-
       fetchTemplates();
     } catch (error: any) {
       toast({

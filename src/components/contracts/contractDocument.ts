@@ -453,11 +453,30 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
     }
   }
 
+  // Fallback: orçamentos ligados via pipeline_links (sem quotes.proposal_id preenchido)
+  if (!resolvedQuoteId && contract.proposal_id) {
+    const { data: pLinks } = await (supabase as any)
+      .from("pipeline_links")
+      .select("quote_id")
+      .eq("proposal_id", contract.proposal_id)
+      .not("quote_id", "is", null);
+    const pLinkedIds = (pLinks || []).map((l: any) => l.quote_id).filter(Boolean);
+    if (pLinkedIds.length > 0) {
+      const { data: pLinkQuote } = await (supabase as any)
+        .from("quotes")
+        .select("id")
+        .in("id", pLinkedIds)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (pLinkQuote?.[0]?.id) resolvedQuoteId = pLinkQuote[0].id;
+    }
+  }
+
   if (resolvedQuoteId) {
     const [{ data: quote }, { data: lines }] = await Promise.all([
       (supabase as any)
         .from("quotes")
-        .select("total")
+        .select("total, desconto_global_percent")
         .eq("id", resolvedQuoteId)
         .maybeSingle(),
       (supabase as any)
@@ -472,10 +491,14 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
       data.contrato_valor = resolvedQuoteTotal;
     }
 
+    const descontoGlobal = parseNumericAmount(quote?.desconto_global_percent) ?? 0;
+    const discountFactor = descontoGlobal > 0 ? 1 - descontoGlobal / 100 : 1;
+
     if (lines && lines.length > 0) {
       const mappedItems = lines.map((l: any) => {
         const qtd = parseFloat(l.qt) || 0;
-        const total = parseNumericAmount(l.total_com_desconto ?? l.total_com_iva ?? l.total_sem_iva) || 0;
+        const rawTotal = parseNumericAmount(l.total_com_desconto ?? l.total_com_iva ?? l.total_sem_iva) || 0;
+        const total = rawTotal * discountFactor;
         const pu = qtd > 0 ? total / qtd : 0;
         const kind: "product" | "service" | "bundle" | "manual" =
           l.bundle_id ? "bundle" :

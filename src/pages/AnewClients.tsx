@@ -306,13 +306,7 @@ const AnewClients = () => {
 
     // Special status filters (from KPI cards)
     if (statusFilter === "no_contact_30d") {
-      const now = new Date();
-      filtered = filtered.filter(c => {
-        if (["inactive", "churned", "lost"].includes(c.status || "")) return false;
-        const int = interactionMap.get(c.entity_id);
-        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
-        return days > 30;
-      });
+      filtered = filtered.filter(c => !["inactive", "churned", "lost"].includes(c.status || ""));
     } else if (statusFilter === "expiring_contracts") {
       filtered = filtered.filter(c => {
         if (["inactive", "churned", "lost"].includes(c.status || "")) return false;
@@ -510,6 +504,13 @@ const AnewClients = () => {
           query = query.in("status", ["inactive", "churned", "lost"]);
         } else if (statusFilter !== "all" && statusFilter !== "no_contact_30d" && statusFilter !== "no_contact_60d" && statusFilter !== "expiring_contracts" && statusFilter !== "missing_nif") {
           query = query.eq("status", statusFilter);
+        }
+        if (statusFilter === "no_contact_30d") {
+          query = query.not("status", "in", '("inactive","churned","lost")');
+          const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
+          if (atRiskIds.length > 0) {
+            query = query.in("entity_id", atRiskIds);
+          }
         }
       }
 

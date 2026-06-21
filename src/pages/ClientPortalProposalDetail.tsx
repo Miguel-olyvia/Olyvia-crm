@@ -363,6 +363,7 @@ const ClientPortalProposalDetail = () => {
           template={portalData.template}
           quotes={portalData.quotes}
           quoteLines={portalData.quoteLines}
+          quoteFees={portalData.quoteFees}
           commercial={portalData.commercial}
           company={portalData.company}
           mode="portal"

@@ -70,7 +70,7 @@ function RetentionGauge({ rate }: { rate: number }) {
   const startY = cy;
   const endX = cx + r * Math.cos(Math.PI - radians);
   const endY = cy - r * Math.sin(radians);
-  const largeArc = angle > 90 ? 1 : 0;
+  const largeArc = 0;
 
   // Color
   let gaugeColor = "hsl(0, 70%, 55%)"; // red

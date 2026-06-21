@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "sonner";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
-import { CONTRACT_VARIABLES, substituteVariables } from "@/utils/contractVariables";
+import { extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
@@ -108,10 +108,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   });
 
   const finalizeGeneration = async (html: string, templateId: string, templateName: string, promptValues: Record<string, string>) => {
-    // Bake apenas as respostas dos prompts (que são input do utilizador) — DEIXA
-    // os tokens dinâmicos ({{proposta_numero}}, {{cliente_nome}}, …) intactos
-    // para a substituição ocorrer em runtime no preview/PDF.
-    let withPrompts = html;
+    // Apply auto-resolved substitutions (empresa_nome, etc.) — html may be raw baseWithItems
+    // from GenerateFromTemplateDialog which passes pre-substitution HTML to allow full token detection.
+    let base = variableData ? substituteVariables(html, variableData as any) : html;
+    // Bake prompt values filled by the user permanently into the body.
+    let withPrompts = base;
     for (const [k, v] of Object.entries(promptValues)) {
       const safeKey = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       withPrompts = withPrompts.replace(new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"), v);
@@ -136,35 +137,39 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   };
 
   const handleGenerated = async (html: string, templateId: string, templateName: string) => {
-    // Detect "preencher no contrato" variables present in the template body.
     try {
-      const { data: customVars } = await (supabase as any)
-        .from("custom_contract_variables")
-        .select("variable_key, label, description, default_value, linked_field_key")
-        .eq("organization_id", activeCompany?.id)
-        .eq("is_active", true)
-        .is("default_value", null)
-        .is("linked_field_key", null);
+      const unknownKeys = extractPromptTokens(html);
 
-      const prompts: PromptVariable[] = [];
-      for (const v of (customVars || []) as Array<{ variable_key: string; label: string; description: string | null }>) {
-        const bareKey = String(v.variable_key || "").replace(/^\{\{|\}\}$/g, "").trim();
-        if (!bareKey) continue;
-        const safeKey = bareKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const tokenRe = new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`);
-        if (tokenRe.test(html)) {
-          prompts.push({ key: bareKey, label: v.label, description: v.description });
+      if (unknownKeys.length > 0) {
+        // 2. Look up definitions for the detected tokens (same org + parent orgs).
+        const { data: customVars } = await (supabase as any)
+          .from("custom_contract_variables")
+          .select("variable_key, label, description, default_value, linked_field_key")
+          .in("organization_id", [activeCompany?.id].filter(Boolean))
+          .eq("is_active", true)
+          .is("default_value", null)
+          .is("linked_field_key", null);
+
+        const varMap = new Map<string, { label: string; description: string | null }>();
+        for (const v of (customVars || []) as Array<{ variable_key: string; label: string; description: string | null }>) {
+          const bareKey = String(v.variable_key || "").replace(/^\{\{|\}\}$/g, "").trim();
+          if (bareKey) varMap.set(bareKey, { label: v.label, description: v.description });
+        }
+
+        // 3. Build prompt list — tokens with a "preencher" definition in the DB.
+        //    Tokens without a definition are left in the HTML (auto-resolved elsewhere or kept as-is).
+        const prompts: PromptVariable[] = unknownKeys
+          .filter(k => varMap.has(k))
+          .map(k => ({ key: k, label: varMap.get(k)!.label, description: varMap.get(k)!.description }));
+
+        if (prompts.length > 0) {
+          setPendingPromptVars(prompts);
+          setPendingGeneration({ html, templateId, templateName });
+          setPromptDialogOpen(true);
+          return;
         }
       }
-
-      if (prompts.length > 0) {
-        setPendingPromptVars(prompts);
-        setPendingGeneration({ html, templateId, templateName });
-        setPromptDialogOpen(true);
-        return;
-      }
     } catch (e) {
-      // If detection fails for any reason, fall back to plain generation.
       console.error("Falha a detectar variáveis a preencher:", e);
     }
 

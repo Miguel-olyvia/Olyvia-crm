@@ -35,6 +35,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { UserSchedulePreview } from "./UserSchedulePreview";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import {
+  createSupabaseLeadDialogFieldDefinitionResolverClient,
+  resolveLeadDialogFieldDefinitions,
+  type LeadDialogFieldDefinition,
+} from "@/lib/leads/fieldDefinitions";
+import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 
 interface Lead {
   id: string;
@@ -117,9 +123,22 @@ interface LeadContactDialogProps {
   onOpenChange: (open: boolean) => void;
   lead: Lead | null;
   companyId: string | null;
-  onLeadUpdated?: () => void;
+  onLeadUpdated?: (payload?: LeadContactDialogUpdate) => void;
 }
 
+export interface LeadContactDialogUpdate {
+  leadId: string;
+  entityId: string | null;
+  status: string;
+  assignedTo: string | null;
+  contactResult: string;
+  callbackScheduledAt: string | null;
+  workflowStageId: string | null;
+  scheduledVisitId: string | null;
+  fieldValues?: Record<string, any>;
+}
+
+const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
 export function AnewLeadContactDialog({ 
   open, 
@@ -141,14 +160,7 @@ export function AnewLeadContactDialog({
   } | null>(null);
   
   // Campaign field definitions
-  const [fieldDefinitions, setFieldDefinitions] = useState<{
-    id: string;
-    field_key: string;
-    field_label: string;
-    field_type: string;
-    is_required: boolean | null;
-    sort_order: number | null;
-  }[]>([]);
+  const [fieldDefinitions, setFieldDefinitions] = useState<LeadDialogFieldDefinition[]>([]);
   
   // Reference data for resolving UUIDs (e.g. district IDs to names)
   const [refLookup, setRefLookup] = useState<Record<string, Record<string, string>>>({});
@@ -240,7 +252,7 @@ export function AnewLeadContactDialog({
       }
       
       // Pre-populate location from lead field_values, fallback to entity address
-      const extractedLocation = extractLeadLocation(lead);
+      const extractedLocation = extractSharedLeadLocation(lead);
       if (extractedLocation) {
         setVisitLocation(extractedLocation);
       } else if (lead.entity_id) {
@@ -374,40 +386,40 @@ export function AnewLeadContactDialog({
   };
 
   const loadFieldDefinitions = async () => {
-    const campaignId = await resolveCampaignId();
-    if (!campaignId) {
-      setFieldDefinitions([]);
-      return;
-    }
-    
-    const { data, error } = await supabase
-      .from("lead_field_definitions")
-      .select("id, field_key, field_label, field_type, is_required, sort_order")
-      .eq("campaign_id", campaignId)
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true, nullsFirst: false });
-    
-    if (!error && data) {
-      setFieldDefinitions(data);
-      // Load reference data for ref_* fields
-      const refFields = data.filter(f => f.field_type.startsWith('ref_'));
-      if (refFields.length > 0) {
-        const lookup: Record<string, Record<string, string>> = {};
-        for (const rf of refFields) {
-          if (rf.field_type === 'ref_district') {
-            const { data: districts } = await supabase
-              .from('administrative_divisions')
-              .select('id, name')
-              .eq('admin_level', 1);
-            if (districts) {
-              lookup[rf.field_key] = {};
-              districts.forEach(d => { lookup[rf.field_key][d.id] = d.name; });
-            }
+    try {
+      const campaignId = await resolveCampaignId();
+      const resolvedDefinitions = await resolveLeadDialogFieldDefinitions(
+        {
+          campaignId,
+          organizationId: companyId || lead?.organization_id || null,
+        },
+        fieldDefinitionResolverClient,
+      );
+
+      setFieldDefinitions(resolvedDefinitions);
+
+      const refFields = resolvedDefinitions.filter((field) => field.field_type.startsWith("ref_"));
+      if (refFields.length === 0) return;
+
+      const lookup: Record<string, Record<string, string>> = {};
+      for (const rf of refFields) {
+        if (rf.field_type === "ref_district") {
+          const { data: districts } = await supabase
+            .from("administrative_divisions")
+            .select("id, name")
+            .eq("admin_level", 1);
+          if (districts) {
+            lookup[rf.field_key] = {};
+            districts.forEach((district) => {
+              lookup[rf.field_key][district.id] = district.name;
+            });
           }
         }
-        setRefLookup(prev => ({ ...prev, ...lookup }));
       }
-    } else {
+
+      setRefLookup((prev) => ({ ...prev, ...lookup }));
+    } catch (error) {
+      console.error("Error loading field definitions:", error);
       setFieldDefinitions([]);
     }
   };
@@ -537,6 +549,7 @@ export function AnewLeadContactDialog({
           requested_time: visitTime || null,
           duration_minutes: parseInt(visitDuration),
           lead_postal_code: leadPostalCode,
+          lead_location: extractSharedLeadLocation(lead),
         }),
       });
 
@@ -796,6 +809,7 @@ export function AnewLeadContactDialog({
       if (scheduleCallback && callbackDate && callbackTime) {
         callbackDatetime = `${callbackDate}T${callbackTime}:00`;
       }
+      let scheduledVisitId: string | null = lead.scheduled_visit_id || null;
 
       // Insert contact history (organization_id = anew model)
       const { error: historyError } = await supabase
@@ -1067,6 +1081,7 @@ export function AnewLeadContactDialog({
 
             // Persist the link Lead -> Scheduled Visit
             if (scheduleItem?.id) {
+              scheduledVisitId = scheduleItem.id;
               const { error: linkError } = await supabase
                 .from("anew_leads")
                 .update({ scheduled_visit_id: scheduleItem.id })
@@ -1138,7 +1153,17 @@ export function AnewLeadContactDialog({
       toast({ title: "Contacto registado com sucesso!" });
       if (draftStorageKey) localStorage.removeItem(draftStorageKey);
       resetForm();
-      onLeadUpdated?.();
+      onLeadUpdated?.({
+        leadId: lead.id,
+        entityId: entityIdForTimeline,
+        status: statusToSet,
+        assignedTo: resolvedAssignedTo,
+        contactResult,
+        callbackScheduledAt: callbackDatetime,
+        workflowStageId,
+        scheduledVisitId,
+        ...(isEditingFields ? { fieldValues: editableFieldValues } : {}),
+      });
       onOpenChange(false);
 
     } catch (error: any) {
@@ -1327,7 +1352,17 @@ export function AnewLeadContactDialog({
                       } else {
                         toast({ title: "Dados guardados" });
                         setIsEditingFields(false);
-                        onLeadUpdated?.();
+                        onLeadUpdated?.({
+                          leadId: lead.id,
+                          entityId: lead.entity_id || null,
+                          status: lead.status,
+                          assignedTo: lead.assigned_to || null,
+                          contactResult: "",
+                          callbackScheduledAt: lead.callback_scheduled_at || null,
+                          workflowStageId: null,
+                          scheduledVisitId: lead.scheduled_visit_id || null,
+                          fieldValues: editableFieldValues,
+                        });
                       }
                     }}
                   >

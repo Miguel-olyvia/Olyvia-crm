@@ -1,6 +1,11 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import { sanitizeEmail, sanitizePhone, sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
+import {
+  cleanupCreatedEntityArtifacts,
+  resolveRootOrganizationId,
+  validateInsertLeadCampaign,
+} from '../_shared/leadsValidation.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -181,15 +186,33 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Get root organization for hierarchy
-    const { data: hierarchy } = await supabase
-      .from('anew_hierarchy')
-      .select('parent_org_id')
-      .eq('child_org_id', organizationId)
-      .limit(1)
-      .maybeSingle();
+    if (leadData.campaign_id) {
+      const { data: campaign, error: campaignError } = await supabase
+        .from('campaigns')
+        .select('id, organization_id, status')
+        .eq('id', leadData.campaign_id)
+        .maybeSingle();
 
-    const rootOrganizationId = hierarchy?.parent_org_id || organizationId;
+      if (campaignError && !campaign) {
+        return new Response(
+          JSON.stringify({ error: 'Campaign not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const campaignValidation = validateInsertLeadCampaign(organizationId, campaign);
+      if (!campaignValidation.ok) {
+        return new Response(
+          JSON.stringify({
+            error: campaignValidation.error,
+            ...(campaignValidation.details ? campaignValidation.details : {}),
+          }),
+          { status: campaignValidation.status || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    const rootOrganizationId = await resolveRootOrganizationId(supabase, organizationId) || organizationId;
 
     // Find an admin user for created_by via anew_memberships
     const { data: adminMembership } = await supabase
@@ -255,6 +278,7 @@ Deno.serve(async (req) => {
 
     // --- Entity deduplication: reuse existing entity if email matches ---
     let entityId: string | null = null;
+    let entityWasCreated = false;
     const rawEmail = leadData.email || fieldValues.email || null;
     const rawPhone = leadData.phone || fieldValues.phone || null;
     const leadEmail = sanitizeEmail(rawEmail);
@@ -301,36 +325,75 @@ Deno.serve(async (req) => {
 
     if (!entityId) {
       const displayName = composeDisplayName(leadFirstName, leadLastName) || 'Lead';
-      const entityInsert: Record<string, any> = { display_name: displayName, type: 'person', status: 'active' };
-      if (leadFirstName) entityInsert.first_name = leadFirstName;
-      if (leadLastName) entityInsert.last_name = leadLastName;
-      const { data: newEntity, error: entityError } = await supabase
-        .from('anew_entities')
-        .insert(entityInsert)
-        .select('id')
-        .single();
-
-      if (entityError) {
-        console.error('Error creating entity:', entityError);
-      } else {
-        entityId = newEntity.id;
-        console.log('Created new entity:', entityId);
-
-        if (leadEmail) {
-          await supabase.from('anew_entity_emails').insert({
-            entity_id: entityId, email: leadEmail, is_primary: true
-          });
-        }
-        if (leadPhone) {
-          await supabase.from('anew_entity_phones').insert({
-            entity_id: entityId, phone_number: leadPhone, is_primary: true
-          });
-        }
+      const emailsPayload: Array<Record<string, unknown>> = [];
+      if (leadEmail) {
+        emailsPayload.push({
+          email: leadEmail.toLowerCase().trim(),
+          email_type: 'personal',
+          is_primary: true,
+        });
       }
+
+      const phonesPayload: Array<Record<string, unknown>> = [];
+      if (leadPhone) {
+        phonesPayload.push({
+          phone_number: leadPhone,
+          phone_type: 'mobile',
+          is_primary: true,
+        });
+      }
+
+      const addressesPayload: Array<Record<string, unknown>> = [];
+      const street = String(leadData.address || '').trim();
+      const postalCode = String(leadData.postal_code || '').trim();
+      const city = String(leadData.city || '').trim();
+      if (street && postalCode) {
+        addressesPayload.push({
+          street,
+          postal_code: postalCode,
+          city: city || '',
+          number: '',
+          country: 'PT',
+          address_type: 'primary',
+          is_primary: true,
+        });
+      }
+
+      const entityPayload: Record<string, unknown> = {
+        display_name: displayName,
+        type: 'person',
+        status: 'active',
+      };
+      if (leadFirstName) entityPayload.first_name = leadFirstName;
+      if (leadLastName) entityPayload.last_name = leadLastName;
+
+      const { data: rpcEntityId, error: entityError } = await supabase.rpc(
+        'create_entity_with_contacts_and_roles',
+        {
+          p_organization_id: organizationId,
+          p_entity: entityPayload,
+          p_emails: emailsPayload,
+          p_phones: phonesPayload,
+          p_addresses: addressesPayload,
+          p_roles: [{ role: 'lead', status: 'active', source_type: 'lead' }],
+          p_created_by: createdBy,
+        },
+      );
+
+      if (entityError || !rpcEntityId) {
+        console.error('Error creating entity via RPC:', entityError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to create lead entity', details: entityError?.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      entityId = rpcEntityId as string;
+      entityWasCreated = true;
+      console.log('Created new entity (RPC):', entityId);
     }
 
     if (entityId) {
-      await ensureEntityOrgLinkSR({ supabase, entityId, organizationId, isPrimary: !scopedHit?.entityId });
+      await ensureEntityOrgLinkSR({ supabase, entityId, organizationId, isPrimary: entityWasCreated });
     }
 
     // Check existing roles on entity
@@ -367,6 +430,14 @@ Deno.serve(async (req) => {
 
     if (insertError) {
       console.error('Error inserting lead:', insertError);
+      if (entityWasCreated && entityId) {
+        try {
+          await cleanupCreatedEntityArtifacts(supabase, entityId);
+          console.log('Compensation cleanup completed for entity:', entityId);
+        } catch (cleanupErr) {
+          console.error('Compensation cleanup failed (manual review needed):', cleanupErr, 'entity_id:', entityId);
+        }
+      }
       return new Response(
         JSON.stringify({ error: 'Failed to create lead', details: insertError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

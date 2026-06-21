@@ -23,6 +23,11 @@ import {
 import { Loader2, Save } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { DynamicFormField } from "./DynamicFormField";
+import {
+  createSupabaseLeadDialogFieldDefinitionResolverClient,
+  resolveLeadDialogFieldDefinitions,
+  type LeadDialogFieldDefinition,
+} from "@/lib/leads/fieldDefinitions";
 
 interface Lead {
   id: string;
@@ -37,22 +42,15 @@ interface Lead {
   workflow_stage_id?: string | null;
 }
 
-interface FieldDefinition {
-  id: string;
-  campaign_id: string | null;
-  organization_id: string | null;
-  field_key: string;
-  field_label: string;
-  field_type: string;
-  is_required: boolean;
-  is_unique: boolean;
-  options: any;
-  sort_order: number;
-  contact_field_mapping: string | null;
-  client_field_mapping: string | null;
-  placeholder?: string;
-  help_text?: string;
-  display_style?: string;
+export interface LeadEditDialogUpdate {
+  leadId: string;
+  entityId: string | null;
+  status: string;
+  assignedTo: string | null;
+  source: string | null;
+  notes: string | null;
+  workflowStageId: string | null;
+  fieldValues: Record<string, any>;
 }
 
 interface LeadEditDialogProps {
@@ -61,7 +59,7 @@ interface LeadEditDialogProps {
   lead: Lead | null;
   companyId: string;
   companyUsers: { id: string; name: string }[];
-  onLeadUpdated: () => void;
+  onLeadUpdated: (payload?: LeadEditDialogUpdate) => void;
 }
 
 const NOTES_FIELD_KEYS = ["notas", "notes", "observacoes", "observações"];
@@ -105,6 +103,8 @@ const getGeneralFieldValue = (values: Record<string, any>, key: string) => {
   return "";
 };
 
+const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
+
 export function AnewLeadEditDialog({
   open,
   onOpenChange,
@@ -116,7 +116,7 @@ export function AnewLeadEditDialog({
   const { t } = useTranslation();
   const { toast } = useToast();
   
-  const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
+  const [fieldDefs, setFieldDefs] = useState<LeadDialogFieldDefinition[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
   const [status, setStatus] = useState("new");
   const [source, setSource] = useState("");
@@ -138,22 +138,15 @@ export function AnewLeadEditDialog({
     setLoading(true);
     
     try {
-      // Get field definitions from campaign or company
-      let query = supabase
-        .from("lead_field_definitions")
-        .select("*")
-        .order("sort_order", { ascending: true });
+      const resolvedDefinitions = await resolveLeadDialogFieldDefinitions(
+        {
+          campaignId: lead.campaign_id,
+          organizationId: companyId,
+        },
+        fieldDefinitionResolverClient,
+      );
 
-      if (lead.campaign_id) {
-        query = query.eq("campaign_id", lead.campaign_id);
-      } else {
-        query = query.eq("organization_id", companyId).is("campaign_id", null);
-      }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      setFieldDefs(data || []);
+      setFieldDefs(resolvedDefinitions);
     } catch (error) {
       console.error("Error loading field definitions:", error);
     } finally {
@@ -271,7 +264,16 @@ export function AnewLeadEditDialog({
         description: "Os dados da lead foram guardados com sucesso.",
       });
 
-      onLeadUpdated();
+      onLeadUpdated({
+        leadId: lead.id,
+        entityId: lead.entity_id,
+        status,
+        assignedTo,
+        source: source || null,
+        notes: notes || null,
+        workflowStageId,
+        fieldValues: updatedFieldValues,
+      });
       onOpenChange(false);
     } catch (error) {
       console.error("Error saving lead:", error);

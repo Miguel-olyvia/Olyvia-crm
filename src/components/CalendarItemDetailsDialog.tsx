@@ -440,4 +440,12 @@ export function CalendarItemDetailsDialog({
       </DialogContent>
     </Dialog>
   );
+<<<<<<< ours
+<<<<<<< ours
 }
+=======
+}
+>>>>>>> theirs
+=======
+}
+>>>>>>> theirs

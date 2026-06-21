@@ -246,17 +246,15 @@ export default function PublicProposal() {
     setRejecting(true);
     try {
       const selectedReason = rejectionReasons.find(r => r.code === selectedRejectionReason);
-      const { error } = await supabase
-        .from("proposals")
-        .update({ 
-          status: "rejected",
-          rejected_at: new Date().toISOString(),
+      const { error } = await supabase.functions.invoke("reject-proposal", {
+        body: {
+          proposal_id:           portalData.proposal.id,
+          public_token:          token,
           rejection_reason_code: selectedRejectionReason,
-          rejection_reason: selectedReason?.label || null,
-          rejection_notes: rejectionNotes || null,
-        })
-        .eq("id", portalData.proposal.id);
-      
+          rejection_reason:      selectedReason?.label || null,
+          rejection_notes:       rejectionNotes || null,
+        },
+      });
       if (error) throw error;
       setPortalData({
         ...portalData,
@@ -372,6 +370,7 @@ export default function PublicProposal() {
           template={portalData.template}
           quotes={portalData.quotes}
           quoteLines={portalData.quoteLines}
+          quoteFees={portalData.quoteFees}
           commercial={portalData.commercial}
           company={portalData.company}
           mode="portal"

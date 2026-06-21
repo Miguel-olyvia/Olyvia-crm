@@ -78,27 +78,39 @@ async function extractTextWithPdfJs(file: File): Promise<string> {
 }
 
 async function extractTextFromPdf(file: File): Promise<{ html: string; mode: "pdfjs" | "ai" }> {
-  // Try AI extraction first — preserves bold, headings, lists
-  const arrayBuffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  const pdfBase64 = btoa(binary);
+  // Fast base64 encoding via FileReader — avoids slow byte-by-byte string concatenation
+  const pdfBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   try {
-    const { data, error } = await supabase.functions.invoke("import-contract-pdf", {
-      body: {
-        fileName: file.name,
-        pdfBase64,
-      },
+    const AI_TIMEOUT_MS = 25_000;
+    const timeoutSignal = AbortSignal.timeout(AI_TIMEOUT_MS);
+
+    const invokePromise = supabase.functions.invoke("import-contract-pdf", {
+      body: { fileName: file.name, pdfBase64 },
     });
+
+    const { data, error } = await Promise.race([
+      invokePromise,
+      new Promise<never>((_, reject) =>
+        timeoutSignal.addEventListener("abort", () => reject(new Error("AI_TIMEOUT")))
+      ),
+    ]);
 
     if (!error && data?.html) {
       return { html: data.html as string, mode: "ai" };
     }
     console.warn("AI extraction failed, falling back to PDF.js:", error || data?.error);
-  } catch (err) {
-    console.warn("AI extraction error, falling back to PDF.js:", err);
+  } catch (err: any) {
+    if (err?.message === "AI_TIMEOUT") {
+      console.warn("AI extraction timed out, falling back to PDF.js");
+    } else {
+      console.warn("AI extraction error, falling back to PDF.js:", err);
+    }
   }
 
   // Fallback: local pdfjs extraction (no formatting)

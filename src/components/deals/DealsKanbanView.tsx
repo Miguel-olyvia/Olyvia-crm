@@ -24,6 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 
 interface Deal {
   id: string;
@@ -75,6 +76,7 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
     newStageName: string;
     message: string;
   } | null>(null);
+  const [emailDeal, setEmailDeal] = useState<{ id: string; name: string; email: string } | null>(null);
 
   const dealsByStage = useMemo(() => {
     const map: Record<string, Deal[]> = {};
@@ -230,8 +232,8 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
                                     </Button>
                                   )}
                                   {deal.entity_email && (
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" asChild onClick={e => e.stopPropagation()}>
-                                      <a href={`mailto:${deal.entity_email}`}><Mail className="h-3 w-3 text-primary" /></a>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={e => { e.stopPropagation(); setEmailDeal({ id: deal.id, name: deal.entity_name || "", email: deal.entity_email! }); }}>
+                                      <Mail className="h-3 w-3 text-primary" />
                                     </Button>
                                   )}
                                   <Button variant="ghost" size="icon" className="h-6 w-6 ml-auto" onClick={e => { e.stopPropagation(); onViewDetails(deal); }}>
@@ -252,6 +254,17 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
           ))}
         </div>
       </DragDropContext>
+
+      <SendEntityEmailDialog
+        open={!!emailDeal}
+        onOpenChange={open => { if (!open) setEmailDeal(null); }}
+        module="leads"
+        entityId={emailDeal?.id ?? ""}
+        entityName={emailDeal?.name ?? ""}
+        entityEmail={emailDeal?.email ?? ""}
+        leadId={emailDeal?.id}
+        onSent={() => setEmailDeal(null)}
+      />
 
       {/* Workflow confirmation dialog */}
       <AlertDialog open={!!confirmDialog?.open} onOpenChange={(open) => { if (!open) setConfirmDialog(null); }}>

@@ -33,7 +33,7 @@ export default function DocsApi() {
             
             <div className="bg-muted p-4 rounded-lg">
               <div className="font-mono text-sm">
-                Base URL: <code>https://jfuyxszlgetnmdwfdmgw.supabase.co/rest/v1</code>
+                Base URL: <code>https://{import.meta.env.VITE_SUPABASE_PROJECT_ID}.supabase.co/rest/v1</code>
               </div>
             </div>
           </CardContent>

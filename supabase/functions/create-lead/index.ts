@@ -14,6 +14,11 @@ import {
   sanitizePhone,
   sanitizeFieldValues,
 } from '../_shared/inputSanitizers.ts';
+import {
+  cleanupCreatedEntityArtifacts,
+  resolveCanonicalFormId,
+  resolveRootOrganizationId,
+} from '../_shared/leadsValidation.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -145,7 +150,7 @@ Deno.serve(async (req) => {
     // Get campaign and its company
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id, name, organization_id, status')
+      .select('id, name, organization_id, status, form_id')
       .eq('id', campaign_id)
       .single();
 
@@ -165,6 +170,14 @@ Deno.serve(async (req) => {
     }
 
     const organization_id = campaign.organization_id;
+    const canonicalForm = resolveCanonicalFormId(form_id, campaign.form_id);
+    if (canonicalForm.error) {
+      return new Response(
+        JSON.stringify({ error: canonicalForm.error }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    const canonicalFormId = canonicalForm.formId;
 
     if (!field_values || typeof field_values !== 'object') {
       return new Response(
@@ -187,12 +200,12 @@ Deno.serve(async (req) => {
     let totalSteps = 1;
     let definitions: any[] = [];
 
-    if (form_id) {
+    if (canonicalFormId) {
       // Use form-level tables
       const { data: formStepsData } = await supabase
         .from('form_steps')
         .select('step_number')
-        .eq('form_id', form_id)
+        .eq('form_id', canonicalFormId)
         .order('step_number', { ascending: false })
         .limit(1);
       totalSteps = formStepsData?.[0]?.step_number || 1;
@@ -200,14 +213,14 @@ Deno.serve(async (req) => {
       const { data: formFieldDefs, error: formFieldDefsError } = await supabase
         .from('form_fields')
         .select('*, step_number, field_key, field_label, is_required, is_unique, is_active')
-        .eq('form_id', form_id)
+        .eq('form_id', canonicalFormId)
         .eq('is_active', true)
         .order('sort_order');
       if (formFieldDefsError) {
         console.error('Error fetching form field definitions:', formFieldDefsError);
       }
       definitions = formFieldDefs || [];
-      console.log('Using form-level steps/fields. form_id:', form_id, 'totalSteps:', totalSteps, 'fields:', definitions.length);
+      console.log('Using form-level steps/fields. form_id:', canonicalFormId, 'totalSteps:', totalSteps, 'fields:', definitions.length);
     } else {
       // Fallback: use campaign-level tables
       const { data: stepsData } = await supabase
@@ -376,22 +389,7 @@ Deno.serve(async (req) => {
     };
 
     // Get root_organization_id from hierarchy
-    let rootOrgId = organization_id;
-    const { data: hierarchyData } = await supabase
-      .from('anew_hierarchy')
-      .select('parent_org_id')
-      .eq('child_org_id', organization_id)
-      .limit(1)
-      .maybeSingle();
-    if (hierarchyData?.parent_org_id) {
-      // Walk up to find root (simplified: one level up)
-      const { data: parentHierarchy } = await supabase
-        .from('anew_hierarchy')
-        .select('parent_org_id')
-        .eq('child_org_id', hierarchyData.parent_org_id)
-        .maybeSingle();
-      rootOrgId = parentHierarchy?.parent_org_id || hierarchyData.parent_org_id;
-    }
+    const rootOrgId = await resolveRootOrganizationId(supabase, organization_id) || organization_id;
 
     // --- Build mapping from contact_field_mapping → field_key ---
     const contactMappingToKey: Record<string, string> = {};
@@ -508,7 +506,7 @@ Deno.serve(async (req) => {
             entityId,
             summary,
             campaignId: campaign_id ?? null,
-            formId: form_id ?? null,
+            formId: canonicalFormId ?? null,
             fieldValuesDiff: diff,
             displayName: composeDisplayName(leadFirstName, leadLastName) || null,
           });
@@ -757,24 +755,7 @@ Deno.serve(async (req) => {
       // reused a pre-existing one via dedup).
       if (entityWasCreated && entityId) {
         try {
-          // 1. Delete entity_addresses, then orphaned addresses
-          const { data: entAddrs } = await supabase
-            .from('anew_entity_addresses')
-            .select('address_id')
-            .eq('entity_id', entityId);
-          await supabase.from('anew_entity_addresses').delete().eq('entity_id', entityId);
-          const addrIds = (entAddrs || []).map((a: any) => a.address_id).filter(Boolean);
-          if (addrIds.length > 0) {
-            await supabase.from('anew_addresses').delete().in('id', addrIds);
-          }
-
-          // 2. Delete emails, phones, roles
-          await supabase.from('anew_entity_emails').delete().eq('entity_id', entityId);
-          await supabase.from('anew_entity_phones').delete().eq('entity_id', entityId);
-          await supabase.from('anew_entity_roles').delete().eq('entity_id', entityId);
-
-          // 3. Finally delete the entity itself
-          await supabase.from('anew_entities').delete().eq('id', entityId);
+          await cleanupCreatedEntityArtifacts(supabase, entityId);
           console.log('Compensation cleanup completed for entity:', entityId);
         } catch (cleanupErr) {
           console.error('Compensation cleanup failed (manual review needed):', cleanupErr, 'entity_id:', entityId);

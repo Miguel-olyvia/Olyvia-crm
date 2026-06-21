@@ -62,6 +62,7 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { DealNeedsSection } from "@/components/deals/DealNeedsSection";
 import { CatalogItemPicker, CatalogLineItem } from "@/components/clients/detail/CatalogItemPicker";
 import { DealsKanbanView } from "@/components/deals/DealsKanbanView";
+import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { DealsDashboardView } from "@/components/deals/DealsDashboardView";
 import { LayoutList, Columns3, BarChart3, Download, TrendingUp, Timer, AlertCircle } from "lucide-react";
 import {
@@ -189,6 +190,7 @@ const Deals = () => {
   const truncatedWarnedRef = useRef<string | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
+  const [emailDeal, setEmailDeal] = useState<{ id: string; entityId: string; name: string; email: string; orgId: string; leadId: string | null } | null>(null);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [showFilters, setShowFilters] = useState(true);
 
@@ -228,10 +230,10 @@ const Deals = () => {
     try {
       const dealIds = Array.from(selectedIds);
       
-      const { error } = await (supabase
-        .from("deals" as any)
-        .update({ stage_id: bulkNewStatus } as any)
-        .in("id", dealIds) as any);
+      const { error } = await supabase.rpc("bulk_update_deal_stage", {
+        p_deal_ids: dealIds,
+        p_stage_id: bulkNewStatus,
+      });
 
       if (error) throw error;
 
@@ -343,35 +345,57 @@ const Deals = () => {
     resolveRootOrg();
   }, [activeCompany?.id]);
 
-  // Fetch dashboard stats independently (all deals, no pagination)
+  // Fetch dashboard stats via RPC (KPIs) + separate query for kanban deals
   const fetchDealsDashboardStats = useCallback(async () => {
-    // eslint-disable-next-line @typescript-eslint/no-use-before-define
     if (!activeCompany?.id) return;
     setStatsLoading(true);
     try {
-      let query = supabase
+      // Build org scope array (same BFS logic as loadData)
+      const childrenLookup = cachedChildrenMapRef.current;
+      const scopeOrgIds = new Set<string>([activeCompany.id]);
+      if (childrenLookup && childrenLookup.size > 0) {
+        const bfsQueue = [activeCompany.id];
+        while (bfsQueue.length > 0) {
+          const cur = bfsQueue.shift()!;
+          for (const child of (childrenLookup.get(cur) || [])) {
+            if (!scopeOrgIds.has(child)) { scopeOrgIds.add(child); bfsQueue.push(child); }
+          }
+        }
+      }
+      const scopeOrgIdsArr = Array.from(scopeOrgIds);
+
+      // KPIs via RPC — sempre correctos independentemente do numero de registos
+      const { data: kpiData, error: kpiError } = await supabase.rpc("get_deals_kpi_stats", {
+        p_org_ids: scopeOrgIdsArr,
+      });
+      if (kpiError) throw kpiError;
+      const kpi = kpiData as any;
+      setDealsDashboardStats({
+        total:            kpi.total            ?? 0,
+        totalValue:       kpi.totalValue        ?? 0,
+        wonCount:         kpi.wonCount          ?? 0,
+        wonValue:         kpi.wonValue          ?? 0,
+        lostCount:        kpi.lostCount         ?? 0,
+        conversionRate:   kpi.conversionRate    ?? 0,
+        avgCloseTimeDays: kpi.avgCloseTimeDays  ?? 0,
+        stalledCount:     kpi.stalledCount      ?? 0,
+        stalledValue:     kpi.stalledValue      ?? 0,
+        openCount:        kpi.openCount         ?? 0,
+        openValue:        kpi.openValue         ?? 0,
+        stageStats:       kpi.stageStats        ?? {},
+        stageValues:      kpi.stageValues       ?? {},
+      });
+
+      // Kanban deals — query paginada com limite razoavel para visualizacao
+      const { data: kanbanData, error: kanbanError } = await supabase
         .from("deals")
         .select("id, title, value, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .is("deleted_at", null)
-        .range(0, 9999);
-      if (activeCompany?.id) {
-        // Use same org scope logic
-        const childrenLookup = cachedChildrenMapRef.current;
-        const scopeOrgIds = new Set<string>([activeCompany.id]);
-        if (childrenLookup && childrenLookup.size > 0) {
-          const bfsQueue = [activeCompany.id];
-          while (bfsQueue.length > 0) {
-            const cur = bfsQueue.shift()!;
-            for (const child of (childrenLookup.get(cur) || [])) {
-              if (!scopeOrgIds.has(child)) { scopeOrgIds.add(child); bfsQueue.push(child); }
-            }
-          }
-        }
-        query = query.in("organization_id", Array.from(scopeOrgIds));
-      }
-      const { data, error } = await query;
-      if (error) throw error;
-      const all = (data || []) as any[];
+        .in("organization_id", scopeOrgIdsArr)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (kanbanError) throw kanbanError;
+      const all = (kanbanData || []) as any[];
       const assignedToIds = [...new Set(all.map(d => d.assigned_to).filter(Boolean))] as string[];
       const leadIds = [...new Set(all.map(d => d.lead_id).filter(Boolean))] as string[];
       const [assignedUsersRes, leadSourcesRes] = await Promise.all([
@@ -386,47 +410,18 @@ const Deals = () => {
       const leadSourceMap = new Map((leadSourcesRes.data || []).map((l: any) => [l.id, l.source || (l.campaign_id ? "campanha" : "manual")]));
       setDashboardDeals(all.map((deal) => ({
         ...deal,
-        probability: deal.probability ?? 0,
-        closed_at: deal.closed_at ?? null,
-        description: null,
+        probability:        deal.probability ?? 0,
+        closed_at:          deal.closed_at ?? null,
+        description:        null,
         expected_close_date: null,
-        created_by: null,
-        organization_id: activeCompany.id,
-        client_id: null,
-        contact_id: null,
-        entity_id: null,
-        assigned_to_name: deal.assigned_to ? (assignedMap.get(deal.assigned_to) || "Utilizador") : null,
-        lead_source: deal.lead_id ? (leadSourceMap.get(deal.lead_id) || null) : null,
+        created_by:         null,
+        organization_id:    activeCompany.id,
+        client_id:          null,
+        contact_id:         null,
+        entity_id:          null,
+        assigned_to_name:   deal.assigned_to ? (assignedMap.get(deal.assigned_to) || "Utilizador") : null,
+        lead_source:        deal.lead_id ? (leadSourceMap.get(deal.lead_id) || null) : null,
       })) as Deal[]);
-      const total = all.length;
-      const totalValue = all.reduce((sum, d) => sum + (d.value || 0), 0);
-      const stageStats: Record<string, number> = {};
-      const stageValues: Record<string, number> = {};
-      stages.forEach(stage => {
-        const sd = all.filter(d => d.deal_stages?.id === stage.id);
-        stageStats[stage.id] = sd.length;
-        stageValues[stage.id] = sd.reduce((sum, d) => sum + (d.value || 0), 0);
-      });
-      const wonDeals = all.filter(d => isWonStage(d.deal_stages));
-      const lostDeals = all.filter(d => isLostStage(d.deal_stages));
-      const conversionRate = total > 0 ? Math.round((wonDeals.length / total) * 100 * 10) / 10 : 0;
-      const avgCloseTimeDays = wonDeals.length > 0
-        ? Math.round(wonDeals.reduce((sum, d) => sum + differenceInDays(new Date(), parseISO(d.created_at)), 0) / wonDeals.length)
-        : 0;
-      const stalledDeals = all.filter(d => {
-        const daysOpen = differenceInDays(new Date(), parseISO(d.created_at));
-        return daysOpen > 30 && !isClosedStage(d.deal_stages);
-      });
-      const stalledValue = stalledDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-      const openDeals = all.filter(d => !isClosedStage(d.deal_stages));
-      const openValue = openDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-      setDealsDashboardStats({
-        total, totalValue, stageStats, stageValues,
-        wonCount: wonDeals.length, wonValue: wonDeals.reduce((sum, d) => sum + (d.value || 0), 0),
-        lostCount: lostDeals.length, conversionRate, avgCloseTimeDays,
-        stalledCount: stalledDeals.length, stalledValue,
-        openCount: openDeals.length, openValue,
-      });
     } catch (err) {
       console.error("Error fetching deals dashboard stats:", err);
       setDashboardDeals([]);
@@ -505,6 +500,14 @@ const Deals = () => {
 
       // If scope is still loading, skip — will re-run when ready
       if (scopeLoading) { setLoading(false); return; }
+
+      if (!activeCompany?.id) {
+        setDeals([]);
+        setTotalCount(0);
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
 
       // Load stages, companies, contacts, leads, clients (only on initial load)
       if (!append) {
@@ -2257,6 +2260,8 @@ const Deals = () => {
               formatCurrency={formatCurrency}
               isLoading={statsLoading}
               hasError={statsError}
+              rpcStageStats={dealsDashboardStats?.stageStats}
+              rpcStageValues={dealsDashboardStats?.stageValues}
             />
           </div>
         ) : (
@@ -2452,11 +2457,9 @@ const Deals = () => {
                                         </DropdownMenuItem>
                                       )}
                                       {deal.entity_email && (
-                                        <DropdownMenuItem asChild>
-                                          <a href={`mailto:${deal.entity_email}`}>
-                                            <Mail className="w-3.5 h-3.5 mr-2" />
-                                            Enviar email
-                                          </a>
+                                        <DropdownMenuItem onClick={() => setEmailDeal({ id: deal.id, entityId: deal.entity_id ?? "", name: deal.entity_name ?? "", email: deal.entity_email!, orgId: deal.organization_id ?? "", leadId: deal.lead_id })}>
+                                          <Mail className="w-3.5 h-3.5 mr-2" />
+                                          Enviar email
                                         </DropdownMenuItem>
                                       )}
                                       {canActOnDeal(deal, "deals.create") && (
@@ -2660,6 +2663,18 @@ const Deals = () => {
         selectedCount={selectedIds.size}
         onConfirm={handleBulkDelete}
         processing={processing}
+      />
+
+      <SendEntityEmailDialog
+        open={!!emailDeal}
+        onOpenChange={open => { if (!open) setEmailDeal(null); }}
+        module="leads"
+        entityId={emailDeal?.entityId ?? ""}
+        entityName={emailDeal?.name ?? ""}
+        entityEmail={emailDeal?.email ?? ""}
+        organizationId={emailDeal?.orgId}
+        leadId={emailDeal?.leadId ?? undefined}
+        onSent={() => setEmailDeal(null)}
       />
 
       {/* Deal Workflow Config */}

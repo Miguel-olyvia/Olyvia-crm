@@ -47,19 +47,26 @@ interface DealsDashboardViewProps {
   formatCurrency: (value: number) => string;
   isLoading?: boolean;
   hasError?: boolean;
+  rpcStageStats?: Record<string, number>;
+  rpcStageValues?: Record<string, number>;
 }
 
-export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, hasError }: DealsDashboardViewProps) {
+export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, hasError, rpcStageStats, rpcStageValues }: DealsDashboardViewProps) {
   const { t } = useTranslation();
 
   const data = useMemo(() => {
     const sortedStages = [...stages].sort((a, b) => a.order_index - b.order_index);
     const funnelData = sortedStages.map((stage, idx) => {
-      const stageDeals = deals.filter(d => d.deal_stages?.id === stage.id);
-      const count = stageDeals.length;
-      const value = stageDeals.reduce((s, d) => s + (d.value || 0), 0);
+      const count = rpcStageStats
+        ? (rpcStageStats[stage.id] ?? 0)
+        : deals.filter(d => d.deal_stages?.id === stage.id).length;
+      const value = rpcStageValues
+        ? (rpcStageValues[stage.id] ?? 0)
+        : deals.filter(d => d.deal_stages?.id === stage.id).reduce((s, d) => s + (d.value || 0), 0);
       const nextStage = sortedStages[idx + 1];
-      const nextCount = nextStage ? deals.filter(d => d.deal_stages?.id === nextStage.id).length : 0;
+      const nextCount = nextStage
+        ? (rpcStageStats ? (rpcStageStats[nextStage.id] ?? 0) : deals.filter(d => d.deal_stages?.id === nextStage.id).length)
+        : 0;
       const conversionRate = count > 0 && nextStage ? Math.round((nextCount / count) * 100) : null;
       return { stage, count, value, conversionRate };
     });

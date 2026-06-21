@@ -337,4 +337,12 @@ export function CalendarView({
       </div>
     </div>
   );
+<<<<<<< ours
+<<<<<<< ours
 }
+=======
+}
+>>>>>>> theirs
+=======
+}
+>>>>>>> theirs

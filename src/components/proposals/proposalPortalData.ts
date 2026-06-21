@@ -12,6 +12,7 @@ export interface ProposalPortalData {
   company: any | null;
   quotes: any[];
   quoteLines: Record<string, any[]>;
+  quoteFees: Record<string, any[]>;
   commercial: ProposalPortalCommercial | null;
 }
 
@@ -154,7 +155,7 @@ export async function loadProposalPortalData(
       : Promise.resolve({ data: null, error: null }),
     supabase
       .from("quotes")
-      .select("id, title, quote_number, estado, subtotal, total, iva_rate, client_notes")
+      .select("id, title, quote_number, estado, subtotal, total, total_fees, iva_rate, client_notes, desconto_global_percent")
       .eq("proposal_id", proposalId),
     loadTemplate(proposal),
     resolveCommercialForProposal(proposal),
@@ -187,7 +188,7 @@ export async function loadProposalPortalData(
       if (quoteIds.length > 0) {
         const { data: linkedQuotes, error: linkedErr } = await supabase
           .from("quotes")
-          .select("id, title, quote_number, estado, subtotal, total, iva_rate, client_notes")
+          .select("id, title, quote_number, estado, subtotal, total, total_fees, iva_rate, client_notes, desconto_global_percent")
           .in("id", quoteIds);
         if (linkedErr) {
           console.error("[proposalPortalData] linked quotes lookup", linkedErr);
@@ -198,25 +199,42 @@ export async function loadProposalPortalData(
   }
 
   const quoteLines: Record<string, any[]> = {};
+  const quoteFees: Record<string, any[]> = {};
 
   if (quotes.length > 0) {
     const quoteIds = quotes.map((quote) => quote.id);
 
-    const { data: lines, error: linesErr } = await supabase
-      .from("quote_lines")
-      .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent")
-      .in("quote_id", quoteIds)
-      .order("ordem", { ascending: true });
+    const [linesResult, feesResult] = await Promise.all([
+      supabase
+        .from("quote_lines")
+        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent")
+        .in("quote_id", quoteIds)
+        .order("ordem", { ascending: true }),
+      (supabase as any)
+        .from("quote_fees")
+        .select("id, quote_id, calculated_value, vat_rate, vat_amount, service_fee_types(name)")
+        .in("quote_id", quoteIds),
+    ]);
 
-    if (linesErr) {
-      console.error("[proposalPortalData] quote_lines lookup", linesErr);
+    if (linesResult.error) {
+      console.error("[proposalPortalData] quote_lines lookup", linesResult.error);
+    }
+    if (feesResult.error) {
+      console.error("[proposalPortalData] quote_fees lookup", feesResult.error);
     }
 
-    (lines || []).forEach((line) => {
+    (linesResult.data || []).forEach((line: any) => {
       if (!quoteLines[line.quote_id]) {
         quoteLines[line.quote_id] = [];
       }
       quoteLines[line.quote_id].push(line);
+    });
+
+    (feesResult.data || []).forEach((fee: any) => {
+      if (!quoteFees[fee.quote_id]) {
+        quoteFees[fee.quote_id] = [];
+      }
+      quoteFees[fee.quote_id].push(fee);
     });
   }
 
@@ -226,6 +244,7 @@ export async function loadProposalPortalData(
     company: companyResult.data ?? null,
     quotes,
     quoteLines,
+    quoteFees,
     commercial,
   };
 }

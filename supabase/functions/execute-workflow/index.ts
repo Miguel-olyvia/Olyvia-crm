@@ -2,6 +2,10 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 import { syncEntityPrimaryAddressFromLead } from "../_shared/addressSanitization.ts";
+import {
+  getWorkflowPermissionForSourceEntity,
+  resolveWorkflowOrganizationFromRecord,
+} from "../_shared/leadsValidation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -27,8 +31,58 @@ serve(async (req) => {
     }
 
     const { source_entity, entity_id, new_stage_id, old_stage_id, organization_id, triggered_by } = await req.json();
-    const orgId = organization_id;
-    console.log("Workflow execution request:", { source_entity, entity_id, new_stage_id, old_stage_id, orgId, triggered_by, caller: caller.anewUserId });
+    if (!source_entity || !entity_id) {
+      return new Response(
+        JSON.stringify({ error: "source_entity and entity_id are required" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const workflowSourceTable: Record<string, string> = {
+      lead: "anew_leads",
+      deal: "deals",
+      quote: "quotes",
+      proposal: "proposals",
+      contract: "client_contracts",
+    };
+    const sourceTable = workflowSourceTable[source_entity];
+    if (!sourceTable) {
+      return new Response(
+        JSON.stringify({ error: `Unsupported source_entity: ${source_entity}` }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const { data: sourceRecord, error: sourceRecordError } = await supabase
+      .from(sourceTable)
+      .select("*")
+      .eq("id", entity_id)
+      .maybeSingle();
+    if (sourceRecordError || !sourceRecord) {
+      return new Response(
+        JSON.stringify({ error: `${source_entity} not found` }),
+        { status: 404, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    const orgId = resolveWorkflowOrganizationFromRecord(source_entity, sourceRecord);
+    if (!orgId) {
+      return new Response(
+        JSON.stringify({ error: "Could not resolve organization for workflow source record" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
+    console.log("Workflow execution request:", {
+      source_entity,
+      entity_id,
+      new_stage_id,
+      old_stage_id,
+      request_org_id: organization_id,
+      derived_org_id: orgId,
+      triggered_by,
+      caller: caller.anewUserId,
+    });
 
     // ── Scope check ──
     if (orgId) {
@@ -36,6 +90,37 @@ serve(async (req) => {
       if (!hasAccess) {
         return new Response(
           JSON.stringify({ error: "Sem permissão para esta organização" }),
+          { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+    }
+
+    if (!caller?.isServiceRole) {
+      const permissionCode = getWorkflowPermissionForSourceEntity(source_entity);
+      if (!permissionCode) {
+        return new Response(
+          JSON.stringify({ error: `No workflow permission mapping for source_entity: ${source_entity}` }),
+          { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
+      const aliasCode = permissionCode.endsWith(".edit")
+        ? permissionCode.replace(".edit", ".update")
+        : permissionCode;
+      const { data: hasPermission, error: permissionError } = await supabase.rpc("has_anew_permission", {
+        _auth_uid: caller.authUid,
+        _permission_code: permissionCode,
+      });
+      const { data: hasAliasPermission, error: aliasPermissionError } = aliasCode !== permissionCode
+        ? await supabase.rpc("has_anew_permission", {
+          _auth_uid: caller.authUid,
+          _permission_code: aliasCode,
+        })
+        : { data: false, error: null };
+
+      if (permissionError || aliasPermissionError || (!hasPermission && !hasAliasPermission)) {
+        return new Response(
+          JSON.stringify({ error: `Sem permissÃ£o funcional para ${source_entity}` }),
           { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
         );
       }

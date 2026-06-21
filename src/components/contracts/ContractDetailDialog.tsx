@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ContractBodyTab } from "@/components/contracts/ContractBodyTab";
+import { extractPromptTokens } from "@/utils/contractVariables";
 import { DocumentsTab } from "@/components/shared/DocumentsTab";
 import {
   FileText, Calendar, User, Euro, Send, Pencil, Loader2, Clock, Building2, Hash, CreditCard, StickyNote, CheckCircle, AlertTriangle, Paperclip, Edit3,
@@ -97,14 +98,7 @@ export function ContractDetailDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Valida prompts da minuta selecionada
-    const missing = promptVars.filter(p => !(promptValues[p.key] || "").trim());
-    if (missing.length > 0) {
-      toast.error(`Preencha os campos da minuta: ${missing.map(m => m.label).join(", ")}`);
-      return;
-    }
     const payload: any = contract ? { ...formData, id: contract.id } : { ...formData };
-    if (promptVars.length > 0) payload.prompt_values = promptValues;
     onSave(payload);
   };
 
@@ -128,24 +122,30 @@ export function ContractDetailDialog({
     [templates, formData.template_id]
   );
 
-  // Deteta variáveis "Preencher no contrato" presentes no corpo da minuta selecionada
+  // Deteta variáveis "Preencher no contrato" presentes no corpo da minuta selecionada.
+  // Scanneia o HTML primeiro para tokens desconhecidos, depois faz lookup no DB — mais
+  // robusto do que iterar o DB e testar regex (evita falhas por chip-spans ou entidades).
   const promptVars = useMemo<PromptVar[]>(() => {
     const body = selectedTemplate?.body_html || "";
     if (!body || !formData.template_id) return [];
-    const out: PromptVar[] = [];
+
+    const unknownKeys = extractPromptTokens(body);
+    if (unknownKeys.length === 0) return [];
+
+    const varMap = new Map<string, typeof promptCustomVars[0]>();
     for (const v of promptCustomVars) {
       const bareKey = String(v.variable_key || "").replace(/^\{\{|\}\}$/g, "").trim();
-      if (!bareKey) continue;
-      const safe = bareKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const tokenRe = new RegExp(`\\{\\{\\s*${safe}\\s*\\}\\}`);
-      if (tokenRe.test(body)) {
+      if (bareKey) varMap.set(bareKey, v);
+    }
+
+    return unknownKeys
+      .filter(k => varMap.has(k))
+      .map(k => {
+        const v = varMap.get(k)!;
         const pt = (v as any).prompt_type;
         const promptType: PromptVar["promptType"] = (pt === "textarea" || pt === "number" || pt === "date") ? pt : "text";
-        out.push({ key: bareKey, label: v.label, description: v.description, promptType });
-
-      }
-    }
-    return out;
+        return { key: k, label: v.label, description: v.description, promptType };
+      });
   }, [selectedTemplate, formData.template_id, promptCustomVars]);
 
   // Reset prompt inputs quando muda a minuta
@@ -366,42 +366,6 @@ export function ContractDetailDialog({
                 </Select>
               </div>
 
-              {promptVars.length > 0 && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30 p-3 space-y-3">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-amber-900 dark:text-amber-200">
-                    <Edit3 className="h-3.5 w-3.5" />
-                    Campos a preencher na minuta
-                  </div>
-                  <div className="space-y-3">
-                    {promptVars.map(p => (
-                      <div key={p.key} className="space-y-1">
-                        <Label className="text-xs font-medium">
-                          {p.label} <span className="text-red-500">*</span>
-                        </Label>
-                        {p.description && (
-                          <p className="text-[11px] text-muted-foreground">{p.description}</p>
-                        )}
-                        {p.promptType === "textarea" ? (
-                          <Textarea
-                            value={promptValues[p.key] || ""}
-                            onChange={e => setPromptValues(prev => ({ ...prev, [p.key]: e.target.value }))}
-                            placeholder={`Valor para {{${p.key}}}`}
-                            rows={3}
-                          />
-                        ) : (
-                          <Input
-                            type={p.promptType === "number" ? "number" : p.promptType === "date" ? "date" : "text"}
-                            value={promptValues[p.key] || ""}
-                            onChange={e => setPromptValues(prev => ({ ...prev, [p.key]: e.target.value }))}
-                            placeholder={`Valor para {{${p.key}}}`}
-                          />
-                        )}
-                      </div>
-                    ))}
-
-                  </div>
-                </div>
-              )}
 
 
               <div className="grid grid-cols-2 gap-4">

@@ -3,6 +3,7 @@ import { sanitizeTracking } from "../_shared/leadTracking.ts";
 import { normalizeFirstLast } from "../_shared/composeDisplayName.ts";
 import { runMarketingAttribution } from "../_shared/marketingAttribution.ts";
 import { sanitizeFieldValues } from "../_shared/inputSanitizers.ts";
+import { resolveCanonicalFormId } from "../_shared/leadsValidation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,7 +132,7 @@ Deno.serve(async (req) => {
     // Get existing lead
     const { data: existingLead, error: leadError } = await supabase
       .from("anew_leads")
-      .select("*, campaigns!anew_leads_campaign_id_fkey(id, organization_id, status)")
+      .select("*, campaigns!anew_leads_campaign_id_fkey(id, organization_id, status, form_id)")
       .eq("id", lead_id)
       .single();
 
@@ -158,28 +159,37 @@ Deno.serve(async (req) => {
     }
 
     const campaignId = existingLead.campaign_id;
+    const campaignFormId = existingLead.campaigns?.form_id ?? null;
+    const canonicalForm = resolveCanonicalFormId(form_id, campaignFormId);
+    if (canonicalForm.error) {
+      return new Response(
+        JSON.stringify({ error: canonicalForm.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const canonicalFormId = canonicalForm.formId;
 
     // Get field definitions and total steps
     // Priority: form_id (form_steps/form_fields) > campaign_id (campaign_form_steps/lead_field_definitions)
     let definitions: any[] = [];
     let totalSteps = 1;
 
-    if (form_id) {
+    if (canonicalFormId) {
       const { data: formFieldDefs } = await supabase
         .from("form_fields")
         .select("*")
-        .eq("form_id", form_id)
+        .eq("form_id", canonicalFormId)
         .eq("is_active", true);
       definitions = formFieldDefs || [];
 
       const { data: formStepsData } = await supabase
         .from("form_steps")
         .select("step_number")
-        .eq("form_id", form_id)
+        .eq("form_id", canonicalFormId)
         .order("step_number", { ascending: false })
         .limit(1);
       totalSteps = formStepsData?.[0]?.step_number || 1;
-      console.log("Using form-level steps/fields. form_id:", form_id, "totalSteps:", totalSteps);
+      console.log("Using form-level steps/fields. form_id:", canonicalFormId, "totalSteps:", totalSteps);
     } else {
       const { data: fieldDefs } = await supabase
         .from("lead_field_definitions")

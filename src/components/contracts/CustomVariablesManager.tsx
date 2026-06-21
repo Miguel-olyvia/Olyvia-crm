@@ -67,7 +67,7 @@ interface FormState {
   prompt_type: PromptType;
 }
 
-const EMPTY_FORM: FormState = { label: "", key: "", description: "", default_value: "", mode: "fixed", linked_field_key: "", prompt_type: "text" };
+const EMPTY_FORM: FormState = { label: "", key: "", description: "", default_value: "", mode: "prompt", linked_field_key: "", prompt_type: "text" };
 
 
 export function CustomVariablesManager({ onInsertVariable }: Props) {

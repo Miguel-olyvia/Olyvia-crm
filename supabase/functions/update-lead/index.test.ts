@@ -16,6 +16,7 @@ import {
   assertEquals,
   assertExists,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { resolveCanonicalFormId } from "../_shared/leadsValidation.ts";
 
 interface FilterCall {
   column: string;
@@ -182,4 +183,19 @@ Deno.test("L4 — non-unique field is ignored entirely", async () => {
   );
   assertEquals(result, null);
   assertEquals(calls.filters.length, 0);
+});
+
+Deno.test("L6 â€” update-lead uses the campaign canonical form_id when body omits it", () => {
+  const resolved = resolveCanonicalFormId(undefined, "form-campaign");
+  assertEquals(resolved.formId, "form-campaign");
+  assertEquals(resolved.error, undefined);
+});
+
+Deno.test("L6 â€” update-lead rejects mismatched body form_id", () => {
+  const resolved = resolveCanonicalFormId("form-body", "form-campaign");
+  assertEquals(resolved.formId, null);
+  assertEquals(
+    resolved.error,
+    "form_id does not match the campaign's canonical form_id",
+  );
 });

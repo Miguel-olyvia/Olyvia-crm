@@ -110,6 +110,13 @@ import { LeadJourneyTab } from "@/components/leads/detail/LeadJourneyTab";
 import { ClientNotesTab } from "@/components/clients/detail/ClientNotesTab";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
+import {
+  getLeadScopeUserIds,
+  identityContactIsPrimary,
+  mapWithConcurrency,
+  normalizeLeadScope,
+  reconcileRefreshedLead,
+} from "./anewLeadsHelpers";
 
 
 interface Lead {
@@ -229,7 +236,13 @@ export default function AnewLeads() {
   const { alerts: leadAlerts, dismissAlert: dismissLeadAlert } = useModuleAlerts('lead', activeCompanyId);
   const { toast } = useToast();
   const { createDealFromLead } = usePipelineAutomation();
-  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId, loading: scopeLoading } = usePermissionScope();
+  const {
+    getPermissionScope,
+    anewUserId: scopeAnewUserId,
+    authUserId: scopeAuthUserId,
+    teamMemberIds,
+    loading: scopeLoading,
+  } = usePermissionScope();
   
   const [leads, setLeads] = useState<Lead[]>([]);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
@@ -260,6 +273,7 @@ export default function AnewLeads() {
   const [campaignFilter, setCampaignFilter] = useState<string>("all");
   const [contactResultFilter, setContactResultFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [onlyMine, setOnlyMine] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Read ?filter= param from notification links
@@ -294,14 +308,42 @@ export default function AnewLeads() {
             setShowDetails(true);
           }
         } else {
-          const { data } = await (supabase as any)
+          let openQuery = (supabase as any)
             .from("anew_leads")
-            .select("*")
+            .select(`
+              id, entity_id, campaign_id,
+              status, workflow_stage_id, assigned_to, created_by,
+              organization_id, root_organization_id,
+              created_at, updated_at, converted_at,
+              converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
+              field_values, notes, source, source_id,
+              last_contact_at, last_contact_result, contact_attempts,
+              callback_scheduled_at, callback_notes, tags,
+              campaigns(id, name)
+            `)
             .eq("id", openId)
-            .eq("organization_id", activeCompanyId)
-            .maybeSingle();
+            .or(`organization_id.eq.${activeCompanyId},root_organization_id.eq.${activeCompanyId}`)
+            .is("deleted_at", null);
+          const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+          if (requestedScope === "OWNED" && scopeAnewUserId) {
+            const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
+            openQuery = openQuery.or(
+              `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
+            );
+          } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+            const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
+            openQuery = openQuery.or(
+              `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
+            );
+          }
+          const { data } = await openQuery.maybeSingle();
           if (!cancelled && data) {
-            setSelectedLead(data as Lead);
+            setSelectedLead({
+              ...data,
+              field_values: data.field_values && typeof data.field_values === "object"
+                ? data.field_values
+                : {},
+            } as Lead);
             setDetailTab("info");
             setShowDetails(true);
           } else if (!cancelled) {
@@ -318,7 +360,16 @@ export default function AnewLeads() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, activeCompanyId, leads]);
+  }, [
+    searchParams,
+    activeCompanyId,
+    leads,
+    getPermissionScope,
+    onlyMine,
+    scopeAnewUserId,
+    scopeAuthUserId,
+    teamMemberIds,
+  ]);
 
   // Derive totals from statusCounts (single source of truth from RPC)
   const globalTotal = useMemo(() => 
@@ -330,7 +381,6 @@ export default function AnewLeads() {
     if (statusFilter === 'lost') return (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0);
     return statusCounts[statusFilter] || 0;
   }, [statusFilter, statusCounts, globalTotal]);
-  const [onlyMine, setOnlyMine] = useState(false);
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
   const [companyUsers, setCompanyUsers] = useState<{ id: string; name: string }[]>([]);
   const [comercialUsers, setComercialUsers] = useState<{ id: string; name: string; districts: string[]; org_ids: string[] }[]>([]);
@@ -474,13 +524,31 @@ export default function AnewLeads() {
     (async () => {
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
-      const { data } = await supabase
+      let callbacksQuery = supabase
         .from("anew_leads")
         .select("*, campaigns(id, name)")
-        .eq("organization_id", activeCompanyId)
+        .is("deleted_at", null)
         .neq("status", "converted")
         .gte("callback_scheduled_at", todayStart.toISOString())
         .lte("callback_scheduled_at", todayEnd.toISOString());
+      callbacksQuery = isRootOrg
+        ? callbacksQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
+        : callbacksQuery.eq("organization_id", activeCompanyId);
+
+      const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+      if (requestedScope === "OWNED" && scopeAnewUserId) {
+        const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
+        callbacksQuery = callbacksQuery.or(
+          `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
+        );
+      } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+        const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
+        callbacksQuery = callbacksQuery.or(
+          `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
+        );
+      }
+
+      const { data } = await callbacksQuery;
       if (cancelled) return;
       const list = (data || []) as any[];
       setTodayCallbacks(list as Lead[]);
@@ -496,7 +564,7 @@ export default function AnewLeads() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId]);
+  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
   // Determine if active company is a root org (no parent in hierarchy)
   useEffect(() => {
@@ -545,7 +613,7 @@ export default function AnewLeads() {
       loadLeads();
       loadStatusCounts();
     }
-  }, [activeCompanyId, isRootOrg, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, isRootOrg, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
 
 
@@ -578,7 +646,7 @@ export default function AnewLeads() {
       const rpcParams: Record<string, any> = {
         p_org_id: activeCompanyId,
         p_is_root: isRootOrg || false,
-        p_scope: (viewScope === "OWNED" || onlyMine) ? "OWNED" : "ALL",
+        p_scope: normalizeLeadScope(viewScope, onlyMine),
         p_anew_user_id: scopeAnewUserId || null,
         p_auth_user_id: scopeAuthUserId || null,
       };
@@ -598,6 +666,8 @@ export default function AnewLeads() {
       if (dateFrom) rpcParams.p_date_from = startOfDay(dateFrom).toISOString();
       if (dateTo) rpcParams.p_date_to = endOfDay(dateTo).toISOString();
       if (effectiveSearch) rpcParams.p_search = effectiveSearch;
+      if (sourceFilter === "none") rpcParams.p_source_is_null = true;
+      else if (sourceFilter !== "all") rpcParams.p_source = sourceFilter;
 
       const { data, error } = await (supabase.rpc as any)('get_lead_status_counts', rpcParams);
 
@@ -616,10 +686,45 @@ export default function AnewLeads() {
     } catch (error) {
       console.error("Error loading status counts:", error);
     }
-  }, [activeCompanyId, isRootOrg, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, isRootOrg, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
+  const dashboardQuery = useMemo(() => {
+    if (!activeCompanyId || scopeLoading) return null;
 
-
+    return {
+      orgId: activeCompanyId,
+      isRoot: isRootOrg,
+      requestedScope: normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
+      anewUserId: scopeAnewUserId,
+      authUserId: scopeAuthUserId,
+      filters: {
+        search: effectiveSearch || null,
+        status: statusFilter,
+        campaignId: campaignFilter,
+        assignedTo: assignedToFilter,
+        contactResult: contactResultFilter,
+        source: sourceFilter,
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
+      },
+    };
+  }, [
+    activeCompanyId,
+    scopeLoading,
+    isRootOrg,
+    getPermissionScope,
+    onlyMine,
+    scopeAnewUserId,
+    scopeAuthUserId,
+    effectiveSearch,
+    statusFilter,
+    campaignFilter,
+    assignedToFilter,
+    contactResultFilter,
+    sourceFilter,
+    dateFrom?.getTime(),
+    dateTo?.getTime(),
+  ]);
 
   const getDescendantOrgIds = useCallback(async (rootId: string): Promise<string[]> => {
     // Return cached result if same root
@@ -1216,6 +1321,11 @@ export default function AnewLeads() {
       if (effectiveSearch) {
         q = q.ilike("search_text", `%${effectiveSearch}%`);
       }
+      if (sourceFilter === "none") {
+        q = q.is("source", null);
+      } else if (sourceFilter !== "all") {
+        q = q.eq("source", sourceFilter);
+      }
       return q;
     };
 
@@ -1246,8 +1356,17 @@ export default function AnewLeads() {
       query = query.or(`organization_id.eq.${activeCompanyId}`);
     }
 
-    if ((viewScope === "OWNED" || onlyMine) && scopeAnewUserId) {
-      query = query.or(`assigned_to.eq.${scopeAnewUserId},created_by.eq.${scopeAnewUserId}`);
+    const requestedScope = normalizeLeadScope(viewScope, onlyMine);
+    if (requestedScope === "OWNED" && scopeAnewUserId) {
+      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
+      query = query.or(
+        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
+      );
+    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
+      query = query.or(
+        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
+      );
     }
 
     query = applyServerFilters(query);
@@ -1323,29 +1442,30 @@ export default function AnewLeads() {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        const [{ data: interData }, { data: dealData }] = await Promise.all([
-          supabase
-            .from("entity_interactions")
-            .select("entity_id")
-            .in("entity_id", leadEntityIds)
-            .gte("interaction_at", thirtyDaysAgo.toISOString()),
-          supabase
-            .from("deals")
-            .select("entity_id")
-            .in("entity_id", leadEntityIds)
-            .not("status", "in", '("won","lost")'),
-        ]);
+        const { data: healthData, error: healthError } = await (supabase as any)
+          .rpc("get_lead_page_health", {
+            p_org_id: activeCompanyId,
+            p_entity_ids: [...new Set(leadEntityIds)],
+            p_is_root: isRootOrg,
+            p_scope: requestedScope,
+            p_since: thirtyDaysAgo.toISOString(),
+          });
 
         const counts: Record<string, number> = {};
-        (interData || []).forEach(r => {
-          counts[r.entity_id] = (counts[r.entity_id] || 0) + 1;
-        });
-        setLeadInteractionCounts(counts);
-
         const dealSet = new Set<string>();
-        (dealData || []).forEach(r => {
-          if (r.entity_id) dealSet.add(r.entity_id);
-        });
+        if (healthError) {
+          console.error("Error loading lead health aggregates:", healthError);
+        } else {
+          (healthData || []).forEach((row: {
+            entity_id: string;
+            interaction_count: number | string;
+            has_open_deal: boolean;
+          }) => {
+            counts[row.entity_id] = Number(row.interaction_count) || 0;
+            if (row.has_open_deal) dealSet.add(row.entity_id);
+          });
+        }
+        setLeadInteractionCounts(counts);
         setLeadDealEntityIds(dealSet);
       }
 
@@ -1380,7 +1500,7 @@ export default function AnewLeads() {
     isLoadingRef.current = false;
     setLoading(false);
     setLoadingMore(false);
-  }, [activeCompanyId, isRootOrg, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, isRootOrg, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -1388,7 +1508,7 @@ export default function AnewLeads() {
 
     // L5: usar lista de colunas explícita (mesma de loadLeads) em vez de '*'
     // para reduzir payload e evitar trazer colunas internas como search_text.
-    const { data: d, error } = await supabase
+    let refreshQuery = supabase
       .from("anew_leads")
       .select(`
         id, entity_id, campaign_id,
@@ -1403,7 +1523,26 @@ export default function AnewLeads() {
         campaigns(id, name)
       `)
       .eq("id", leadId)
-      .maybeSingle();
+      .is("deleted_at", null);
+
+    refreshQuery = isRootOrg
+      ? refreshQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
+      : refreshQuery.eq("organization_id", activeCompanyId);
+
+    const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+    if (requestedScope === "OWNED" && scopeAnewUserId) {
+      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
+      refreshQuery = refreshQuery.or(
+        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
+      );
+    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
+      refreshQuery = refreshQuery.or(
+        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
+      );
+    }
+
+    const { data: d, error } = await refreshQuery.maybeSingle();
 
     if (error) {
       console.error("Error refreshing lead:", error);
@@ -1412,8 +1551,17 @@ export default function AnewLeads() {
 
     if (!d) {
       // Lead was deleted — remove from local state
-      setLeads(prev => prev.filter(l => l.id !== leadId));
-      return;
+      setLeads((previous) =>
+        reconcileRefreshedLead(previous, selectedLead, leadId, null).leads
+      );
+      if (selectedLead?.id === leadId) {
+        setSelectedLead(null);
+        setShowDetails(false);
+        setShowContactDialog(false);
+        setShowEditDialog(false);
+        setShowVisitReassignDialog(false);
+      }
+      return null;
     }
 
     // Map the single lead — batch user lookups in parallel
@@ -1457,10 +1605,24 @@ export default function AnewLeads() {
       await resolveEntities(entityIds);
     }
 
-    setLeads(prev => prev.map(l => l.id === leadId ? mapped : l));
+    setLeads((previous) =>
+      reconcileRefreshedLead(previous, selectedLead, leadId, mapped).leads
+    );
+    setSelectedLead((previous) => previous?.id === leadId ? mapped : previous);
     // Refresh status counts since the lead's status may have changed
     loadStatusCounts();
-  }, [activeCompanyId, loadStatusCounts]);
+    return mapped;
+  }, [
+    activeCompanyId,
+    getPermissionScope,
+    isRootOrg,
+    loadStatusCounts,
+    onlyMine,
+    scopeAnewUserId,
+    scopeAuthUserId,
+    selectedLead,
+    teamMemberIds,
+  ]);
 
   // Load more leads for infinite scroll
   const loadMoreLeads = useCallback(() => {
@@ -2393,9 +2555,7 @@ export default function AnewLeads() {
     // ─── Compensable-state tracking (best-effort frontend rollback) ───
     type CompensableTable = "anew_leads" | "anew_entities" | "anew_entity_emails" | "anew_entity_phones";
     type CreatedRecord = { table: CompensableTable; id: string };
-    type PrimaryDeactivation = { kind: "email" | "phone"; id: string };
     const createdIds: CreatedRecord[] = [];
-    const primaryDeactivations: PrimaryDeactivation[] = [];
     let entityCreatedHere = false;
     let dbCommitted = false;
 
@@ -2411,15 +2571,6 @@ export default function AnewLeads() {
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
         } catch (e: any) {
           failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
-        }
-      }
-      for (const p of [...primaryDeactivations].reverse()) {
-        const table = p.kind === "email" ? "anew_entity_emails" : "anew_entity_phones";
-        try {
-          const { error } = await (supabase.from(table) as any).update({ is_primary: true }).eq("id", p.id);
-          if (error) failures.push({ what: `restore-primary:${table}:${p.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `restore-primary:${p.kind}:${p.id}`, reason: e?.message ?? String(e) });
         }
       }
       if (failures.length > 0) {
@@ -2876,7 +3027,7 @@ export default function AnewLeads() {
         if (allMatches.length > 0) {
           // Interrupção por duplicados depois de já existirem escritas (entidade
           // criada agora ou link). Limpar antes de abrir o dialog.
-          if (createdIds.length > 0 || primaryDeactivations.length > 0) {
+          if (createdIds.length > 0) {
             await runCleanup(null);
           }
           setDuplicateMatches(allMatches);
@@ -2909,31 +3060,11 @@ export default function AnewLeads() {
             "lookup existing email",
           );
           if (!existing) {
-            if (!entityCreatedHere) {
-              const prevPrimary = await assertNoSupabaseError<{ id: string } | null>(
-                supabase
-                  .from("anew_entity_emails")
-                  .select("id")
-                  .eq("entity_id", entityId)
-                  .eq("is_primary", true)
-                  .maybeSingle(),
-                "lookup primary email",
-              );
-              if (prevPrimary?.id) {
-                await assertNoSupabaseError(
-                  (supabase.from("anew_entity_emails") as any)
-                    .update({ is_primary: false })
-                    .eq("id", prevPrimary.id),
-                  "deactivate primary email",
-                );
-                primaryDeactivations.push({ kind: "email", id: prevPrimary.id });
-              }
-            }
             const inserted = await assertNoSupabaseError<{ id: string }>(
               (supabase.from("anew_entity_emails") as any)
                 .insert({
                   entity_id: entityId, email: emailValue, email_type: 'personal',
-                  is_primary: true, created_by: createdByResolved,
+                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
                 })
                 .select("id")
                 .single(),
@@ -2962,31 +3093,11 @@ export default function AnewLeads() {
             });
           }
           if (!exists) {
-            if (!entityCreatedHere) {
-              const prevPrimary = await assertNoSupabaseError<{ id: string } | null>(
-                supabase
-                  .from("anew_entity_phones")
-                  .select("id")
-                  .eq("entity_id", entityId)
-                  .eq("is_primary", true)
-                  .maybeSingle(),
-                "lookup primary phone",
-              );
-              if (prevPrimary?.id) {
-                await assertNoSupabaseError(
-                  (supabase.from("anew_entity_phones") as any)
-                    .update({ is_primary: false })
-                    .eq("id", prevPrimary.id),
-                  "deactivate primary phone",
-                );
-                primaryDeactivations.push({ kind: "phone", id: prevPrimary.id });
-              }
-            }
             const inserted = await assertNoSupabaseError<{ id: string }>(
               (supabase.from("anew_entity_phones") as any)
                 .insert({
                   entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                  is_primary: true, created_by: createdByResolved,
+                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
                 })
                 .select("id")
                 .single(),
@@ -3057,7 +3168,7 @@ export default function AnewLeads() {
         }
       } catch (err: any) {
         console.error('Lead creation error:', err);
-        if (createdIds.length === 0 && primaryDeactivations.length === 0) {
+        if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
           toast({ title: t('leads.toast.createError'), description, variant: "destructive" });
         } else {
@@ -3186,9 +3297,7 @@ export default function AnewLeads() {
     // Cleanup tracking
     type CompensableTable = "anew_leads" | "anew_entities" | "anew_entity_emails" | "anew_entity_phones";
     type CreatedRecord = { table: CompensableTable; id: string };
-    type PrimaryDeactivation = { kind: "email" | "phone"; id: string };
     const createdIds: CreatedRecord[] = [];
-    const primaryDeactivations: PrimaryDeactivation[] = [];
     let entityCreatedHere = false;
     let dbCommitted = false;
 
@@ -3204,15 +3313,6 @@ export default function AnewLeads() {
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
         } catch (e: any) {
           failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
-        }
-      }
-      for (const p of [...primaryDeactivations].reverse()) {
-        const table = p.kind === "email" ? "anew_entity_emails" : "anew_entity_phones";
-        try {
-          const { error } = await (supabase.from(table) as any).update({ is_primary: true }).eq("id", p.id);
-          if (error) failures.push({ what: `restore-primary:${table}:${p.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `restore-primary:${p.kind}:${p.id}`, reason: e?.message ?? String(e) });
         }
       }
       if (failures.length > 0) {
@@ -3290,24 +3390,10 @@ export default function AnewLeads() {
             "lookup existing email (create-anyway)",
           );
           if (!existing) {
-            if (!entityCreatedHere) {
-              const prevPrimary = await assertNoSupabaseError<{ id: string } | null>(
-                supabase.from("anew_entity_emails")
-                  .select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-                "lookup primary email (create-anyway)",
-              );
-              if (prevPrimary?.id) {
-                await assertNoSupabaseError(
-                  (supabase.from("anew_entity_emails") as any).update({ is_primary: false }).eq("id", prevPrimary.id),
-                  "deactivate primary email (create-anyway)",
-                );
-                primaryDeactivations.push({ kind: "email", id: prevPrimary.id });
-              }
-            }
             const inserted = await assertNoSupabaseError<{ id: string }>(
               (supabase.from("anew_entity_emails") as any).insert({
                 entity_id: entityId, email: emailValue, email_type: 'personal',
-                is_primary: true, created_by: createdBy,
+                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
               }).select("id").single(),
               "insert email (create-anyway)",
             );
@@ -3330,24 +3416,10 @@ export default function AnewLeads() {
             });
           }
           if (!exists) {
-            if (!entityCreatedHere) {
-              const prevPrimary = await assertNoSupabaseError<{ id: string } | null>(
-                supabase.from("anew_entity_phones")
-                  .select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-                "lookup primary phone (create-anyway)",
-              );
-              if (prevPrimary?.id) {
-                await assertNoSupabaseError(
-                  (supabase.from("anew_entity_phones") as any).update({ is_primary: false }).eq("id", prevPrimary.id),
-                  "deactivate primary phone (create-anyway)",
-                );
-                primaryDeactivations.push({ kind: "phone", id: prevPrimary.id });
-              }
-            }
             const inserted = await assertNoSupabaseError<{ id: string }>(
               (supabase.from("anew_entity_phones") as any).insert({
                 entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                is_primary: true, created_by: createdBy,
+                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
               }).select("id").single(),
               "insert phone (create-anyway)",
             );
@@ -3390,7 +3462,7 @@ export default function AnewLeads() {
         cleanFieldValuesForPostCommit = cleanFieldValues;
       } catch (err: any) {
         console.error('[create-anyway] failed:', err);
-        if (createdIds.length === 0 && primaryDeactivations.length === 0) {
+        if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
           toast({ title: t('leads.toast.createError'), description, variant: "destructive" });
         } else {
@@ -3691,9 +3763,8 @@ export default function AnewLeads() {
       toast({ title: `Status atualizado para ${selectedLeadIds.length} lead(s)` });
       // Execute workflow for each lead BEFORE reloading
       if (matchingStage?.id && activeCompanyId) {
-        for (const leadId of selectedLeadIds) {
-          try {
-            await supabase.functions.invoke('execute-workflow', {
+        const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
+          const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
               body: {
                 source_entity: 'lead',
                 entity_id: leadId,
@@ -3702,9 +3773,19 @@ export default function AnewLeads() {
                 triggered_by: scopeAuthUserId,
               }
             });
-          } catch (wfErr) {
-            console.error("Workflow execution error for lead:", leadId, wfErr);
+          if (workflowError) {
+            throw workflowError;
           }
+          return leadId;
+        });
+        const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
+        if (failedWorkflows.length > 0) {
+          console.error("Bulk workflow execution failures:", failedWorkflows);
+          toast({
+            title: "Status atualizado com automações incompletas",
+            description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos.`,
+            variant: "destructive",
+          });
         }
       }
       setSelectedLeadIds([]);
@@ -3758,13 +3839,10 @@ export default function AnewLeads() {
       toast({ title: `Atribuição atualizada para ${selectedLeadIds.length} lead(s)` });
       setSelectedLeadIds([]);
       loadLeads();
+      loadStatusCounts();
     }
     setIsBulkUpdating(false);
   };
-
-  const handleSelectAllLeads = useCallback(() => {
-    // This will be called after filteredLeads is defined
-  }, []);
 
   const toggleLeadSelection = useCallback((leadId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -3782,37 +3860,24 @@ export default function AnewLeads() {
     let cancelled = false;
     (async () => {
       try {
-        let q = (supabase as any).from("anew_leads").select("source");
-        if (isRootOrg) {
-          q = q.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`);
-        } else {
-          q = q.eq("organization_id", activeCompanyId);
-        }
-        const { data, error } = await q.not("source", "is", null).limit(5000);
+        const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+        const { data, error } = await (supabase as any).rpc("get_lead_source_options", {
+          p_org_id: activeCompanyId,
+          p_is_root: isRootOrg,
+          p_scope: requestedScope,
+        });
         if (error || cancelled) return;
-        const set = new Set<string>();
-        (data || []).forEach((r: any) => {
-          const s = (r.source || "").trim();
-          if (s) set.add(s);
-        });
-        // Merge with any sources visible in the current page (safety net)
-        leads.forEach((l) => {
-          const s = (l.source || "").trim();
-          if (s) set.add(s);
-        });
-        setSourceOptions(Array.from(set).sort((a, b) => a.localeCompare(b)));
+        setSourceOptions(
+          (data || [])
+            .map((row: { source?: string | null }) => row.source?.trim() || "")
+            .filter(Boolean),
+        );
       } catch {
-        // fallback: derive from in-memory leads
-        const set = new Set<string>();
-        leads.forEach((l) => {
-          const s = (l.source || "").trim();
-          if (s) set.add(s);
-        });
-        if (!cancelled) setSourceOptions(Array.from(set).sort((a, b) => a.localeCompare(b)));
+        if (!cancelled) setSourceOptions([]);
       }
     })();
     return () => { cancelled = true; };
-  }, [activeCompanyId, isRootOrg, leads]);
+  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine]);
 
   // Filter (by source) + sort leads — memoized to stabilize reference
   const filteredLeads = useMemo(() => {
@@ -4264,11 +4329,26 @@ export default function AnewLeads() {
             
             {/* Stats summary for quick reference */}
             <div className="flex items-center gap-4 text-sm">
-              <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto gap-2 px-2 py-1"
+                onClick={() => {
+                  setStatusFilter("all");
+                  setCampaignFilter("all");
+                  setAssignedToFilter("all");
+                  setContactResultFilter("all");
+                  setSourceFilter("all");
+                  setOnlyMine(false);
+                  setDateFrom(undefined);
+                  setDateTo(undefined);
+                  setActiveTab("list");
+                }}
+              >
                 <div className="w-2 h-2 rounded-full bg-primary"></div>
                 <span className="text-muted-foreground">{t('leads.stats.total')}:</span>
                 <span className="font-semibold">{globalTotal}</span>
-              </div>
+              </Button>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-warning"></div>
                 <span className="text-muted-foreground">{t('leads.stats.new')}:</span>
@@ -4336,11 +4416,12 @@ export default function AnewLeads() {
 
           {/* Dashboard Tab */}
           <TabsContent value="dashboard" className="space-y-6 mt-6">
-            <LeadsDashboard 
+            <LeadsDashboard
               leads={leads}
               workflowStages={workflowStages}
               campaigns={campaigns}
               companyId={activeCompanyId}
+              query={dashboardQuery}
             />
           </TabsContent>
 

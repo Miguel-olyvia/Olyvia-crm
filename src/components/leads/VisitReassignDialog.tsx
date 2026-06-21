@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { findScheduleItemForLead } from "./leadVisitMatching";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 
 interface ScheduledVisit {
   id: string;
@@ -75,7 +76,16 @@ interface VisitReassignDialogProps {
   onOpenChange: (open: boolean) => void;
   lead: Lead | null;
   companyId: string;
-  onUpdated?: () => void;
+  onUpdated?: (append?: boolean, payload?: VisitReassignDialogUpdate) => void | Promise<void>;
+}
+
+export interface VisitReassignDialogUpdate {
+  leadId: string;
+  visitId: string;
+  assignedTo: string;
+  resourceId: string | null;
+  scheduledStart: string;
+  scheduledEnd: string;
 }
 
 export function VisitReassignDialog({
@@ -128,7 +138,7 @@ export function VisitReassignDialog({
     if (!lead) return;
     const leadInfo = extractLeadContactInfo(lead.field_values);
     const expectedTitle = leadInfo.name ? `Visita: ${leadInfo.name}` : found.title;
-    const expectedLocation = extractLeadLocation(lead) || found.location || null;
+    const expectedLocation = extractSharedLeadLocation(lead) || found.location || null;
 
     const assignee = (found as any).assignees?.[0]?.resource;
     setVisit({
@@ -576,7 +586,7 @@ export function VisitReassignDialog({
             (new Date(endDatetime).getTime() - visitDate.getTime()) / 60000
           ),
           lead_postal_code: postalCode,
-          lead_location: lead.field_values?.morada || lead.field_values?.address || "",
+          lead_location: extractSharedLeadLocation(lead),
         },
       });
 
@@ -685,7 +695,6 @@ export function VisitReassignDialog({
         throw new Error("Não foi possível resolver o auth_user_id do utilizador selecionado.");
       }
 
-      const authUserId = anewUserData.auth_user_id;
       const anewUserId = anewUserData.id;
       const userName = anewUserData.name || "Utilizador";
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -757,7 +766,14 @@ export function VisitReassignDialog({
       }
 
       toast({ title: "Visita reatribuída com sucesso!" });
-      onUpdated?.();
+      await onUpdated?.(undefined, {
+        leadId: lead.id,
+        visitId: visit.id,
+        assignedTo: anewUserId,
+        resourceId: newResourceId,
+        scheduledStart: newStart.toISOString(),
+        scheduledEnd: newEnd.toISOString(),
+      });
       onOpenChange(false);
     } catch (error: any) {
       toast({

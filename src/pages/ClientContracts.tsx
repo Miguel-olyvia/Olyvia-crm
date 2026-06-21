@@ -95,6 +95,17 @@ const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
 
+/** Devolve o valor efectivo do contrato: prefere `quote.total` (inclui desconto global)
+ *  em vez de `contract.total_value` que pode ter sido guardado sem desconto aplicado. */
+function getEffectiveContractValue(contract: any): number {
+  if (contract.quote_id) {
+    const proposalQuotes: any[] = (contract.proposals as any)?.quotes ?? [];
+    const linked = proposalQuotes.find((q: any) => q.id === contract.quote_id);
+    if (linked?.total != null) return Number(linked.total);
+  }
+  return Number(contract.total_value) || 0;
+}
+
 const ClientContracts = () => {
   const { t, language } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -371,7 +382,7 @@ const ClientContracts = () => {
       const runBaseQuery = (creatorBatch: string[] | null) => {
         let q: any = (supabase as any)
           .from("client_contracts")
-          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(total) )`)
+          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total) )`)
           .in("organization_id", subtreeIds)
           .is("deleted_at", null)
           .order("created_at", { ascending: false });
@@ -532,13 +543,13 @@ const ClientContracts = () => {
   const now = new Date();
   const kpis = useMemo(() => {
     const total = contracts.length;
-    const totalValue = contracts.reduce((s, c) => s + (c.total_value || 0), 0);
+    const totalValue = contracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
     const drafts = contracts.filter(c => c.status === "draft");
     const sent = contracts.filter(c => c.status === "pending_signature");
     const signed = contracts.filter(c => c.status === "signed" || c.status === "active");
     const expired = contracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
     const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
-    const activeValue = activeContracts.reduce((s, c) => s + (c.total_value || 0), 0);
+    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
     const avgValue = total > 0 ? totalValue / total : 0;
     const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
     const expiring90 = contracts.filter(c => {
@@ -557,10 +568,10 @@ const ClientContracts = () => {
     }
     return {
       total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
-      draftValue: drafts.reduce((s, c) => s + (c.total_value || 0), 0),
-      sentValue: sent.reduce((s, c) => s + (c.total_value || 0), 0),
-      signedValue: signed.reduce((s, c) => s + (c.total_value || 0), 0),
-      expiredValue: expired.reduce((s, c) => s + (c.total_value || 0), 0),
+      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
     };
   }, [contracts]);
 
@@ -610,7 +621,7 @@ const ClientContracts = () => {
     const drafts = contracts.filter(c => c.status === "draft");
     if (drafts.length > 0) {
       const d = drafts[0];
-      parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(d.total_value || 0)}) foi criado automaticamente pelo workflow mas está em Draft. Contratos não enviados em 48h têm 25% menos probabilidade de serem assinados. Sugerimos enviar para assinatura agora.`);
+      parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(getEffectiveContractValue(d))}) foi criado automaticamente pelo workflow mas está em Draft. Contratos não enviados em 48h têm 25% menos probabilidade de serem assinados. Sugerimos enviar para assinatura agora.`);
       actions.push({ label: `Enviar ${(d._clientName || "").split(" ")[0]}`, action: "send_signature", contract: d });
     }
     const sentOld = contracts.filter(c => {
@@ -621,7 +632,7 @@ const ClientContracts = () => {
     if (sentOld.length > 0) {
       const d = sentOld[0];
       const days = Math.ceil((now.getTime() - new Date(d.updated_at || d.created_at).getTime()) / (1000 * 60 * 60 * 24));
-      parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(d.total_value || 0)}) foi enviado há ${days} dias sem assinatura — considere um follow-up.`);
+      parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(getEffectiveContractValue(d))}) foi enviado há ${days} dias sem assinatura — considere um follow-up.`);
       actions.push({ label: `Follow-up ${(d._clientName || "").split(" ")[0]}`, action: "followup", contract: d });
     }
     const signedRecent = contracts.filter(c => (c.status === "signed" || c.status === "active") && (now.getTime() - new Date(c.updated_at || c.created_at).getTime()) < 7 * 24 * 60 * 60 * 1000);
@@ -1331,7 +1342,7 @@ const ClientContracts = () => {
                       </TableCell>
                       <TableCell>
                         <span className={`font-semibold ${contract.status === "expired" ? "line-through text-muted-foreground" : "text-primary"}`}>
-                          {formatContractCurrency(contract.total_value, contract.currency)}
+                          {formatContractCurrency(getEffectiveContractValue(contract), contract.currency)}
                         </span>
                       </TableCell>
                       <TableCell>

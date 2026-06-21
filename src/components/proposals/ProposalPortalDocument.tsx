@@ -18,6 +18,7 @@ interface ProposalPortalDocumentProps {
   template: any | null;
   quotes: any[];
   quoteLines: Record<string, any[]>;
+  quoteFees?: Record<string, any[]>;
   commercial: ProposalPortalCommercial | null;
   company: any | null;
   mode?: "preview" | "portal";
@@ -75,6 +76,7 @@ export function ProposalPortalDocument({
   template,
   quotes,
   quoteLines,
+  quoteFees = {},
   commercial,
   company,
   mode = "preview",
@@ -344,18 +346,37 @@ export function ProposalPortalDocument({
                               </div>
     
                               <div className="space-y-1 border-t pt-3 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Subtotal</span>
-                                  <span>{formatCurrency(sectionSubtotal)}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">IVA</span>
-                                  <span>{formatCurrency(sectionIva)}</span>
-                                </div>
-                                <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                                  <span>Total</span>
-                                  <span style={{ color: primaryColor }}>{formatCurrency(sectionTotalComIva)}</span>
-                                </div>
+                                {(() => {
+                                  const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                                  const discountFactor = 1 - globalDiscount / 100;
+                                  const discountAmount = sectionSubtotal * globalDiscount / 100;
+                                  const discountedSubtotal = sectionSubtotal * discountFactor;
+                                  const adjustedTotal = items.reduce((sum: number, item: any) =>
+                                    sum + (item.total_sem_iva || 0) * discountFactor * (1 + (item.iva_percent || 23) / 100), 0);
+                                  const adjustedIva = adjustedTotal - discountedSubtotal;
+                                  return (
+                                    <>
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Subtotal</span>
+                                        <span>{formatCurrency(sectionSubtotal)}</span>
+                                      </div>
+                                      {globalDiscount > 0 && (
+                                        <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                                          <span>Desconto global ({globalDiscount}%)</span>
+                                          <span>-{formatCurrency(discountAmount)}</span>
+                                        </div>
+                                      )}
+                                      <div className="flex justify-between">
+                                        <span className="text-muted-foreground">IVA</span>
+                                        <span>{formatCurrency(globalDiscount > 0 ? adjustedIva : sectionIva)}</span>
+                                      </div>
+                                      <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                                        <span>Total</span>
+                                        <span style={{ color: primaryColor }}>{formatCurrency(globalDiscount > 0 ? adjustedTotal : sectionTotalComIva)}</span>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </CardContent>
                           </Card>
@@ -461,18 +482,60 @@ export function ProposalPortalDocument({
                       ))}
     
                       <div className="space-y-1 border-t pt-3 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Subtotal</span>
-                          <span>{formatCurrency(quote.subtotal || 0)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">IVA ({quote.iva_rate || 23}%)</span>
-                          <span>{formatCurrency((quote.total || 0) - (quote.subtotal || 0))}</span>
-                        </div>
-                        <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                          <span>Total</span>
-                          <span style={{ color: primaryColor }}>{formatCurrency(quote.total || 0)}</span>
-                        </div>
+                        {(() => {
+                          const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                          const ivaRate = Number(quote.iva_rate || 23);
+                          const productsSubtotal = Number(quote.subtotal) || 0;
+                          const total = Number(quote.total) || 0;
+                          // Try individual fees from quote_fees (authenticated users); fallback to total_fees field (anon/portal)
+                          const namedFees = quoteFees[quote.id] || [];
+                          const namedFeesSubtotal = namedFees.reduce((s: number, f: any) => s + (Number(f.calculated_value) || 0), 0);
+                          const totalFeesField = Number((quote as any).total_fees) || 0;
+                          const fallbackFeesSubtotal = namedFeesSubtotal === 0 && totalFeesField > 0
+                            ? totalFeesField / (1 + ivaRate / 100)
+                            : 0;
+                          const feesSubtotal = namedFeesSubtotal > 0 ? namedFeesSubtotal : fallbackFeesSubtotal;
+                          const correctedSubtotal = productsSubtotal + feesSubtotal;
+                          const discountAmount = correctedSubtotal * globalDiscount / 100;
+                          const discountedSubtotal = correctedSubtotal * (1 - globalDiscount / 100);
+                          const iva = globalDiscount > 0 ? total - discountedSubtotal : total - correctedSubtotal;
+                          return (
+                            <>
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">Subtotal</span>
+                                <span>{formatCurrency(productsSubtotal)}</span>
+                              </div>
+                              {namedFees.length > 0
+                                ? namedFees.map((fee: any) => (
+                                    <div key={fee.id} className="flex justify-between">
+                                      <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
+                                      <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
+                                    </div>
+                                  ))
+                                : feesSubtotal > 0 && (
+                                    <div className="flex justify-between">
+                                      <span className="text-muted-foreground">Taxas de Serviço</span>
+                                      <span>{formatCurrency(feesSubtotal)}</span>
+                                    </div>
+                                  )
+                              }
+                              {globalDiscount > 0 && (
+                                <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                                  <span>Desconto global ({globalDiscount}%)</span>
+                                  <span>-{formatCurrency(discountAmount)}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                <span className="text-muted-foreground">IVA ({ivaRate}%)</span>
+                                <span>{formatCurrency(iva)}</span>
+                              </div>
+                              <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                                <span>Total</span>
+                                <span style={{ color: primaryColor }}>{formatCurrency(total)}</span>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
     
                       {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
@@ -769,7 +832,16 @@ export function ProposalPortalDocument({
         </CardHeader>
         <CardContent>
           {(() => {
-            const quotesSubtotalSum = (quotes || []).reduce((acc: number, q: any) => acc + (Number(q?.subtotal) || 0), 0);
+            const quotesSubtotalSum = (quotes || []).reduce((acc: number, q: any) => {
+              const namedFees = quoteFees[q.id] || [];
+              const namedFeesSubtotal = namedFees.reduce((s: number, f: any) => s + (Number(f.calculated_value) || 0), 0);
+              const totalFeesField = Number(q?.total_fees) || 0;
+              const ivaRate = Number(q?.iva_rate || 23);
+              const feesSubtotal = namedFeesSubtotal > 0
+                ? namedFeesSubtotal
+                : (totalFeesField > 0 ? totalFeesField / (1 + ivaRate / 100) : 0);
+              return acc + (Number(q?.subtotal) || 0) + feesSubtotal;
+            }, 0);
             const quotesTotalSum = (quotes || []).reduce((acc: number, q: any) => acc + (Number(q?.total) || 0), 0);
             const displayTotal = quotesTotalSum > 0 ? quotesTotalSum : Number(proposal.value) || 0;
             const displaySubtotal = quotesSubtotalSum > 0

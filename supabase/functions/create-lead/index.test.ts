@@ -12,6 +12,7 @@ import {
   assertEquals,
   assertExists,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { resolveCanonicalFormId } from "../_shared/leadsValidation.ts";
 
 // ---- Helpers replicated from index.ts ----------------------------------
 
@@ -204,4 +205,19 @@ Deno.test("L3 — compensation skips orphan address delete when no addresses exi
 
   assertEquals(calls.cleanupCalls.includes("delete-in:anew_addresses"), false);
   assertEquals(calls.cleanupCalls.at(-1), "delete:anew_entities");
+});
+
+Deno.test("L6 â€” campaign.form_id becomes the canonical form_id when caller omits it", () => {
+  const resolved = resolveCanonicalFormId(undefined, "form-campaign");
+  assertEquals(resolved.formId, "form-campaign");
+  assertEquals(resolved.error, undefined);
+});
+
+Deno.test("L6 â€” mismatched body form_id is rejected in favour of campaign.form_id", () => {
+  const resolved = resolveCanonicalFormId("form-body", "form-campaign");
+  assertEquals(resolved.formId, null);
+  assertEquals(
+    resolved.error,
+    "form_id does not match the campaign's canonical form_id",
+  );
 });

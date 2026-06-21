@@ -83,6 +83,7 @@ interface QuoteItem {
   total: number | null;
   estado: string;
   created_at?: string;
+  desconto_global_percent?: number | null;
   quote_lines?: QuoteLine[];
 }
 
@@ -225,7 +226,7 @@ export function ProposalDetailsDialog({
           .order("sort_order"),
         supabase
           .from("quotes")
-          .select("id, quote_number, total, estado, created_at, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
+          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
           .eq("proposal_id", proposal.id),
         supabase
           .from("proposals")
@@ -261,7 +262,7 @@ export function ProposalDetailsDialog({
         if (pLink?.quote_id) {
           const { data: linkedQuote } = await supabase
             .from("quotes")
-            .select("id, quote_number, total, estado, created_at, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
+            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
             .eq("id", pLink.quote_id)
             .single();
           if (linkedQuote) {
@@ -661,7 +662,7 @@ export function ProposalDetailsDialog({
                                 {quote.estado}
                               </Badge>
                               <span className="font-bold text-green-600 dark:text-green-400">
-                                {formatCurrency(group.total)}
+                                {formatCurrency(!hasMultipleSections ? (quote.total ?? group.total) : group.total)}
                               </span>
                             </div>
                           </div>
@@ -714,6 +715,8 @@ export function ProposalDetailsDialog({
                                         <td className="p-2 text-center">
                                           {(line.discount_percent || 0) > 0 ? (
                                             <span className="text-orange-600 dark:text-orange-400 font-medium">{line.discount_percent}%</span>
+                                          ) : (quote.desconto_global_percent ?? 0) > 0 ? (
+                                            <span className="text-orange-500 dark:text-orange-400 font-medium">{quote.desconto_global_percent}%</span>
                                           ) : (
                                             <span className="text-muted-foreground">—</span>
                                           )}
@@ -742,9 +745,19 @@ export function ProposalDetailsDialog({
                                   <span className="text-muted-foreground">Subtotal</span>
                                   <span>{formatCurrency(group.subtotal)}</span>
                                 </div>
+                                {!hasMultipleSections && (quote.desconto_global_percent ?? 0) > 0 && (
+                                  <div className="flex justify-end gap-6 text-orange-600 dark:text-orange-400">
+                                    <span>Desconto global ({quote.desconto_global_percent}%)</span>
+                                    <span>-{formatCurrency(group.subtotal * (quote.desconto_global_percent ?? 0) / 100)}</span>
+                                  </div>
+                                )}
                                 <div className="flex justify-end gap-6">
                                   <span className="text-muted-foreground">IVA</span>
-                                  <span>{formatCurrency(group.vat)}</span>
+                                  <span>{formatCurrency(
+                                    (!hasMultipleSections && (quote.desconto_global_percent ?? 0) > 0)
+                                      ? (quote.total ?? 0) - group.subtotal * (1 - (quote.desconto_global_percent ?? 0) / 100)
+                                      : group.vat
+                                  )}</span>
                                 </div>
                               </div>
                             </div>

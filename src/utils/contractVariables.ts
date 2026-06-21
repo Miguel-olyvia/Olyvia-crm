@@ -10,6 +10,30 @@ import type { RenderContext } from "./documentVariables/context";
 import { EMPTY_CLIENT, EMPTY_COMPANY, EMPTY_COMMERCIAL } from "./documentVariables/context";
 
 
+// Complete set of token keys that are auto-resolved — never prompt the user for these.
+// Includes all CONTRACT_VARIABLES keys plus extra tokens handled by contractDocument.ts.
+export const RESERVED_CONTRACT_KEYS: ReadonlySet<string> = new Set([
+  "empresa_nome", "empresa_nif", "empresa_morada", "empresa_telefone", "empresa_email", "empresa_website",
+  "cliente_nome", "cliente_nif", "cliente_morada", "cliente_email", "cliente_telefone", "cliente_localidade",
+  "contrato_numero", "contrato_valor", "contrato_valor_extenso",
+  "contrato_data_inicio", "contrato_data_fim", "contrato_duracao",
+  "proposta_numero", "proposta_valor", "proposta_data",
+  "orcamento_itens", "tabela_artigos", "tabela_signatarios",
+  "comercial_nome", "comercial_email", "comercial_telefone",
+  "signatario_nome", "signatario_cargo",
+  "data_atual",
+]);
+
+// Scan HTML for {{key}} tokens not in RESERVED_CONTRACT_KEYS.
+// Handles whitespace variants ({{ key }}), chip spans, and deduplicates automatically.
+export function extractPromptTokens(html: string): string[] {
+  return [
+    ...new Set(
+      [...html.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map(m => m[1].trim())
+    ),
+  ].filter(k => !RESERVED_CONTRACT_KEYS.has(k));
+}
+
 export const CONTRACT_VARIABLES = [
   { key: "{{empresa_nome}}", label: "Nome da Empresa", description: "Nome da organização" },
   { key: "{{empresa_nif}}", label: "NIF da Empresa", description: "NIF da organização" },

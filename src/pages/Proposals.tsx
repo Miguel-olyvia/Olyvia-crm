@@ -277,6 +277,10 @@ const Proposals = () => {
   const [quoteSearchResults, setQuoteSearchResults] = useState<QuoteItem[]>([]);
   const [showQuoteDropdown, setShowQuoteDropdown] = useState(false);
   const [selectedQuotes, setSelectedQuotes] = useState<QuoteItem[]>([]);
+  const [showNullTotalDialog, setShowNullTotalDialog] = useState(false);
+  const [nullTotalQuoteNames, setNullTotalQuoteNames] = useState<string[]>([]);
+  const nullTotalConfirmedRef = useRef(false);
+  const proposalFormRef = useRef<HTMLFormElement>(null);
   const [suggestedQuotes, setSuggestedQuotes] = useState<QuoteItem[]>([]);
   
   const [proposalItems, setProposalItems] = useState<ProposalItem[]>([]);
@@ -566,7 +570,7 @@ const Proposals = () => {
         const [proposalsRes, dealsRes] = await Promise.all([
           (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total)")
+            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .order("created_at", { ascending: false }),
@@ -619,7 +623,7 @@ const Proposals = () => {
           if (dealIds.length > 0) {
             const { data: proposalsRes, error } = await (supabase
               .from("proposals") as any)
-              .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total)")
+              .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
               .eq("organization_id", activeCompany.id)
               .is("deleted_at", null)
               .in("deal_id", dealIds)
@@ -634,7 +638,7 @@ const Proposals = () => {
         if (proposalsData.length === 0 || viewScope === "TEAM") {
           const { data: ownedProposals } = await (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total)")
+            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .in("created_by", Array.from(allowedUserIds))
@@ -1123,6 +1127,14 @@ const Proposals = () => {
       });
       return;
     }
+
+    const quotesWithNullTotal = selectedQuotes.filter(q => q.total == null);
+    if (quotesWithNullTotal.length > 0 && !nullTotalConfirmedRef.current) {
+      setNullTotalQuoteNames(quotesWithNullTotal.map(q => q.quote_number || q.id.slice(0, 8)));
+      setShowNullTotalDialog(true);
+      return;
+    }
+    nullTotalConfirmedRef.current = false;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
     const inlineQuotesTotal = inlineQuotes.reduce((sum, q) => sum + calcInlineQuoteTotal(q), 0);
@@ -2036,7 +2048,7 @@ const Proposals = () => {
                       <PipelineBreadcrumb entityType="proposal" entityId={editingId} />
                     </div>
                   )}
-                  <form onSubmit={handleSubmit} className="space-y-4">
+                  <form onSubmit={handleSubmit} ref={proposalFormRef} className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="title">{t('proposals.form.title')} *</Label>
@@ -2947,14 +2959,23 @@ const Proposals = () => {
                                   const items = (proposal as any).proposal_items || [];
                                   const itemsSubtotal = items.reduce((s: number, i: any) => s + (Number(i.subtotal) || 0), 0);
                                   const itemsTotal = items.reduce((s: number, i: any) => s + (Number(i.total) || 0), 0);
-                                  const displayValue = itemsSubtotal > 0 ? itemsSubtotal : Number(proposal.value);
-                                  const displayTotal = itemsTotal > 0 ? itemsTotal : Number(proposal.value);
+                                  const proposalValue = Number(proposal.value) || 0;
+                                  // Use proposal.value (grand total) as authoritative source when items total doesn't match
+                                  const displayTotal = Math.abs(itemsTotal - proposalValue) < 0.05 ? itemsTotal : proposalValue;
+                                  const displayValue = itemsSubtotal > 0 ? itemsSubtotal : proposalValue;
+                                  const linkedQuotes: any[] = (proposal as any).quotes || [];
+                                  const maxDiscount = linkedQuotes.reduce((max: number, q: any) => Math.max(max, Number(q.desconto_global_percent) || 0), 0);
                                   return (
                                     <>
                                       {formatCurrency(displayValue)}
                                       {displayTotal > 0 && displayTotal !== displayValue && (
                                         <span className="block text-[10px] text-muted-foreground tabular-nums">
                                           c/ IVA: {formatCurrency(displayTotal)}
+                                        </span>
+                                      )}
+                                      {maxDiscount > 0 && (
+                                        <span className="block text-[10px] text-orange-500 dark:text-orange-400 tabular-nums">
+                                          Desc. global: {maxDiscount}%
                                         </span>
                                       )}
                                     </>
@@ -3023,6 +3044,30 @@ const Proposals = () => {
         onAccept={handleAcceptProposal}
         onReject={handleRejectProposal}
       />
+
+      <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Orçamentos sem valor total</AlertDialogTitle>
+            <AlertDialogDescription>
+              {nullTotalQuoteNames.length === 1
+                ? `O orçamento "${nullTotalQuoteNames[0]}" não tem total definido e será contabilizado como €0.`
+                : `${nullTotalQuoteNames.length} orçamentos sem total definido serão contabilizados como €0: ${nullTotalQuoteNames.join(", ")}.`}
+              {" "}Deseja continuar?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              nullTotalConfirmedRef.current = true;
+              setShowNullTotalDialog(false);
+              proposalFormRef.current?.requestSubmit();
+            }}>
+              Continuar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

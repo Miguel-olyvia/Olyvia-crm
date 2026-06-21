@@ -40,6 +40,7 @@ import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog"
 import { CatalogItemPicker, CatalogLineItem } from "@/components/clients/detail/CatalogItemPicker";
 import { EditActionDialog } from "@/components/shared/EditActionDialog";
 import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
+import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
 
 interface ContactDetailsDialogProps {
   contact: any;
@@ -108,6 +109,11 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
   const [teamMembers, setTeamMembers] = useState<{ id: string; name: string }[]>([]);
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId, teamMemberIds } = usePermissionScope();
+  const canEditContact = useMemo(() => {
+    const editScope = getPermissionScope("contacts.edit");
+    return canActOnEntity(editScope, contact || {}, scopeAnewUserId, scopeAuthUserId, teamMemberIds);
+  }, [getPermissionScope, contact, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
   // New state
   const [interactions, setInteractions] = useState<any[]>([]);
@@ -136,6 +142,12 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
   const [proposalLineItems, setProposalLineItems] = useState<CatalogLineItem[]>([]);
 
   const contactId = contact?.id;
+
+  useEffect(() => {
+    if (activeTab === "edit" && !canEditContact) {
+      setActiveTab("info");
+    }
+  }, [activeTab, canEditContact]);
 
   useEffect(() => {
     if (open && contact) {
@@ -487,6 +499,10 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
   const handleUpdateContact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (savingContact) return;
+    if (!canEditContact) {
+      toast({ title: "Sem permissão", description: "Não tem permissão para editar este contacto.", variant: "destructive" });
+      return;
+    }
     const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
     const validation = schema.safeParse(editFormData);
     if (!validation.success) {
@@ -798,7 +814,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
               <div className="overflow-x-auto">
                 <TabsList className="inline-flex w-auto min-w-full">
                   <TabsTrigger value="info">Info</TabsTrigger>
-                  <TabsTrigger value="edit">Editar</TabsTrigger>
+                  {canEditContact && <TabsTrigger value="edit">Editar</TabsTrigger>}
                   <TabsTrigger value="lists">
                     <ListPlus className="w-3.5 h-3.5 mr-1" />
                     Listas
@@ -841,6 +857,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
               </TabsContent>
 
               {/* TAB: EDIT (preserved exactly) */}
+              {canEditContact && (
               <TabsContent value="edit" className="space-y-4 mt-4">
                 <form onSubmit={handleUpdateContact} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -927,6 +944,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
                   </div>
                 </form>
               </TabsContent>
+              )}
 
               {/* TAB: LISTS (preserved exactly) */}
               <TabsContent value="lists" className="space-y-4 mt-4">

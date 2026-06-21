@@ -73,9 +73,10 @@ export function GenerateFromTemplateDialog({
       const primaryColor = templateDocSettings?.primary_color || "#7C3AED";
       const baseWithItems = applyQuoteItemsToken(template.body_html, variableData, templateDocSettings, primaryColor);
       const highlightedHtml = substituteVariables(baseWithItems, variableData, true);
-      const cleanHtml = substituteVariables(baseWithItems, variableData, false);
       setPreviewHtml(highlightedHtml);
-      setFinalHtml(cleanHtml);
+      // Pass pre-substitution HTML so handleGenerated can detect ALL custom tokens
+      // (including "fixed" vars with defaults). finalizeGeneration applies substituteVariables.
+      setFinalHtml(baseWithItems);
       setStep("preview");
     } catch (err: any) {
       toast.error("Erro ao preparar preview: " + err.message);

@@ -68,6 +68,14 @@ import { ContactsScoringView } from "@/components/contacts/ContactsScoringView";
 import { ContactsRelationsMap } from "@/components/contacts/ContactsRelationsMap";
 import { Switch } from "@/components/ui/switch";
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import {
+  buildContactScopeOrFilter,
+  contactMatchesScope,
+  getContactScopeUserIds,
+  normalizeContactScope,
+} from "@/lib/contacts/scope";
+import { findScopedContactByRef } from "@/lib/contacts/resolution";
+import { parseContactsCsv, serializeContactsCsv } from "@/lib/contacts/csv";
 
 // --- Types ---
 interface ContactRecord {
@@ -101,7 +109,7 @@ const AnewContacts = () => {
   const [totalCount, setTotalCount] = useState<number>(0);
   const [allContacts, setAllContacts] = useState<ContactRecord[]>([]);
   const [allContactsLoading, setAllContactsLoading] = useState(false);
-  const [serverAlertCounts, setServerAlertCounts] = useState<{ total: number; active: number; inactive: number; no_contact_14d: number; no_contact_7d: number; no_deal: number; unassigned: number } | null>(null);
+  const [serverAlertCounts, setServerAlertCounts] = useState<{ total: number; active: number; inactive: number; no_contact_14d: number; no_contact_7d: number; without_deals: number; with_deals: number; unassigned: number } | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedContact, setSelectedContact] = useState<any>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -226,6 +234,27 @@ const AnewContacts = () => {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("active");
   const [searchParams, setSearchParams] = useSearchParams();
+  const viewScope = useMemo(
+    () => normalizeContactScope(getPermissionScope("contacts.view"), onlyMine),
+    [getPermissionScope, onlyMine],
+  );
+  const scopedUserIds = useMemo(
+    () => getContactScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds),
+    [scopeAnewUserId, scopeAuthUserId, teamMemberIds],
+  );
+  const effectiveOrgIds = useMemo(() => {
+    if (companyFilter !== "all") return [companyFilter];
+    if (scopeOrgIds.length > 0) return scopeOrgIds;
+    return activeCompany?.id ? [activeCompany.id] : [];
+  }, [companyFilter, scopeOrgIds, activeCompany?.id]);
+  const currentScopeOptions = useMemo(
+    () => ({
+      scope: viewScope,
+      scopedUserIds,
+      allowedOrgIds: effectiveOrgIds,
+    }),
+    [viewScope, scopedUserIds, effectiveOrgIds],
+  );
 
   // Load organizations for filter
   useEffect(() => {
@@ -289,9 +318,11 @@ const AnewContacts = () => {
 
     if (alertRefs.length === 0) return;
 
-    const contactPool = allContacts.length > 0 ? allContacts : contacts;
+    const contactPool = (allContacts.length > 0 ? allContacts : contacts).filter((contact) =>
+      contactMatchesScope(contact, currentScopeOptions),
+    );
     const missingRefs = alertRefs.filter((ref) => {
-      const localContact = contactPool.find((contact) => contact.id === ref || contact.entity_id === ref);
+      const localContact = findScopedContactByRef(contactPool, ref, currentScopeOptions);
       const localName = localContact ? getIdentity(localContact.entity_id)?.display_name : null;
       const cachedName = alertContactNameMap.get(ref);
       return !localName && !cachedName;
@@ -302,9 +333,34 @@ const AnewContacts = () => {
     let cancelled = false;
 
     const loadAlertContactNames = async () => {
+      if (viewScope === "NONE") return;
+
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      let contactsByIdQuery = supabase
+        .from("anew_contacts")
+        .select("id, entity_id, organization_id, assigned_to, created_by, converted_to_client_id, deleted_at")
+        .is("deleted_at", null)
+        .is("converted_to_client_id", null)
+        .in("id", missingRefs);
+      let contactsByEntityIdQuery = supabase
+        .from("anew_contacts")
+        .select("id, entity_id, organization_id, assigned_to, created_by, converted_to_client_id, deleted_at")
+        .is("deleted_at", null)
+        .is("converted_to_client_id", null)
+        .in("entity_id", missingRefs);
+
+      if (effectiveOrgIds.length > 0) {
+        contactsByIdQuery = contactsByIdQuery.in("organization_id", effectiveOrgIds);
+        contactsByEntityIdQuery = contactsByEntityIdQuery.in("organization_id", effectiveOrgIds);
+      }
+      if (scopeFilter) {
+        contactsByIdQuery = contactsByIdQuery.or(scopeFilter);
+        contactsByEntityIdQuery = contactsByEntityIdQuery.or(scopeFilter);
+      }
+
       const [contactsByIdResult, contactsByEntityIdResult] = await Promise.all([
-        supabase.from("anew_contacts").select("id, entity_id").in("id", missingRefs),
-        supabase.from("anew_contacts").select("id, entity_id").in("entity_id", missingRefs),
+        contactsByIdQuery,
+        contactsByEntityIdQuery,
       ]);
 
       const contactRows = [
@@ -341,16 +397,18 @@ const AnewContacts = () => {
     return () => {
       cancelled = true;
     };
-  }, [contactAlerts, allContacts, contacts, getIdentity, alertContactNameMap]);
+  }, [contactAlerts, allContacts, contacts, getIdentity, alertContactNameMap, currentScopeOptions, effectiveOrgIds, scopedUserIds, viewScope]);
 
   const personalizedContactAlerts = useMemo(() => {
-    const contactPool = allContacts.length > 0 ? allContacts : contacts;
+    const contactPool = (allContacts.length > 0 ? allContacts : contacts).filter((contact) =>
+      contactMatchesScope(contact, currentScopeOptions),
+    );
 
     return contactAlerts.map((alert) => {
       if (!alert.type.startsWith("contact_no_contact_")) return alert;
 
       const alertRef = (alert.action_config as any)?.entity_id || alert.entity_id || (alert.action_config as any)?.contact_id;
-      const matchedContact = contactPool.find((contact) => contact.id === alertRef || contact.entity_id === alertRef);
+      const matchedContact = findScopedContactByRef(contactPool, alertRef, currentScopeOptions);
       const contactName = (matchedContact ? getIdentity(matchedContact.entity_id)?.display_name : null) || (alertRef ? alertContactNameMap.get(alertRef) : null);
 
       if (!contactName) return alert;
@@ -366,7 +424,7 @@ const AnewContacts = () => {
           : `${contactName} não é abordado há mais de ${days} dias.`,
       };
     });
-  }, [contactAlerts, allContacts, contacts, getIdentity, alertContactNameMap]);
+  }, [contactAlerts, allContacts, contacts, getIdentity, alertContactNameMap, currentScopeOptions]);
  
   useEffect(() => {
     const newContact = searchParams.get("newContact");
@@ -376,18 +434,31 @@ const AnewContacts = () => {
     if (!openId || selectedContact) return;
  
     const openFromQuery = async () => {
-      const found = contacts.find((c: any) => c.id === openId || c.entity_id === openId);
+      const contactPool = allContacts.length > 0 ? allContacts : contacts;
+      const found = findScopedContactByRef(contactPool, openId, currentScopeOptions);
       if (found) {
         await openContactDetails(found);
         setSearchParams({});
         return;
       }
- 
-      const { data: fetchedContact } = await supabase
+
+      if (viewScope === "NONE") return;
+
+      let query = supabase
         .from("anew_contacts")
-        .select("id, entity_id, organization_id, root_organization_id, status, position, source_type, source_lead_id, assigned_to, notes, created_at, created_by, last_interaction_at, converted_to_client_id, updated_at")
+        .select("id, entity_id, organization_id, root_organization_id, status, position, source_type, source_lead_id, assigned_to, notes, created_at, created_by, last_interaction_at, converted_to_client_id, updated_at, deleted_at")
+        .is("deleted_at", null)
+        .is("converted_to_client_id", null)
         .or(`id.eq.${openId},entity_id.eq.${openId}`)
-        .maybeSingle();
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      if (scopeFilter) query = query.or(scopeFilter);
+
+      const { data: fetchedContacts } = await query;
+      const fetchedContact = findScopedContactByRef((fetchedContacts || []) as any[], openId, currentScopeOptions);
 
       if (fetchedContact) {
         await openContactDetails(fetchedContact as ContactRecord);
@@ -396,7 +467,7 @@ const AnewContacts = () => {
     };
 
     void openFromQuery();
-  }, [searchParams, setSearchParams, contacts, selectedContact]);
+  }, [searchParams, setSearchParams, contacts, allContacts, selectedContact, currentScopeOptions, effectiveOrgIds, scopedUserIds, viewScope]);
 
   // Initial load effect moved after loadContacts definition (see below)
 
@@ -459,7 +530,7 @@ const AnewContacts = () => {
       const viewScope = getPermissionScope("contacts.view");
 
       // Cache exclude entity IDs — only re-fetch on initial load or filter changes
-      const excludeCacheKey = `${companyFilter}|${scopeOrgIds.join(',')}|${activeCompany?.id}`;
+      const excludeCacheKey = `${effectiveOrgIds.join(",")}|${viewScope}`;
       let excludeEntityIds: string[] = [];
       let clientOrgPairs: Set<string> = new Set();
       if (!isInitial && cachedExcludeRef.current?.key === excludeCacheKey) {
@@ -468,15 +539,9 @@ const AnewContacts = () => {
       } else {
         let inactiveQuery = supabase.from("anew_entity_roles").select("entity_id").eq("role", "contact").eq("status", "inactive");
         let clientQuery = supabase.from("anew_clients").select("entity_id, organization_id").neq("status", "inactive");
-        if (companyFilter !== "all") {
-          inactiveQuery = inactiveQuery.eq("organization_id", companyFilter);
-          clientQuery = clientQuery.eq("organization_id", companyFilter);
-        } else if (scopeOrgIds.length > 0) {
-          inactiveQuery = inactiveQuery.in("organization_id", scopeOrgIds);
-          clientQuery = clientQuery.in("organization_id", scopeOrgIds);
-        } else if (activeCompany?.id) {
-          inactiveQuery = inactiveQuery.eq("organization_id", activeCompany.id);
-          clientQuery = clientQuery.eq("organization_id", activeCompany.id);
+        if (effectiveOrgIds.length > 0) {
+          inactiveQuery = inactiveQuery.in("organization_id", effectiveOrgIds);
+          clientQuery = clientQuery.in("organization_id", effectiveOrgIds);
         }
         const [inactiveRes, clientRes] = await Promise.all([inactiveQuery, clientQuery]);
         // Inactive contact roles: exclude globally (entity has no active contact role)
@@ -519,24 +584,15 @@ const AnewContacts = () => {
       // Apply server-side search filter
       if (searchEntityIds) query = query.in("entity_id", searchEntityIds);
       if (excludeEntityIds.length > 0) query = query.not("entity_id", "in", `(${excludeEntityIds.join(",")})`);
-      if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-      else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
-      else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
+      if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
       if (statusFilter === "deals") query = query.eq("status", "active");
       else if (statusFilter !== "all") query = query.eq("status", statusFilter);
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
       if (commercialFilter !== "all") query = query.eq("assigned_to", commercialFilter);
-      if (viewScope === "OWNED" && internalUserId) {
-        query = query.or(`assigned_to.eq.${internalUserId},created_by.eq.${internalUserId}`);
-      } else if (viewScope === "TEAM" && internalUserId) {
-        const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-        teamMemberIds.forEach(mid => {
-          orFilters.push(`assigned_to.eq.${mid}`, `created_by.eq.${mid}`);
-        });
-        query = query.or(orFilters.join(','));
-      }
-      else if (viewScope === "NONE") { if (isInitial) setContacts([]); setHasMore(false); setLoading(false); return; }
+      if (viewScope === "NONE") { if (isInitial) setContacts([]); setHasMore(false); setLoading(false); return; }
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      if (scopeFilter) query = query.or(scopeFilter);
       query = query.order("created_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
       const { data, error, count } = await query;
       if (error) throw error;
@@ -577,7 +633,7 @@ const AnewContacts = () => {
     } catch (error: any) {
       toast({ title: t('contacts.toast.loadContactsError'), description: error.message, variant: "destructive" });
     } finally { setLoading(false); setLoadingMore(false); }
-  }, [activeCompany?.id, companyFilter, scopeOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, getPermissionScope, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, teamMemberIds, commercialFilter]);
+  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope]);
 
   // Keep a stable ref to loadContacts for infinite scroll
   useEffect(() => { loadContactsRef.current = loadContacts; }, [loadContacts]);
@@ -748,10 +804,8 @@ const AnewContacts = () => {
         }
         cachedAuthRef.current = { authUserId, internalUserId };
       }
-      const viewScope = getPermissionScope("contacts.view");
-
       // Reuse cached exclude IDs from loadContacts instead of re-querying
-      const excludeCacheKey = `${companyFilter}|${scopeOrgIds.join(',')}|${activeCompany?.id}`;
+      const excludeCacheKey = `${effectiveOrgIds.join(",")}|${viewScope}`;
       let excludeEntityIds: string[] = [];
       let clientOrgPairs: Set<string> = new Set();
       if (cachedExcludeRef.current?.key === excludeCacheKey) {
@@ -760,15 +814,9 @@ const AnewContacts = () => {
       } else {
         let inactiveQuery = supabase.from("anew_entity_roles").select("entity_id").eq("role", "contact").eq("status", "inactive");
         let clientQuery = supabase.from("anew_clients").select("entity_id, organization_id").neq("status", "inactive");
-        if (companyFilter !== "all") {
-          inactiveQuery = inactiveQuery.eq("organization_id", companyFilter);
-          clientQuery = clientQuery.eq("organization_id", companyFilter);
-        } else if (scopeOrgIds.length > 0) {
-          inactiveQuery = inactiveQuery.in("organization_id", scopeOrgIds);
-          clientQuery = clientQuery.in("organization_id", scopeOrgIds);
-        } else if (activeCompany?.id) {
-          inactiveQuery = inactiveQuery.eq("organization_id", activeCompany.id);
-          clientQuery = clientQuery.eq("organization_id", activeCompany.id);
+        if (effectiveOrgIds.length > 0) {
+          inactiveQuery = inactiveQuery.in("organization_id", effectiveOrgIds);
+          clientQuery = clientQuery.in("organization_id", effectiveOrgIds);
         }
         const [inactiveRes, clientRes] = await Promise.all([inactiveQuery, clientQuery]);
         const inactiveSet = new Set<string>();
@@ -790,23 +838,15 @@ const AnewContacts = () => {
         query = query.is("deleted_at", null);
         query = query.is("converted_to_client_id", null);
         if (excludeEntityIds.length > 0) query = query.not("entity_id", "in", `(${excludeEntityIds.join(",")})`);
-        if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-        else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
-        else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
+        if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
         if (statusFilter === "deals") query = query.eq("status", "active");
         else if (statusFilter !== "all") query = query.eq("status", statusFilter);
         if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
         if (dateTo) query = query.lte("created_at", dateTo.toISOString());
         if (commercialFilter !== "all") query = query.eq("assigned_to", commercialFilter);
-        if (viewScope === "OWNED" && internalUserId) {
-          query = query.or(`assigned_to.eq.${internalUserId},created_by.eq.${internalUserId}`);
-        } else if (viewScope === "TEAM" && internalUserId) {
-          const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-          teamMemberIds.forEach(mid => {
-            orFilters.push(`assigned_to.eq.${mid}`, `created_by.eq.${mid}`);
-          });
-          query = query.or(orFilters.join(','));
-        } else if (viewScope === "NONE") { setAllContacts([]); setAllContactsLoading(false); return; }
+        if (viewScope === "NONE") { setAllContacts([]); setAllContactsLoading(false); return; }
+        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+        if (scopeFilter) query = query.or(scopeFilter);
         query = query.order("created_at", { ascending: false }).range(offset, offset + BATCH_SIZE - 1);
         const { data, error } = await query;
         if (error) throw error;
@@ -848,7 +888,7 @@ const AnewContacts = () => {
     } finally {
       setAllContactsLoading(false);
     }
-  }, [activeCompany?.id, scopeOrgIds, companyFilter, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, getPermissionScope, resolveEntities, loadSupplementaryData, teamMemberIds, commercialFilter]);
+  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, loadSupplementaryData, commercialFilter, scopedUserIds, viewScope]);
 
   // Trigger full load for accurate KPIs — always, but defer via idle to not block first paint
   useEffect(() => {
@@ -869,12 +909,14 @@ const AnewContacts = () => {
     };
   }, [loadAllContacts, activeView, dealsFilter, noContact14dFilter]);
 
-  // Server-side alert counts - lightweight RPC, runs on every view
+  // Server-side dashboard KPIs - lightweight RPC, runs on every view.
+  // M3: aggregate counts are computed server-side instead of loading up to
+  // 10,000 contacts client-side just to derive totals.
   useEffect(() => {
     if (scopeLoading || !scopeOrgIds.length) return;
     const loadAlertCounts = async () => {
       try {
-        const { data, error } = await supabase.rpc('get_contact_alert_counts', { p_org_ids: scopeOrgIds });
+        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: scopeOrgIds });
         if (!error && data) {
           setServerAlertCounts(data as any);
         }
@@ -951,6 +993,7 @@ const AnewContacts = () => {
   const filteredContacts = sourceForFiltering.filter(contact => {
     const entityId = contact.entity_id;
     if (clientOrgPairKeys.has(`${entityId}|${contact.organization_id}`)) return false;
+    if (!contactMatchesScope(contact, currentScopeOptions)) return false;
     if (normalizedSearchQuery && !isServerTextSearchActive) {
       const identity = getIdentity(entityId);
       const name = (identity?.display_name || "").toLowerCase();
@@ -980,7 +1023,6 @@ const AnewContacts = () => {
       if (!tagsFilter.some(tf => tags.some(t => t.tag === tf))) return false;
     }
     if (sentimentFilter !== "all" && lastSentiments[entityId] !== sentimentFilter) return false;
-    if (onlyMine && scopeAnewUserId && contact.assigned_to !== scopeAnewUserId) return false;
     if (commercialFilter !== "all" && contact.assigned_to !== commercialFilter) return false;
     if (smartFilter) {
       const hs = getHealthScore(entityId, contact.last_interaction_at);
@@ -997,7 +1039,7 @@ const AnewContacts = () => {
     if (viewScope === "ORG" && serverAlertCounts) {
       return {
         noContact14d: serverAlertCounts.no_contact_14d || 0,
-        noDeal: serverAlertCounts.no_deal || 0,
+        noDeal: serverAlertCounts.without_deals || 0,
         unassigned: serverAlertCounts.unassigned || 0,
       };
     }
@@ -1066,7 +1108,7 @@ const AnewContacts = () => {
       return count;
     };
     const noContact7d = useServerCounts ? (serverAlertCounts?.no_contact_7d ?? calcNoContact7d()) : calcNoContact7d();
-    const withoutDeals = useServerCounts ? (serverAlertCounts?.no_deal ?? (total - withDeals)) : (total - withDeals);
+    const withoutDeals = useServerCounts ? (serverAlertCounts?.without_deals ?? (total - withDeals)) : (total - withDeals);
     return {
       total, active, inactive,
       pipeline: totalPipeline, withDeals, withProposals, withPipeline, withoutDeals,
@@ -1196,9 +1238,7 @@ const AnewContacts = () => {
     try {
     const dataToValidate = contactType === "person" ? formData : { first_name: companyFormData.name, last_name: "", email: companyFormData.email, phone: companyFormData.phone, phone_country_code: companyFormData.phone_country_code, vat: companyFormData.vat, position: "", status: companyFormData.status };
     const schema = contactType === "company" ? contactCompanySchema : contactSchema;
-    console.log('[DEBUG] contactType:', contactType, 'dataToValidate:', JSON.stringify(dataToValidate));
     const contactValidation = schema.safeParse(dataToValidate);
-    console.log('[DEBUG] validation result:', contactValidation.success, contactValidation.success ? 'OK' : JSON.stringify(contactValidation.error.errors));
     if (!contactValidation.success) {
       const errors: Record<string,string> = {};
       contactValidation.error.errors.forEach(err => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
@@ -1314,23 +1354,28 @@ const AnewContacts = () => {
       if (contactEntityResolved) {
         await supabase.from("anew_entities").update({ display_name: contactDisplayName, first_name: contactFirstName, last_name: contactLastName } as any).eq("id", contactEntityId);
       }
-      // No duplicate — proceed with creation
-      const { error: insertContactErr } = await supabase.from("anew_contacts").insert({ entity_id: contactEntityId, root_organization_id: resolvedRootOrgId || organizationId, organization_id: organizationId, status: roleStatus, source_type: "manual", created_by: internalUserId });
-      if (insertContactErr) throw insertContactErr;
-
-      const { data: existingRole, error: roleLookupErr } = await supabase.from("anew_entity_roles").select("id").eq("entity_id", contactEntityId).eq("role","contact").eq("organization_id", organizationId).maybeSingle();
-      if (roleLookupErr) throw roleLookupErr;
-      if (!existingRole) {
-        const { error: roleInsertErr } = await supabase.from("anew_entity_roles").insert({ entity_id: contactEntityId, role:"contact", status: roleStatus, organization_id: organizationId, source_type:"manual", created_by: internalUserId });
-        if (roleInsertErr) {
-          toast({ title: "Contacto criado mas role não foi atribuída", description: roleInsertErr.message, variant: "destructive" });
-        }
-      } else {
-        const { error: roleUpdateErr } = await supabase.from("anew_entity_roles").update({ status: roleStatus }).eq("id", existingRole.id);
-        if (roleUpdateErr) {
-          toast({ title: "Contacto criado mas role não foi atualizada", description: roleUpdateErr.message, variant: "destructive" });
-        }
-      }
+      // No duplicate — proceed with creation.
+      // M1 — single transactional RPC: guarantees the contact never persists
+      // without its role. Any RPC error is treated as a total creation failure.
+      const { error: createRpcError } = await supabase.rpc('create_contact_with_role', {
+        p_payload: {
+          entityId: contactEntityId,
+          organizationId,
+          rootOrganizationId: resolvedRootOrgId || organizationId,
+          displayName: contactDisplayName,
+          entityType: contactEntityType,
+          firstName: contactFirstName,
+          lastName: contactLastName,
+          email: contactEmail || null,
+          phone: contactPhone || null,
+          phoneCountryCode: contactPhoneCode || null,
+          vat: contactVat || null,
+          status: roleStatus,
+          sourceType: "manual",
+          assignedTo: null,
+        },
+      });
+      if (createRpcError) throw createRpcError;
       if (addressData.postal_code || addressData.street || addressData.city) {
         // Use shared sanitizer-aware helper to prevent placeholders ("N/A", "0000-000")
         // from being persisted. Helper is a no-op when data lacks core minimum.
@@ -1438,35 +1483,28 @@ const AnewContacts = () => {
     setSavingContact(true);
     try {
       // "Create anyway" = user explicitly wants a SEPARATE record.
-      // Always create a brand-new entity so the typed email/phone/vat are persisted
-      // and we don't piggyback on the entity that triggered the duplicate warning.
-      const newEntityId = await createEntityWithIdentity({
-        displayName: pendingContactData.displayName,
-        type: pendingContactData.entityType,
-        email: pendingContactData.email || null,
-        phone: pendingContactData.phone || null,
-        phoneCountryCode: pendingContactData.phoneCountryCode || null,
-        vat: pendingContactData.vat || null,
-        createdBy: pendingContactData.internalUserId,
-        firstName: pendingContactData.firstName,
-        lastName: pendingContactData.lastName,
+      // M1 — single transactional RPC creates a brand-new entity (entityId
+      // omitted) + contact + role atomically, guaranteeing the contact never
+      // persists without its role. Any RPC error is a total creation failure.
+      const { error: createAnywayRpcError } = await supabase.rpc('create_contact_with_role', {
+        p_payload: {
+          entityId: null,
+          organizationId: pendingContactData.organizationId,
+          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+          displayName: pendingContactData.displayName,
+          entityType: pendingContactData.entityType,
+          firstName: pendingContactData.firstName,
+          lastName: pendingContactData.lastName,
+          email: pendingContactData.email || null,
+          phone: pendingContactData.phone || null,
+          phoneCountryCode: pendingContactData.phoneCountryCode || null,
+          vat: pendingContactData.vat || null,
+          status: pendingContactData.roleStatus,
+          sourceType: "manual",
+          assignedTo: null,
+        },
       });
-      // Garantir link da nova entidade à org actual antes do insert (RLS).
-      try {
-        await ensureEntityOrgLink({ entityId: newEntityId, organizationId: pendingContactData.organizationId, isPrimary: true });
-      } catch (linkErr: any) {
-        throw new Error(`Não foi possível associar a nova entidade à organização: ${linkErr?.message || linkErr}`);
-      }
-      const { error: insertErr } = await supabase.from("anew_contacts").insert({ entity_id: newEntityId, root_organization_id: resolvedRootOrgId || pendingContactData.organizationId, organization_id: pendingContactData.organizationId, status: pendingContactData.roleStatus, source_type: "manual", created_by: pendingContactData.internalUserId } as any);
-      if (insertErr) throw insertErr;
-      const { data: existingRole, error: roleLookupErr } = await supabase.from("anew_entity_roles").select("id").eq("entity_id", newEntityId).eq("role", "contact").eq("organization_id", pendingContactData.organizationId).maybeSingle();
-      if (roleLookupErr) throw roleLookupErr;
-      if (!existingRole) {
-        const { error: roleInsertErr } = await supabase.from("anew_entity_roles").insert({ entity_id: newEntityId, role: "contact", status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId, source_type: "manual", created_by: pendingContactData.internalUserId } as any);
-        if (roleInsertErr) {
-          toast({ title: "Contacto criado mas role não foi atribuída", description: roleInsertErr.message, variant: "destructive" });
-        }
-      }
+      if (createAnywayRpcError) throw createAnywayRpcError;
       toast({ title: t('contacts.toast.createSuccess') });
       setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
@@ -1480,17 +1518,28 @@ const AnewContacts = () => {
     setSavingContact(true);
     try {
       await linkEntityToOrg(match.entityId, pendingContactData.organizationId);
-      // Create the contact in this org reusing the shared entity_id
-      const { error: insertErr } = await supabase.from("anew_contacts").insert({ entity_id: match.entityId, root_organization_id: resolvedRootOrgId || pendingContactData.organizationId, organization_id: pendingContactData.organizationId, status: pendingContactData.roleStatus, source_type: "manual", created_by: pendingContactData.internalUserId } as any);
-      if (insertErr) throw insertErr;
-      const { data: existingRole, error: roleLookupErr } = await supabase.from("anew_entity_roles").select("id").eq("entity_id", match.entityId).eq("role", "contact").eq("organization_id", pendingContactData.organizationId).maybeSingle();
-      if (roleLookupErr) throw roleLookupErr;
-      if (!existingRole) {
-        const { error: roleInsertErr } = await supabase.from("anew_entity_roles").insert({ entity_id: match.entityId, role: "contact", status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId, source_type: "manual", created_by: pendingContactData.internalUserId } as any);
-        if (roleInsertErr) {
-          toast({ title: "Contacto criado mas role não foi atribuída", description: roleInsertErr.message, variant: "destructive" });
-        }
-      }
+      // M1 — single transactional RPC reusing the shared entity_id: creates
+      // the contact + role atomically, guaranteeing the contact never
+      // persists without its role. Any RPC error is a total creation failure.
+      const { error: shareRpcError } = await supabase.rpc('create_contact_with_role', {
+        p_payload: {
+          entityId: match.entityId,
+          organizationId: pendingContactData.organizationId,
+          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+          displayName: pendingContactData.displayName,
+          entityType: pendingContactData.entityType,
+          firstName: pendingContactData.firstName,
+          lastName: pendingContactData.lastName,
+          email: pendingContactData.email || null,
+          phone: pendingContactData.phone || null,
+          phoneCountryCode: pendingContactData.phoneCountryCode || null,
+          vat: pendingContactData.vat || null,
+          status: pendingContactData.roleStatus,
+          sourceType: "manual",
+          assignedTo: null,
+        },
+      });
+      if (shareRpcError) throw shareRpcError;
       toast({ title: "Contacto criado a partir de entidade do grupo" });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
@@ -1512,26 +1561,53 @@ const AnewContacts = () => {
   const handleExport = async () => {
     try {
       const MAX_EXPORT_RECORDS = 10_000;
-      let query = supabase.from("anew_contacts").select("entity_id, status, organization_id");
-      if (activeCompany?.id) {
-        if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
-        else query = query.eq("organization_id", activeCompany.id);
-      }
+      if (viewScope === "NONE") { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
+
+      let query = supabase
+        .from("anew_contacts")
+        .select("entity_id, status, organization_id, assigned_to, created_by")
+        .is("deleted_at", null)
+        .is("converted_to_client_id", null);
+      if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
+      else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
+
+      // H2 — apply the same OWNED/TEAM scope as the main listing; exporting
+      // must never surface records outside the user's effective scope.
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      if (scopeFilter) query = query.or(scopeFilter);
+
       const { data, error } = await query.limit(MAX_EXPORT_RECORDS);
       if (error) throw error;
-      if (!data || data.length === 0) { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
-      if (data.length === MAX_EXPORT_RECORDS) { toast({ title: "Export limitado", description: `O export foi limitado a ${MAX_EXPORT_RECORDS.toLocaleString()} registos.`, variant: "default" }); }
-      const entityIds = data.map((r:any) => r.entity_id).filter(Boolean);
-      let identityMap: Record<string,any> = {};
+
+      const scopedData = (data || []).filter((r) => contactMatchesScope(r as any, currentScopeOptions));
+      if (scopedData.length === 0) { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
+      if (scopedData.length === MAX_EXPORT_RECORDS) { toast({ title: "Export limitado", description: `O export foi limitado a ${MAX_EXPORT_RECORDS.toLocaleString()} registos.`, variant: "default" }); }
+
+      const entityIds = scopedData.map((r: any) => r.entity_id).filter(Boolean);
+      let identityMap: Record<string, any> = {};
       if (entityIds.length > 0) identityMap = await resolveEntities(entityIds);
-      const rows = [["Nome","Email","Telefone","NIF","Status","Tipo"], ...data.map((r:any) => { const id = identityMap[r.entity_id]; return [id?.display_name||"",id?.email||"",id?.phone||"",id?.vat||"",r.status||"",id?.type||""]; })];
-      const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(";")).join("\r\n");
-      const blob = new Blob(["\uFEFF"+csvContent], { type: "text/csv;charset=utf-8;" });
+
+      // H4 — use the single CSV schema shared with the importer.
+      const csvContent = serializeContactsCsv(scopedData.map((r: any) => {
+        const id = identityMap[r.entity_id];
+        const entityType: "person" | "organization" = id?.type === "organization" ? "organization" : "person";
+        return {
+          entityType,
+          firstName: entityType === "person" ? (id?.first_name || "") : "",
+          lastName: entityType === "person" ? (id?.last_name || "") : "",
+          companyName: entityType === "organization" ? (id?.display_name || "") : "",
+          email: id?.email || "",
+          phone: id?.phone || "",
+          vat: id?.vat || "",
+          status: r.status || "active",
+        };
+      }));
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       link.setAttribute("href", URL.createObjectURL(blob));
       link.setAttribute("download", `contacts_${new Date().toISOString().split('T')[0]}.csv`);
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      toast({ title: t('contacts.export.success'), description: t('contacts.export.successDesc', { count: data.length }) });
+      toast({ title: t('contacts.export.success'), description: t('contacts.export.successDesc', { count: scopedData.length }) });
     } catch (error: any) { toast({ title: t('contacts.export.error'), description: error.message, variant: "destructive" }); }
   };
 
@@ -1539,22 +1615,17 @@ const AnewContacts = () => {
     if (!importFile) { toast({ title: t('contacts.import.noFile'), variant: "destructive" }); return; }
     try {
       const text = await importFile.text();
-      const lines = text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(l=>l.trim());
-      if (lines.length < 2) { toast({ title: t('contacts.import.invalid'), variant: "destructive" }); return; }
+      // H4 - single CSV schema/parser shared with the exporter.
+      const contactsToImport = parseContactsCsv(text);
+      if (contactsToImport.length === 0) { toast({ title: t('contacts.import.invalid'), variant: "destructive" }); return; }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
-      const dataLines = lines.slice(1);
-      const contactsToImport = dataLines.map(line => { const v = line.split(";").map(val=>val.replace(/^"|"$/g,"").trim()); return { first_name: v[0]||"", last_name: v[1]||"", email: v[2]||null, phone: v[3]||null, vat: v[4]||null, status: v[5]||"active" }; }).filter(c=>c.first_name);
-      if (contactsToImport.length === 0) { toast({ title: t('contacts.import.noValid'), variant: "destructive" }); return; }
       let importedCount = 0;
       let skippedCount = 0;
       const orgId = activeCompany?.id || '';
       for (const c of contactsToImport) {
-        let entityId = await resolveEntityByIdentity({ email: c.email, phone: c.phone, vat: c.vat });
-        const entityWasCreated = !entityId;
-        if (!entityId) {
-          entityId = await createEntityWithIdentity({ displayName: `${c.first_name} ${c.last_name}`.trim(), type:'person', email:c.email, phone:c.phone, vat:c.vat, createdBy:user.id, firstName: c.first_name || null, lastName: c.last_name || null });
-        } else {
+        const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null });
+        if (entityId) {
           // Check for existing active records in this org (leads, contacts, clients)
           const [{ data: exContacts }, { data: exLeads }, { data: exClients }] = await Promise.all([
             supabase.from("anew_contacts").select("id").eq("entity_id", entityId).eq("organization_id", orgId).not("status", "eq", "inactive").limit(1),
@@ -1566,36 +1637,35 @@ const AnewContacts = () => {
             continue;
           }
         }
-        const __importBuid = await resolveCurrentBusinessUserId();
-        if (!__importBuid) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
-        // Garantir link entidade↔org antes do insert (RLS).
-        try {
-          await ensureEntityOrgLink({ entityId: entityId!, organizationId: orgId, isPrimary: entityWasCreated });
-        } catch (linkErr) {
-          console.error('[import] ensureEntityOrgLink failed', linkErr);
+
+        // M1 - single transactional RPC: creates entity (if needed) + contact + role
+        // atomically, guaranteeing the contact never persists without its role.
+        const { error: rpcError } = await supabase.rpc('create_contact_with_role', {
+          p_payload: {
+            entityId: entityId || null,
+            organizationId: orgId,
+            rootOrganizationId: resolvedRootOrgId || orgId,
+            displayName: c.displayName || null,
+            entityType: c.entityType,
+            firstName: c.firstName || null,
+            lastName: c.lastName || null,
+            email: c.email || null,
+            phone: c.phone || null,
+            vat: c.vat || null,
+            status: c.status || "active",
+            sourceType: "import",
+            assignedTo: null,
+          },
+        });
+        if (rpcError) {
+          console.error('[import] create_contact_with_role failed', rpcError);
           skippedCount++;
           continue;
-        }
-        const { error: insertContactErr } = await supabase.from("anew_contacts").insert({ entity_id: entityId, root_organization_id: resolvedRootOrgId || activeCompany?.id || null, organization_id: activeCompany?.id || null, status: c.status||"active", source_type: "import", created_by: __importBuid });
-        if (insertContactErr) {
-          console.error('[import] insert contact failed', insertContactErr);
-          skippedCount++;
-          continue;
-        }
-        const { data: existingRole, error: roleLookupErr } = await supabase.from("anew_entity_roles").select("id").eq("entity_id", entityId).eq("role","contact").eq("organization_id", orgId).maybeSingle();
-        if (roleLookupErr) {
-          console.error('[import] role lookup failed', roleLookupErr);
-        }
-        if (!existingRole) {
-          const { error: roleInsertErr } = await supabase.from("anew_entity_roles").insert({ entity_id: entityId, role:"contact", status:"active", organization_id: activeCompany?.id||null, source_type:"import", created_by: __importBuid });
-          if (roleInsertErr) {
-            console.error('[import] role insert failed (contact criado sem role)', roleInsertErr);
-          }
         }
         importedCount++;
       }
       const importDesc = skippedCount > 0
-        ? `${importedCount} importados, ${skippedCount} ignorados por duplicação`
+        ? `${importedCount} importados, ${skippedCount} ignorados por duplicacao ou erro`
         : t('contacts.import.successDesc', { count: importedCount });
       toast({ title: t('contacts.import.success'), description: importDesc });
       setImportDialogOpen(false); setImportFile(null); setContacts([]); setHasMore(true); loadContacts(0, true);
@@ -1654,31 +1724,28 @@ const AnewContacts = () => {
             const alertRef = (alert.action_config as any)?.entity_id || alert.entity_id || (alert.action_config as any)?.contact_id;
             if (!alertRef) return;
 
-            const found = (allContacts.length > 0 ? allContacts : contacts).find(
-              (c: any) => c.id === alertRef || c.entity_id === alertRef
-            );
+            const contactPool = (allContacts.length > 0 ? allContacts : contacts);
+            const found = findScopedContactByRef(contactPool, alertRef, currentScopeOptions);
 
             if (found) {
               await openContactDetails(found);
               return;
             }
 
-            // Prefer contact in active org; fallback to first match (entity_id can repeat across orgs)
+            if (viewScope === "NONE") return;
+
+            // Apply the same org + OWNED/TEAM scope as the main listing —
+            // never fall back to an unscoped query (see M2 audit finding).
+            const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
             let query = supabase
               .from("anew_contacts")
               .select("*")
-              .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`);
-            if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-            let { data: rows } = await query.limit(1);
-
-            if (!rows || rows.length === 0) {
-              const fallback = await supabase
-                .from("anew_contacts")
-                .select("*")
-                .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
-                .limit(1);
-              rows = fallback.data || [];
-            }
+              .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
+              .is("deleted_at", null)
+              .is("converted_to_client_id", null);
+            if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
+            if (scopeFilter) query = query.or(scopeFilter);
+            const { data: rows } = await query.limit(1);
 
             if (rows && rows[0]) await openContactDetails(rows[0] as ContactRecord);
           }}
@@ -2351,89 +2418,15 @@ const AnewContacts = () => {
                 convertClientLockRef.current = true;
                 setConverting(true);
                 try {
-                  const { data: { user } } = await supabase.auth.getUser();
-                  if (!user) throw new Error("Not authenticated");
-                  const { data: anewUser } = await supabase.from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
-                  if (!anewUser?.id) {
-                    toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-                    return;
-                  }
-                  const internalUserId = anewUser.id;
-                  const orgId = activeCompany?.id;
-                  const contactOrgId = contactToConvert.organization_id || orgId;
-                  if (!orgId || !contactToConvert.entity_id) return;
+                  // H5 — single transactional RPC: any error is a total
+                  // conversion failure, never a partial client/contact/role state.
+                  const { data: convertResult, error: convertError } = await supabase.rpc('convert_contact_to_client', {
+                    p_contact_id: contactToConvert.id,
+                  });
+                  if (convertError) throw convertError;
 
-                  const nowIso = new Date().toISOString();
-
-                  // Look for a reusable client (any status, but not soft-deleted).
-                  const { data: existingClients, error: existingClientError } = await (supabase as any)
-                    .from("anew_clients")
-                    .select("id, status, deleted_at")
-                    .eq("entity_id", contactToConvert.entity_id)
-                    .eq("organization_id", contactOrgId)
-                    .is("deleted_at", null)
-                    .order("created_at", { ascending: true })
-                    .limit(1);
-                  if (existingClientError) throw existingClientError;
-
-                  let clientId = existingClients?.[0]?.id || null;
-                  if (clientId) {
-                    // Reactivate the existing client so the contact never points to an inactive one.
-                    await (supabase as any)
-                      .from("anew_clients")
-                      .update({ status: "active", deleted_at: null, updated_at: nowIso })
-                      .eq("id", clientId);
-                  } else {
-                    const { data: newClient, error: clientInsertError } = await (supabase as any)
-                      .from("anew_clients")
-                      .insert({ entity_id: contactToConvert.entity_id, root_organization_id: resolvedRootOrgId || orgId, organization_id: contactOrgId, status: "active", source_type: "contact", source_id: contactToConvert.id, created_by: internalUserId, assigned_to: contactToConvert.assigned_to, client_type: "individual" })
-                      .select("id")
-                      .single();
-                    if (clientInsertError) throw clientInsertError;
-                    clientId = newClient.id;
-                  }
-
-                  await (supabase as any)
-                    .from("anew_contacts")
-                    .update({ converted_to_client_id: clientId, converted_at: nowIso, status: "inactive" })
-                    .eq("id", contactToConvert.id);
-
-                  const identity = getIdentity(contactToConvert.entity_id);
-                  if (identity) {
-                    const nameParts = (identity.display_name || '').trim().split(' ');
-                    const entityNameUpdate: Record<string, any> = {};
-                    if (nameParts[0]) entityNameUpdate.first_name = nameParts[0];
-                    if (nameParts.length > 1) entityNameUpdate.last_name = nameParts.slice(1).join(' ');
-                    if (Object.keys(entityNameUpdate).length > 0) await supabase.from("anew_entities").update(entityNameUpdate as any).eq("id", contactToConvert.entity_id);
-                  }
-
-                  // Client role: use the contact's own organization (not root org)
-                  const { data: existingClientRoleRows, error: existingClientRoleError } = await supabase
-                    .from("anew_entity_roles")
-                    .select("id")
-                    .eq("entity_id", contactToConvert.entity_id)
-                    .eq("role", "client")
-                    .eq("organization_id", contactOrgId)
-                    .order("created_at", { ascending: true })
-                    .limit(1);
-                  if (existingClientRoleError) throw existingClientRoleError;
-
-                  const existingClientRoleId = existingClientRoleRows?.[0]?.id;
-                  if (!existingClientRoleId) {
-                    await supabase.from("anew_entity_roles").insert({ entity_id: contactToConvert.entity_id, role: "client", status: "active", organization_id: contactOrgId, source_type: "contacts", created_by: internalUserId });
-                  } else {
-                    await supabase.from("anew_entity_roles").update({ status: "active" }).eq("id", existingClientRoleId);
-                  }
-
-                  // Deactivate contact role ONLY in the contact's own organization
-                  await supabase
-                    .from("anew_entity_roles")
-                    .update({ status: "inactive" })
-                    .eq("entity_id", contactToConvert.entity_id)
-                    .eq("role", "contact")
-                    .eq("organization_id", contactOrgId);
-
-                  toast({ title: "Convertido em Cliente", description: existingClients?.[0]?.id ? "Cliente existente reutilizado e contacto sincronizado." : "O contacto foi convertido em cliente com sucesso." });
+                  const reusedExistingClient = !!(convertResult as any)?.reused_existing_client;
+                  toast({ title: "Convertido em Cliente", description: reusedExistingClient ? "Cliente existente reutilizado e contacto sincronizado." : "O contacto foi convertido em cliente com sucesso." });
                   cachedExcludeRef.current = null;
                   loadContacts(0, true); setDashboardKey(prev=>prev+1);
                 } catch (err: any) { toast({ title: "Erro na conversão", description: err.message, variant: "destructive" }); }

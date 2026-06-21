@@ -18,11 +18,22 @@ interface Quote {
   lead_source?: string;
 }
 
+interface RpcStatusCounts {
+  rascunho: number; enviado: number; aceite: number;
+  perdido: number; finalizado: number; rejeitado: number; outros: number;
+}
+interface RpcStatusValues {
+  rascunhoValue: number; enviadoValue: number; aceiteValue: number;
+  perdidoValue: number; finalizadoValue: number; rejeitadoValue: number; outrosValue: number;
+}
+
 interface QuotesDashboardViewProps {
   quotes: Quote[];
   isLoading?: boolean;
   hasError?: boolean;
   errorMessage?: string;
+  rpcStatusCounts?: RpcStatusCounts;
+  rpcStatusValues?: RpcStatusValues;
 }
 
 const normalizeStatus = (status?: string | null) => status || "sem_estado";
@@ -45,7 +56,7 @@ const OPEN_STATUSES = ["rascunho", "enviado"];
 // quotes.total is the authoritative DB value. Zero is a valid value.
 const valueOf = (q: Quote) => Number(q.total ?? 0);
 
-export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage }: QuotesDashboardViewProps) {
+export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage, rpcStatusCounts, rpcStatusValues }: QuotesDashboardViewProps) {
   const wonQuotes = useMemo(
     () => quotes.filter(q => WON_STATUSES.has(normalizeStatus(q.estado))),
     [quotes]
@@ -54,13 +65,20 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage 
   const wonValue = useMemo(() => wonQuotes.reduce((s, q) => s + valueOf(q), 0), [wonQuotes]);
 
   const funnelData = useMemo(() => {
-    const directCount: Record<string, number> = {};
-    const directValue: Record<string, number> = {};
-    quotes.forEach(q => {
-      const s = normalizeStatus(q.estado);
-      directCount[s] = (directCount[s] || 0) + 1;
-      directValue[s] = (directValue[s] || 0) + valueOf(q);
-    });
+    // Usar dados RPC quando disponíveis (totais correctos), caso contrário fallback local
+    const directCount: Record<string, number> = rpcStatusCounts
+      ? { rascunho: rpcStatusCounts.rascunho, enviado: rpcStatusCounts.enviado, aceite: rpcStatusCounts.aceite, finalizado: rpcStatusCounts.finalizado, perdido: rpcStatusCounts.perdido, rejeitado: rpcStatusCounts.rejeitado }
+      : {};
+    const directValue: Record<string, number> = rpcStatusValues
+      ? { rascunho: rpcStatusValues.rascunhoValue, enviado: rpcStatusValues.enviadoValue, aceite: rpcStatusValues.aceiteValue, finalizado: rpcStatusValues.finalizadoValue, perdido: rpcStatusValues.perdidoValue, rejeitado: rpcStatusValues.rejeitadoValue }
+      : {};
+    if (!rpcStatusCounts) {
+      quotes.forEach(q => {
+        const s = normalizeStatus(q.estado);
+        directCount[s] = (directCount[s] || 0) + 1;
+        directValue[s] = (directValue[s] || 0) + valueOf(q);
+      });
+    }
     return FUNNEL_PIPELINE.map((stage, idx) => {
       let count = 0;
       let value = 0;

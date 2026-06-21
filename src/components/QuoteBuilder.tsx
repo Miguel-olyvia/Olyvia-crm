@@ -1975,11 +1975,20 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       if (updateError) throw updateError;
 
-      // Sync proposal value when this quote is linked to a proposal
+      // Sync proposal value when this quote is linked to a proposal.
+      // Must sum ALL quotes linked to the proposal, not just this one —
+      // otherwise saving any single quote overwrites the proposal total.
       if (savedQuoteId && formData.proposal_id) {
         try {
+          const { data: linkedQuotes, error: linkedQuotesError } = await supabase
+            .from("quotes")
+            .select("total")
+            .eq("proposal_id", formData.proposal_id)
+            .is("deleted_at", null);
+          if (linkedQuotesError) throw linkedQuotesError;
+          const proposalValue = (linkedQuotes || []).reduce((sum, q) => sum + (Number(q.total) || 0), 0);
           await (supabase.from("proposals") as any)
-            .update({ value: totals.grandTotal })
+            .update({ value: proposalValue })
             .eq("id", formData.proposal_id);
         } catch (propErr) {
           console.error("Proposal value sync error:", propErr);
