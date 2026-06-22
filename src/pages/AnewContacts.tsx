@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, selectInBatches } from "@/hooks/useEntityIdentity";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import Layout from "@/components/Layout";
@@ -680,28 +680,28 @@ const AnewContacts = () => {
     const uniqueIds = [...new Set(entityIds)];
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const [interactionsRes, tagsRes, dealsRes, sentimentRes, proposalsRes, quotesRes] = await Promise.all([
-      supabase.from("entity_interactions").select("entity_id, id").in("entity_id", uniqueIds).gte("interaction_at", thirtyDaysAgo.toISOString()),
-      supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", uniqueIds),
-      (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", uniqueIds).is("lost_reason", null),
-      supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", uniqueIds).not("sentiment", "is", null).order("interaction_at", { ascending: false }),
-      (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", uniqueIds).neq("status", "rejeitada"),
-      (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", uniqueIds).neq("estado", "perdido"),
+    const [interactions, tags, deals, sentiment, proposals, quotes] = await Promise.all([
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, id").in("entity_id", batch).gte("interaction_at", thirtyDaysAgo.toISOString())),
+      selectInBatches(uniqueIds, batch => supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", batch)),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", batch).is("lost_reason", null)) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", batch).not("sentiment", "is", null).order("interaction_at", { ascending: false })),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", batch).neq("status", "rejeitada")) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", batch).neq("estado", "perdido")) as Promise<any[]>,
     ]);
     const counts: Record<string, number> = {};
-    (interactionsRes.data || []).forEach((i: any) => { counts[i.entity_id] = (counts[i.entity_id] || 0) + 1; });
+    (interactions || []).forEach((i: any) => { counts[i.entity_id] = (counts[i.entity_id] || 0) + 1; });
     setInteractionCounts(prev => ({ ...prev, ...counts }));
     const lastDates: Record<string, string> = {};
-    (sentimentRes.data || []).forEach((i: any) => { if (!lastDates[i.entity_id]) lastDates[i.entity_id] = i.interaction_at; });
+    (sentiment || []).forEach((i: any) => { if (!lastDates[i.entity_id]) lastDates[i.entity_id] = i.interaction_at; });
     setLastInteractions(prev => ({ ...prev, ...lastDates }));
     const tagMap: Record<string, { id: string; tag: string; color: string }[]> = {};
-    (tagsRes.data || []).forEach((t: any) => {
+    (tags || []).forEach((t: any) => {
       if (!tagMap[t.entity_id]) tagMap[t.entity_id] = [];
       tagMap[t.entity_id].push({ id: t.id, tag: t.tag, color: t.color || "blue" });
     });
     setTagsData(prev => ({ ...prev, ...tagMap }));
     const dealMap: Record<string, { count: number; value: number }> = {};
-    (dealsRes.data || []).forEach((d: any) => {
+    (deals || []).forEach((d: any) => {
       if (!dealMap[d.entity_id]) dealMap[d.entity_id] = { count: 0, value: 0 };
       dealMap[d.entity_id].count++;
       dealMap[d.entity_id].value += (d.value || 0);
@@ -712,7 +712,7 @@ const AnewContacts = () => {
     // Deals store auth_user_id, so we need to resolve to anew_users.id
     const dealAuthIds = new Set<string>();
     const entityToDealAuthId: Record<string, string> = {};
-    (dealsRes.data || []).forEach((d: any) => {
+    (deals || []).forEach((d: any) => {
       if (!entityToDealAuthId[d.entity_id]) {
         const authId = d.assigned_to || d.created_by;
         if (authId) {
@@ -723,7 +723,7 @@ const AnewContacts = () => {
     });
     if (dealAuthIds.size > 0) {
       const authIdsArr = [...dealAuthIds];
-      const { data: resolvedUsers } = await supabase.from("anew_users").select("id, name, auth_user_id").in("auth_user_id", authIdsArr);
+      const resolvedUsers = await selectInBatches(authIdsArr, batch => supabase.from("anew_users").select("id, name, auth_user_id").in("auth_user_id", batch));
       if (resolvedUsers && resolvedUsers.length > 0) {
         const authToAnew = new Map<string, { id: string; name: string }>();
         resolvedUsers.forEach((u: any) => authToAnew.set(u.auth_user_id, { id: u.id, name: u.name || '' }));
@@ -743,7 +743,7 @@ const AnewContacts = () => {
     }
     // Proposals
     const proposalMap: Record<string, { count: number; value: number; valueWithIva: number }> = {};
-    (proposalsRes.data || []).forEach((p: any) => {
+    (proposals || []).forEach((p: any) => {
       if (!p.entity_id) return;
       if (!proposalMap[p.entity_id]) proposalMap[p.entity_id] = { count: 0, value: 0, valueWithIva: 0 };
       proposalMap[p.entity_id].count++;
@@ -756,7 +756,7 @@ const AnewContacts = () => {
     setProposalsData(prev => ({ ...prev, ...proposalMap }));
     // Quotes
     const quoteMap: Record<string, { count: number; value: number; valueWithIva: number }> = {};
-    (quotesRes.data || []).forEach((q: any) => {
+    (quotes || []).forEach((q: any) => {
       if (!q.entity_id) return;
       if (!quoteMap[q.entity_id]) quoteMap[q.entity_id] = { count: 0, value: 0, valueWithIva: 0 };
       quoteMap[q.entity_id].count++;
@@ -765,7 +765,7 @@ const AnewContacts = () => {
     });
     setQuotesData(prev => ({ ...prev, ...quoteMap }));
     const sentiments: Record<string, string> = {};
-    (sentimentRes.data || []).forEach((s: any) => { if (!sentiments[s.entity_id]) sentiments[s.entity_id] = s.sentiment; });
+    (sentiment || []).forEach((s: any) => { if (!sentiments[s.entity_id]) sentiments[s.entity_id] = s.sentiment; });
     setLastSentiments(prev => ({ ...prev, ...sentiments }));
   }, []);
 

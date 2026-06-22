@@ -17,6 +17,25 @@ export interface EntityIdentity {
   city: string | null;
 }
 
+// Postgrest sends .in() filters as part of the URL; arrays of thousands of
+// UUIDs (e.g. a system_admin's org-wide contact/lead list) can exceed the
+// server's URL length limit and fail silently. Chunk to stay well under it.
+const ID_BATCH_SIZE = 200;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+export async function selectInBatches<T>(
+  ids: string[],
+  runQuery: (batch: string[]) => Promise<{ data: T[] | null }>,
+): Promise<T[]> {
+  const results = await Promise.all(chunk(ids, ID_BATCH_SIZE).map(runQuery));
+  return results.flatMap(r => r.data || []);
+}
+
 export function useEntityIdentity() {
   const [identityMap, setIdentityMap] = useState<Record<string, EntityIdentity>>({});
   const [loading, setLoading] = useState(false);
@@ -38,19 +57,13 @@ export function useEntityIdentity() {
 
     setLoading(true);
     try {
-      const [entitiesRes, emailsRes, phonesRes, fiscalLinksRes, entityAddressesRes] = await Promise.all([
-        supabase.from('anew_entities').select('id, display_name, first_name, last_name, type').in('id', uncachedIds),
-        supabase.from('anew_entity_emails').select('entity_id, email, is_primary').in('entity_id', uncachedIds).eq('is_primary', true),
-        supabase.from('anew_entity_phones').select('entity_id, phone_number, country_code, is_primary').in('entity_id', uncachedIds).eq('is_primary', true),
-        (supabase as any).from('anew_entity_fiscal_entities').select('entity_id, fiscal_entity_id, is_primary').in('entity_id', uncachedIds).eq('is_primary', true).is('valid_to', null),
-        supabase.from('anew_entity_addresses').select('entity_id, address_id, is_primary').in('entity_id', uncachedIds).eq('is_primary', true),
+      const [entities, emails, phones, fiscalLinks, entityAddresses] = await Promise.all([
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entities').select('id, display_name, first_name, last_name, type').in('id', batch)),
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_emails').select('entity_id, email, is_primary').in('entity_id', batch).eq('is_primary', true)),
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_phones').select('entity_id, phone_number, country_code, is_primary').in('entity_id', batch).eq('is_primary', true)),
+        selectInBatches(uncachedIds, batch => (supabase as any).from('anew_entity_fiscal_entities').select('entity_id, fiscal_entity_id, is_primary').in('entity_id', batch).eq('is_primary', true).is('valid_to', null)) as Promise<any[]>,
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_addresses').select('entity_id, address_id, is_primary').in('entity_id', batch).eq('is_primary', true)) as Promise<any[]>,
       ]);
-
-      const entities = entitiesRes.data || [];
-      const emails = emailsRes.data || [];
-      const phones = phonesRes.data || [];
-      const fiscalLinks = (fiscalLinksRes.data || []) as any[];
-      const entityAddresses = (entityAddressesRes.data || []) as any[];
 
       const emailMap: Record<string, string> = {};
       emails.forEach(e => { emailMap[e.entity_id] = e.email; });
@@ -63,7 +76,7 @@ export function useEntityIdentity() {
       if (entityAddresses.length > 0) {
         const addressIds = [...new Set(entityAddresses.map((ea: any) => ea.address_id).filter(Boolean))];
         if (addressIds.length > 0) {
-          const { data: addresses } = await supabase.from('anew_addresses').select('id, street, postal_code, city').in('id', addressIds);
+          const addresses = await selectInBatches(addressIds, batch => supabase.from('anew_addresses').select('id, street, postal_code, city').in('id', batch));
           const addrLookup: Record<string, any> = {};
           (addresses || []).forEach((a: any) => { addrLookup[a.id] = a; });
           entityAddresses.forEach((ea: any) => {
@@ -80,7 +93,7 @@ export function useEntityIdentity() {
       if (fiscalLinks.length > 0) {
         const fiscalEntityIds = [...new Set(fiscalLinks.map((f: any) => f.fiscal_entity_id).filter(Boolean))];
         if (fiscalEntityIds.length > 0) {
-          const { data: fiscalEntities } = await (supabase as any).from('fiscal_entities').select('id, nif').in('id', fiscalEntityIds);
+          const fiscalEntities = await selectInBatches(fiscalEntityIds, batch => (supabase as any).from('fiscal_entities').select('id, nif').in('id', batch)) as any[];
           const nifMap: Record<string, string> = {};
           (fiscalEntities || []).forEach((fe: any) => { if (fe.nif) nifMap[fe.id] = fe.nif; });
           fiscalLinks.forEach((f: any) => {
