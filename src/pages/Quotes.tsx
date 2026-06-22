@@ -76,6 +76,7 @@ import { QuotesMarginsView } from "@/components/quotes/QuotesMarginsView";
 import { QuotesPipelineMini } from "@/components/quotes/QuotesPipelineMini";
 import { resolveLineUnitCosts, resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 
 interface Quote {
   id: string;
@@ -256,6 +257,8 @@ export default function Quotes() {
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendQuote, setSendQuote] = useState<Quote | null>(null);
   const [lostReasonDialog, setLostReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
+  const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   
   const { toast } = useToast();
   const { createContractFromQuote } = usePipelineAutomation();
@@ -1080,17 +1083,13 @@ export default function Quotes() {
     }
   };
 
-  const handleExport = async () => {
+  const performExport = async (includeSensitive: boolean) => {
     if (!activeCompany?.id) {
       toast({ title: t('quotes.toast.exportError'), description: "Selecione uma organização.", variant: "destructive" });
       return;
     }
+    setExporting(true);
     try {
-      const includeSensitive =
-        hasPermission("quotes.export_sensitive") &&
-        window.confirm(
-          "Pretende incluir a morada da obra? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
-        );
       const result = await requestControlledExport({
         module: "quotes",
         organizationId: activeCompany.id,
@@ -1107,7 +1106,21 @@ export default function Quotes() {
       });
     } catch (error: any) {
       toast({ title: t('quotes.toast.exportError'), description: error.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
     }
+  };
+
+  const handleExport = () => {
+    if (!activeCompany?.id) {
+      toast({ title: t('quotes.toast.exportError'), description: "Selecione uma organização.", variant: "destructive" });
+      return;
+    }
+    if (hasPermission("quotes.export_sensitive")) {
+      setSensitiveExportOpen(true);
+      return;
+    }
+    void performExport(false);
   };
 
   const handleViewDetails = async (quote: Quote) => {
@@ -2276,6 +2289,13 @@ export default function Quotes() {
 
       {/* Send Quote Email */}
       <SendQuoteDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} quote={sendQuote} onSent={() => fetchQuotes()} />
+      <SensitiveExportDialog
+        open={sensitiveExportOpen}
+        onOpenChange={setSensitiveExportOpen}
+        sensitiveFields={["morada da obra"]}
+        loading={exporting}
+        onConfirm={(includeSensitive) => void performExport(includeSensitive)}
+      />
     </>
   );
 }

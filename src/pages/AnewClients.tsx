@@ -62,6 +62,7 @@ import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 
 interface ClientRecord {
   id: string;
@@ -153,6 +154,8 @@ const AnewClients = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState<ClientRecord | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("active");
@@ -1150,18 +1153,14 @@ const AnewClients = () => {
     } finally { setSavingClient(false); }
   };
 
-  const handleExport = async () => {
+  const performExport = async (includeSensitive: boolean) => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
       toast({ title: "Selecione uma organização", variant: "destructive" });
       return;
     }
+    setExporting(true);
     try {
-      const includeSensitive =
-        hasPermission("clients.export_sensitive") &&
-        window.confirm(
-          "Pretende incluir email, telefone e NIF? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
-        );
       const result = await requestControlledExport({
         module: "clients",
         organizationId,
@@ -1176,7 +1175,24 @@ const AnewClients = () => {
         title: "Exportação XLSX concluída",
         description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
-    } catch (error: any) { toast({ title: "Erro na exportação", description: error.message, variant: "destructive" }); }
+    } catch (error: any) {
+      toast({ title: "Erro na exportação", description: error.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExport = () => {
+    const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
+    if (!organizationId) {
+      toast({ title: "Selecione uma organização", variant: "destructive" });
+      return;
+    }
+    if (hasPermission("clients.export_sensitive")) {
+      setSensitiveExportOpen(true);
+      return;
+    }
+    void performExport(false);
   };
 
   const openClientDetails = async (client: ClientRecord | null | undefined) => {
@@ -2125,6 +2141,13 @@ const AnewClients = () => {
           open={showWhatsAppDialog}
           onOpenChange={setShowWhatsAppDialog}
           context={whatsAppContext}
+        />
+        <SensitiveExportDialog
+          open={sensitiveExportOpen}
+          onOpenChange={setSensitiveExportOpen}
+          sensitiveFields={["email", "telefone", "NIF"]}
+          loading={exporting}
+          onConfirm={(includeSensitive) => void performExport(includeSensitive)}
         />
 
         {/* Revert to Contact Confirmation */}

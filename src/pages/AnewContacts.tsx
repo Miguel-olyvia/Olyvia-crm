@@ -77,6 +77,8 @@ import {
 import { findScopedContactByRef } from "@/lib/contacts/resolution";
 import { parseContactsCsv } from "@/lib/contacts/csv";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { matchesContactAttentionFilters, needsCompleteContactDataset } from "@/lib/contacts/filterDataset";
+import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 
 // --- Types ---
 interface ContactRecord {
@@ -170,6 +172,7 @@ const AnewContacts = () => {
 
   // Advanced filters
   const [healthFilter, setHealthFilter] = useState<string[]>([]);
+  const [noContact7dFilter, setNoContact7dFilter] = useState(false);
   const [noContact14dFilter, setNoContact14dFilter] = useState(false);
   const [dealsFilter, setDealsFilter] = useState("all");
   const [tagsFilter, setTagsFilter] = useState<string[]>([]);
@@ -177,6 +180,8 @@ const AnewContacts = () => {
   const [onlyMine, setOnlyMine] = useState(false);
   const [commercialFilter, setCommercialFilter] = useState("all");
   const [smartFilter, setSmartFilter] = useState(false);
+  const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [allTags, setAllTags] = useState<string[]>([]);
   const [companyUsers, setCompanyUsers] = useState<{ id: string; name: string }[]>([]);
 
@@ -894,7 +899,12 @@ const AnewContacts = () => {
   // Trigger full load for accurate KPIs — always, but defer via idle to not block first paint
   useEffect(() => {
     if (allContactsLoading) return;
-    const immediate = dealsFilter !== "all" || noContact14dFilter;
+    const immediate = needsCompleteContactDataset({
+      dealsFilter,
+      noContact7dFilter,
+      noContact14dFilter,
+      smartFilter,
+    });
     const w = window as any;
     const run = () => loadAllContacts();
     if (immediate) { run(); return; }
@@ -908,7 +918,7 @@ const AnewContacts = () => {
         window.clearTimeout(handle as any);
       }
     };
-  }, [loadAllContacts, activeView, dealsFilter, noContact14dFilter]);
+  }, [loadAllContacts, activeView, dealsFilter, noContact7dFilter, noContact14dFilter, smartFilter]);
 
   // Server-side dashboard KPIs - lightweight RPC, runs on every view.
   // M3: aggregate counts are computed server-side instead of loading up to
@@ -990,7 +1000,13 @@ const AnewContacts = () => {
   const isServerTextSearchActive = normalizedSearchQuery.length >= 2;
 
   // Client-side filtering
-  const sourceForFiltering = ((dealsFilter !== "all" || noContact14dFilter) && allContacts.length > 0) ? allContacts : contacts;
+  const completeDatasetRequired = needsCompleteContactDataset({
+    dealsFilter,
+    noContact7dFilter,
+    noContact14dFilter,
+    smartFilter,
+  });
+  const sourceForFiltering = completeDatasetRequired && allContacts.length > 0 ? allContacts : contacts;
   const filteredContacts = useMemo(() => sourceForFiltering.filter(contact => {
     const entityId = contact.entity_id;
     if (clientOrgPairKeys.has(`${entityId}|${contact.organization_id}`)) return false;
@@ -1012,10 +1028,16 @@ const AnewContacts = () => {
       const hs = getHealthScore(entityId, contact.last_interaction_at);
       if (!healthFilter.includes(hs.level)) return false;
     }
-    if (noContact14dFilter) {
-      const lastDate = lastInteractions[entityId] || contact.last_interaction_at;
-      if (lastDate && differenceInDays(new Date(), new Date(lastDate)) <= 14) return false;
-    }
+    const lastDate = lastInteractions[entityId] || contact.last_interaction_at;
+    const healthScore = getHealthScore(entityId, contact.last_interaction_at).score;
+    const daysSinceLastContact = lastDate ? differenceInDays(new Date(), new Date(lastDate)) : null;
+    if (!matchesContactAttentionFilters({
+      healthScore,
+      daysSinceLastContact,
+      noContact7dFilter,
+      noContact14dFilter,
+      smartFilter,
+    })) return false;
     const hasPipelineData = !!(dealsData[entityId]?.count || proposalsData[entityId]?.count || quotesData[entityId]?.count);
     if (dealsFilter === "with" && !hasPipelineData) return false;
     if (dealsFilter === "without" && hasPipelineData) return false;
@@ -1025,16 +1047,10 @@ const AnewContacts = () => {
     }
     if (sentimentFilter !== "all" && lastSentiments[entityId] !== sentimentFilter) return false;
     if (commercialFilter !== "all" && contact.assigned_to !== commercialFilter) return false;
-    if (smartFilter) {
-      const hs = getHealthScore(entityId, contact.last_interaction_at);
-      if (hs.score >= 40) return false;
-      const lastDate = lastInteractions[entityId] || contact.last_interaction_at;
-      if (lastDate && differenceInDays(new Date(), new Date(lastDate)) <= 7) return false;
-    }
     return true;
   }), [
     sourceForFiltering, clientOrgPairKeys, currentScopeOptions, normalizedSearchQuery, isServerTextSearchActive,
-    getIdentity, healthFilter, getHealthScore, noContact14dFilter, lastInteractions, dealsData, proposalsData,
+    getIdentity, healthFilter, getHealthScore, noContact7dFilter, noContact14dFilter, lastInteractions, dealsData, proposalsData,
     quotesData, dealsFilter, tagsFilter, tagsData, sentimentFilter, lastSentiments, commercialFilter, smartFilter,
   ]);
 
@@ -1077,8 +1093,8 @@ const AnewContacts = () => {
 
   // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
   // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
-  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || smartFilter || searchQuery.length > 0 || noContact14dFilter;
-  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all";
+  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || searchQuery.length > 0;
+  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all" || smartFilter || noContact7dFilter || noContact14dFilter;
 
   // KPI data - use server-side counts for stable numbers when no filter, client-side filtered data when filters active
   const kpiData = useMemo(() => {
@@ -1123,14 +1139,14 @@ const AnewContacts = () => {
 
   // Active filter count
   const activeFilterCount = [
-    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact14dFilter,
+    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact7dFilter, noContact14dFilter,
   ].filter(Boolean).length;
 
   const clearAllFilters = () => {
     setHealthFilter([]); setDealsFilter("all"); setTagsFilter([]); setSentimentFilter("all");
     setOnlyMine(false); setSmartFilter(false); setSearchQuery(""); setStatusFilter("all");
     setCompanyFilter("all"); setDateFrom(undefined); setDateTo(undefined); setCommercialFilter("all");
-    setNoContact14dFilter(false);
+    setNoContact7dFilter(false); setNoContact14dFilter(false);
   };
 
   // --- All handlers from original (preserved exactly) ---
@@ -1563,19 +1579,15 @@ const AnewContacts = () => {
     }
   };
 
-  const handleExport = async () => {
+  const performExport = async (includeSensitive: boolean) => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
       toast({ title: t('contacts.export.noData'), variant: "destructive" });
       return;
     }
+    setExporting(true);
     try {
       if (viewScope === "NONE") { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
-      const includeSensitive =
-        hasPermission("contacts.export_sensitive") &&
-        window.confirm(
-          "Pretende incluir email, telefone e NIF? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
-        );
       const result = await requestControlledExport({
         module: "contacts",
         organizationId,
@@ -1590,7 +1602,24 @@ const AnewContacts = () => {
         title: t('contacts.export.success'),
         description: `${result.rowCount} contactos exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
-    } catch (error: any) { toast({ title: t('contacts.export.error'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) {
+      toast({ title: t('contacts.export.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExport = () => {
+    const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
+    if (!organizationId || viewScope === "NONE") {
+      toast({ title: t('contacts.export.noData'), variant: "destructive" });
+      return;
+    }
+    if (hasPermission("contacts.export_sensitive")) {
+      setSensitiveExportOpen(true);
+      return;
+    }
+    void performExport(false);
   };
 
   const handleImport = async () => {
@@ -1736,7 +1765,7 @@ const AnewContacts = () => {
         {/* Alert Bar - server-side counts, stable */}
         {serverAlertCounts && (
           <ContactsAlertBar alerts={[
-            { key: "noContact", label: `sem contacto há >14 dias`, count: alertData.noContact14d, color: "bg-destructive", action: () => { setSmartFilter(false); setHealthFilter([]); setNoContact14dFilter(true); } },
+            { key: "noContact", label: `sem contacto há >14 dias`, count: alertData.noContact14d, color: "bg-destructive", action: () => { setSmartFilter(false); setHealthFilter([]); setNoContact7dFilter(false); setNoContact14dFilter(true); } },
             { key: "noDeal", label: "sem pedido criado", count: alertData.noDeal, color: "bg-warning", action: () => { setDealsFilter("without"); } },
             { key: "unassigned", label: "sem atribuição", count: alertData.unassigned, color: "bg-muted-foreground", action: () => {} },
           ]} />
@@ -1797,7 +1826,7 @@ const AnewContacts = () => {
             { label: "TOTAL", value: kpiData.total, icon: Users, sub: null, clickAction: () => { clearAllFilters(); }, iconColor: "text-primary" },
             { label: "PIPELINE", value: formatCurrency(kpiData.pipeline), icon: DollarSign, sub: `${kpiData.withPipeline} em pipeline`, clickAction: () => { setDealsFilter("with"); }, iconColor: "text-purple-600" },
             { label: "SEM PEDIDO", value: kpiData.withoutDeals, icon: Handshake, sub: null, clickAction: () => { setDealsFilter("without"); }, danger: kpiData.withoutDeals > 0, iconColor: "text-orange-600" },
-            { label: "SEM CONTACTO >7D", value: kpiData.noContact7d, icon: AlertTriangle, sub: null, clickAction: () => { setSmartFilter(true); }, danger: kpiData.noContact7d > 0, iconColor: "text-red-600" },
+            { label: "SEM CONTACTO >7D", value: kpiData.noContact7d, icon: AlertTriangle, sub: null, clickAction: () => { setSmartFilter(false); setHealthFilter([]); setNoContact14dFilter(false); setNoContact7dFilter(true); }, danger: kpiData.noContact7d > 0, iconColor: "text-red-600" },
             { label: "SAÚDE MÉDIA", value: `${kpiData.avgHealth}/100`, icon: Heart, sub: null, clickAction: () => { setActiveView("scoring"); }, iconColor: kpiData.avgHealth >= 60 ? "text-green-600" : kpiData.avgHealth >= 40 ? "text-yellow-600" : "text-red-600" },
           ] as Array<{label: string; value: string|number; icon: any; sub: string|null; clickAction: () => void; danger?: boolean; iconColor: string}>).map(kpi => {
             const card = (
@@ -1926,13 +1955,21 @@ const AnewContacts = () => {
                 )}
 
                 {/* Smart filter chip */}
-                <button onClick={() => setSmartFilter(!smartFilter)}
+                <button onClick={() => { setNoContact7dFilter(false); setNoContact14dFilter(false); setSmartFilter(!smartFilter); }}
                   className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all border",
                     smartFilter ? "bg-primary text-primary-foreground border-primary" : "bg-muted text-muted-foreground border-border hover:border-primary/50"
                   )}>
                   <Zap className="h-3 w-3" />Precisam de atenção
                   {smartFilter && <X className="h-3 w-3 ml-0.5" onClick={(e) => { e.stopPropagation(); setSmartFilter(false); }} />}
                 </button>
+
+                {noContact7dFilter && (
+                  <button onClick={() => setNoContact7dFilter(false)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all border bg-destructive text-destructive-foreground border-destructive">
+                    Sem contacto &gt;7d
+                    <X className="h-3 w-3 ml-0.5" />
+                  </button>
+                )}
 
                 {/* No-contact >14d chip */}
                 {noContact14dFilter && (
@@ -2037,7 +2074,7 @@ const AnewContacts = () => {
 
         {activeView === "list" && (
           <>
-            {(loading && filteredContacts.length === 0) || (noContact14dFilter && allContactsLoading && allContacts.length === 0) ? (
+            {(loading && filteredContacts.length === 0) || (completeDatasetRequired && allContactsLoading && allContacts.length === 0) ? (
               <Card>
                 <CardContent className="py-12">
                   <div className="animate-pulse space-y-3">
@@ -2509,6 +2546,13 @@ const AnewContacts = () => {
         <ContactTagsDialog open={tagsDialogOpen} onOpenChange={setTagsDialogOpen} entityId={tagsEntityId} organizationId={activeCompany?.id || ""} entityName={tagsEntityName} onTagsChanged={() => { const entityIds = contacts.map(c => c.entity_id).filter(Boolean); if (entityIds.length > 0) loadSupplementaryData(entityIds); }} />
         <RegisterCallDialog open={callDialogOpen} onOpenChange={setCallDialogOpen} entityId={callEntityId} entityName={callEntityName} organizationId={activeCompany?.id || ""} contactId={callContactId} onCallRegistered={() => { const entityIds = contacts.map(c => c.entity_id).filter(Boolean); if (entityIds.length > 0) loadSupplementaryData(entityIds); }} onOpenWhatsApp={(eid, ename, ctx) => { const identity = getIdentity(eid); if (identity?.phone) { const dp = ctx?.dealOrProposal; const mod = dp?.type === "proposal" ? "proposals" : dp?.type === "quote" ? "quotes" : "contacts"; setWhatsAppContext({ module: mod as any, recipientName: ename, recipientPhone: identity.phone, entityId: eid, hasActiveDeal: !!dealsData[eid]?.count || dp?.type === "deal", dealName: dp?.type === "deal" ? dp.title : undefined, proposalTitle: dp?.type === "proposal" ? dp.title : undefined, proposalValue: dp?.type === "proposal" ? (dp.value || 0) : undefined, quoteTitle: dp?.type === "quote" ? dp.title : undefined, quoteValue: dp?.type === "quote" ? (dp.value || 0) : undefined }); setShowWhatsAppDialog(true); } }} onOpenEmail={(eid, ename, ctx) => { const identity = getIdentity(eid); setEmailTarget({ id: callContactId, name: ename, email: identity?.email || "", pdfAttachment: ctx?.pdfAttachment || null }); setShowEmailDialog(true); }} />
         <WhatsAppSendDialog open={showWhatsAppDialog} onOpenChange={setShowWhatsAppDialog} context={whatsAppContext} />
+        <SensitiveExportDialog
+          open={sensitiveExportOpen}
+          onOpenChange={setSensitiveExportOpen}
+          sensitiveFields={["email", "telefone", "NIF"]}
+          loading={exporting}
+          onConfirm={(includeSensitive) => void performExport(includeSensitive)}
+        />
 
         {/* Duplicate Detection Dialog */}
         <DuplicateEntityDialog
