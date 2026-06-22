@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface ProductExport {
   sku: string;
@@ -285,10 +286,19 @@ export const exportProductsToCSV = async (products: any[], organizationId?: stri
     ]);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet([EXPORT_HEADERS, ...rows]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Produtos');
-  XLSX.writeFile(wb, `produtos_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  const numericColumns = new Set([11, 12, 13, 14, 15, 16, 20]);
+  downloadStandardXlsx({
+    sheetName: "Produtos",
+    columns: EXPORT_HEADERS.map((header, index) => ({
+      key: `column_${index}`,
+      header,
+      type: numericColumns.has(index) ? "number" : "text",
+      width: index === 2 || index === 21 ? 40 : index === 1 ? 30 : 18,
+    })),
+    rows: rows.map((row) =>
+      Object.fromEntries(row.map((value, index) => [`column_${index}`, value])),
+    ),
+  }, `produtos_export_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const downloadProductsTemplate = () => {

@@ -1,27 +1,31 @@
-export const exportDriversToCSV = (drivers: any[]) => {
-  const BOM = '\uFEFF';
-  const headers = ['Funcionário', 'Número Carta', 'Categorias', 'Validade', 'Veículo', 'Infrações', 'Acidentes', 'Pontuação', 'Ativo'];
-  const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-    drivers.map(driver => {
-      const row = [
-        driver.full_name || '',
-        driver.license_number || '',
-        Array.isArray(driver.license_categories) ? driver.license_categories.join(',') : '',
-        driver.license_expiry || '',
-        driver.vehicle?.license_plate || '',
-        driver.total_infractions || 0,
-        driver.total_accidents || 0,
-        driver.driving_score || 0,
-        driver.is_active ? 'Sim' : 'Não'
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `condutores_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+export const exportDriversToCSV = (drivers: any[]) => {
+  downloadStandardXlsx({
+    sheetName: "Condutores",
+    columns: [
+      { key: "employee", header: "Funcionário", width: 28 },
+      { key: "license", header: "Número carta", width: 18 },
+      { key: "categories", header: "Categorias", width: 16 },
+      { key: "expiry", header: "Validade", type: "date", width: 14 },
+      { key: "vehicle", header: "Veículo", width: 16 },
+      { key: "infractions", header: "Infrações", type: "number", width: 12 },
+      { key: "accidents", header: "Acidentes", type: "number", width: 12 },
+      { key: "score", header: "Pontuação", type: "number", width: 12 },
+      { key: "active", header: "Ativo", type: "boolean", width: 10 },
+    ],
+    rows: drivers.map((driver) => ({
+      employee: driver.full_name,
+      license: driver.license_number,
+      categories: Array.isArray(driver.license_categories) ? driver.license_categories.join(", ") : "",
+      expiry: driver.license_expiry,
+      vehicle: driver.vehicle?.license_plate,
+      infractions: driver.total_infractions,
+      accidents: driver.total_accidents,
+      score: driver.driving_score,
+      active: driver.is_active,
+    })),
+  }, `condutores_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const parseDriversCSV = (text: string, employees: any[], vehicles: any[]) => {

@@ -36,6 +36,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string };
@@ -256,35 +257,27 @@ const Stocks = () => {
   };
 
   const handleExport = () => {
-    const BOM = '\uFEFF';
-    const headers = [
-      t('stocks.table.product'), 
-      t('stocks.table.warehouse'), 
-      t('stocks.table.quantity'), 
-      t('stocks.form.minimumQuantity'), 
-      t('stocks.form.maximumQuantity'), 
-      t('stocks.form.reorderPoint'), 
-      t('stocks.table.location')
-    ];
-    const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-      stocks.map(stock => {
-        const row = [
-          stock.products?.name || '',
-          stock.warehouses?.name || '',
-          stock.quantity || 0,
-          stock.minimum_quantity || 0,
-          stock.maximum_quantity || 0,
-          stock.reorder_point || 0,
-          stock.location || ''
-        ];
-        return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-      }).join('\r\n');
-
-    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `stocks_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
+    downloadStandardXlsx({
+      sheetName: "Stocks",
+      columns: [
+        { key: "product", header: t('stocks.table.product'), width: 30 },
+        { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
+        { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
+        { key: "minimum", header: t('stocks.form.minimumQuantity'), type: "number", width: 14 },
+        { key: "maximum", header: t('stocks.form.maximumQuantity'), type: "number", width: 14 },
+        { key: "reorderPoint", header: t('stocks.form.reorderPoint'), type: "number", width: 16 },
+        { key: "location", header: t('stocks.table.location'), width: 24 },
+      ],
+      rows: stocks.map((stock) => ({
+        product: stock.products?.name,
+        warehouse: stock.warehouses?.name,
+        quantity: stock.quantity,
+        minimum: stock.minimum_quantity,
+        maximum: stock.maximum_quantity,
+        reorderPoint: stock.reorder_point,
+        location: stock.location,
+      })),
+    }, `stocks_${new Date().toISOString().slice(0, 10)}.xlsx`);
     
     toast({
       title: t('stocks.toast.exportSuccess'),

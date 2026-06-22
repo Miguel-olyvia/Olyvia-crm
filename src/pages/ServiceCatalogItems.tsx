@@ -44,6 +44,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCompany } from "@/contexts/CompanyContext";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface Service {
   id: string;
@@ -277,33 +278,29 @@ export default function ServiceCatalogItems() {
   };
 
   const handleExport = () => {
-    const rows = [
-      [t('serviceCatalog.table.sku'), t('serviceCatalog.table.name'), t('serviceCatalog.table.category'), t('serviceCatalog.table.salePrice'), "Currency", t('serviceCatalog.table.company'), t('serviceCatalog.table.supplier'), t('serviceCatalog.table.status')],
-      ...filteredAndSortedServices.map((service) => [
-        service.sku,
-        service.name,
-        service.category_name || "",
-        service.retail_price || 0,
-        service.currency,
-        service.company_name || "",
-        service.supplier_name || "",
-        service.is_active ? t('serviceCatalog.active') : t('serviceCatalog.inactive'),
-      ]),
-    ];
-    
-    const csvContent = rows.map(row => 
-      row.map(cell => `"${cell}"`).join(";")
-    ).join("\r\n");
-
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "catalogo_servicos.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadStandardXlsx({
+      sheetName: "Catálogo de serviços",
+      columns: [
+        { key: "sku", header: t('serviceCatalog.table.sku'), width: 16 },
+        { key: "name", header: t('serviceCatalog.table.name'), width: 30 },
+        { key: "category", header: t('serviceCatalog.table.category'), width: 22 },
+        { key: "price", header: t('serviceCatalog.table.salePrice'), type: "number", width: 16 },
+        { key: "currency", header: "Moeda", width: 10 },
+        { key: "company", header: t('serviceCatalog.table.company'), width: 26 },
+        { key: "supplier", header: t('serviceCatalog.table.supplier'), width: 26 },
+        { key: "active", header: t('serviceCatalog.table.status'), type: "boolean", width: 10 },
+      ],
+      rows: filteredAndSortedServices.map((service) => ({
+        sku: service.sku,
+        name: service.name,
+        category: service.category_name,
+        price: service.retail_price,
+        currency: service.currency,
+        company: service.company_name,
+        supplier: service.supplier_name,
+        active: service.is_active,
+      })),
+    }, `catalogo_servicos_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

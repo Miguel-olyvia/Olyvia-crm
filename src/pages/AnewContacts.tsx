@@ -75,7 +75,8 @@ import {
   normalizeContactScope,
 } from "@/lib/contacts/scope";
 import { findScopedContactByRef } from "@/lib/contacts/resolution";
-import { parseContactsCsv, serializeContactsCsv } from "@/lib/contacts/csv";
+import { parseContactsCsv } from "@/lib/contacts/csv";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 
 // --- Types ---
 interface ContactRecord {
@@ -1563,55 +1564,32 @@ const AnewContacts = () => {
   };
 
   const handleExport = async () => {
+    const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
+    if (!organizationId) {
+      toast({ title: t('contacts.export.noData'), variant: "destructive" });
+      return;
+    }
     try {
-      const MAX_EXPORT_RECORDS = 10_000;
       if (viewScope === "NONE") { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
-
-      let query = supabase
-        .from("anew_contacts")
-        .select("entity_id, status, organization_id, assigned_to, created_by")
-        .is("deleted_at", null)
-        .is("converted_to_client_id", null);
-      if (effectiveOrgIds.length > 0) query = query.in("organization_id", effectiveOrgIds);
-      else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-
-      // H2 — apply the same OWNED/TEAM scope as the main listing; exporting
-      // must never surface records outside the user's effective scope.
-      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-      if (scopeFilter) query = query.or(scopeFilter);
-
-      const { data, error } = await query.limit(MAX_EXPORT_RECORDS);
-      if (error) throw error;
-
-      const scopedData = (data || []).filter((r) => contactMatchesScope(r as any, currentScopeOptions));
-      if (scopedData.length === 0) { toast({ title: t('contacts.export.noData'), variant: "destructive" }); return; }
-      if (scopedData.length === MAX_EXPORT_RECORDS) { toast({ title: "Export limitado", description: `O export foi limitado a ${MAX_EXPORT_RECORDS.toLocaleString()} registos.`, variant: "default" }); }
-
-      const entityIds = scopedData.map((r: any) => r.entity_id).filter(Boolean);
-      let identityMap: Record<string, any> = {};
-      if (entityIds.length > 0) identityMap = await resolveEntities(entityIds);
-
-      // H4 — use the single CSV schema shared with the importer.
-      const csvContent = serializeContactsCsv(scopedData.map((r: any) => {
-        const id = identityMap[r.entity_id];
-        const entityType: "person" | "organization" = id?.type === "organization" ? "organization" : "person";
-        return {
-          entityType,
-          firstName: entityType === "person" ? (id?.first_name || "") : "",
-          lastName: entityType === "person" ? (id?.last_name || "") : "",
-          companyName: entityType === "organization" ? (id?.display_name || "") : "",
-          email: id?.email || "",
-          phone: id?.phone || "",
-          vat: id?.vat || "",
-          status: r.status || "active",
-        };
-      }));
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      link.setAttribute("href", URL.createObjectURL(blob));
-      link.setAttribute("download", `contacts_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      toast({ title: t('contacts.export.success'), description: t('contacts.export.successDesc', { count: scopedData.length }) });
+      const includeSensitive =
+        hasPermission("contacts.export_sensitive") &&
+        window.confirm(
+          "Pretende incluir email, telefone e NIF? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
+        );
+      const result = await requestControlledExport({
+        module: "contacts",
+        organizationId,
+        includeSensitive,
+        filters: {
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
+          dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+        },
+      });
+      toast({
+        title: t('contacts.export.success'),
+        description: `${result.rowCount} contactos exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+      });
     } catch (error: any) { toast({ title: t('contacts.export.error'), description: error.message, variant: "destructive" }); }
   };
 

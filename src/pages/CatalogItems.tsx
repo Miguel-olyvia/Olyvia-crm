@@ -44,6 +44,7 @@ import {
 import { Trash2, Search, Download, Upload, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { PermissionGate } from "@/components/PermissionGate";
 import { Badge } from "@/components/ui/badge";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface CatalogItem {
   id: string;
@@ -277,32 +278,27 @@ const CatalogItems = () => {
   };
 
   const handleExport = () => {
-    const rows = [
-      [t('catalogItems.table.sku'), t('catalogItems.table.name'), t('catalogItems.table.description'), t('catalogItems.table.category'), t('catalogItems.table.brand'), t('catalogItems.table.salePrice'), t('catalogItems.table.active')],
-      ...filteredAndSortedItems.map((item) => [
-        item.sku || "",
-        item.name,
-        item.description || "",
-        item.category_name || "",
-        item.brand_name || "",
-        item.retail_price || 0,
-        item.is_active ? t('catalogItems.yes') : t('catalogItems.no'),
-      ]),
-    ];
-    
-    const csvContent = rows.map(row =>
-      row.map(cell => `"${cell}"`).join(";")
-    ).join("\r\n");
-
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "catalog_items.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadStandardXlsx({
+      sheetName: "Catálogo de produtos",
+      columns: [
+        { key: "sku", header: t('catalogItems.table.sku'), width: 16 },
+        { key: "name", header: t('catalogItems.table.name'), width: 30 },
+        { key: "description", header: t('catalogItems.table.description'), width: 40 },
+        { key: "category", header: t('catalogItems.table.category'), width: 22 },
+        { key: "brand", header: t('catalogItems.table.brand'), width: 20 },
+        { key: "price", header: t('catalogItems.table.salePrice'), type: "number", width: 16 },
+        { key: "active", header: t('catalogItems.table.active'), type: "boolean", width: 10 },
+      ],
+      rows: filteredAndSortedItems.map((item) => ({
+        sku: item.sku,
+        name: item.name,
+        description: item.description,
+        category: item.category_name,
+        brand: item.brand_name,
+        price: item.retail_price,
+        active: item.is_active,
+      })),
+    }, `catalogo_produtos_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

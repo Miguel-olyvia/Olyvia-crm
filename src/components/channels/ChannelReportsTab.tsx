@@ -6,21 +6,22 @@ import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RTooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface Props { data: any; channelId: string; campaignId: string }
 
-function exportCsv(rows: any[], filename: string) {
+function exportXlsx(rows: any[], filename: string) {
   if (!rows || rows.length === 0) return;
   const headers = Object.keys(rows[0]);
-  const csv = [
-    headers.join(","),
-    ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")),
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
+  downloadStandardXlsx({
+    sheetName: "Relatório do canal",
+    columns: headers.map((header) => ({
+      key: header,
+      header,
+      type: ["leads", "conversions", "revenue", "spend"].includes(header) ? "number" : "text",
+    })),
+    rows,
+  }, filename.replace(/\.csv$/i, ".xlsx"));
 }
 
 const formatBucketLabel = (value: string, bucket: string) => {
@@ -48,8 +49,8 @@ export function ChannelReportsTab({ data, channelId, campaignId }: Props) {
       <section className="space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-lg font-semibold">Relatórios</h2>
-          <Button variant="outline" size="sm" onClick={() => exportCsv(series, `channel-${channelId}-series.csv`)} disabled={series.length === 0}>
-            <Download className="w-4 h-4 mr-1" /> Exportar CSV
+          <Button variant="outline" size="sm" onClick={() => exportXlsx(series, `channel-${channelId}-series.xlsx`)} disabled={series.length === 0}>
+            <Download className="w-4 h-4 mr-1" /> Exportar Excel
           </Button>
         </div>
 

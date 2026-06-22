@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface BundleExport {
   sku: string;
@@ -30,31 +31,35 @@ const CSV_HEADERS = [
 ];
 
 export const exportBundlesToCSV = async (bundles: any[]) => {
-  const BOM = '\uFEFF';
-
-  const csvContent = CSV_HEADERS.map(h => `"${h}"`).join(';') + '\r\n' +
-    bundles.map(bundle => {
-      const row = [
-        bundle.sku || '',                              // 0 - SKU
-        bundle.name || '',                             // 1 - Nome
-        bundle.description || '',                      // 2 - Descrição
-        bundle.status || 'draft',                      // 3 - Estado
-        bundle.pricing_type || 'custom',               // 4 - Tipo Preço
-        bundle.fixed_price || '',                      // 5 - Preço Fixo
-        bundle.discount_percent || '',                 // 6 - Desconto %
-        bundle.discount_fixed || '',                   // 7 - Desconto €
-        bundle.valid_from || '',                       // 8 - Válido De
-        bundle.valid_to || '',                         // 9 - Válido Até
-        bundle.companies?.name || '',                  // 10 - Empresa
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
-
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `bundles_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+  downloadStandardXlsx({
+    sheetName: "Bundles",
+    columns: [
+      { key: "sku", header: "SKU", width: 16 },
+      { key: "name", header: "Nome", width: 30 },
+      { key: "description", header: "Descrição", width: 40 },
+      { key: "status", header: "Estado", width: 14 },
+      { key: "pricingType", header: "Tipo preço", width: 20 },
+      { key: "fixedPrice", header: "Preço fixo", type: "number", width: 14 },
+      { key: "discountPercent", header: "Desconto %", type: "number", width: 14 },
+      { key: "discountFixed", header: "Desconto €", type: "number", width: 14 },
+      { key: "validFrom", header: "Válido de", type: "date", width: 14 },
+      { key: "validTo", header: "Válido até", type: "date", width: 14 },
+      { key: "company", header: "Empresa", width: 26 },
+    ],
+    rows: bundles.map((bundle) => ({
+      sku: bundle.sku,
+      name: bundle.name,
+      description: bundle.description,
+      status: bundle.status || "draft",
+      pricingType: bundle.pricing_type || "custom",
+      fixedPrice: bundle.fixed_price,
+      discountPercent: bundle.discount_percent,
+      discountFixed: bundle.discount_fixed,
+      validFrom: bundle.valid_from,
+      validTo: bundle.valid_to,
+      company: bundle.companies?.name,
+    })),
+  }, `bundles_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const downloadBundlesTemplate = () => {

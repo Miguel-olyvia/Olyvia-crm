@@ -26,6 +26,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 
@@ -514,45 +515,37 @@ const Suppliers = () => {
 
 
   const handleExport = () => {
-    const BOM = '\uFEFF';
-    const headers = [
-      t("suppliers.form.name"),
-      t("suppliers.form.contactPerson"),
-      t("suppliers.form.email"),
-      t("suppliers.form.phone"),
-      t("suppliers.form.address"),
-      t("suppliers.form.city"),
-      t("suppliers.form.postalCode"),
-      t("suppliers.form.country"),
-      t("suppliers.form.taxId"),
-      t("suppliers.form.website"),
-      t("suppliers.form.notes"),
-      t("suppliers.form.active")
-    ];
-    const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-      suppliers.map(supplier => {
-        const row = [
-          supplier.name || '',
-          (supplier as any).contact_person || '',
-          supplier.email || '',
-          supplier.phone || '',
-          supplier.address || '',
-          supplier.city || '',
-          supplier.postal_code || '',
-          supplier.country || '',
-          (supplier as any).tax_id || '',
-          supplier.website || '',
-          supplier.notes || '',
-          supplier.is_active ? t("common.yes") : t("common.no")
-        ];
-        return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-      }).join('\r\n');
-
-    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `suppliers_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
+    downloadStandardXlsx({
+      sheetName: "Fornecedores",
+      columns: [
+        { key: "name", header: t("suppliers.form.name"), width: 30 },
+        { key: "contact", header: t("suppliers.form.contactPerson"), width: 26 },
+        { key: "email", header: t("suppliers.form.email"), width: 30 },
+        { key: "phone", header: t("suppliers.form.phone"), width: 18 },
+        { key: "address", header: t("suppliers.form.address"), width: 36 },
+        { key: "city", header: t("suppliers.form.city"), width: 20 },
+        { key: "postalCode", header: t("suppliers.form.postalCode"), width: 16 },
+        { key: "country", header: t("suppliers.form.country"), width: 16 },
+        { key: "taxId", header: t("suppliers.form.taxId"), width: 16 },
+        { key: "website", header: t("suppliers.form.website"), width: 28 },
+        { key: "notes", header: t("suppliers.form.notes"), width: 36 },
+        { key: "active", header: t("suppliers.form.active"), type: "boolean", width: 10 },
+      ],
+      rows: suppliers.map((supplier) => ({
+        name: supplier.name,
+        contact: (supplier as any).contact_person,
+        email: supplier.email,
+        phone: supplier.phone,
+        address: supplier.address,
+        city: supplier.city,
+        postalCode: supplier.postal_code,
+        country: supplier.country,
+        taxId: (supplier as any).tax_id,
+        website: supplier.website,
+        notes: supplier.notes,
+        active: supplier.is_active,
+      })),
+    }, `fornecedores_${new Date().toISOString().slice(0, 10)}.xlsx`);
     
     toast({
       title: t("suppliers.export.success"),

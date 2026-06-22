@@ -61,6 +61,7 @@ import { formatWhatsAppLink } from "@/utils/whatsapp";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 
 interface ClientRecord {
   id: string;
@@ -1150,32 +1151,31 @@ const AnewClients = () => {
   };
 
   const handleExport = async () => {
+    const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
+    if (!organizationId) {
+      toast({ title: "Selecione uma organização", variant: "destructive" });
+      return;
+    }
     try {
-      let query = (supabase as any).from("anew_clients").select("entity_id, status, organization_id, client_type");
-      if (activeCompany?.id) {
-        if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
-        else query = query.eq("organization_id", activeCompany.id);
-      }
-      const { data, error } = await query;
-      if (error) throw error;
-      if (!data || data.length === 0) { toast({ title: "Sem dados para exportar", variant: "destructive" }); return; }
-      const eIds = data.map((r: any) => r.entity_id).filter(Boolean);
-      let identityMap: Record<string, any> = {};
-      if (eIds.length > 0) identityMap = await resolveEntities(eIds);
-      const rows = [
-        ["Nome", "Email", "Telefone", "NIF", "Status", "Tipo"],
-        ...data.map((r: any) => {
-          const id = identityMap[r.entity_id];
-          return [id?.display_name || "", id?.email || "", id?.phone || "", id?.vat || "", r.status || "", r.client_type || ""];
-        })
-      ];
-      const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(";")).join("\r\n");
-      const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-      const link = document.createElement("a");
-      link.setAttribute("href", URL.createObjectURL(blob));
-      link.setAttribute("download", `clients_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link); link.click(); document.body.removeChild(link);
-      toast({ title: "Exportação concluída", description: `${data.length} clientes exportados` });
+      const includeSensitive =
+        hasPermission("clients.export_sensitive") &&
+        window.confirm(
+          "Pretende incluir email, telefone e NIF? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
+        );
+      const result = await requestControlledExport({
+        module: "clients",
+        organizationId,
+        includeSensitive,
+        filters: {
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
+          dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+        },
+      });
+      toast({
+        title: "Exportação XLSX concluída",
+        description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+      });
     } catch (error: any) { toast({ title: "Erro na exportação", description: error.message, variant: "destructive" }); }
   };
 

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 // CSV column headers (aligned with import template)
 const CSV_HEADERS = [
@@ -91,46 +92,47 @@ export async function exportServicesToCSV(
       entry.vat_rate = p.vat_rate;
   });
 
-  const rows: string[][] = [];
-  rows.push(CSV_HEADERS);
-
-  for (const svc of services) {
+  const rows = services.map((svc) => {
     const pr = priceMap.get(svc.id) || {
       purchase: 0,
       retail: 0,
       currency: "EUR",
       vat_rate: 23,
     };
+    return {
+      sku: svc.sku,
+      name: svc.name,
+      description: svc.long_desc || svc.short_desc,
+      status: svc.is_active === false ? "inativo" : "ativo",
+      category: svc.service_categories?.name,
+      subcategory: svc.subcategory?.name,
+      serviceType: labelServiceType(svc.service_type),
+      company: svc.anew_organizations?.name,
+      vatRate: pr.vat_rate,
+      purchasePrice: pr.purchase,
+      retailPrice: pr.retail,
+      currency: pr.currency || "EUR",
+    };
+  });
 
-    rows.push([
-      svc.sku || "",
-      svc.name || "",
-      svc.long_desc || svc.short_desc || "",
-      svc.is_active === false ? "inativo" : "ativo",
-      svc.service_categories?.name || "",
-      svc.subcategory?.name || "",
-      labelServiceType(svc.service_type),
-      svc.anew_organizations?.name || "",
-      fmtDecimal(pr.vat_rate),
-      fmtDecimal(pr.purchase),
-      fmtDecimal(pr.retail),
-      pr.currency || "EUR",
-    ]);
-  }
-
-  // BOM + ; separator (Excel PT/EU default; preserves UTF-8 acentuação)
-  const csv =
-    "\uFEFF" + rows.map((r) => r.map(escapeCsv).join(";")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `servicos_${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadStandardXlsx({
+    sheetName: "Serviços",
+    columns: [
+      { key: "sku", header: "SKU", width: 16 },
+      { key: "name", header: "Nome", width: 30 },
+      { key: "description", header: "Descrição", width: 40 },
+      { key: "status", header: "Estado", width: 14 },
+      { key: "category", header: "Categoria", width: 22 },
+      { key: "subcategory", header: "Subcategoria", width: 22 },
+      { key: "serviceType", header: "Tipo serviço", width: 16 },
+      { key: "company", header: "Empresa", width: 26 },
+      { key: "vatRate", header: "Taxa IVA", type: "number", width: 12 },
+      { key: "purchasePrice", header: "Preço compra", type: "number", width: 16 },
+      { key: "retailPrice", header: "Preço venda", type: "number", width: 16 },
+      { key: "currency", header: "Moeda", width: 10 },
+    ],
+    rows,
+  }, `servicos_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
 // ============================================================

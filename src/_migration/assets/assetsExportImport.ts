@@ -1,29 +1,35 @@
-export const exportAssetsToCSV = (assets: any[]) => {
-  const BOM = '\uFEFF';
-  const headers = ['Código', 'Nome', 'Descrição', 'Empresa', 'Localização', 'Categoria', 'Fabricante', 'Modelo', 'Custo Aquisição', 'Valor Atual', 'Estado'];
-  const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-    assets.map(asset => {
-      const row = [
-        asset.asset_code || '',
-        asset.name || '',
-        asset.description || '',
-        asset.companies?.name || '',
-        asset.locations?.name || '',
-        asset.asset_categories?.name || '',
-        asset.manufacturer || '',
-        asset.model || '',
-        asset.acquisition_cost || 0,
-        asset.current_value || 0,
-        asset.status || ''
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `assets_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+export const exportAssetsToCSV = (assets: any[]) => {
+  downloadStandardXlsx({
+    sheetName: "Ativos",
+    columns: [
+      { key: "code", header: "Código", width: 16 },
+      { key: "name", header: "Nome", width: 28 },
+      { key: "description", header: "Descrição", width: 36 },
+      { key: "company", header: "Empresa", width: 26 },
+      { key: "location", header: "Localização", width: 24 },
+      { key: "category", header: "Categoria", width: 22 },
+      { key: "manufacturer", header: "Fabricante", width: 20 },
+      { key: "model", header: "Modelo", width: 20 },
+      { key: "acquisitionCost", header: "Custo aquisição", type: "number", width: 16 },
+      { key: "currentValue", header: "Valor atual", type: "number", width: 16 },
+      { key: "status", header: "Estado", width: 14 },
+    ],
+    rows: assets.map((asset) => ({
+      code: asset.asset_code,
+      name: asset.name,
+      description: asset.description,
+      company: asset.companies?.name,
+      location: asset.locations?.name,
+      category: asset.asset_categories?.name,
+      manufacturer: asset.manufacturer,
+      model: asset.model,
+      acquisitionCost: asset.acquisition_cost,
+      currentValue: asset.current_value,
+      status: asset.status,
+    })),
+  }, `ativos_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const parseAssetsCSV = (text: string, companies: any[], locations: any[], categories: any[], userId: string) => {

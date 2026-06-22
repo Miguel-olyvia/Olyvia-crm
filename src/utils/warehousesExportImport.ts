@@ -1,29 +1,35 @@
-export const exportWarehousesToCSV = (warehouses: any[]) => {
-  const BOM = '\uFEFF';
-  const headers = ['Nome', 'Código', 'Morada', 'Cidade', 'Código Postal', 'País', 'Gestor', 'Telefone', 'Email', 'Capacidade', 'Ativo'];
-  const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-    warehouses.map(warehouse => {
-      const row = [
-        warehouse.name || '',
-        warehouse.code || '',
-        warehouse.address || '',
-        warehouse.city || '',
-        warehouse.postal_code || '',
-        warehouse.country || '',
-        warehouse.manager_name || '',
-        warehouse.phone || '',
-        warehouse.email || '',
-        warehouse.capacity || '',
-        warehouse.is_active ? 'Sim' : 'Não'
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `armazens_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+export const exportWarehousesToCSV = (warehouses: any[]) => {
+  downloadStandardXlsx({
+    sheetName: "Armazéns",
+    columns: [
+      { key: "name", header: "Nome", width: 28 },
+      { key: "code", header: "Código", width: 16 },
+      { key: "address", header: "Morada", width: 36 },
+      { key: "city", header: "Cidade", width: 20 },
+      { key: "postalCode", header: "Código postal", width: 16 },
+      { key: "country", header: "País", width: 16 },
+      { key: "manager", header: "Gestor", width: 24 },
+      { key: "phone", header: "Telefone", width: 18 },
+      { key: "email", header: "Email", width: 30 },
+      { key: "capacity", header: "Capacidade", type: "number", width: 14 },
+      { key: "active", header: "Ativo", type: "boolean", width: 10 },
+    ],
+    rows: warehouses.map((warehouse) => ({
+      name: warehouse.name,
+      code: warehouse.code,
+      address: warehouse.address,
+      city: warehouse.city,
+      postalCode: warehouse.postal_code,
+      country: warehouse.country,
+      manager: warehouse.manager_name,
+      phone: warehouse.phone,
+      email: warehouse.email,
+      capacity: warehouse.capacity,
+      active: warehouse.is_active,
+    })),
+  }, `armazens_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const parseWarehousesCSV = (text: string, userId: string, companyId: string) => {

@@ -34,7 +34,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
-import { exportQuotesToCSV } from "@/utils/quotesExportImport";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -76,6 +75,7 @@ import { QuotesDashboardView } from "@/components/quotes/QuotesDashboardView";
 import { QuotesMarginsView } from "@/components/quotes/QuotesMarginsView";
 import { QuotesPipelineMini } from "@/components/quotes/QuotesPipelineMini";
 import { resolveLineUnitCosts, resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 
 interface Quote {
   id: string;
@@ -1081,9 +1081,30 @@ export default function Quotes() {
   };
 
   const handleExport = async () => {
+    if (!activeCompany?.id) {
+      toast({ title: t('quotes.toast.exportError'), description: "Selecione uma organização.", variant: "destructive" });
+      return;
+    }
     try {
-      await exportQuotesToCSV(quotes);
-      toast({ title: t('quotes.toast.exportSuccess'), description: t('quotes.toast.exportDescription') });
+      const includeSensitive =
+        hasPermission("quotes.export_sensitive") &&
+        window.confirm(
+          "Pretende incluir a morada da obra? Esta exportação contém dados sensíveis e ficará registada na auditoria.",
+        );
+      const result = await requestControlledExport({
+        module: "quotes",
+        organizationId: activeCompany.id,
+        includeSensitive,
+        filters: {
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
+          dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+        },
+      });
+      toast({
+        title: t('quotes.toast.exportSuccess'),
+        description: `${result.rowCount} orçamentos exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+      });
     } catch (error: any) {
       toast({ title: t('quotes.toast.exportError'), description: error.message, variant: "destructive" });
     }

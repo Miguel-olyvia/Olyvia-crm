@@ -1,25 +1,27 @@
-export const exportPurchaseOrdersToCSV = (orders: any[]) => {
-  const BOM = '\uFEFF';
-  const headers = ['Número', 'Fornecedor', 'Data da Encomenda', 'Entrega Esperada', 'Estado', 'Valor Total', 'Notas'];
-  const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-    orders.map(order => {
-      const row = [
-        order.order_number || '',
-        order.suppliers?.name || '',
-        order.order_date || '',
-        order.expected_delivery || '',
-        order.status || '',
-        order.total_value || 0,
-        order.notes || ''
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `encomendas_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+export const exportPurchaseOrdersToCSV = (orders: any[]) => {
+  downloadStandardXlsx({
+    sheetName: "Encomendas",
+    columns: [
+      { key: "number", header: "Número", width: 18 },
+      { key: "supplier", header: "Fornecedor", width: 28 },
+      { key: "orderDate", header: "Data da encomenda", type: "date", width: 16 },
+      { key: "deliveryDate", header: "Entrega esperada", type: "date", width: 16 },
+      { key: "status", header: "Estado", width: 16 },
+      { key: "total", header: "Valor total", type: "number", width: 16 },
+      { key: "notes", header: "Notas", width: 36 },
+    ],
+    rows: orders.map((order) => ({
+      number: order.order_number,
+      supplier: order.suppliers?.name,
+      orderDate: order.order_date,
+      deliveryDate: order.expected_delivery,
+      status: order.status,
+      total: order.total_value,
+      notes: order.notes,
+    })),
+  }, `encomendas_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const parsePurchaseOrdersCSV = (text: string, suppliers: any[], userId: string, organizationId?: string) => {

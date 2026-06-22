@@ -1,27 +1,31 @@
-export const exportVehiclesToCSV = (vehicles: any[]) => {
-  const BOM = '\uFEFF';
-  const headers = ['Matrícula', 'Marca', 'Modelo', 'Ano', 'Tipo', 'Empresa', 'VIN', 'Quilometragem', 'Estado'];
-  const csvContent = headers.map(h => `"${h}"`).join(';') + '\r\n' +
-    vehicles.map(vehicle => {
-      const row = [
-        vehicle.license_plate || '',
-        vehicle.brand || '',
-        vehicle.model || '',
-        vehicle.year || '',
-        vehicle.vehicle_type || '',
-        vehicle.companies?.name || '',
-        vehicle.vin || '',
-        vehicle.current_odometer || 0,
-        vehicle.status || ''
-      ];
-      return row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';');
-    }).join('\r\n');
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
-  const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `veiculos_${new Date().toISOString().split('T')[0]}.csv`;
-  link.click();
+export const exportVehiclesToCSV = (vehicles: any[]) => {
+  downloadStandardXlsx({
+    sheetName: "Veículos",
+    columns: [
+      { key: "plate", header: "Matrícula", width: 16 },
+      { key: "brand", header: "Marca", width: 20 },
+      { key: "model", header: "Modelo", width: 20 },
+      { key: "year", header: "Ano", type: "number", width: 10 },
+      { key: "type", header: "Tipo", width: 16 },
+      { key: "company", header: "Empresa", width: 26 },
+      { key: "vin", header: "VIN", width: 22 },
+      { key: "odometer", header: "Quilometragem", type: "number", width: 16 },
+      { key: "status", header: "Estado", width: 14 },
+    ],
+    rows: vehicles.map((vehicle) => ({
+      plate: vehicle.license_plate,
+      brand: vehicle.brand,
+      model: vehicle.model,
+      year: vehicle.year,
+      type: vehicle.vehicle_type,
+      company: vehicle.companies?.name,
+      vin: vehicle.vin,
+      odometer: vehicle.current_odometer,
+      status: vehicle.status,
+    })),
+  }, `veiculos_${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
 export const parseVehiclesCSV = (text: string, companies: any[], userId: string) => {
