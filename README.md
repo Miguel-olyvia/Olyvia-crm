@@ -1,73 +1,98 @@
-# Welcome to your Lovable project
+# Olyvia CRM
 
-## Project info
+Plataforma CRM multi-tenant para gestão de clientes, contactos, leads, oportunidades, orçamentos, propostas, contratos, marketing e operações.
 
-**URL**: https://lovable.dev/projects/047ed890-275a-406b-bfd3-2500f41a05f6
+## Stack
 
-## How can I edit this code?
+- React 18, TypeScript e Vite
+- Tailwind CSS e shadcn/ui
+- Supabase: PostgreSQL, autenticação, RLS, Storage e Edge Functions
+- Vitest e Testing Library
+- Playwright para testes end-to-end
+- Vercel para alojamento do frontend
 
-There are several ways of editing your application.
+## Requisitos
 
-**Use Lovable**
+- Node.js
+- npm
+- Supabase CLI para desenvolvimento e migrações
+- Docker Desktop apenas para executar a stack Supabase local
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/047ed890-275a-406b-bfd3-2500f41a05f6) and start prompting.
+## Configuração
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+git clone https://github.com/Miguel-olyvia/Olyvia-crm.git
+cd Olyvia-crm
+npm install
 ```
 
-**Edit a file directly in GitHub**
+Cria os ficheiros de ambiente locais a partir do exemplo:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+copy .env.example .env.local
+```
 
-**Use GitHub Codespaces**
+Preenche apenas variáveis do teu ambiente. Nunca publiques chaves secretas, passwords ou a `service_role`.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Comandos
 
-## What technologies are used for this project?
+```bash
+npm run dev
+npm run build
+npm run lint
+npm run preview
+npx vitest run
+```
 
-This project is built with:
+O servidor de desenvolvimento usa, por defeito:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+```text
+http://localhost:8080
+```
 
-## How can I deploy this project?
+## Supabase
 
-Simply open [Lovable](https://lovable.dev/projects/047ed890-275a-406b-bfd3-2500f41a05f6) and click on Share -> Publish.
+As migrações versionadas encontram-se em:
 
-## Can I connect a custom domain to my Lovable project?
+```text
+supabase/migrations/
+```
 
-Yes, you can!
+Comandos principais:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```bash
+supabase start
+supabase status
+supabase migration list
+supabase db push --dry-run
+supabase db push
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Antes de aplicar alterações na base de dados ativa:
+
+1. Confirma o projeto Supabase ligado.
+2. Executa `supabase migration list`.
+3. Executa sempre o `dry-run`.
+4. Não alteres migrações que já tenham sido aplicadas.
+
+## Branches
+
+- `development`: desenvolvimento e integração.
+- A publicação para produção deve seguir o fluxo definido no GitHub/Vercel.
+
+## Segurança
+
+- A autorização real deve ser aplicada na base de dados através de RLS e RPCs seguras.
+- Controlos do frontend não substituem autorização no servidor.
+- Não incluir dados pessoais, tokens ou segredos nos logs.
+- Não fazer commit de `.env`, `.env.local`, dumps privados ou credenciais.
+
+## Deploy
+
+O frontend é compilado com:
+
+```bash
+npm run build
+```
+
+A configuração SPA da Vercel encontra-se em `vercel.json`.

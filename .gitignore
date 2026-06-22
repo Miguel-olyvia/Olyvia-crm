@@ -23,7 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# Environment files (Lovable Cloud auto-injects these locally)
+# Environment files
 .env
 .env.local
 .env.*.local
@@ -44,4 +44,5 @@ ficheiros/
 .env
 src.zip
 supabase/.temp/
--
+supabase/.branches/
+migrations_disabled_local/
