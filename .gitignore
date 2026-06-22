@@ -45,4 +45,5 @@ ficheiros/
 src.zip
 supabase/.temp/
 supabase/.branches/
+supabase/seed.sql
 migrations_disabled_local/

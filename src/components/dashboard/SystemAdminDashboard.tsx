@@ -4,7 +4,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import DashboardCard from "./DashboardCard";
 import DashboardGrid from "./DashboardGrid";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Target, DollarSign, Briefcase, Building } from "lucide-react";
+import { Users, Target, DollarSign, Briefcase, Building, Contact, UserPlus, FileText, Receipt, FileSignature } from "lucide-react";
 
 interface Stats {
   organizations: number;
@@ -12,6 +12,12 @@ interface Stats {
   memberships: number;
   deals: number;
   dealsValue: number;
+  leads: number;
+  contacts: number;
+  clients: number;
+  proposals: number;
+  quotes: number;
+  contracts: number;
 }
 
 const SystemAdminDashboard = () => {
@@ -22,6 +28,12 @@ const SystemAdminDashboard = () => {
     memberships: 0,
     deals: 0,
     dealsValue: 0,
+    leads: 0,
+    contacts: 0,
+    clients: 0,
+    proposals: 0,
+    quotes: 0,
+    contracts: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -40,6 +52,12 @@ const SystemAdminDashboard = () => {
           memberships: Number(result.memberships) || 0,
           deals: Number(result.deals) || 0,
           dealsValue: Number(result.deals_value) || 0,
+          leads: Number(result.leads) || 0,
+          contacts: Number(result.contacts) || 0,
+          clients: Number(result.clients) || 0,
+          proposals: Number(result.proposals) || 0,
+          quotes: Number(result.quotes) || 0,
+          contracts: Number(result.contracts) || 0,
         });
       } catch (error) {
         console.error("Error loading system admin stats:", error);
@@ -92,6 +110,48 @@ const SystemAdminDashboard = () => {
       icon: DollarSign,
       color: "text-primary",
       bgColor: "bg-primary/10",
+    },
+    {
+      title: t('dashboard.cards.leads'),
+      value: stats.leads,
+      icon: UserPlus,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: t('dashboard.cards.contacts'),
+      value: stats.contacts,
+      icon: Contact,
+      color: "text-warning",
+      bgColor: "bg-warning/10",
+    },
+    {
+      title: t('dashboard.cards.clients'),
+      value: stats.clients,
+      icon: Users,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+    {
+      title: t('dashboard.cards.proposals'),
+      value: stats.proposals,
+      icon: FileText,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
+    },
+    {
+      title: t('dashboard.cards.quotes'),
+      value: stats.quotes,
+      icon: Receipt,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: t('dashboard.cards.contracts'),
+      value: stats.contracts,
+      icon: FileSignature,
+      color: "text-warning",
+      bgColor: "bg-warning/10",
     },
   ];
 
