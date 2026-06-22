@@ -6,7 +6,7 @@
  *  - Public API (permissions, isSystemAdmin, hasPermission, hasAnyPermission,
  *    hasModuleAccess, refreshPermissions, loading) returns the SAME shape and
  *    values as the legacy implementation for the same inputs.
- *  - System admin bypass returns ["*"].
+ *  - System admin identity is separate from explicit permissions.
  *  - RPC error → fail-closed (empty permissions, no crash).
  *  - No membership → fail-closed (empty permissions).
  */
@@ -145,7 +145,51 @@ describe("PermissionsContext (P2.a — RPC-backed)", () => {
     expect(result.current.hasModuleAccess("contracts")).toBe(false);
   });
 
-  it("system_admin via userType bypasses RPC permissions and returns ['*']", async () => {
+  it("system_admin keeps explicit platform permissions without wildcard bypass", async () => {
+    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "system_admin" });
+    rpcMock.mockResolvedValue({
+      data: {
+        business_user_id: "biz-1",
+        is_system_admin: true,
+        org_ids: [],
+        memberships: [],
+        permissions: ["platform.dashboard.view"],
+      },
+      error: null,
+    });
+
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.isSystemAdmin).toBe(true);
+    expect(result.current.permissions).toEqual(["platform.dashboard.view"]);
+    expect(result.current.hasPermission("platform.dashboard.view")).toBe(true);
+    expect(result.current.hasPermission("leads.view")).toBe(false);
+    expect(result.current.hasAnyPermission(["leads.view", "contacts.view"])).toBe(false);
+  });
+
+  it("is_system_admin from RPC identifies the role but does not bypass permissions", async () => {
+    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "member" });
+    rpcMock.mockResolvedValue({
+      data: {
+        business_user_id: "biz-1",
+        is_system_admin: true,
+        org_ids: [],
+        memberships: [],
+        permissions: ["platform.users.view"],
+      },
+      error: null,
+    });
+
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.permissions).toEqual(["platform.users.view"]);
+    expect(result.current.hasPermission("platform.users.view")).toBe(true);
+    expect(result.current.hasPermission("rls.bypass")).toBe(false);
+  });
+
+  it("rejects an unexpected wildcard and fails closed", async () => {
     useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "system_admin" });
     rpcMock.mockResolvedValue({
       data: {
@@ -161,31 +205,8 @@ describe("PermissionsContext (P2.a — RPC-backed)", () => {
     const { result } = renderHook(() => usePermissions(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(result.current.isSystemAdmin).toBe(true);
-    expect(result.current.permissions).toEqual(["*"]);
-    expect(result.current.hasPermission("anything.at.all")).toBe(true);
-    expect(result.current.hasAnyPermission(["x.y", "z.w"])).toBe(true);
-    expect(result.current.hasModuleAccess("any-module")).toBe(true);
-  });
-
-  it("is_system_admin from RPC bypasses even if userType is plain member", async () => {
-    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "member" });
-    rpcMock.mockResolvedValue({
-      data: {
-        business_user_id: "biz-1",
-        is_system_admin: true,
-        org_ids: [],
-        memberships: [],
-        permissions: ["*"],
-      },
-      error: null,
-    });
-
-    const { result } = renderHook(() => usePermissions(), { wrapper });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    expect(result.current.permissions).toEqual(["*"]);
-    expect(result.current.hasPermission("rls.bypass")).toBe(true);
+    expect(result.current.permissions).toEqual([]);
+    expect(result.current.hasPermission("platform.dashboard.view")).toBe(false);
   });
 
   it("RPC error → fail-closed (empty permissions, no crash)", async () => {

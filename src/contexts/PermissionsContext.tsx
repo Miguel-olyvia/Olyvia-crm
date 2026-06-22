@@ -31,7 +31,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const { activeCompany, userType } = useCompany();
 
-  const isSystemAdmin = userType === "system_admin";
+  const [isSystemAdmin, setIsSystemAdmin] = useState(userType === "system_admin");
   // Version counter to handle race conditions — only the latest call applies results
   const versionRef = useRef(0);
   const [refreshCounter, setRefreshCounter] = useState(0);
@@ -49,7 +49,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (version !== versionRef.current) return;
-        if (!session?.user) { setPermissions([]); setPermissionSet(new Set()); return; }
+        if (!session?.user) {
+          setPermissions([]);
+          setPermissionSet(new Set());
+          setIsSystemAdmin(false);
+          return;
+        }
 
         const userId = session.user.id;
 
@@ -77,15 +82,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // System admin bypass (RPC already returns ["*"] in this case, but keep userType-based bypass for parity)
-        if (ctx.is_system_admin || userType === "system_admin" || userType === "super_admin") {
-          setPermissions(["*"]);
-          setPermissionSet(new Set(["*"]));
-          permissionsCache.set(cacheKey, { permissions: ["*"], timestamp: Date.now() });
-          return;
-        }
+        setIsSystemAdmin(ctx.is_system_admin === true || userType === "system_admin");
 
-        const permissionsList: string[] = Array.isArray(ctx.permissions) ? ctx.permissions : [];
+        const permissionsList: string[] =
+          Array.isArray(ctx.permissions) &&
+          ctx.permissions.every((value): value is string => typeof value === "string") &&
+          !ctx.permissions.includes("*")
+            ? ctx.permissions
+            : [];
         const expanded = expandPermissions(permissionsList);
 
         permissionsCache.set(cacheKey, { permissions: permissionsList, timestamp: Date.now() });
@@ -101,25 +105,19 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, [activeCompany?.id, userType, refreshCounter]);
 
   const hasPermission = useCallback((permissionCode: string): boolean => {
-    if (isSystemAdmin) return true;
-    if (permissionSet.has("*")) return true;
     return permissionSetHas(permissionSet, permissionCode);
-  }, [isSystemAdmin, permissionSet]);
+  }, [permissionSet]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
-    if (isSystemAdmin) return true;
-    if (permissionSet.has("*")) return true;
     return permissionCodes.some(code => permissionSetHas(permissionSet, code));
-  }, [isSystemAdmin, permissionSet]);
+  }, [permissionSet]);
 
   const hasModuleAccess = useCallback((module: string): boolean => {
-    if (isSystemAdmin) return true;
-    if (permissionSet.has("*")) return true;
     for (const p of permissionSet) {
       if (p.startsWith(module)) return true;
     }
     return false;
-  }, [isSystemAdmin, permissionSet]);
+  }, [permissionSet]);
 
   const refreshPermissions = useCallback(() => {
     permissionsCache.clear();

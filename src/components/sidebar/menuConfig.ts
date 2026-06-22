@@ -84,10 +84,10 @@ export const menuSections: MenuSection[] = [
     paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder", "/brands", "/bundles", "/products", "/product-categories", "/product-subcategories", "/product-attributes", "/units-of-measure", "/services", "/service-catalog", "/service-categories", "/service-subcategories", "/service-fees"],
     permissions: ["organizations.view", "products.view", "services.view"],
     items: [
-      { to: "/organizations", icon: Building, labelKey: "sidebar.organizations" },
-      { to: "/org-chart", icon: Network, labelKey: "sidebar.orgChart" },
+      { to: "/organizations", icon: Building, labelKey: "sidebar.organizations", permission: "organizations.view" },
+      { to: "/org-chart", icon: Network, labelKey: "sidebar.orgChart", permission: "organizations.view" },
       { to: "/flow-builder", icon: Zap, labelKey: "sidebar.flowBuilder", permission: "flow_builder.view" },
-      { to: "/org-help", icon: HelpCircle, labelKey: "sidebar.help" },
+      { to: "/org-help", icon: HelpCircle, labelKey: "sidebar.help", permission: "organizations.view" },
     ],
     subSections: [
       {
@@ -193,8 +193,8 @@ export const menuSections: MenuSection[] = [
     paths: ["/users", "/roles"],
     permissions: ["users.view"],
     items: [
-      { to: "/users", icon: Users, labelKey: "sidebar.users" },
-      { to: "/roles", icon: Shield, labelKey: "sidebar.roles" },
+      { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
+      { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
     ],
   },
   {
@@ -204,10 +204,10 @@ export const menuSections: MenuSection[] = [
     paths: ["/settings", "/smtp-management", "/email-templates", "/trash"],
     permissions: [],
     items: [
-      { to: "/settings", icon: Settings, labelKey: "sidebar.settings" },
-      { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement" },
-      { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates" },
-      { to: "/trash", icon: Trash2, labelKey: "sidebar.trash" },
+      { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
+      { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
+      { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
+      { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
     ],
   },
 ];

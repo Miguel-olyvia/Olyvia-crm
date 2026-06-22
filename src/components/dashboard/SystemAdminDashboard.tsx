@@ -15,7 +15,7 @@ interface Stats {
 }
 
 const SystemAdminDashboard = () => {
-  const { t, language } = useTranslation();
+  const { t } = useTranslation();
   const [stats, setStats] = useState<Stats>({
     organizations: 0,
     users: 0,
@@ -28,28 +28,18 @@ const SystemAdminDashboard = () => {
   useEffect(() => {
     const loadStats = async () => {
       try {
-        const [
-          { count: orgsCount },
-          { count: usersCount },
-          { count: membershipsCount },
-          { count: dealsCount },
-          { data: dealsData },
-        ] = await Promise.all([
-          supabase.from("anew_organizations").select("*", { count: "exact", head: true }),
-          supabase.from("anew_users").select("*", { count: "exact", head: true }),
-          supabase.from("anew_memberships").select("*", { count: "exact", head: true }).eq("status", "active"),
-          supabase.from("deals").select("*", { count: "exact", head: true }),
-          supabase.from("deals").select("value"),
-        ]);
-
-        const totalValue = dealsData?.reduce((sum, deal) => sum + (Number(deal.value) || 0), 0) || 0;
+        const { data, error } = await (supabase as any).rpc(
+          "get_system_admin_dashboard_stats",
+        );
+        if (error) throw error;
+        const result = data && typeof data === "object" ? data : {};
 
         setStats({
-          organizations: orgsCount || 0,
-          users: usersCount || 0,
-          memberships: membershipsCount || 0,
-          deals: dealsCount || 0,
-          dealsValue: totalValue,
+          organizations: Number(result.organizations) || 0,
+          users: Number(result.users) || 0,
+          memberships: Number(result.memberships) || 0,
+          deals: Number(result.deals) || 0,
+          dealsValue: Number(result.deals_value) || 0,
         });
       } catch (error) {
         console.error("Error loading system admin stats:", error);

@@ -35,16 +35,11 @@ export function PermissionGate({
   children,
   fallback = null,
 }: PermissionGateProps) {
-  const { hasPermission, hasAnyPermission, loading, permissions: userPermissions, isSystemAdmin } = usePermissions();
+  const { hasPermission, hasAnyPermission, loading, permissions: userPermissions } = usePermissions();
 
   // While loading, render fallback (or nothing)
   if (loading) {
     return <>{fallback}</>;
-  }
-
-  // System admin always has access - bypass all permission checks
-  if (isSystemAdmin) {
-    return <>{children}</>;
   }
 
   let hasAccess = false;

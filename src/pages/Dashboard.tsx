@@ -7,7 +7,7 @@ import WelcomeDashboard from "@/components/dashboard/WelcomeDashboard";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 
 const dashboardRoleMap: Record<string, string> = {
-  super_admin: "system_admin",
+  super_admin: "company_admin",
   org_admin: "company_admin",
   org_editor: "worker_user",
   org_viewer: "worker_user",
@@ -19,6 +19,10 @@ const Dashboard = () => {
   const renderDashboard = () => {
     if (isLoading) {
       return <div className="min-h-[50vh] flex items-center justify-center"><OlyviaLoader size={40} /></div>;
+    }
+
+    if (userType === "system_admin") {
+      return <SystemAdminDashboard />;
     }
 
     if (!companies || companies.length === 0) {

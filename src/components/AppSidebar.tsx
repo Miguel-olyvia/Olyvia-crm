@@ -48,7 +48,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
 
   const canViewItem = useCallback(
     (item: MenuItem): boolean => {
-      if (permissionsLoading || !activeCompany) return true;
+      if (permissionsLoading) return true;
       if (item.permissions && item.permissions.length > 0) {
         return hasAnyPermission(item.permissions);
       }
@@ -57,21 +57,21 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
       }
       return true;
     },
-    [permissionsLoading, activeCompany, hasPermission, hasAnyPermission]
+    [permissionsLoading, hasPermission, hasAnyPermission]
   );
 
   const canViewTopLevel = useCallback(
     (item: TopLevelItem): boolean => {
-      if (permissionsLoading || !activeCompany) return true;
+      if (permissionsLoading) return true;
       if (item.permissions.length === 0) return true;
       return hasAnyPermission(item.permissions);
     },
-    [permissionsLoading, activeCompany, hasAnyPermission]
+    [permissionsLoading, hasAnyPermission]
   );
 
   const canViewSection = useCallback(
     (section: MenuSection): boolean => {
-      if (permissionsLoading || !activeCompany) return true;
+      if (permissionsLoading) return true;
       // A section is visible if at least ONE child item or subsection item is visible
       const hasVisibleItem = section.items.some(item => canViewItem(item));
       if (hasVisibleItem) return true;

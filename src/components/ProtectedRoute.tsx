@@ -23,7 +23,7 @@ interface ProtectedRouteProps {
  * Shows a localized "Access Denied" page inside the Layout shell.
  */
 export function ProtectedRoute({ permission, permissions, children }: ProtectedRouteProps) {
-  const { hasPermission, hasAnyPermission, isSystemAdmin, loading: permissionsLoading } = usePermissions();
+  const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
   const { isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -37,11 +37,6 @@ export function ProtectedRoute({ permission, permissions, children }: ProtectedR
         </div>
       </Layout>
     );
-  }
-
-  // System admin always has access — bypass all permission checks
-  if (isSystemAdmin) {
-    return <>{children}</>;
   }
 
   // Check access
