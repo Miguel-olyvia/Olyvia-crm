@@ -990,7 +990,7 @@ const AnewContacts = () => {
 
   // Client-side filtering
   const sourceForFiltering = ((dealsFilter !== "all" || noContact14dFilter) && allContacts.length > 0) ? allContacts : contacts;
-  const filteredContacts = sourceForFiltering.filter(contact => {
+  const filteredContacts = useMemo(() => sourceForFiltering.filter(contact => {
     const entityId = contact.entity_id;
     if (clientOrgPairKeys.has(`${entityId}|${contact.organization_id}`)) return false;
     if (!contactMatchesScope(contact, currentScopeOptions)) return false;
@@ -1031,7 +1031,11 @@ const AnewContacts = () => {
       if (lastDate && differenceInDays(new Date(), new Date(lastDate)) <= 7) return false;
     }
     return true;
-  });
+  }), [
+    sourceForFiltering, clientOrgPairKeys, currentScopeOptions, normalizedSearchQuery, isServerTextSearchActive,
+    getIdentity, healthFilter, getHealthScore, noContact14dFilter, lastInteractions, dealsData, proposalsData,
+    quotesData, dealsFilter, tagsFilter, tagsData, sentimentFilter, lastSentiments, commercialFilter, smartFilter,
+  ]);
 
   // Alert data - use server-side RPC only when scope is ORG, otherwise compute from loaded data
   const alertData = useMemo(() => {
