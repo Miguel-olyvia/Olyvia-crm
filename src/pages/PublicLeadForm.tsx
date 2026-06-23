@@ -175,18 +175,26 @@ const injectMetaPixel = (pixelId: string) => {
 // Inject TikTok Pixel
 const injectTikTokPixel = (pixelId: string) => {
   if (!pixelId || !isValidTrackingId(pixelId, "tiktok") || document.getElementById(`tiktok-pixel-${pixelId}`)) return;
-  
+
   const script = document.createElement('script');
   script.id = `tiktok-pixel-${pixelId}`;
-  script.innerHTML = `
-    !function (w, d, t) {
-      w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};var o=document.createElement("script");o.type="text/javascript",o.async=!0,o.src=i+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)};
-      ttq.load('${pixelId}');
-      ttq.page();
-    }(window, document, 'ttq');
-  `;
+  script.async = true;
+  // Load the stub from a static file so no inline script is needed (CSP: script-src 'self').
+  // After the stub initialises the ttq queue, call load() and page() with the runtime pixel ID.
+  script.src = '/tiktok-pixel-stub.js';
+  script.onload = () => {
+    try {
+      window.ttq?.load(pixelId);
+      window.ttq?.page();
+    } catch (err) {
+      console.warn('[Tracking] TikTok Pixel init failed', err);
+    }
+  };
+  script.onerror = () => {
+    console.warn('[Tracking] TikTok Pixel stub failed to load', pixelId);
+  };
   document.head.appendChild(script);
-  
+
   console.log('[Tracking] TikTok Pixel injected:', pixelId);
 };
 
@@ -211,25 +219,35 @@ const injectGoogleAdsTag = (tagId: string) => {
 // Inject LinkedIn Insight Tag
 const injectLinkedInTag = (partnerId: string) => {
   if (!partnerId || !isValidTrackingId(partnerId, "linkedin") || document.getElementById(`linkedin-${partnerId}`)) return;
-  
-  const script = document.createElement('script');
-  script.id = `linkedin-${partnerId}`;
-  script.innerHTML = `
-    _linkedin_partner_id = "${partnerId}";
-    window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
-    window._linkedin_data_partner_ids.push(_linkedin_partner_id);
-    (function(l) {
-      if (!l){window.lintrk = function(a,b){window.lintrk.q.push([a,b])};
-      window.lintrk.q=[]}
-      var s = document.getElementsByTagName("script")[0];
-      var b = document.createElement("script");
-      b.type = "text/javascript";b.async = true;
-      b.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
-      s.parentNode.insertBefore(b, s);
-    })(window.lintrk);
-  `;
-  document.head.appendChild(script);
-  
+
+  // Step 1: load the lintrk stub from a static file (CSP: script-src 'self').
+  const stub = document.createElement('script');
+  stub.id = `linkedin-${partnerId}`;
+  stub.async = true;
+  stub.src = '/linkedin-insight-stub.js';
+  stub.onload = () => {
+    try {
+      // Step 2: set partner ID globals that the LinkedIn SDK reads on load.
+      (window as any)._linkedin_partner_id = partnerId;
+      (window as any)._linkedin_data_partner_ids = (window as any)._linkedin_data_partner_ids || [];
+      (window as any)._linkedin_data_partner_ids.push(partnerId);
+
+      // Step 3: load the LinkedIn analytics SDK from their CDN.
+      const sdk = document.createElement('script');
+      sdk.type = 'text/javascript';
+      sdk.async = true;
+      sdk.src = 'https://snap.licdn.com/li.lms-analytics/insight.min.js';
+      const first = document.getElementsByTagName('script')[0];
+      first.parentNode?.insertBefore(sdk, first);
+    } catch (err) {
+      console.warn('[Tracking] LinkedIn Insight Tag init failed', err);
+    }
+  };
+  stub.onerror = () => {
+    console.warn('[Tracking] LinkedIn Insight stub failed to load', partnerId);
+  };
+  document.head.appendChild(stub);
+
   console.log('[Tracking] LinkedIn Insight Tag injected:', partnerId);
 };
 
@@ -260,7 +278,7 @@ const pushTrackingEvent = (eventName: string, eventData: Record<string, any> = {
         event: eventName,
         data: eventData,
         timestamp,
-      }, '*');
+      }, window.location.origin);
       console.log('[postMessage to parent]', eventName, eventData);
     } catch (e) {
       // Cross-origin or blocked - silently fail
@@ -628,7 +646,7 @@ export default function PublicLeadForm() {
         window.parent.postMessage({
           type: 'IFRAME_RESIZE',
           height: height,
-        }, '*');
+        }, window.location.origin);
       } catch {
         // Cross-origin error - silently fail
       }
@@ -681,8 +699,8 @@ export default function PublicLeadForm() {
 
       // 4) Notify parent if in iframe (support both message types)
       try {
-        window.parent?.postMessage({ type: 'lovable_scroll_top' }, '*');
-        window.parent?.postMessage({ type: 'scroll_top' }, '*');
+        window.parent?.postMessage({ type: 'lovable_scroll_top' }, window.location.origin);
+        window.parent?.postMessage({ type: 'scroll_top' }, window.location.origin);
       } catch {
         // Ignore cross-origin errors
       }
@@ -984,7 +1002,7 @@ export default function PublicLeadForm() {
           window.parent.postMessage({
             type: 'FORM_VALIDATION_ERROR',
             fieldKey,
-          }, '*');
+          }, window.location.origin);
         } catch (e) {
           // Cross-origin - silently fail
         }
