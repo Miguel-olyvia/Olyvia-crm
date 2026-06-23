@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { requireServiceRole } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 const corsHeaders = {
@@ -89,27 +90,40 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // ── Auth: resolve caller from JWT (verify_jwt=true ensures valid token) ──
+    // ── Auth: mandatory — either SERVICE_ROLE (internal/cron) or valid user JWT ──
     let callerAuthUid: string | undefined;
     let callerAnewUserId: string | undefined;
-    let isServiceRole = false;
+    const isServiceRole = requireServiceRole(req);
     const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      if (token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
-        isServiceRole = true;
-      } else {
-        const { data: { user } } = await supabaseClient.auth.getUser(token);
-        if (user) {
-          callerAuthUid = user.id;
-          const { data: anewUser } = await supabaseClient
-            .from("anew_users")
-            .select("id")
-            .eq("auth_user_id", user.id)
-            .maybeSingle();
-          callerAnewUserId = anewUser?.id;
-        }
+
+    if (!isServiceRole) {
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Authentication required" }),
+          { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
       }
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Invalid or expired token" }),
+          { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      callerAuthUid = user.id;
+      const { data: anewUser } = await supabaseClient
+        .from("anew_users")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+      if (!anewUser) {
+        return new Response(
+          JSON.stringify({ error: "User profile not found" }),
+          { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      callerAnewUserId = anewUser.id;
     }
 
     const rawBody = await req.json();
@@ -129,7 +143,7 @@ const handler = async (req: Request): Promise<Response> => {
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
     // ── Scope check: validate organization access (skip for service role & test mode) ──
-    if (!isServiceRole && !test && organization_id && callerAnewUserId) {
+    if (!isServiceRole && !test && organization_id) {
       const { data: membership } = await supabaseClient
         .from("anew_memberships")
         .select("id")

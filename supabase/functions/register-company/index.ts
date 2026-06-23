@@ -85,9 +85,31 @@ async function upsertCompanyFiscalEntity(supabaseAdmin: any, entityId: string, v
   await supabaseAdmin.from("anew_entity_fiscal_entities").insert({ entity_id: entityId, fiscal_entity_id: fiscalEntityId, is_primary: true, created_by: createdBy });
 }
 
+// IP-based rate limit: max 3 registration attempts per IP per hour.
+const registrationRateLimit = new Map<string, { count: number; resetAt: number }>();
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  // Rate limiting — applied to POST only (OPTIONS already returned above).
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-forwarded-for") || "unknown";
+  const now = Date.now();
+  const windowMs = 3600 * 1000; // 1 hour
+  const maxAttempts = 3;
+
+  const entry = registrationRateLimit.get(ip);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= maxAttempts) {
+      return new Response(
+        JSON.stringify({ error: "Too many registration attempts. Try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    entry.count += 1;
+  } else {
+    registrationRateLimit.set(ip, { count: 1, resetAt: now + windowMs });
   }
 
   try {

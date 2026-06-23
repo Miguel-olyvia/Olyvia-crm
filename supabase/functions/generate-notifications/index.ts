@@ -1,6 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-// Notification engine — runs via cron (anon key → service_role internally)
+import { requireServiceRole } from "../_shared/auth.ts";
+// Notification engine — runs via cron (service_role required)
 // v2: Optimized — batch preloads replace N+1 queries
 
 const querySchema = z.object({
@@ -102,6 +103,13 @@ async function fetchAll<T>(supabase: any, table: string, query: (q: any) => any)
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (!requireServiceRole(req)) {
+    return new Response(
+      JSON.stringify({ error: "Service role required" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   try {
