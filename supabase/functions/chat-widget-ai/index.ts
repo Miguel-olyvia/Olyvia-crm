@@ -14,16 +14,16 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Simple in-memory rate limiter per form_id (max 20 requests per minute)
+// Simple in-memory rate limiter per caller IP (max 20 requests per minute)
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
-function checkRateLimit(formId: string): boolean {
+function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const entry = rateLimitMap.get(formId);
+  const entry = rateLimitMap.get(ip);
   if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(formId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
     return true;
   }
   if (entry.count >= RATE_LIMIT_MAX) return false;
@@ -56,15 +56,19 @@ serve(async (req) => {
     }
     const { form_id, messages, collected_data, conversation_mode } = parsed.data;
 
-    // Rate limiting per form_id
-    if (!checkRateLimit(form_id)) {
+    // Rate limiting per caller IP — keying on form_id (attacker-controlled) is bypassable
+    const callerIp =
+      req.headers.get("cf-connecting-ip") ||
+      req.headers.get("x-forwarded-for") ||
+      "unknown";
+    if (!checkRateLimit(callerIp)) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Fetch form configuration from the forms table
+    // Validate form_id in the DB BEFORE making any AI call
     const { data: formData, error: formError } = await supabase
       .from("forms")
       .select("id, name, branding, settings, organization_id")
@@ -73,7 +77,10 @@ serve(async (req) => {
 
     if (formError || !formData) {
       console.error("Error fetching form:", formError);
-      throw new Error("Form not found");
+      return new Response(
+        JSON.stringify({ error: "Form not found" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     // Get company info and AI knowledge from back office

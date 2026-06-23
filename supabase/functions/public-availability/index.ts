@@ -6,6 +6,41 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// --- Rate Limiting (in-memory, per-isolate) ---
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 30;        // max requests per window
+const RATE_WINDOW = 60_000;   // 1 minute (60 seconds)
+
+function checkRateLimit(req: Request): Response | null {
+  const ip =
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    req.headers.get('cf-connecting-ip') ||
+    'unknown';
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (entry && now < entry.resetAt) {
+    entry.count++;
+    if (entry.count > RATE_LIMIT) {
+      return new Response(
+        JSON.stringify({ error: 'Too many requests.' }),
+        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
+      );
+    }
+  } else {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
+  }
+
+  // Cleanup stale entries when map grows large
+  if (rateLimitMap.size > 10_000) {
+    for (const [k, v] of rateLimitMap) {
+      if (now > v.resetAt) rateLimitMap.delete(k);
+    }
+  }
+
+  return null; // not rate-limited
+}
+
 /**
  * Public Availability API
  *
@@ -37,6 +72,10 @@ Deno.serve(async (req: Request) => {
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
+
+  // Rate limiting check — must come before any DB work
+  const rateLimitResponse = checkRateLimit(req);
+  if (rateLimitResponse) return rateLimitResponse;
 
   try {
     const body = await req.json();
