@@ -191,8 +191,8 @@ const App = () => (
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<ProtectedRoute permission="contacts.view"><AnewContacts /></ProtectedRoute>} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
-                      <Route path="/deals" element={<Deals />} />
-                      <Route path="/proposals" element={<Proposals />} />
+                      <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
+                      <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
                       <Route path="/acquisition-help" element={<AcquisitionHelp />} />
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />

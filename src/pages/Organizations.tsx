@@ -176,7 +176,7 @@ export default function Organizations() {
         scopedOrgIds = Array.from(scopeSet);
       }
 
-      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, created_by, created_at, sector, is_fiscal, entity_id, phone").order("created_at", { ascending: false });
+      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
       const isGlobalAdmin = userType === "system_admin";
       if (isGlobalAdmin) {
         // Fetch all orgs (RLS handles security), then post-filter

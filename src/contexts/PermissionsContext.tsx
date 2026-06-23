@@ -31,7 +31,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const { activeCompany, userType } = useCompany();
 
-  const [isSystemAdmin, setIsSystemAdmin] = useState(userType === "system_admin");
+  const [isSystemAdmin, setIsSystemAdmin] = useState(false);
   // Version counter to handle race conditions — only the latest call applies results
   const versionRef = useRef(0);
   const [refreshCounter, setRefreshCounter] = useState(0);
@@ -82,7 +82,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        setIsSystemAdmin(ctx.is_system_admin === true || userType === "system_admin");
+        setIsSystemAdmin(ctx.is_system_admin === true);
 
         const permissionsList: string[] =
           Array.isArray(ctx.permissions) &&
