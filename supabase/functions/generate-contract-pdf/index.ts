@@ -2,10 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface GeneratePDFRequest {
   contract_id: string;
@@ -27,7 +24,18 @@ const handler = async (req: Request): Promise<Response> => {
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // ── Auth: validate JWT token ──
+    // ── 1. Parse & validate request body first (no I/O) ──
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+      );
+    }
+    const { contract_id } = parsed.data;
+
+    // ── 2. Auth: validate JWT token ──
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
       return new Response(
@@ -39,7 +47,7 @@ const handler = async (req: Request): Promise<Response> => {
     const token = authHeader.replace('Bearer ', '');
     let callerAnewUserId: string | undefined;
     const isServiceRole = token === supabaseServiceKey;
-    
+
     if (!isServiceRole) {
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       if (authError || !user) {
@@ -51,16 +59,6 @@ const handler = async (req: Request): Promise<Response> => {
       const { data: anewUser } = await supabase.from('anew_users').select('id').eq('auth_user_id', user.id).maybeSingle();
       callerAnewUserId = anewUser?.id;
     }
-
-    const body = await req.json();
-    const parsed = requestSchema.safeParse(body);
-    if (!parsed.success) {
-      return new Response(
-        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
-        { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-      );
-    }
-    const { contract_id } = parsed.data;
 
     // Fetch contract with parties (versions/clauses tables removed — were always empty)
     const { data: contract, error: contractError } = await supabase
