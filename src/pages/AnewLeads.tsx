@@ -95,6 +95,7 @@ import { ensureEntityOrgLink, linkEntityToOrg } from "@/utils/orgEntity";
 import { assertNoSupabaseError } from "@/lib/assertNoSupabaseError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { usePermissions } from "@/hooks/usePermissions";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { LeadTableRow } from "@/components/leads/LeadTableRow";
@@ -245,6 +246,7 @@ export default function AnewLeads() {
     teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
+  const { hasPermission } = usePermissions();
   
   const [leads, setLeads] = useState<Lead[]>([]);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
