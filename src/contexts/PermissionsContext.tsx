@@ -105,19 +105,22 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, [activeCompany?.id, userType, refreshCounter]);
 
   const hasPermission = useCallback((permissionCode: string): boolean => {
+    if (isSystemAdmin) return true;
     return permissionSetHas(permissionSet, permissionCode);
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
+    if (isSystemAdmin) return true;
     return permissionCodes.some(code => permissionSetHas(permissionSet, code));
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const hasModuleAccess = useCallback((module: string): boolean => {
+    if (isSystemAdmin) return true;
     for (const p of permissionSet) {
       if (p.startsWith(module)) return true;
     }
     return false;
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const refreshPermissions = useCallback(() => {
     permissionsCache.clear();
