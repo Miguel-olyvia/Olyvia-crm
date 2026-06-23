@@ -1,6 +1,27 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 
+const getNearestResourcesSchema = z.object({
+  postal_code: z.string().min(1),
+  board_id: z.string().uuid(),
+  date: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "date deve ser uma data válida" }),
+  duration: z
+    .string()
+    .optional()
+    .transform((val) => (val !== undefined ? parseInt(val, 10) : 60))
+    .pipe(z.number().int().positive()),
+});
+
+const getAvailableSlotsSchema = z.object({
+  resource_id: z.string().uuid(),
+  date: z.string().refine((val) => !isNaN(Date.parse(val)), { message: "date deve ser uma data válida" }),
+  duration: z
+    .string()
+    .optional()
+    .transform((val) => (val !== undefined ? parseInt(val, 10) : 60))
+    .pipe(z.number().int().positive()),
+});
+
 const requestSchema = z.object({
   title: z.string(),
   board_id: z.string().optional(),
@@ -25,8 +46,8 @@ const requestSchema = z.object({
 });
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-key, x-internal-source',
+  "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_ORIGIN") ?? "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-api-key, x-internal-source",
 };
 
 const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY');
@@ -243,17 +264,19 @@ Deno.serve(async (req) => {
 
       // Get nearest resources for a postal code using Google Maps API
       if (action === 'nearest_resources') {
-        const postalCode = url.searchParams.get('postal_code');
-        const boardId = url.searchParams.get('board_id');
-        const date = url.searchParams.get('date');
-        const duration = parseInt(url.searchParams.get('duration') || '60');
-
-        if (!postalCode || !boardId || !date) {
+        const nearestParsed = getNearestResourcesSchema.safeParse({
+          postal_code: url.searchParams.get('postal_code') ?? undefined,
+          board_id: url.searchParams.get('board_id') ?? undefined,
+          date: url.searchParams.get('date') ?? undefined,
+          duration: url.searchParams.get('duration') ?? undefined,
+        });
+        if (!nearestParsed.success) {
           return new Response(
-            JSON.stringify({ error: 'postal_code, board_id, and date are required' }),
+            JSON.stringify({ error: 'Parâmetros inválidos', details: nearestParsed.error.issues }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
+        const { postal_code: postalCode, board_id: boardId, date, duration } = nearestParsed.data;
 
         console.log(`Finding nearest resources for postal code ${postalCode} on ${date}`);
 
@@ -357,16 +380,18 @@ Deno.serve(async (req) => {
       }
 
       // Get available slots for a resource
-      const resourceId = url.searchParams.get('resource_id');
-      const date = url.searchParams.get('date');
-      const duration = parseInt(url.searchParams.get('duration') || '60');
-
-      if (!resourceId || !date) {
+      const slotsParsed = getAvailableSlotsSchema.safeParse({
+        resource_id: url.searchParams.get('resource_id') ?? undefined,
+        date: url.searchParams.get('date') ?? undefined,
+        duration: url.searchParams.get('duration') ?? undefined,
+      });
+      if (!slotsParsed.success) {
         return new Response(
-          JSON.stringify({ error: 'resource_id and date are required' }),
+          JSON.stringify({ error: 'Parâmetros inválidos', details: slotsParsed.error.issues }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      const { resource_id: resourceId, date, duration } = slotsParsed.data;
 
       const { data: slots, error: slotsError } = await supabase
         .rpc('get_resource_available_slots', {

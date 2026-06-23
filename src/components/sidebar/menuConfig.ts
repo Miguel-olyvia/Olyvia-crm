@@ -32,6 +32,7 @@ import {
   BarChart3,
   Mail,
   Trash2,
+  FileDown,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -190,11 +191,12 @@ export const menuSections: MenuSection[] = [
     id: "users",
     icon: UserCog,
     labelKey: "sidebar.users",
-    paths: ["/users", "/roles"],
+    paths: ["/users", "/roles", "/export-audit"],
     permissions: ["users.view"],
     items: [
       { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
       { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
+      { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },
   {

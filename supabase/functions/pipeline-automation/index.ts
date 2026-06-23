@@ -3,15 +3,75 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const requestSchema = z.object({
   action: z.string(),
   payload: z.record(z.unknown()).optional(),
 });
+
+// ── Sub-schemas por ação ─────────────────────────────────────────────────────
+const uuid = z.string().uuid();
+const optionalUuid = z.string().uuid().optional();
+const optionalString = z.string().min(1).optional();
+
+const payloadSchemas: Record<string, z.ZodTypeAny> = {
+  create_deal_from_lead: z.object({
+    lead_id: uuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    title: optionalString,
+    created_by: optionalString,
+    entity_id: optionalUuid,
+  }),
+  create_quote_from_deal: z.object({
+    deal_id: uuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    title: optionalString,
+    created_by: optionalString,
+  }),
+  create_proposal_from_quote: z.object({
+    quote_id: uuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    deal_id: optionalUuid,
+    title: optionalString,
+    created_by: optionalString,
+  }),
+  create_proposal_from_deal: z.object({
+    deal_id: uuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    entity_id: optionalUuid,
+    title: optionalString,
+    created_by: optionalString,
+  }),
+  create_quote_from_proposal: z.object({
+    proposal_id: uuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    deal_id: optionalUuid,
+    created_by: optionalString,
+  }),
+  create_contract_from_quote: z.object({
+    quote_id: optionalUuid,
+    proposal_id: optionalUuid,
+    organization_id: uuid,
+    root_organization_id: optionalUuid,
+    client_id: optionalUuid,
+    created_by: optionalString,
+  }),
+  finalize_contract: z.object({
+    contract_id: uuid,
+    user_id: optionalString,
+  }),
+  propagate_rejection: z.object({
+    entity_type: z.enum(["proposal", "quote", "contract"]),
+    entity_id: uuid,
+    reason: optionalString,
+  }),
+};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -39,7 +99,25 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const { action, payload } = parsed.data;
+    const { action } = parsed.data;
+
+    // ── Validação do payload por ação ────────────────────────────────────────
+    const payloadSchema = payloadSchemas[action];
+    if (!payloadSchema) {
+      return new Response(
+        JSON.stringify({ success: false, message: `Ação desconhecida: ${action}` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const payloadParsed = payloadSchema.safeParse(parsed.data.payload ?? {});
+    if (!payloadParsed.success) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Payload inválido para a ação", details: payloadParsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const payload = payloadParsed.data;
+
     console.log("Pipeline automation:", action, payload, "caller:", caller.anewUserId);
 
     // ── Scope check: validate caller has access to the organization ──

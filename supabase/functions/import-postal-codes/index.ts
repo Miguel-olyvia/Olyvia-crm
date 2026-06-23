@@ -17,10 +17,7 @@ const importBodySchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 // Portuguese postal code ranges by district
 const POSTAL_CODE_RANGES = [

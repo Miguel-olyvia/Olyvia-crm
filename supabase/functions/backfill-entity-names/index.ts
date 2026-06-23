@@ -2,10 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "npm:zod";
 import { resolveCallerIdentity, requireAdminRole, authErrorResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const requestSchema = z.object({
   dry_run: z.boolean().optional(),

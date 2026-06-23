@@ -9,11 +9,7 @@ const requestSchema = z.object({
   apply_discount_percent: z.number().optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 interface DuplicateRequest {
   quote_id: string;

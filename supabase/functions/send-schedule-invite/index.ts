@@ -5,10 +5,7 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 // ... keep existing code (interfaces SmtpConfig, InviteRequest, getSmtpConfig, sendEmailViaSMTP, getUsersFromEntity, generateInviteEmailHtml)
 

@@ -119,6 +119,7 @@ const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const AlertSettings = lazy(() => import("./pages/AlertSettings"));
+const ExportAudit = lazy(() => import("./pages/ExportAudit"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -267,6 +268,7 @@ const App = () => (
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<Trash />} />
+                      <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
                     </Route>
                   </Route>
 

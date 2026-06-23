@@ -23,10 +23,7 @@ const requestSchema = z.object({
   additional_phones: z.array(z.unknown()).optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 // Unified admin check via anew_memberships + anew_roles
 async function resolveCallerAdmin(supabase: any, authUserId: string) {

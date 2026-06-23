@@ -10,10 +10,7 @@ const requestSchema = z.object({
   message: "newPassword or newEmail is required",
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 function handleUpdateError(error: any) {
   const msg = error.message.toLowerCase();

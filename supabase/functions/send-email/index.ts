@@ -4,10 +4,7 @@ import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmai
 import { requireServiceRole } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 interface EmailAttachment {
   filename: string;

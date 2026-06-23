@@ -8,10 +8,7 @@ const querySchema = z.object({
   mode: z.enum(["fast", "daily"]).optional().default("fast"),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 // ─── Default thresholds ───
 const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> = {

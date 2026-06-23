@@ -81,9 +81,8 @@ const GENERAL_FIELDS = [
   { key: "email", label: "Email" },
   { key: "phone", label: "Telefone" },
   { key: "company_name", label: "Empresa" },
-  { key: "address", label: "Morada" },
-  { key: "postal_code", label: "Código Postal" },
-  { key: "city", label: "Cidade" },
+  // address, postal_code e city removidos por RGPD (minimização de dados):
+  // morada só deve aparecer no fluxo de cliente/faturação, não na ficha de lead.
 ];
 
 const normalizeFieldKey = (key: string) => key.toLowerCase().trim();

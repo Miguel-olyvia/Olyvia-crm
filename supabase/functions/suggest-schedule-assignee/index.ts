@@ -12,10 +12,7 @@ const requestSchema = z.object({
   lead_postal_code: z.string().optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 interface AISchedulingRules {
   buffer_before_minutes: number;

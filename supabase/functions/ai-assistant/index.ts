@@ -8,10 +8,7 @@ import { TOOLS, HANDLERS } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { corsHeaders } from "../_shared/cors.ts";
 
 const MODEL = "google/gemini-2.5-flash";
 

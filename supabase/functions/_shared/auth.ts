@@ -1,9 +1,11 @@
 /**
  * Shared Auth Helper for Edge Functions
- * 
+ *
  * Provides reusable identity resolution and scope validation.
  * Handles both user JWT tokens and internal SERVICE_ROLE calls.
  */
+
+import { withRetry } from "./retry.ts";
 
 export interface CallerIdentity {
   authUid: string;

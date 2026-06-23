@@ -166,7 +166,7 @@ function buildPdfRenderContainer(opts: {
   // fit in the remaining space on the last content page.
   const footerHtml = "";
 
-  container.innerHTML = `${headerHtml}<div>${bodyMarkup}</div>${footerHtml}`;
+  container.innerHTML = DOMPurify.sanitize(`${headerHtml}<div>${bodyMarkup}</div>${footerHtml}`);
   return container;
 }
 

@@ -9,10 +9,7 @@ const _noInputSchema = z.object({});
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
