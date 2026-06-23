@@ -891,7 +891,7 @@ const ContractTemplates = () => {
 
 function ContractPreviewHeader({ settings, sampleData }: { settings: any; sampleData?: any }) {
   const html = renderContractHeaderHtml(settings || {}, (sampleData || SAMPLE_VARIABLE_DATA) as any);
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
 }
 
 function ContractPreviewFooter({ settings }: { settings: any }) {

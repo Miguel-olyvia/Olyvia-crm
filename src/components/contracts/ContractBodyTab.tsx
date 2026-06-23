@@ -360,7 +360,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           {mergedDs?.show_header !== false && (
             <div
               dangerouslySetInnerHTML={{
-                __html: renderContractHeaderHtml(mergedDs as any, (variableData || {}) as any),
+                __html: DOMPurify.sanitize(renderContractHeaderHtml(mergedDs as any, (variableData || {}) as any)),
               }}
             />
           )}
