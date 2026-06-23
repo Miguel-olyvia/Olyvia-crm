@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { validateOrgScope } from "../_shared/auth.ts";
 
 const requestSchema = z.object({
   document_type: z.enum(["proposal", "contract", "quote"]),
@@ -65,6 +66,16 @@ serve(async (req: Request) => {
       );
     }
     const { document_type, document_id, organization_id, login_url, force_new_password } = parsedBody.data;
+
+    // ── Scope check: verify caller belongs to the target organization ──
+    if (!callerAnew) {
+      return new Response(JSON.stringify({ error: "Utilizador não encontrado no sistema" }), { status: 403, headers: corsHeaders });
+    }
+    const callerIdentity = { authUid: caller.id, anewUserId: callerAnew.id, isServiceRole: false };
+    const hasAccess = await validateOrgScope(supabase, callerIdentity, organization_id);
+    if (!hasAccess) {
+      return new Response(JSON.stringify({ error: "Sem permissão para aceder a esta organização" }), { status: 403, headers: corsHeaders });
+    }
 
     // 1. Get document and its entity
     let entityId: string | null = null;

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
+import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,6 +27,13 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    let caller;
+    try {
+      caller = await resolveCallerIdentity(req, supabase);
+    } catch (e) {
+      return authErrorResponse(e, corsHeaders);
+    }
+
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
     if (!parsed.success) {
@@ -35,6 +43,14 @@ serve(async (req) => {
       );
     }
     const { entity_id, organization_id, extra_context } = parsed.data;
+
+    const hasAccess = await validateOrgScope(supabase, caller, organization_id);
+    if (!hasAccess) {
+      return new Response(
+        JSON.stringify({ error: "Sem permissão para aceder a esta organização" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Get entity info
     const { data: entity } = await supabase

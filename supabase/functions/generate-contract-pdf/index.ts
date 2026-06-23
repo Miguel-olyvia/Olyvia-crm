@@ -83,25 +83,32 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // ── Scope check: verify caller has access to the contract's organization ──
-    if (!isServiceRole && callerAnewUserId && contract.organization_id) {
-      const { data: membership } = await supabase
-        .from('anew_memberships')
-        .select('id')
-        .eq('user_id', callerAnewUserId)
-        .eq('status', 'active')
-        .or(`organization_id.eq.${contract.organization_id}`)
-        .maybeSingle();
+    if (!isServiceRole) {
+      if (!callerAnewUserId) {
+        return new Response(
+          JSON.stringify({ error: 'Utilizador não encontrado no sistema' }),
+          { status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+        );
+      }
+      if (contract.organization_id) {
+        const { data: membership } = await supabase
+          .from('anew_memberships')
+          .select('id')
+          .eq('user_id', callerAnewUserId)
+          .eq('status', 'active')
+          .or(`organization_id.eq.${contract.organization_id}`)
+          .maybeSingle();
 
-      if (!membership) {
-        // Check hierarchy
-        const { data: userMemberships } = await supabase.from('anew_memberships').select('organization_id').eq('user_id', callerAnewUserId).eq('status', 'active');
-        const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
-        const { data: hierarchyMatch } = await supabase.from('anew_hierarchy').select('id').eq('child_org_id', contract.organization_id).in('parent_org_id', userOrgIds).maybeSingle();
-        if (!hierarchyMatch) {
-          return new Response(
-            JSON.stringify({ error: 'Sem permissão para aceder a este contrato' }),
-            { status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
-          );
+        if (!membership) {
+          const { data: userMemberships } = await supabase.from('anew_memberships').select('organization_id').eq('user_id', callerAnewUserId).eq('status', 'active');
+          const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
+          const { data: hierarchyMatch } = await supabase.from('anew_hierarchy').select('id').eq('child_org_id', contract.organization_id).in('parent_org_id', userOrgIds).maybeSingle();
+          if (!hierarchyMatch) {
+            return new Response(
+              JSON.stringify({ error: 'Sem permissão para aceder a este contrato' }),
+              { status: 403, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
+            );
+          }
         }
       }
     }

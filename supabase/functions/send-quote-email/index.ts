@@ -145,22 +145,23 @@ const handler = async (req: Request): Promise<Response> => {
     // ── Scope check: verify caller has access to quote's organization ──
     if (userId && quote.organization_id) {
       const { data: anewUser } = await supabaseClient.from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
-      if (anewUser) {
-        const { data: membership } = await supabaseClient
-          .from("anew_memberships")
-          .select("id")
-          .eq("user_id", anewUser.id)
-          .eq("status", "active")
-          .or(`organization_id.eq.${quote.organization_id}`)
-          .maybeSingle();
-        
-        if (!membership) {
-          const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
-          const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
-          const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", quote.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
-          if (!hierarchyMatch) {
-            throw new Error("Sem permissão para enviar este orçamento");
-          }
+      if (!anewUser) {
+        throw new Error("Utilizador não encontrado no sistema");
+      }
+      const { data: membership } = await supabaseClient
+        .from("anew_memberships")
+        .select("id")
+        .eq("user_id", anewUser.id)
+        .eq("status", "active")
+        .or(`organization_id.eq.${quote.organization_id}`)
+        .maybeSingle();
+
+      if (!membership) {
+        const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
+        const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
+        const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", quote.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
+        if (!hierarchyMatch) {
+          throw new Error("Sem permissão para enviar este orçamento");
         }
       }
     }
