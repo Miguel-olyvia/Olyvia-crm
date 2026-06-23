@@ -1,4 +1,4 @@
-export type ExportModule = "clients" | "contacts" | "quotes";
+export type ExportModule = "clients" | "contacts" | "quotes" | "leads";
 export type ExportCellType = "text" | "number" | "date" | "boolean";
 
 export interface ExportColumnDefinition {
@@ -72,6 +72,24 @@ const DEFINITIONS: Record<ExportModule, ExportDefinition> = {
       { key: "currency", header: "Moeda", width: 10 },
       { key: "baseModel", header: "Modelo base", width: 20 },
       { key: "siteAddress", header: "Morada da obra", width: 36, sensitive: true },
+    ],
+  },
+  leads: {
+    module: "leads",
+    sheetName: "Leads",
+    filenamePrefix: "leads",
+    basePermission: "leads.export",
+    sensitivePermission: "leads.export_sensitive",
+    viewPermission: "leads.view",
+    columns: [
+      { key: "name", header: "Nome", width: 30 },
+      { key: "status", header: "Estado", width: 16 },
+      { key: "source", header: "Origem", width: 20 },
+      { key: "assignedTo", header: "Responsável", width: 24 },
+      { key: "createdAt", header: "Criado em", type: "date", width: 14 },
+      { key: "email", header: "Email", width: 30, sensitive: true },
+      { key: "phone", header: "Telefone", width: 18, sensitive: true },
+      { key: "vat", header: "NIF", width: 16, sensitive: true },
     ],
   },
 };

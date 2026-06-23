@@ -43,11 +43,11 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
-  Search, Plus, RefreshCw, UserPlus, Eye, Trash2, Pencil, GripVertical, 
+  Search, Plus, RefreshCw, UserPlus, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
-  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink, 
+  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
   Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
-  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart
+  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -110,6 +110,8 @@ import { LeadJourneyTab } from "@/components/leads/detail/LeadJourneyTab";
 import { ClientNotesTab } from "@/components/clients/detail/ClientNotesTab";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
   getLeadScopeUserIds,
   identityContactIsPrimary,
@@ -441,6 +443,11 @@ export default function AnewLeads() {
   const [callbacksChecked, setCallbacksChecked] = useState(false);
   const [showCallbackAlert, setShowCallbackAlert] = useState(true);
   const [showAISchedulingConfig, setShowAISchedulingConfig] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
   const [showAIConfig, setShowAIConfig] = useState(false);
   const [leadInteractionCounts, setLeadInteractionCounts] = useState<Record<string, number>>({});
   const [leadDealEntityIds, setLeadDealEntityIds] = useState<Set<string>>(new Set());
@@ -1092,6 +1099,136 @@ export default function AnewLeads() {
     if (!resultName) return null;
     return contactResults.find(r => r.id === resultName || r.name === resultName);
   }, [contactResults]);
+
+  const performExport = async (includeSensitive: boolean) => {
+    const organizationId = activeCompanyId;
+    if (!organizationId) {
+      toast({ title: "Sem organização ativa", variant: "destructive" });
+      return;
+    }
+    setExporting(true);
+    try {
+      const result = await requestControlledExport({
+        module: "leads",
+        organizationId,
+        includeSensitive,
+        filters: {
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
+          dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+        },
+      });
+      toast({
+        title: "Exportação concluída",
+        description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+      });
+    } catch (error: any) {
+      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExport = () => {
+    if (!activeCompanyId) {
+      toast({ title: "Sem organização ativa", variant: "destructive" });
+      return;
+    }
+    if (hasPermission("leads.export_sensitive")) {
+      setSensitiveExportOpen(true);
+      return;
+    }
+    void performExport(false);
+  };
+
+  const handleImport = async () => {
+    if (!importFile) {
+      toast({ title: "Seleciona um ficheiro CSV", variant: "destructive" });
+      return;
+    }
+    if (!activeCompanyId) {
+      toast({ title: "Sem organização ativa", variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    try {
+      const text = await importFile.text();
+      const lines = text.split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) throw new Error("Ficheiro sem dados");
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/"/g, ""));
+      const nameIdx = headers.indexOf("nome");
+      const emailIdx = headers.indexOf("email");
+      const phoneIdx = headers.indexOf("telefone");
+      const statusIdx = headers.indexOf("status");
+      if (nameIdx === -1) throw new Error("Coluna 'nome' obrigatória não encontrada");
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Sessão inválida");
+
+      const rootOrgId = (!isRootOrg && activeCompanyId)
+        ? await resolveRootOrgId(activeCompanyId)
+        : activeCompanyId;
+
+      const { data: userData } = await supabase
+        .from("anew_users")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .single();
+      const createdBy = userData?.id || null;
+
+      let imported = 0;
+      let skipped = 0;
+      for (const line of lines.slice(1)) {
+        const cols = line.split(",").map((c) => c.trim().replace(/"/g, ""));
+        const name = cols[nameIdx] || "";
+        if (!name) { skipped++; continue; }
+        const status = statusIdx !== -1 && cols[statusIdx] ? cols[statusIdx] : "new";
+
+        const { data: entityId, error: entityError } = await supabase.rpc(
+          "create_lead_entity_for_org",
+          { p_organization_id: activeCompanyId, p_display_name: name },
+        );
+        if (entityError || !entityId) { skipped++; continue; }
+
+        const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
+          .insert({
+            organization_id: activeCompanyId,
+            root_organization_id: rootOrgId || activeCompanyId,
+            entity_id: entityId,
+            status,
+            source: "import",
+            field_values: {},
+            created_by: createdBy,
+          })
+          .select("id")
+          .single();
+        if (leadError || !newLead) { skipped++; continue; }
+
+        await (supabase.from("anew_entity_roles") as any).upsert({
+          organization_id: activeCompanyId,
+          entity_id: entityId,
+          role: "lead",
+          status: "active",
+          source_type: "lead",
+          source_id: newLead.id,
+          created_by: createdBy,
+        });
+
+        imported++;
+      }
+      toast({
+        title: "Importação concluída",
+        description: `${imported} leads importados, ${skipped} ignorados.`,
+      });
+      setImportDialogOpen(false);
+      setImportFile(null);
+      loadLeads(false);
+    } catch (error: any) {
+      toast({ title: "Erro ao importar", description: error.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const loadWorkflowStages = async () => {
     if (!activeCompanyId) return;
@@ -4207,6 +4344,16 @@ export default function AnewLeads() {
             <Button variant="outline" size="icon" onClick={() => loadLeads(false)} title={t('leads.refresh')}>
               <RefreshCw className="w-4 h-4" />
             </Button>
+            <PermissionGate permission="leads.export">
+              <Button variant="outline" size="icon" onClick={handleExport} disabled={exporting} title="Exportar leads">
+                <Download className="w-4 h-4" />
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="leads.import">
+              <Button variant="outline" size="icon" onClick={() => setImportDialogOpen(true)} title="Importar leads">
+                <Upload className="w-4 h-4" />
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="leads.create">
               <Button onClick={() => { setCreateLeadCampaignId(""); setCreateLeadFormId(""); setCreateLeadSourceId(""); setNewLeadValues({}); setExtraCampaignFieldDefs([]); setShowCreateLead(true); }}>
                 <Plus className="w-4 h-4 mr-2" />
@@ -6133,6 +6280,44 @@ export default function AnewLeads() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <SensitiveExportDialog
+          open={sensitiveExportOpen}
+          onOpenChange={setSensitiveExportOpen}
+          sensitiveFields={["email", "telefone", "NIF"]}
+          loading={exporting}
+          onConfirm={(includeSensitive) => void performExport(includeSensitive)}
+        />
+
+        <Dialog open={importDialogOpen} onOpenChange={(open) => { setImportDialogOpen(open); if (!open) setImportFile(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Importar Leads via CSV</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-muted-foreground">
+                O ficheiro CSV deve ter as colunas: <strong>nome</strong> (obrigatório), email, telefone, status.
+              </p>
+              <Label htmlFor="leads-csv-upload">Ficheiro CSV</Label>
+              <input
+                id="leads-csv-upload"
+                type="file"
+                accept=".csv"
+                className="w-full text-sm"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setImportDialogOpen(false); setImportFile(null); }}>
+                Cancelar
+              </Button>
+              <Button onClick={handleImport} disabled={!importFile || importing}>
+                <Upload className="w-4 h-4 mr-2" />
+                {importing ? "A importar..." : "Importar"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <LeadWorkflowConfig
           open={showWorkflowConfig}
           onOpenChange={setShowWorkflowConfig}

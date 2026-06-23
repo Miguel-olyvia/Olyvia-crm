@@ -368,6 +368,65 @@ async function exportContacts(
   }));
 }
 
+async function exportLeads(
+  admin: any,
+  request: ExportRequest,
+  auth: AuthorizationContext,
+  includeSensitive: boolean,
+) {
+  let query = admin
+    .from("anew_leads")
+    .select("entity_id, status, source_id, assigned_to, created_by, created_at")
+    .in("organization_id", auth.exportOrgIds)
+    .is("deleted_at", null);
+  query = applyCommonFilters(query, request.filters);
+  query = applyOwnerScope(query, auth);
+  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
+  if (error) throw error;
+
+  const records = data || [];
+  const sourceIds = Array.from(
+    new Set(records.map((r: any) => r.source_id).filter(Boolean)),
+  );
+  const assignedIds = Array.from(
+    new Set(records.map((r: any) => r.assigned_to).filter(Boolean)),
+  );
+
+  const [maps, sourcesResult, usersResult] = await Promise.all([
+    resolveIdentityMaps(
+      admin,
+      records.map((r: any) => r.entity_id),
+      includeSensitive,
+    ),
+    sourceIds.length > 0
+      ? admin.from("lead_sources").select("id, name").in("id", sourceIds)
+      : Promise.resolve({ data: [], error: null }),
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, full_name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (sourcesResult.error) throw sourcesResult.error;
+  if (usersResult.error) throw usersResult.error;
+
+  const sourceNames = new Map(
+    (sourcesResult.data || []).map((s: any) => [s.id, s.name]),
+  );
+  const userNames = new Map(
+    (usersResult.data || []).map((u: any) => [u.id, u.full_name]),
+  );
+
+  return records.map((r: any) => ({
+    name: maps.identity.get(r.entity_id)?.display_name || "",
+    status: r.status || "",
+    source: sourceNames.get(r.source_id) || "",
+    assignedTo: userNames.get(r.assigned_to) || "",
+    createdAt: r.created_at,
+    email: maps.email.get(r.entity_id) || "",
+    phone: maps.phone.get(r.entity_id) || "",
+    vat: maps.vat.get(r.entity_id) || "",
+  }));
+}
+
 async function exportQuotes(
   admin: any,
   request: ExportRequest,
@@ -518,7 +577,9 @@ Deno.serve(async (req: Request) => {
         ? await exportClients(admin, request, auth, includeSensitive)
         : request.module === "contacts"
           ? await exportContacts(admin, request, auth, includeSensitive)
-          : await exportQuotes(admin, request, auth, includeSensitive);
+          : request.module === "leads"
+            ? await exportLeads(admin, request, auth, includeSensitive)
+            : await exportQuotes(admin, request, auth, includeSensitive);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
