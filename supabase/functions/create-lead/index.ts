@@ -4,13 +4,13 @@ import { sanitizeTracking } from '../_shared/leadTracking.ts';
 
 const requestSchema = z.object({
   campaign_id: z.string().uuid(),
-  form_id: z.string().optional(),
-  business_unit_id: z.string().optional(),
+  form_id: z.string().uuid().optional(),
+  business_unit_id: z.string().uuid().optional(),
   step_number: z.number().optional(),
   field_values: z.record(z.unknown()).optional(),
   source: z.string().optional(),
-  source_id: z.string().optional(),
-  sourceId: z.string().optional(),
+  source_id: z.string().uuid().optional(),
+  sourceId: z.string().uuid().optional(),
   notes: z.string().optional(),
   tags: z.array(z.string()).optional(),
   from_chat_widget: z.boolean().optional(),
