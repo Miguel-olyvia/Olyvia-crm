@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +15,15 @@ interface RegisterCompanyRequest {
   vat: string;
   country: string;
 }
+
+const requestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  full_name: z.string(),
+  company_name: z.string(),
+  vat: z.string().max(20).optional(),
+  country: z.string().min(2).max(3),
+});
 
 async function createOrganizationEntity(supabaseAdmin: any, displayName: string, createdBy: string) {
   const { data, error } = await supabaseAdmin
@@ -88,15 +98,15 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const body: RegisterCompanyRequest = await req.json();
-    const { email, password, full_name, company_name, vat, country } = body;
-
-    if (!email || !password || !full_name || !company_name || !vat || !country) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ success: false, field: "general", message: "Campos obrigatórios em falta" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const { email, password, full_name, company_name, vat, country } = parsed.data;
 
     console.log(`Checking for duplicates - Email: ${email}, VAT: ${vat}, Company: ${company_name}`);
 

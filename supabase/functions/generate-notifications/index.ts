@@ -1,6 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 // Notification engine — runs via cron (anon key → service_role internally)
 // v2: Optimized — batch preloads replace N+1 queries
+
+const querySchema = z.object({
+  mode: z.enum(["fast", "daily"]).optional().default("fast"),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -105,7 +110,14 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const url = new URL(req.url);
-    const mode = url.searchParams.get("mode") || "fast";
+    const parsedQuery = querySchema.safeParse({ mode: url.searchParams.get("mode") || undefined });
+    if (!parsedQuery.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedQuery.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const mode = parsedQuery.data.mode;
     const now = new Date();
 
     // Calendar-day diff (avoids ms drift between generation/auto-resolve runs)

@@ -1,6 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { requireServiceRole } from "../_shared/auth.ts";
+
+// This function is invoked by the Supabase scheduler (service role) — no external input.
+// The schema is empty; input validation is enforced by the requireServiceRole guard above.
+const _noInputSchema = z.object({});
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp.ts";
 

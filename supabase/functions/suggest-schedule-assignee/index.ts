@@ -1,6 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  organization_id: z.string(),
+  campaign_id: z.string().optional(),
+  requested_date: z.string(),
+  requested_time: z.string().optional(),
+  duration_minutes: z.number().optional(),
+  lead_postal_code: z.string().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,21 +48,22 @@ serve(async (req) => {
     // Auth: resolve caller and validate org scope
     const caller = await resolveCallerIdentity(req, supabase);
 
-    const { 
-      organization_id, 
-      campaign_id,
-      requested_date, 
-      requested_time, 
-      duration_minutes = 60,
-      lead_postal_code,
-    } = await req.json();
-
-    if (!organization_id || !requested_date) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "organization_id and requested_date are required" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const {
+      organization_id,
+      campaign_id,
+      requested_date,
+      requested_time,
+      lead_postal_code,
+    } = parsed.data;
+    const duration_minutes = parsed.data.duration_minutes ?? 60;
 
     // Scope check: caller must belong to the requested organization
     const hasAccess = await validateOrgScope(supabase, caller, organization_id);

@@ -164,7 +164,77 @@ export function CampaignFormPreview({
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
 
   const branding = formData?.branding;
-  const primaryColor = branding?.primary_color || "#85D3BE";
+
+  /**
+   * Sanitizes a CSS value before interpolation into a <style> block.
+   * Uses strict whitelists to prevent CSS injection / XSS breakout.
+   */
+  function sanitizeCSSValue(value: string, type: 'color' | 'font' | 'size' | 'generic'): string {
+    const SAFE_COLOR_DEFAULTS: Record<string, string> = {
+      color: '#85D3BE',
+    };
+    const SAFE_SIZE_DEFAULT = '0';
+    const SAFE_FONT_DEFAULT = 'inherit';
+    const SAFE_GENERIC_DEFAULT = '';
+
+    if (typeof value !== 'string') {
+      return type === 'color' ? SAFE_COLOR_DEFAULTS.color
+           : type === 'size'  ? SAFE_SIZE_DEFAULT
+           : type === 'font'  ? SAFE_FONT_DEFAULT
+           : SAFE_GENERIC_DEFAULT;
+    }
+
+    const trimmed = value.trim();
+
+    if (type === 'color') {
+      // Hex shorthand (#RGB) or full (#RRGGBB) — case-insensitive.
+      if (/^#[0-9A-Fa-f]{3}$/.test(trimmed) || /^#[0-9A-Fa-f]{6}$/.test(trimmed)) {
+        return trimmed;
+      }
+      // rgb() — digits and commas only inside, no expressions.
+      if (/^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/.test(trimmed)) {
+        return trimmed;
+      }
+      // rgba() — digits, commas and a decimal opacity only.
+      if (/^rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(0|1|0?\.\d+)\s*\)$/.test(trimmed)) {
+        return trimmed;
+      }
+      // Small set of safe CSS named colours.
+      const safeNamed = new Set(['transparent', 'white', 'black', 'inherit', 'currentColor']);
+      if (safeNamed.has(trimmed.toLowerCase())) {
+        return trimmed;
+      }
+      return SAFE_COLOR_DEFAULTS.color;
+    }
+
+    if (type === 'font') {
+      // Block any character that could break out of a CSS string context.
+      if (/[<>"';{}\\]/.test(trimmed)) {
+        return SAFE_FONT_DEFAULT;
+      }
+      // Allow only printable ASCII (space included) and common Unicode letters — no control chars.
+      if (/^[\w\s,\-]+$/.test(trimmed) && trimmed.length <= 200) {
+        return trimmed;
+      }
+      return SAFE_FONT_DEFAULT;
+    }
+
+    if (type === 'size') {
+      // Numbers optionally followed by a safe CSS unit.
+      if (/^\d+(\.\d+)?(px|rem|em|%|vh|vw)?$/.test(trimmed)) {
+        return trimmed;
+      }
+      return SAFE_SIZE_DEFAULT;
+    }
+
+    // 'generic': reject anything that contains CSS-escape characters.
+    if (/[<>"';{}\\]/.test(trimmed)) {
+      return SAFE_GENERIC_DEFAULT;
+    }
+    return trimmed;
+  }
+
+  const primaryColor = sanitizeCSSValue(branding?.primary_color || '#85D3BE', 'color');
   const radioButtonColor = branding?.radio_button_color || primaryColor;
   const iconColor = branding?.icon_color || '#000000';
   const iconSelectedColor = branding?.icon_selected_color || '#000000';

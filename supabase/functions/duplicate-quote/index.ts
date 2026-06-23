@@ -1,6 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { z } from "npm:zod";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse, AuthError } from "../_shared/auth.ts";
+
+const requestSchema = z.object({
+  quote_id: z.string().uuid(),
+  title_suffix: z.string().optional(),
+  apply_discount_percent: z.number().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -34,9 +41,9 @@ serve(async (req) => {
 
     const caller = await resolveCallerIdentity(req, supabaseAdmin);
 
-    let body: DuplicateRequest;
+    let rawBody: unknown;
     try {
-      body = await req.json();
+      rawBody = await req.json();
     } catch {
       return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
         status: 400,
@@ -44,14 +51,16 @@ serve(async (req) => {
       });
     }
 
-    const quoteId = typeof body?.quote_id === "string" ? body.quote_id.trim() : "";
-    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (!quoteId || !uuidRe.test(quoteId)) {
-      return new Response(JSON.stringify({ error: "quote_id inválido" }), {
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request", details: parsed.error.issues }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const body: DuplicateRequest = parsed.data;
+
+    const quoteId = body.quote_id.trim();
 
     const titleSuffix = typeof body.title_suffix === "string" && body.title_suffix.length <= 50
       ? body.title_suffix

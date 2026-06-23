@@ -1624,96 +1624,142 @@ export default function MarketingIntegration() {
 
     // No longer need borderRadiusMap fallback - using granular values directly
 
+    // Sanitize branding values before interpolating into CSS to prevent CSS injection.
+    // Each type enforces a strict whitelist; invalid values fall back to a safe default.
+    function sanitizeCSSValue(value, type) {
+      if (typeof value !== 'string') return '';
+      var v = value.trim();
+      if (type === 'color') {
+        // Allow: #RGB, #RRGGBB, rgb(...), rgba(...), hsl(...), hsla(...), named colors (a-z only)
+        if (/^#[0-9A-Fa-f]{3,8}$/.test(v)) return v;
+        if (/^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)$/.test(v)) return v;
+        if (/^hsla?\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)$/.test(v)) return v;
+        if (/^[a-zA-Z]{2,30}$/.test(v)) return v;
+        return 'transparent';
+      }
+      if (type === 'font') {
+        // Strip characters that could break out of CSS context; allow font stacks
+        // Forbidden: < > { } ; (these can escape a CSS string into HTML/JS context)
+        if (/[<>{};]/.test(v)) return 'system-ui, sans-serif';
+        // Allow only printable ASCII minus the dangerous chars above, plus spaces/commas
+        if (/^[\w\s\-.,'"]+$/.test(v)) return v;
+        return 'system-ui, sans-serif';
+      }
+      if (type === 'size') {
+        // Allow: numbers with optional unit (px, rem, em, %, vw, vh) or compound values
+        // e.g. "12px", "1.5rem", "12px 14px", "1px solid" — no letters that could be url()/expression()
+        if (/^[\d.\s]+$/.test(v)) return v;
+        if (/^([\d.]+)(px|rem|em|%|vw|vh|pt|ch|ex|cm|mm|in|pc|fr|deg|s|ms)?$/.test(v)) return v;
+        // Compound size values (padding, border shorthand): only digits, units, spaces
+        if (/^([\d.]+(px|rem|em|%|vw|vh|pt)?(\s+[\d.]+(px|rem|em|%|vw|vh|pt)?){0,3})$/.test(v)) return v;
+        return '0';
+      }
+      if (type === 'shadow') {
+        // Allow box-shadow / text-shadow values: digits, units, spaces, commas, rgb/rgba, #hex
+        // Reject anything containing < > " ' { } ; which could escape CSS context
+        if (/[<>"'{}; -]/.test(v)) return 'none';
+        // Must consist only of safe CSS shadow tokens
+        if (/^[a-zA-Z0-9#(),.\s\-\/]+$/.test(v)) return v;
+        return 'none';
+      }
+      return '';
+    }
+
+    // Pre-sanitize all branding values that will be interpolated into CSS
+    var sColor = function(val) { return sanitizeCSSValue(val, 'color'); };
+    var sFont  = function(val) { return sanitizeCSSValue(val, 'font'); };
+    var sSize  = function(val) { return sanitizeCSSValue(val, 'size'); };
+    var sShadow = function(val) { return sanitizeCSSValue(val, 'shadow'); };
+
     // Apply 100% dynamic styles from branding - matching PublicLeadForm exactly
     var style = document.createElement('style');
     style.textContent = \`
       @keyframes olyvia-spin { to { transform: rotate(360deg); } }
-      #olyvia-form { font-family: \${fontFamily}; max-width: 640px; margin: 0 auto; color: \${textColor}; line-height: 1.5; }
-      .olyvia-step { padding: \${stepPadding}; background: \${backgroundColor}; border-radius: \${stepBorderRadius}; border: \${stepBorderWidth} solid \${stepBorderColor}; box-shadow: \${stepShadow}; }
-      .olyvia-step h2 { margin: 0 0 4px; font-size: 1.75rem; font-weight: 600; font-family: \${headingFontFamily}; color: \${textColor}; line-height: 1.2; }
-      .olyvia-step-desc { margin: 0 0 20px; color: \${textColor}80; font-size: 0.9rem; }
+      #olyvia-form { font-family: \${sFont(fontFamily)}; max-width: 640px; margin: 0 auto; color: \${sColor(textColor)}; line-height: 1.5; }
+      .olyvia-step { padding: \${sSize(stepPadding)}; background: \${sColor(backgroundColor)}; border-radius: \${sSize(stepBorderRadius)}; border: \${sSize(stepBorderWidth)} solid \${sColor(stepBorderColor)}; box-shadow: \${sShadow(stepShadow)}; }
+      .olyvia-step h2 { margin: 0 0 4px; font-size: 1.75rem; font-weight: 600; font-family: \${sFont(headingFontFamily)}; color: \${sColor(textColor)}; line-height: 1.2; }
+      .olyvia-step-desc { margin: 0 0 20px; color: \${sColor(textColor)}80; font-size: 0.9rem; }
       .olyvia-progress { margin-bottom: 20px; }
-      .olyvia-progress-header { display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 500; color: \${textColor}70; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.025em; }
-      .olyvia-progress-bar { height: \${progressBarHeight}; background: #e5e7eb; border-radius: \${progressBarBorderRadius}; overflow: hidden; display: flex; gap: 4px; }
-      .olyvia-progress-fill { height: 100%; transition: width 0.3s ease; border-radius: \${progressBarBorderRadius}; background: \${primaryColor}; }
-      .olyvia-section-title { font-size: 1rem; font-weight: 600; color: \${textColor}; margin: 24px 0 4px; }
-      .olyvia-section-desc { font-size: 0.85rem; color: \${textColor}70; margin: 0 0 16px; }
-      .olyvia-info-block { background: \${primaryColor}\${infoBlockBgOpacity}; padding: \${infoBlockPadding}; border-radius: \${infoBlockBorderRadius}; margin-bottom: 24px; }
-      .olyvia-info-block strong { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.95rem; color: \${textColor}; }
-      .olyvia-info-block p { margin: 0; font-size: 0.875rem; color: \${textColor}90; line-height: 1.6; }
+      .olyvia-progress-header { display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 500; color: \${sColor(textColor)}70; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.025em; }
+      .olyvia-progress-bar { height: \${sSize(progressBarHeight)}; background: #e5e7eb; border-radius: \${sSize(progressBarBorderRadius)}; overflow: hidden; display: flex; gap: 4px; }
+      .olyvia-progress-fill { height: 100%; transition: width 0.3s ease; border-radius: \${sSize(progressBarBorderRadius)}; background: \${sColor(primaryColor)}; }
+      .olyvia-section-title { font-size: 1rem; font-weight: 600; color: \${sColor(textColor)}; margin: 24px 0 4px; }
+      .olyvia-section-desc { font-size: 0.85rem; color: \${sColor(textColor)}70; margin: 0 0 16px; }
+      .olyvia-info-block { background: \${sColor(primaryColor)}\${sSize(infoBlockBgOpacity)}; padding: \${sSize(infoBlockPadding)}; border-radius: \${sSize(infoBlockBorderRadius)}; margin-bottom: 24px; }
+      .olyvia-info-block strong { display: block; margin-bottom: 8px; font-weight: 600; font-size: 0.95rem; color: \${sColor(textColor)}; }
+      .olyvia-info-block p { margin: 0; font-size: 0.875rem; color: \${sColor(textColor)}90; line-height: 1.6; }
       .olyvia-field { margin-bottom: 20px; }
-      .olyvia-field > label { display: block; margin-bottom: 8px; font-weight: 600; color: \${textColor}; font-size: 0.875rem; }
+      .olyvia-field > label { display: block; margin-bottom: 8px; font-weight: 600; color: \${sColor(textColor)}; font-size: 0.875rem; }
       .olyvia-required { color: #ef4444; margin-left: 2px; }
       .olyvia-field-error input, .olyvia-field-error select, .olyvia-field-error textarea { border-color: #ef4444 !important; }
       .olyvia-field-error .olyvia-checkbox-item, .olyvia-field-error .olyvia-radio-item, .olyvia-field-error .olyvia-card { border-color: #ef4444 !important; }
       .olyvia-error-msg { display: block; color: #ef4444; font-size: 0.75rem; margin-top: 6px; }
       .olyvia-input-icon { position: relative; display: block; }
-      .olyvia-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: \${iconColor}; display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0.6; z-index: 1; width: 20px; height: 20px; }
+      .olyvia-icon { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: \${sColor(iconColor)}; display: flex; align-items: center; justify-content: center; pointer-events: none; opacity: 0.6; z-index: 1; width: 20px; height: 20px; }
       .olyvia-icon svg { width: 18px; height: 18px; flex-shrink: 0; }
-      .olyvia-field input[type="text"], .olyvia-field input[type="email"], .olyvia-field input[type="tel"], .olyvia-field input[type="number"], .olyvia-field input[type="date"], .olyvia-field textarea { width: 100%; padding: \${inputPadding}; border: \${inputBorderWidth} solid \${inputBorderColor}; border-radius: \${inputBorderRadius}; font-size: \${inputFontSize}; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; background: \${inputBgColor}; color: \${textColor}; font-family: \${fontFamily}; }
-      .olyvia-field select { width: 100%; padding: \${inputPadding}; border: \${selectBorderWidth} solid \${inputBorderColor}; border-radius: \${selectBorderRadius}; font-size: \${inputFontSize}; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; background: \${inputBgColor}; color: \${textColor}; font-family: \${fontFamily}; }
+      .olyvia-field input[type="text"], .olyvia-field input[type="email"], .olyvia-field input[type="tel"], .olyvia-field input[type="number"], .olyvia-field input[type="date"], .olyvia-field textarea { width: 100%; padding: \${sSize(inputPadding)}; border: \${sSize(inputBorderWidth)} solid \${sColor(inputBorderColor)}; border-radius: \${sSize(inputBorderRadius)}; font-size: \${sSize(inputFontSize)}; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; background: \${sColor(inputBgColor)}; color: \${sColor(textColor)}; font-family: \${sFont(fontFamily)}; }
+      .olyvia-field select { width: 100%; padding: \${sSize(inputPadding)}; border: \${sSize(selectBorderWidth)} solid \${sColor(inputBorderColor)}; border-radius: \${sSize(selectBorderRadius)}; font-size: \${sSize(inputFontSize)}; box-sizing: border-box; transition: border-color 0.2s, box-shadow 0.2s; background: \${sColor(inputBgColor)}; color: \${sColor(textColor)}; font-family: \${sFont(fontFamily)}; }
       .olyvia-field .olyvia-input-icon input[type="text"], .olyvia-field .olyvia-input-icon input[type="email"], .olyvia-field .olyvia-input-icon input[type="tel"] { padding-left: 46px !important; }
-      .olyvia-field input::placeholder, .olyvia-field textarea::placeholder { color: \${textColor}50; }
-      .olyvia-field input:focus, .olyvia-field select:focus, .olyvia-field textarea:focus { outline: none; border-color: \${inputFocusBorderColor}; box-shadow: 0 0 0 3px \${inputFocusBorderColor}15; }
+      .olyvia-field input::placeholder, .olyvia-field textarea::placeholder { color: \${sColor(textColor)}50; }
+      .olyvia-field input:focus, .olyvia-field select:focus, .olyvia-field textarea:focus { outline: none; border-color: \${sColor(inputFocusBorderColor)}; box-shadow: 0 0 0 3px \${sColor(inputFocusBorderColor)}15; }
       .olyvia-field textarea { resize: vertical; min-height: 100px; }
       .olyvia-cards { display: grid; gap: 14px; }
       .olyvia-cols-2 { grid-template-columns: repeat(2, 1fr); }
       .olyvia-cols-3 { grid-template-columns: repeat(3, 1fr); }
       .olyvia-cols-4 { grid-template-columns: repeat(2, 1fr); }
       @media (min-width: 640px) { .olyvia-cols-3 { grid-template-columns: repeat(3, 1fr); } .olyvia-cols-4 { grid-template-columns: repeat(4, 1fr); } }
-      .olyvia-card { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: \${cardPadding}; min-height: \${cardMinHeight}; border: \${cardBorderWidth} solid \${cardBorderColor}; border-radius: \${cardBorderRadius}; cursor: pointer; transition: all 0.2s; text-align: center; background: \${backgroundColor}; }
-      .olyvia-card:hover { border-color: \${primaryColor}60; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
-      .olyvia-card.selected { border-color: \${primaryColor}; background: \${primaryColor}08; box-shadow: 0 0 0 3px \${primaryColor}20; }
-      .olyvia-card-check { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; border-radius: 50%; background: \${primaryColor}; display: none; align-items: center; justify-content: center; color: \${buttonTextColor}; }
+      .olyvia-card { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: \${sSize(cardPadding)}; min-height: \${sSize(cardMinHeight)}; border: \${sSize(cardBorderWidth)} solid \${sColor(cardBorderColor)}; border-radius: \${sSize(cardBorderRadius)}; cursor: pointer; transition: all 0.2s; text-align: center; background: \${sColor(backgroundColor)}; }
+      .olyvia-card:hover { border-color: \${sColor(primaryColor)}60; box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+      .olyvia-card.selected { border-color: \${sColor(primaryColor)}; background: \${sColor(primaryColor)}08; box-shadow: 0 0 0 3px \${sColor(primaryColor)}20; }
+      .olyvia-card-check { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; border-radius: 50%; background: \${sColor(primaryColor)}; display: none; align-items: center; justify-content: center; color: \${sColor(buttonTextColor)}; }
       .olyvia-card.selected .olyvia-card-check { display: flex; }
-      .olyvia-card-icon { width: \${cardIconSize}; height: \${cardIconSize}; border-radius: \${cardIconBorderRadius}; background: #f3f4f6; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: \${textColor}; }
-      .olyvia-card.selected .olyvia-card-icon { background: \${primaryColor}; color: \${buttonTextColor}; }
-      .olyvia-card span:last-child { font-weight: 600; font-size: 0.9rem; color: \${textColor}; }
+      .olyvia-card-icon { width: \${sSize(cardIconSize)}; height: \${sSize(cardIconSize)}; border-radius: \${sSize(cardIconBorderRadius)}; background: #f3f4f6; display: flex; align-items: center; justify-content: center; transition: all 0.2s; color: \${sColor(textColor)}; }
+      .olyvia-card.selected .olyvia-card-icon { background: \${sColor(primaryColor)}; color: \${sColor(buttonTextColor)}; }
+      .olyvia-card span:last-child { font-weight: 600; font-size: 0.9rem; color: \${sColor(textColor)}; }
       .olyvia-checkboxes { display: flex; flex-direction: column; gap: 8px; }
-      .olyvia-checkbox-item { display: flex; align-items: center; gap: 12px; padding: \${checkboxPadding}; border: \${checkboxBorderWidth} solid #e5e7eb; border-radius: \${checkboxBorderRadius}; cursor: pointer; transition: all 0.15s; background: \${backgroundColor}; }
-      .olyvia-checkbox-item:hover { border-color: \${primaryColor}50; background: \${primaryColor}05; }
-      .olyvia-checkbox-item input[type="checkbox"] { width: \${checkboxSize}; height: \${checkboxSize}; accent-color: \${primaryColor}; cursor: pointer; flex-shrink: 0; border-radius: 4px; }
-      .olyvia-checkbox-item span { font-weight: 500; color: \${textColor}; font-size: 0.9rem; }
+      .olyvia-checkbox-item { display: flex; align-items: center; gap: 12px; padding: \${sSize(checkboxPadding)}; border: \${sSize(checkboxBorderWidth)} solid #e5e7eb; border-radius: \${sSize(checkboxBorderRadius)}; cursor: pointer; transition: all 0.15s; background: \${sColor(backgroundColor)}; }
+      .olyvia-checkbox-item:hover { border-color: \${sColor(primaryColor)}50; background: \${sColor(primaryColor)}05; }
+      .olyvia-checkbox-item input[type="checkbox"] { width: \${sSize(checkboxSize)}; height: \${sSize(checkboxSize)}; accent-color: \${sColor(primaryColor)}; cursor: pointer; flex-shrink: 0; border-radius: 4px; }
+      .olyvia-checkbox-item span { font-weight: 500; color: \${sColor(textColor)}; font-size: 0.9rem; }
       .olyvia-radios { display: grid; gap: 10px; }
       .olyvia-radios.olyvia-cols-2 { grid-template-columns: repeat(2, 1fr); }
-      .olyvia-radio-item { display: flex; align-items: center; gap: 12px; padding: \${radioPadding}; border: \${radioBorderWidth} solid #e5e7eb; border-radius: \${radioBorderRadius}; cursor: pointer; transition: all 0.15s; background: \${backgroundColor}; }
-      .olyvia-radio-item:hover { border-color: \${primaryColor}50; background: \${primaryColor}05; }
-      .olyvia-radio-item.selected { border-color: \${primaryColor}; background: \${primaryColor}08; }
-      .olyvia-radio-circle { width: \${radioCircleSize}; height: \${radioCircleSize}; border: 2px solid \${radioButtonColor}50; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
-      .olyvia-radio-item.selected .olyvia-radio-circle { border-color: \${radioButtonColor}; }
-      .olyvia-radio-item.selected .olyvia-radio-circle::after { content: ''; width: \${radioInnerSize}; height: \${radioInnerSize}; background: \${radioButtonColor}; border-radius: 50%; }
-      .olyvia-radio-item span { font-weight: 500; color: \${textColor}; font-size: 0.9rem; }
+      .olyvia-radio-item { display: flex; align-items: center; gap: 12px; padding: \${sSize(radioPadding)}; border: \${sSize(radioBorderWidth)} solid #e5e7eb; border-radius: \${sSize(radioBorderRadius)}; cursor: pointer; transition: all 0.15s; background: \${sColor(backgroundColor)}; }
+      .olyvia-radio-item:hover { border-color: \${sColor(primaryColor)}50; background: \${sColor(primaryColor)}05; }
+      .olyvia-radio-item.selected { border-color: \${sColor(primaryColor)}; background: \${sColor(primaryColor)}08; }
+      .olyvia-radio-circle { width: \${sSize(radioCircleSize)}; height: \${sSize(radioCircleSize)}; border: 2px solid \${sColor(radioButtonColor)}50; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+      .olyvia-radio-item.selected .olyvia-radio-circle { border-color: \${sColor(radioButtonColor)}; }
+      .olyvia-radio-item.selected .olyvia-radio-circle::after { content: ''; width: \${sSize(radioInnerSize)}; height: \${sSize(radioInnerSize)}; background: \${sColor(radioButtonColor)}; border-radius: 50%; }
+      .olyvia-radio-item span { font-weight: 500; color: \${sColor(textColor)}; font-size: 0.9rem; }
       .olyvia-buttons-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-      .olyvia-btn-option { display: flex; align-items: center; justify-content: center; gap: 10px; padding: \${buttonOptionPadding}; border: \${buttonOptionBorderWidth} solid #e5e7eb; border-radius: \${buttonOptionBorderRadius}; cursor: pointer; font-size: 0.95rem; font-weight: 500; background: \${backgroundColor}; transition: all 0.15s; color: \${textColor}; font-family: \${fontFamily}; }
-      .olyvia-btn-option:hover { border-color: \${primaryColor}60; background: \${primaryColor}08; }
-      .olyvia-btn-option.selected { background: \${primaryColor}; border-color: \${primaryColor}; color: \${buttonTextColor}; }
+      .olyvia-btn-option { display: flex; align-items: center; justify-content: center; gap: 10px; padding: \${sSize(buttonOptionPadding)}; border: \${sSize(buttonOptionBorderWidth)} solid #e5e7eb; border-radius: \${sSize(buttonOptionBorderRadius)}; cursor: pointer; font-size: 0.95rem; font-weight: 500; background: \${sColor(backgroundColor)}; transition: all 0.15s; color: \${sColor(textColor)}; font-family: \${sFont(fontFamily)}; }
+      .olyvia-btn-option:hover { border-color: \${sColor(primaryColor)}60; background: \${sColor(primaryColor)}08; }
+      .olyvia-btn-option.selected { background: \${sColor(primaryColor)}; border-color: \${sColor(primaryColor)}; color: \${sColor(buttonTextColor)}; }
       .olyvia-checkbox { display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 8px 0; font-weight: normal; }
-      .olyvia-checkbox input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: \${primaryColor}; }
-      .olyvia-help { display: block; margin-top: 6px; font-size: 0.8rem; color: \${textColor}70; }
+      .olyvia-checkbox input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: \${sColor(primaryColor)}; }
+      .olyvia-help { display: block; margin-top: 6px; font-size: 0.8rem; color: \${sColor(textColor)}70; }
       .olyvia-nav-buttons { display: flex; gap: 12px; margin-top: 28px; }
-      .olyvia-prev, .olyvia-next { padding: \${navButtonPadding}; border-radius: \${navButtonBorderRadius}; cursor: pointer; font-size: \${navButtonFontSize}; font-weight: 600; transition: all 0.15s; font-family: \${fontFamily}; }
-      .olyvia-prev { background: \${backBtnBg}; color: \${backBtnText}; border: 1px solid \${backBtnBorder}; }
-      .olyvia-prev:hover { background: \${backBtnHover}; }
-      .olyvia-next { flex: 1; border: none; background: \${primaryColor}; color: \${buttonTextColor}; }
+      .olyvia-prev, .olyvia-next { padding: \${sSize(navButtonPadding)}; border-radius: \${sSize(navButtonBorderRadius)}; cursor: pointer; font-size: \${sSize(navButtonFontSize)}; font-weight: 600; transition: all 0.15s; font-family: \${sFont(fontFamily)}; }
+      .olyvia-prev { background: \${sColor(backBtnBg)}; color: \${sColor(backBtnText)}; border: 1px solid \${sColor(backBtnBorder)}; }
+      .olyvia-prev:hover { background: \${sColor(backBtnHover)}; }
+      .olyvia-next { flex: 1; border: none; background: \${sColor(primaryColor)}; color: \${sColor(buttonTextColor)}; }
       .olyvia-next:hover { filter: brightness(0.95); }
       .olyvia-next:disabled { opacity: 0.5; cursor: not-allowed; }
-      .olyvia-success { text-align: center; padding: 48px 28px; background: \${backgroundColor}; border-radius: \${successBorderRadius}; }
-      .olyvia-success-icon { width: \${successIconSize}; height: \${successIconSize}; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: \${primaryColor}15; color: \${primaryColor}; }
-      .olyvia-success h3 { color: \${primaryColor}; margin: 0 0 12px; font-size: 1.75rem; font-weight: 600; font-family: \${headingFontFamily}; }
-      .olyvia-success p { color: \${textColor}80; margin: 0 0 8px; font-size: 1rem; line-height: 1.5; }
-      .olyvia-step-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 16px; background: \${backgroundColor}; border-radius: \${stepBorderRadius}; border: \${stepBorderWidth} solid \${stepBorderColor}; box-shadow: \${stepShadow}; min-height: 300px; }
-      .olyvia-loading-spinner { width: 40px; height: 40px; border: 3px solid \${stepBorderColor}; border-top-color: \${primaryColor}; border-radius: 50%; animation: olyvia-spin 0.8s linear infinite; }
-      .olyvia-step-loading p { margin: 0; color: \${textColor}80; font-size: 0.9rem; }
-      .olyvia-location-warning { display: flex; gap: 12px; padding: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: \${inputBorderRadius}; margin-bottom: 20px; color: #dc2626; }
+      .olyvia-success { text-align: center; padding: 48px 28px; background: \${sColor(backgroundColor)}; border-radius: \${sSize(successBorderRadius)}; }
+      .olyvia-success-icon { width: \${sSize(successIconSize)}; height: \${sSize(successIconSize)}; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; background: \${sColor(primaryColor)}15; color: \${sColor(primaryColor)}; }
+      .olyvia-success h3 { color: \${sColor(primaryColor)}; margin: 0 0 12px; font-size: 1.75rem; font-weight: 600; font-family: \${sFont(headingFontFamily)}; }
+      .olyvia-success p { color: \${sColor(textColor)}80; margin: 0 0 8px; font-size: 1rem; line-height: 1.5; }
+      .olyvia-step-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 16px; background: \${sColor(backgroundColor)}; border-radius: \${sSize(stepBorderRadius)}; border: \${sSize(stepBorderWidth)} solid \${sColor(stepBorderColor)}; box-shadow: \${sShadow(stepShadow)}; min-height: 300px; }
+      .olyvia-loading-spinner { width: 40px; height: 40px; border: 3px solid \${sColor(stepBorderColor)}; border-top-color: \${sColor(primaryColor)}; border-radius: 50%; animation: olyvia-spin 0.8s linear infinite; }
+      .olyvia-step-loading p { margin: 0; color: \${sColor(textColor)}80; font-size: 0.9rem; }
+      .olyvia-location-warning { display: flex; gap: 12px; padding: 16px; background: #fef2f2; border: 1px solid #fecaca; border-radius: \${sSize(inputBorderRadius)}; margin-bottom: 20px; color: #dc2626; }
       .olyvia-location-warning strong { display: block; margin-bottom: 4px; }
       .olyvia-location-warning p { margin: 0; font-size: 0.85rem; color: #991b1b; }
-      .olyvia-footer { text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid \${stepBorderColor}; }
-      .olyvia-footer-text { font-size: 0.75rem; color: \${textColor}60; margin: 0 0 8px; line-height: 1.5; }
+      .olyvia-footer { text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid \${sColor(stepBorderColor)}; }
+      .olyvia-footer-text { font-size: 0.75rem; color: \${sColor(textColor)}60; margin: 0 0 8px; line-height: 1.5; }
       .olyvia-footer-links { display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 0.75rem; }
-      .olyvia-footer-links a { color: \${primaryColor}; text-decoration: underline; transition: opacity 0.15s; }
+      .olyvia-footer-links a { color: \${sColor(primaryColor)}; text-decoration: underline; transition: opacity 0.15s; }
       .olyvia-footer-links a:hover { opacity: 0.8; }
-      .olyvia-footer-separator { color: \${textColor}40; }
-      \${b.custom_css || ''}
+      .olyvia-footer-separator { color: \${sColor(textColor)}40; }
     \`;
     document.head.appendChild(style);
 

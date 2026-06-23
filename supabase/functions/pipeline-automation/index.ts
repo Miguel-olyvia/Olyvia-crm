@@ -1,11 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const requestSchema = z.object({
+  action: z.string(),
+  payload: z.record(z.unknown()).optional(),
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -25,7 +31,15 @@ serve(async (req) => {
       return authErrorResponse(e, corsHeaders);
     }
 
-    const { action, payload } = await req.json();
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { action, payload } = parsed.data;
     console.log("Pipeline automation:", action, payload, "caller:", caller.anewUserId);
 
     // ── Scope check: validate caller has access to the organization ──

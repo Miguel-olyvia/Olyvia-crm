@@ -1,5 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  action: z.string(),
+  caller_type: z.string().optional(),
+  target_user_id: z.string().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -40,7 +47,13 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, caller_type, target_user_id } = body;
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request", details: parsed.error.issues }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { action, caller_type, target_user_id } = parsed.data;
 
     // Determine if caller is CRM user or portal user
     const isCrmCaller = caller_type === "crm";

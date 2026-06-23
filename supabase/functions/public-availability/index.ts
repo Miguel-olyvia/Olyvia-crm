@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "npm:zod";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,12 +8,24 @@ const corsHeaders = {
 
 /**
  * Public Availability API
- * 
+ *
  * PUBLIC endpoint (no auth) — Returns available scheduling slots.
  * Supports two modes:
  *   1. Single date: { date } → returns slots for that day
  *   2. Date range: { start_date, end_date } → returns which days have availability (via get_month_availability RPC)
  */
+const requestSchema = z.object({
+  form_id: z.string().optional(),
+  step_number: z.number().optional(),
+  date: z.string().optional(),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  postal_code: z.string().optional(),
+  board_id: z.string().optional(),
+  duration_minutes: z.number().optional(),
+  include_settings: z.boolean().optional(),
+});
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -27,11 +40,18 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     const {
       form_id, step_number, date, start_date, end_date,
       postal_code, board_id: directBoardId, duration_minutes: directDuration,
       include_settings,
-    } = body;
+    } = parsed.data;
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;

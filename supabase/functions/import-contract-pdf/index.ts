@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,6 +9,11 @@ const corsHeaders = {
 };
 
 const stripMarkdownCodeFences = (value: string) => value.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+const requestSchema = z.object({
+  fileName: z.string(),
+  pdfBase64: z.string().max(10_000_000),
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -30,17 +36,29 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const { fileName, pdfBase64 } = await req.json();
-
-    if (!fileName || !pdfBase64) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "fileName and pdfBase64 are required" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    const { fileName, pdfBase64 } = parsed.data;
+
+    const base64Payload = pdfBase64.startsWith("data:")
+      ? (pdfBase64.split(",")[1] ?? "")
+      : pdfBase64;
+
+    if (!base64Payload.startsWith('JVBERi0')) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid file type' }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    const normalizedPdfBase64 = String(pdfBase64).startsWith("data:")
-      ? String(pdfBase64)
+    const normalizedPdfBase64 = pdfBase64.startsWith("data:")
+      ? pdfBase64
       : `data:application/pdf;base64,${pdfBase64}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

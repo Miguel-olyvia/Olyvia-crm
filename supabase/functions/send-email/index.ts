@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +36,29 @@ interface EmailRequest {
     secure: boolean;
   };
 }
+
+const requestSchema = z.object({
+  company_id: z.string().optional(),
+  organization_id: z.string().optional(),
+  user_id: z.string().optional(),
+  smtp_id: z.string().optional(),
+  entity_id: z.string().optional(),
+  to: z.string().email(),
+  recipients: z.array(z.string().email()).optional(),
+  cc: z.array(z.string()).optional(),
+  subject: z.string(),
+  html: z.string(),
+  text: z.string().optional(),
+  test: z.boolean().optional(),
+  attachments: z.array(z.unknown()).optional(),
+  smtp_config: z.object({
+    host: z.string(),
+    port: z.number(),
+    username: z.string(),
+    password: z.string(),
+    secure: z.boolean(),
+  }).optional(),
+});
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function sanitizeEmailList(list: unknown, max = 10): string[] {
@@ -88,7 +112,15 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
-    const body: EmailRequest = await req.json();
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+    const body: EmailRequest = parsed.data as EmailRequest;
     const { company_id, organization_id, user_id, smtp_id, entity_id, to, recipients, cc, subject, html, text, test, smtp_config, attachments } = body;
     const toListInput = sanitizeEmailList(recipients, 10);
     if (to && !toListInput.some((e) => e.toLowerCase() === to.toLowerCase())) {

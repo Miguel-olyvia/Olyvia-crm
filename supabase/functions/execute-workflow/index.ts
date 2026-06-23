@@ -1,6 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  source_entity: z.string(),
+  entity_id: z.string(),
+  new_stage_id: z.string().optional(),
+  old_stage_id: z.string().optional(),
+  organization_id: z.string().optional(),
+  triggered_by: z.string().optional(),
+});
 import { syncEntityPrimaryAddressFromLead } from "../_shared/addressSanitization.ts";
 import {
   getWorkflowPermissionForSourceEntity,
@@ -30,13 +40,15 @@ serve(async (req) => {
       return authErrorResponse(e, corsHeaders);
     }
 
-    const { source_entity, entity_id, new_stage_id, old_stage_id, organization_id, triggered_by } = await req.json();
-    if (!source_entity || !entity_id) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "source_entity and entity_id are required" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
+    const { source_entity, entity_id, new_stage_id, old_stage_id, organization_id, triggered_by } = parsed.data;
 
     const workflowSourceTable: Record<string, string> = {
       lead: "anew_leads",

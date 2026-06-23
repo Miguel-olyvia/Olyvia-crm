@@ -1,10 +1,17 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const requestSchema = z.object({
+  entity_id: z.string(),
+  organization_id: z.string(),
+  extra_context: z.string().optional(),
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -19,14 +26,15 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { entity_id, organization_id, extra_context } = await req.json();
-
-    if (!entity_id || !organization_id) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "entity_id and organization_id are required" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const { entity_id, organization_id, extra_context } = parsed.data;
 
     // Get entity info
     const { data: entity } = await supabase

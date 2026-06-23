@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  form_id: z.string(),
+  messages: z.array(z.unknown()).optional(),
+  collected_data: z.record(z.unknown()).optional(),
+  conversation_mode: z.string().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,10 +46,18 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { form_id, messages, collected_data, conversation_mode } = await req.json();
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { form_id, messages, collected_data, conversation_mode } = parsed.data;
 
     // Rate limiting per form_id
-    if (!form_id || !checkRateLimit(form_id)) {
+    if (!checkRateLimit(form_id)) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }

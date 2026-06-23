@@ -1,6 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
+
+const requestSchema = z.object({
+  action: z.string(),
+  params: z.record(z.unknown()).optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,7 +36,15 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { action, ...params } = body;
+    const parsedBody = requestSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedBody.error.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+    const { action, params: _params } = parsedBody.data;
+    const params = (_params ?? body) as Record<string, any>;
 
     // Verify this user is a portal client
     const { data: portalUser } = await supabase

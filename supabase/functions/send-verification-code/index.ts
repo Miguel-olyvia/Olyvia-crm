@@ -1,6 +1,21 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { z } from "npm:zod";
+
+const verificationRequestSchema = z.object({
+  proposal_id: z.string(),
+  method: z.literal("email"),
+  destination: z.string(),
+  action: z.enum(["accept", "reject"]),
+  rejection_reason_code: z.string().nullable().optional(),
+  rejection_notes: z.string().nullable().optional(),
+});
+
+const verifyCodeRequestSchema = z.object({
+  proposal_id: z.string(),
+  code: z.string(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -179,11 +194,15 @@ const handler = async (req: Request): Promise<Response> => {
 
     if (action === "verify") {
       // Verify code
-      const { proposal_id, code }: VerifyCodeRequest = await req.json();
-
-      if (!proposal_id || !code) {
-        throw new Error("Missing required fields: proposal_id, code");
+      const body = await req.json();
+      const parsed = verifyCodeRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return new Response(
+          JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+          { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
       }
+      const { proposal_id, code } = parsed.data;
 
       // Find valid code
       const { data: verificationData, error: verifyError } = await supabaseClient
@@ -256,11 +275,15 @@ const handler = async (req: Request): Promise<Response> => {
       }
     } else {
       // Send verification code
-      const { proposal_id, method, destination, action, rejection_reason_code, rejection_notes }: VerificationRequest = await req.json();
-
-      if (!proposal_id || !method || !destination) {
-        throw new Error("Missing required fields: proposal_id, method, destination");
+      const body = await req.json();
+      const parsed = verificationRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return new Response(
+          JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+          { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
       }
+      const { proposal_id, method, destination, action, rejection_reason_code, rejection_notes } = parsed.data;
 
       // Get proposal with template
       const { data: proposal, error: proposalError } = await supabaseClient

@@ -1,6 +1,21 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { resolveCallerIdentity, requireAdminRole, authErrorResponse } from "../_shared/auth.ts";
+
+const importBodySchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("get-ranges") }),
+  z.object({
+    action: z.literal("import-batch"),
+    startPrefix: z.union([z.string(), z.number()]),
+    endPrefix: z.union([z.string(), z.number()]),
+    batchSize: z.number().int().min(1).max(500).optional().default(100),
+  }),
+  z.object({
+    action: z.literal("import-specific"),
+    postalCodes: z.array(z.string().regex(/^\d{4}-\d{3}$/)).min(1).max(500),
+  }),
+]);
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -120,7 +135,19 @@ serve(async (req) => {
       );
     }
 
-    const { action, startPrefix, endPrefix, batchSize = 100 } = await req.json();
+    const rawBody = await req.json();
+    const parsedBody = importBodySchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedBody.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    const parsed = parsedBody.data;
+    const action = parsed.action;
+    const startPrefix = action === "import-batch" ? parsed.startPrefix : undefined;
+    const endPrefix = action === "import-batch" ? parsed.endPrefix : undefined;
+    const batchSize = action === "import-batch" ? (parsed.batchSize ?? 100) : 100;
 
     if (action === 'get-ranges') {
       // Return all postal code ranges for the client to iterate
@@ -250,9 +277,9 @@ serve(async (req) => {
     }
 
     if (action === 'import-specific') {
-      // Import specific postal codes
-      const { postalCodes } = await req.json();
-      
+      // Import specific postal codes — postalCodes already validated by Zod above
+      const postalCodes = (parsed as any).postalCodes as string[];
+
       let imported = 0;
       const results: any[] = [];
 

@@ -1,5 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  proposal_id: z.string().optional(),
+  tracking_token: z.string().optional(),
+  send_id: z.string().optional(),
+  event: z.enum(["view", "time", "pixel"]),
+  time_seconds: z.number().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -125,8 +134,15 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // Handle POST requests for page view tracking
-    const body: TrackingRequest = await req.json();
-    const { proposal_id, tracking_token, send_id, event, time_seconds } = body;
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+    const { proposal_id, tracking_token, send_id, event, time_seconds } = parsed.data;
 
     const userAgent = req.headers.get("user-agent") || "";
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "unknown";

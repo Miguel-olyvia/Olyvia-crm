@@ -1,6 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+
+const requestSchema = z.object({
+  document_type: z.enum(["proposal", "contract", "quote"]),
+  document_id: z.string(),
+  organization_id: z.string(),
+  login_url: z.string().optional(),
+  force_new_password: z.boolean().optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,15 +57,14 @@ serve(async (req: Request) => {
       .maybeSingle();
 
     const body = await req.json();
-    const { document_type, document_id, organization_id, login_url, force_new_password } = body;
-
-    if (!document_type || !document_id || !organization_id) {
-      return new Response(JSON.stringify({ error: "Missing required fields: document_type, document_id, organization_id" }), { status: 400, headers: corsHeaders });
+    const parsedBody = requestSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedBody.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
-
-    if (!["proposal", "contract", "quote"].includes(document_type)) {
-      return new Response(JSON.stringify({ error: "document_type must be 'proposal', 'contract' or 'quote'" }), { status: 400, headers: corsHeaders });
-    }
+    const { document_type, document_id, organization_id, login_url, force_new_password } = parsedBody.data;
 
     // 1. Get document and its entity
     let entityId: string | null = null;

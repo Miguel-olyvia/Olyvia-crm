@@ -1,6 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { requireServiceRole } from "../_shared/auth.ts";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  entity_type: z.string(),
+  entity_id: z.string(),
+  new_phase: z.string(),
+  organization_id: z.string().optional(),
+  triggered_by: z.string().optional(),
+});
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 
 const corsHeaders = {
@@ -26,15 +35,16 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    const { entity_type, entity_id, new_phase, organization_id, triggered_by } = await req.json();
-    console.log("Template trigger:", { entity_type, entity_id, new_phase, organization_id, triggered_by });
-
-    if (!entity_type || !entity_id || !new_phase) {
-      return new Response(JSON.stringify({ error: "Missing required fields" }), {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request", details: parsed.error.issues }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    const { entity_type, entity_id, new_phase, organization_id, triggered_by } = parsed.data;
+    console.log("Template trigger:", { entity_type, entity_id, new_phase, organization_id, triggered_by });
 
     const { data: templates } = await supabase
       .from("email_templates")

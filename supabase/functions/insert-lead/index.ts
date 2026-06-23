@@ -1,5 +1,30 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "npm:zod";
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+
+const requestSchema = z.object({
+  first_name: z.string(),
+  last_name: z.string(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  vat: z.string().optional(),
+  position: z.string().optional(),
+  organization_id: z.string().optional(),
+  notes: z.string().optional(),
+  source: z.string().optional(),
+  source_id: z.string().uuid().optional(),
+  campaign_id: z.string().uuid().optional(),
+  status: z.string().optional(),
+  custom_fields: z.record(z.string()).optional(),
+  auto_schedule: z.boolean().optional(),
+  schedule_options: z.record(z.unknown()).optional(),
+  location: z.string().optional(),
+  address: z.string().optional(),
+  postal_code: z.string().optional(),
+  city: z.string().optional(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+});
 import { sanitizeEmail, sanitizePhone, sanitizeFieldValues } from '../_shared/inputSanitizers.ts';
 import {
   cleanupCreatedEntityArtifacts,
@@ -155,8 +180,16 @@ Deno.serve(async (req) => {
       .eq('id', scopedToken.id);
 
     // Parse lead data
-    const leadData: LeadData = await req.json();
-    
+    const rawBody = await req.json();
+    const parsedBody = requestSchema.safeParse(rawBody);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request', details: parsedBody.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    const leadData: LeadData = parsedBody.data;
+
     // Log metadata only — no PII (C28)
     console.log('Received insert-lead request:', JSON.stringify({
       source: leadData.source,
@@ -166,14 +199,6 @@ Deno.serve(async (req) => {
       has_custom_fields: !!leadData.custom_fields,
       field_count: leadData.custom_fields ? Object.keys(leadData.custom_fields).length : 0,
     }));
-
-    // Validate required fields
-    if (!leadData.first_name || !leadData.last_name) {
-      return new Response(
-        JSON.stringify({ error: 'first_name and last_name are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     // Validate custom_fields size (C29)
     if (leadData.custom_fields) {

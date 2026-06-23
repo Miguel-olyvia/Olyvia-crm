@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  countryCode: z.string(),
+  year: z.number().optional(),
+});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,14 +58,15 @@ serve(async (req) => {
   }
 
   try {
-    const { countryCode, year } = await req.json();
-    
-    if (!countryCode) {
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: 'Country code is required' }),
+        JSON.stringify({ error: 'Invalid request', details: parsed.error.issues }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    const { countryCode, year } = parsed.data;
 
     const nagerCode = countryCodeMap[countryCode] || countryCode;
     const targetYear = year || new Date().getFullYear();

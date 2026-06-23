@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.45.0";
+import { z } from "npm:zod";
 import { buildExecCtx } from "./shared/context.ts";
 import { fetchSystemPrompt, fetchHelpKnowledge } from "./shared/prompt.ts";
 import { summarizeToolArgs } from "./shared/summarizeArgs.ts";
@@ -102,6 +103,13 @@ Deno.serve(async (req) => {
 
     // Body is parsed exactly ONCE.
     const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     const {
       messages = [],
       language = "pt",
@@ -109,7 +117,7 @@ Deno.serve(async (req) => {
       companyId,
       currentContext = null,
       pendingTool = null,
-    } = body;
+    } = parsed.data;
     const organizationId: string | null = bodyOrgId || companyId || null;
 
     const built = await buildExecCtx({ req, supabase, organizationId });

@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,6 +24,17 @@ interface EmailRequest {
   message?: string;
   attachments?: EmailAttachmentInput[];
 }
+
+const requestSchema = z.object({
+  quote_id: z.string(),
+  recipient_email: z.string(),
+  recipient_name: z.string().optional(),
+  recipients: z.array(z.string()).optional(),
+  cc: z.array(z.string()).optional(),
+  subject: z.string().optional(),
+  message: z.string().optional(),
+  attachments: z.array(z.unknown()).optional(),
+});
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function sanitizeEmailList(list: unknown, max = 10): string[] {
@@ -77,11 +89,15 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    const { quote_id, recipient_email, recipient_name, recipients, cc, subject, message, attachments }: EmailRequest = await req.json();
-
-    if (!quote_id || !recipient_email) {
-      throw new Error("Missing required fields: quote_id, recipient_email");
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+    const { quote_id, recipient_email, recipient_name, recipients, cc, subject, message, attachments } = parsed.data as EmailRequest;
 
     // Build To/Cc lists. The primary email (recipient_email) is what counts for tracking/state.
     const toListInput = sanitizeEmailList(recipients, 10);

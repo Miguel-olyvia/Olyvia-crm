@@ -1,5 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  targetUserId: z.string(),
+  newPassword: z.string().optional(),
+  newEmail: z.string().email().optional(),
+}).refine(data => data.newPassword || data.newEmail, {
+  message: "newPassword or newEmail is required",
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -45,19 +54,14 @@ serve(async (req: Request) => {
       });
     }
 
-    const { targetUserId, newPassword, newEmail } = await req.json();
-
-    if (!targetUserId) {
-      return new Response(JSON.stringify({ error: "Missing targetUserId" }), {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(JSON.stringify({ error: "Invalid request", details: parsed.error.issues }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    if (!newPassword && !newEmail) {
-      return new Response(JSON.stringify({ error: "Missing newPassword or newEmail" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const { targetUserId, newPassword, newEmail } = parsed.data;
 
     if (newPassword && newPassword.length < 8) {
       return new Response(JSON.stringify({ error: "Password must be at least 8 characters" }), {

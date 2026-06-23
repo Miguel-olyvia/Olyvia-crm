@@ -1,5 +1,10 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  userId: z.string(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -69,13 +74,15 @@ serve(async (req: Request) => {
       );
     }
 
-    const { userId } = await req.json();
-    if (!userId) {
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "Missing userId" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const { userId } = parsed.data;
 
     // Scope check: if not system_admin, verify target user is in visible orgs
     const isSystemAdmin = callerRoles.includes("system_admin");

@@ -1,4 +1,28 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  title: z.string(),
+  board_id: z.string().optional(),
+  description: z.string().optional(),
+  client_id: z.string().optional(),
+  contact_id: z.string().optional(),
+  deal_id: z.string().optional(),
+  location: z.string().optional(),
+  postal_code: z.string().optional(),
+  duration_minutes: z.number().optional(),
+  preferred_date: z.string().optional(),
+  preferred_time_start: z.string().optional(),
+  preferred_time_end: z.string().optional(),
+  preferred_resource_ids: z.array(z.string()).optional(),
+  priority: z.number().optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
+  organization_id: z.string().optional(),
+  campaign_id: z.string().optional(),
+  auto_assign: z.boolean().optional(),
+  use_proximity: z.boolean().optional(),
+});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -183,16 +207,17 @@ Deno.serve(async (req) => {
     }
 
     if (req.method === 'POST') {
-      const body: ScheduleRequest = await req.json();
-      console.log('Schedule request received:', JSON.stringify(body));
+      const rawBody = await req.json();
+      console.log('Schedule request received:', JSON.stringify(rawBody));
 
-      // Validate required fields
-      if (!body.title) {
+      const parsed = requestSchema.safeParse(rawBody);
+      if (!parsed.success) {
         return new Response(
-          JSON.stringify({ error: 'Title is required' }),
+          JSON.stringify({ error: 'Invalid request', details: parsed.error.issues }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+      const body: ScheduleRequest = parsed.data;
 
       if (!userId && !apiKey && !internalTrusted) {
         return new Response(

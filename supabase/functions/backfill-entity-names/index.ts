@@ -1,10 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
+import { z } from "npm:zod";
 import { resolveCallerIdentity, requireAdminRole, authErrorResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const requestSchema = z.object({
+  dry_run: z.boolean().optional(),
+  limit: z.number().optional(),
+});
 
 /**
  * Backfill Entity Names
@@ -44,9 +50,17 @@ Deno.serve(async (req) => {
       );
     }
 
-    const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
-    const dryRun = body.dry_run ?? false;
-    const batchLimit = body.limit ?? 500;
+    const rawBody = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { dry_run, limit } = parsed.data;
+    const dryRun = dry_run ?? false;
+    const batchLimit = limit ?? 500;
 
     // Fetch entities missing first_name
     const { data: entities, error } = await supabase

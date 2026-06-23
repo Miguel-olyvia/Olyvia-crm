@@ -1,5 +1,22 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "npm:zod";
 import { sanitizeTracking } from '../_shared/leadTracking.ts';
+
+const requestSchema = z.object({
+  campaign_id: z.string().uuid(),
+  form_id: z.string().optional(),
+  business_unit_id: z.string().optional(),
+  step_number: z.number().optional(),
+  field_values: z.record(z.unknown()).optional(),
+  source: z.string().optional(),
+  source_id: z.string().optional(),
+  sourceId: z.string().optional(),
+  notes: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  from_chat_widget: z.boolean().optional(),
+  tracking: z.record(z.unknown()).optional(),
+  embed: z.string().optional(),
+});
 import { runMarketingAttribution } from '../_shared/marketingAttribution.ts';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import {
@@ -120,12 +137,19 @@ Deno.serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     const body = await req.json();
+    const parsedBody = requestSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request', details: parsedBody.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     // SECURITY: company_id is intentionally NOT destructured from the body.
     // organization_id is always derived from campaigns.organization_id (single source of truth)
     // to prevent cross-tenant lead injection via a public endpoint.
-    const { campaign_id, form_id, business_unit_id, step_number, field_values, source, notes, tags, from_chat_widget, tracking, embed } = body;
+    const { campaign_id, form_id, business_unit_id, step_number, field_values, source, notes, tags, from_chat_widget, tracking, embed } = parsedBody.data;
     // Aceitar tanto snake_case como camelCase para compatibilidade com integrações antigas/novas.
-    const incomingSourceId: string | null = body.source_id ?? body.sourceId ?? null;
+    const incomingSourceId: string | null = parsedBody.data.source_id ?? parsedBody.data.sourceId ?? null;
     const ALLOWED_EMBED_KINDS = new Set(['popup', 'inline', 'widget', 'utm', 'chat', '']);
     const rawEmbedKind = typeof embed === 'string' ? embed.trim().toLowerCase() : '';
     const embedKind = ALLOWED_EMBED_KINDS.has(rawEmbedKind) ? rawEmbedKind : '';
@@ -138,14 +162,6 @@ Deno.serve(async (req) => {
       campaign_id, form_id, step_number, source,
       from_chat_widget, field_count: Object.keys(field_values || {}).length
     }));
-
-    // Validate campaign_id
-    if (!campaign_id) {
-      return new Response(
-        JSON.stringify({ error: 'campaign_id is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     // Get campaign and its company
     const { data: campaign, error: campaignError } = await supabase

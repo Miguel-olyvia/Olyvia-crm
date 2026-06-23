@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
 import {
   sanitizeAddressFields,
   isSuspiciousAddress,
@@ -11,6 +12,11 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const requestSchema = z.object({
+  mode: z.enum(["preview", "apply"]).optional(),
+  limit: z.number().optional(),
+});
 
 type Bucket =
   | "repair_update_in_place"
@@ -56,9 +62,17 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    const body = await req.json().catch(() => ({}));
-    const mode: "preview" | "apply" = body.mode === "apply" ? "apply" : "preview";
-    const limit: number = Math.min(Math.max(Number(body.limit) || 500, 1), 5000);
+    const rawBody = await req.json().catch(() => ({}));
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    const { mode: rawMode, limit: rawLimit } = parsed.data;
+    const mode: "preview" | "apply" = rawMode === "apply" ? "apply" : "preview";
+    const limit: number = Math.min(Math.max(Number(rawLimit) || 500, 1), 5000);
 
     // 1. Candidate suspicious addresses
     //    a) postal_code not matching NNNN-NNN (covers vast majority of garbage)

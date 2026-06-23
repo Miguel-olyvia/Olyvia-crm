@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError } from "../_shared/smtp.ts";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,6 +20,15 @@ interface InviteRequest {
   }>;
   organization_id: string;
 }
+
+const requestSchema = z.object({
+  schedule_item_id: z.string(),
+  invitees: z.array(z.object({
+    type: z.enum(["user", "user_group", "company", "business_unit", "business_area"]),
+    id: z.string(),
+  })),
+  organization_id: z.string(),
+});
 
 async function getUsersFromEntity(supabase: any, type: string, id: string): Promise<Array<{ id: string; email: string; full_name: string }>> {
   const users: Array<{ id: string; email: string; full_name: string }> = [];
@@ -161,11 +171,15 @@ const handler = async (req: Request): Promise<Response> => {
 
     const caller = await resolveCallerIdentity(req, supabaseClient);
 
-    const { schedule_item_id, invitees, organization_id }: InviteRequest = await req.json();
-
-    if (!schedule_item_id || !invitees?.length || !organization_id) {
-      throw new Error("Missing required fields: schedule_item_id, invitees, organization_id");
+    const rawBody = await req.json();
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+    const { schedule_item_id, invitees, organization_id } = parsed.data;
 
     const hasAccess = await validateOrgScope(supabaseClient, caller, organization_id);
     if (!hasAccess) {

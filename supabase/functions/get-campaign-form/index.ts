@@ -1,4 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+
+const querySchema = z.object({
+  campaign_id: z.string().uuid(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,14 +31,14 @@ Deno.serve(async (req: Request) => {
 
   try {
     const url = new URL(req.url);
-    const campaignId = url.searchParams.get("campaign_id");
-
-    if (!campaignId) {
+    const parsed = querySchema.safeParse({ campaign_id: url.searchParams.get("campaign_id") });
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: "campaign_id is required" }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+    const { campaign_id: campaignId } = parsed.data;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

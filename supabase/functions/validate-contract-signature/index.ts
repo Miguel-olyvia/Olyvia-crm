@@ -1,5 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  token: z.string(),
+  signer_name: z.string().optional(),
+});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,9 +33,9 @@ const handler = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       const token = url.searchParams.get('token');
       
-      if (!token) {
+      if (!token || token.length < 10 || token.length > 500) {
         return new Response(
-          JSON.stringify({ error: 'Token is required' }),
+          JSON.stringify({ error: 'Token is required and must be between 10 and 500 characters' }),
           { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
         );
       }
@@ -170,14 +176,15 @@ const handler = async (req: Request): Promise<Response> => {
 
     if (req.method === 'POST') {
       // Process signature
-      const { token, signer_name }: SignatureRequest = await req.json();
-      
-      if (!token) {
+      const body = await req.json();
+      const parsed = requestSchema.safeParse(body);
+      if (!parsed.success) {
         return new Response(
-          JSON.stringify({ error: 'Token is required' }),
+          JSON.stringify({ error: 'Invalid request', details: parsed.error.issues }),
           { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
         );
       }
+      const { token, signer_name } = parsed.data;
 
       // Hash the token
       const encoder = new TextEncoder();

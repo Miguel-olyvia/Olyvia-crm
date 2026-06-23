@@ -1,4 +1,17 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  form_id: z.string(),
+  step_number: z.number().optional(),
+  slot_start: z.string().refine(val => !isNaN(Date.parse(val)), { message: "Invalid datetime" }),
+  slot_end: z.string().refine(val => !isNaN(Date.parse(val)), { message: "Invalid datetime" }),
+  postal_code: z.string().optional(),
+  field_values: z.record(z.unknown()),
+  campaign_id: z.string().optional(),
+  source_id: z.string().optional(),
+  lead_id: z.string().optional(),
+});
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,6 +44,13 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid request', details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
     const {
       form_id,
       step_number,
@@ -41,22 +61,7 @@ Deno.serve(async (req: Request) => {
       campaign_id,
       source_id,
       lead_id,
-    } = body;
-
-    // Validate required fields
-    if (!form_id || !slot_start || !slot_end) {
-      return new Response(
-        JSON.stringify({ error: 'form_id, slot_start, and slot_end are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    if (!field_values || typeof field_values !== 'object') {
-      return new Response(
-        JSON.stringify({ error: 'field_values is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    } = parsed.data;
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;

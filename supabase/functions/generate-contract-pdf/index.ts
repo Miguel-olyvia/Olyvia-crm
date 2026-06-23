@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { z } from "npm:zod";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +11,11 @@ interface GeneratePDFRequest {
   contract_id: string;
   version_id?: string;
 }
+
+const requestSchema = z.object({
+  contract_id: z.string().uuid(),
+  version_id: z.string().uuid().optional(),
+});
 
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === 'OPTIONS') {
@@ -46,14 +52,15 @@ const handler = async (req: Request): Promise<Response> => {
       callerAnewUserId = anewUser?.id;
     }
 
-    const { contract_id }: GeneratePDFRequest = await req.json();
-
-    if (!contract_id) {
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
       return new Response(
-        JSON.stringify({ error: 'Contract ID is required' }),
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
         { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders } }
       );
     }
+    const { contract_id } = parsed.data;
 
     // Fetch contract with parties (versions/clauses tables removed — were always empty)
     const { data: contract, error: contractError } = await supabase

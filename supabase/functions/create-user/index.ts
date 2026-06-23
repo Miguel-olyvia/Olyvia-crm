@@ -1,5 +1,27 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "npm:zod";
+
+const requestSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+  full_name: z.string().optional(),
+  name: z.string().optional(),
+  phone: z.string().optional(),
+  memberships: z.array(z.unknown()).optional(),
+  membership: z.unknown().optional(),
+  template_id: z.string().optional(),
+  custom_attributes: z.record(z.unknown()).optional(),
+  position: z.string().optional(),
+  location: z.string().optional(),
+  description: z.string().optional(),
+  nif: z.string().optional(),
+  nif_country: z.string().optional(),
+  fiscal: z.record(z.unknown()).optional(),
+  addresses: z.array(z.unknown()).optional(),
+  additional_emails: z.array(z.string()).optional(),
+  additional_phones: z.array(z.unknown()).optional(),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -248,6 +270,13 @@ serve(async (req: Request) => {
 
     // Parse request body - supports both legacy and new formats
     const body = await req.json();
+    const parsedBody = requestSchema.safeParse(body);
+    if (!parsedBody.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedBody.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
     const {
       email,
       password,
@@ -267,11 +296,11 @@ serve(async (req: Request) => {
       addresses,
       additional_emails,
       additional_phones,
-    } = body;
+    } = parsedBody.data;
 
     const userName = name || full_name;
 
-    if (!email || !password || !userName) {
+    if (!userName) {
       return new Response(JSON.stringify({ error: "Email, password and name are required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

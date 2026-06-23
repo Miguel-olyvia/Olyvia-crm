@@ -1,11 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { z } from "npm:zod";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const requestSchema = z.object({
+  query: z.string(),
+  company_id: z.string().optional(),
+  organization_id: z.string().optional(),
+});
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -25,7 +32,15 @@ serve(async (req) => {
     // Auth: resolve caller identity
     const caller = await resolveCallerIdentity(req, supabase);
 
-    const { query, company_id, organization_id: org_id } = await req.json();
+    const body = await req.json();
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { query, company_id, organization_id: org_id } = parsed.data;
     const effective_org_id = org_id || company_id;
 
     // Scope check: caller must belong to the organization

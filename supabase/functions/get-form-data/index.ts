@@ -1,4 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+
+const querySchema = z.object({
+  form_id: z.string().uuid().optional(),
+  campaign_id: z.string().uuid().optional(),
+  lang: z.string().max(10).optional(),
+}).refine((data) => data.form_id || data.campaign_id, {
+  message: "form_id or campaign_id is required",
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,9 +32,20 @@ Deno.serve(async (req: Request) => {
 
   try {
     const url = new URL(req.url);
-    const formId = url.searchParams.get("form_id");
-    const campaignId = url.searchParams.get("campaign_id");
-    const requestedLang = (url.searchParams.get("lang") || "").toLowerCase().trim() || null;
+    const parsedQuery = querySchema.safeParse({
+      form_id: url.searchParams.get("form_id") || undefined,
+      campaign_id: url.searchParams.get("campaign_id") || undefined,
+      lang: url.searchParams.get("lang") || undefined,
+    });
+    if (!parsedQuery.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsedQuery.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const formId = parsedQuery.data.form_id ?? null;
+    const campaignId = parsedQuery.data.campaign_id ?? null;
+    const requestedLang = (parsedQuery.data.lang || "").toLowerCase().trim() || null;
 
     // ----- i18n helpers -----
     type I18nNode = { default_locale?: string; enabled_locales?: string[]; content?: any } | null | undefined;
@@ -124,13 +144,6 @@ Deno.serve(async (req: Request) => {
       }
       return baseOptions;
     };
-
-    if (!formId && !campaignId) {
-      return new Response(
-        JSON.stringify({ error: "form_id or campaign_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

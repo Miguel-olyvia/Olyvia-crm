@@ -1,5 +1,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
+import { z } from "npm:zod";
 import { sanitizeTracking } from "../_shared/leadTracking.ts";
+
+const requestSchema = z.object({
+  lead_id: z.string().uuid(),
+  campaign_id: z.string().uuid(),
+  step_number: z.number().optional(),
+  field_values: z.record(z.unknown()),
+  from_chat_widget: z.boolean().optional(),
+  form_id: z.string().optional(),
+  tracking: z.record(z.unknown()).optional(),
+});
 import { normalizeFirstLast } from "../_shared/composeDisplayName.ts";
 import { runMarketingAttribution } from "../_shared/marketingAttribution.ts";
 import { sanitizeFieldValues } from "../_shared/inputSanitizers.ts";
@@ -90,31 +101,17 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { lead_id, campaign_id, step_number, field_values, from_chat_widget, form_id, tracking } = body;
+    const parsed = requestSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const { lead_id, campaign_id, step_number, field_values, from_chat_widget, form_id, tracking } = parsed.data;
 
     // Safe logging — no PII
     console.log("Received update-lead request:", JSON.stringify({ lead_id, campaign_id, step_number, from_chat_widget, field_count: Object.keys(field_values || {}).length }));
-
-    if (!lead_id) {
-      return new Response(
-        JSON.stringify({ error: "lead_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!campaign_id) {
-      return new Response(
-        JSON.stringify({ error: "campaign_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (!field_values || typeof field_values !== "object") {
-      return new Response(
-        JSON.stringify({ error: "field_values is required and must be an object" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
 
     // Validate field value sizes
     const fieldValidationError = validateFieldValues(field_values);

@@ -1,6 +1,11 @@
 // One-shot migration: contract_documents (+ contract-documents bucket)
 //                   -> documents       (+ documents bucket)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+
+// This function takes no input — schema is empty intentionally.
+// Body is not parsed; validation confirms no unexpected payload is required.
+const _noInputSchema = z.object({});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
