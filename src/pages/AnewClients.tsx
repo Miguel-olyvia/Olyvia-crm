@@ -1608,7 +1608,9 @@ const AnewClients = () => {
               }}><Mail className="w-3.5 h-3.5" />Enviar email</Button>
               <Button size="sm" variant="outline" className="h-8 gap-1.5"><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
               <Button size="sm" variant="outline" className="h-8 gap-1.5"><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><Download className="w-3.5 h-3.5" />Exportar</Button>
+              <PermissionGate permission="clients.export">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleExport}><Download className="w-3.5 h-3.5" />Exportar</Button>
+              </PermissionGate>
               <PermissionGate permission="clients.delete">
                 <Button size="sm" variant="destructive" className="h-8 gap-1.5" onClick={() => setBulkDeleteDialogOpen(true)}>
                   <Trash2 className="w-3.5 h-3.5" />Eliminar

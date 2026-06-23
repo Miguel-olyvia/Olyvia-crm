@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.80.0";
+import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 import { resolveCallerIdentity } from "../_shared/auth.ts";
 import {
@@ -8,6 +9,17 @@ import {
   type ExportDefinition,
   type ExportModule,
 } from "./exportConfig.ts";
+
+const exportRequestSchema = z.object({
+  module: z.string().min(1),
+  organizationId: z.string().uuid(),
+  includeSensitive: z.boolean().optional().default(false),
+  filters: z.object({
+    status: z.string().max(40).optional(),
+    dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  }).optional().default({}),
+});
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -452,7 +464,7 @@ async function exportQuotes(
     resolveIdentityMaps(
       admin,
       records.map((record: any) => record.entity_id),
-      false,
+      includeSensitive,
     ),
     admin
       .from("anew_organizations")
@@ -504,7 +516,15 @@ Deno.serve(async (req: Request) => {
     const caller = await resolveCallerIdentity(req, admin);
     if (caller.isServiceRole) return jsonResponse({ error: "User session required" }, 403);
 
-    const request = parseRequest(await req.json());
+    const rawBody = await req.json();
+    const zodParsed = exportRequestSchema.safeParse(rawBody);
+    if (!zodParsed.success) {
+      return jsonResponse({ error: "Invalid request", details: zodParsed.error.issues }, 400);
+    }
+    if (!isSupportedExportModule(zodParsed.data.module)) {
+      return jsonResponse({ error: "Invalid export request" }, 400);
+    }
+    const request = parseRequest(zodParsed.data);
     const definition = getExportDefinition(request.module);
 
     let auth: AuthorizationContext;
