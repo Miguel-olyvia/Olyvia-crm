@@ -9,6 +9,7 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { TopHeader } from "@/components/TopHeader";
 
 import { InternalChatWidget } from "@/components/chat/InternalChatWidget";
+import { SupportAccessBanner } from "@/components/platform/SupportAccessBanner";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -147,6 +148,9 @@ const LayoutContent = memo(function LayoutContent({
 
   return (
     <div className="min-h-screen w-full flex flex-col">
+      {/* Break-glass support access banner — only visible to sysadmin with active access */}
+      <SupportAccessBanner />
+
       {/* Top Header - Fixed */}
       <TopHeader userName={userName} userRole={displayRole} />
 

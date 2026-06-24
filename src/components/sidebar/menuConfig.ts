@@ -33,6 +33,7 @@ import {
   Mail,
   Trash2,
   FileDown,
+  ShieldAlert,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -210,6 +211,16 @@ export const menuSections: MenuSection[] = [
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
       { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
+    ],
+  },
+  {
+    id: "platform",
+    icon: ShieldAlert,
+    labelKey: "sidebar.platform",
+    paths: ["/platform/support-access"],
+    permissions: ["platform.support_access.view"],
+    items: [
+      { to: "/platform/support-access", icon: ShieldAlert, labelKey: "sidebar.supportAccess", permission: "platform.support_access.view" },
     ],
   },
 ];
