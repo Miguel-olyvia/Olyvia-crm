@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS public.support_access_log (
   CONSTRAINT support_access_log_expires_consistency CHECK (
     (status = 'approved' AND expires_at IS NOT NULL)
     OR status <> 'approved'
+  ),
+  -- Enforce at the storage layer that no one can approve their own request.
+  CONSTRAINT support_access_log_no_self_approval CHECK (
+    reviewed_by IS NULL OR reviewed_by <> admin_user_id
   )
 );
 
@@ -63,6 +67,13 @@ CREATE INDEX IF NOT EXISTS support_access_log_reviewed_by_idx
 CREATE INDEX IF NOT EXISTS support_access_log_active_session_idx
   ON public.support_access_log (admin_user_id, target_org_id, status)
   INCLUDE (expires_at);
+
+-- Partial unique index: once a row is decided (approved or rejected) it can
+-- never transition again — a second concurrent decision hits a unique violation
+-- rather than silently succeeding.
+CREATE UNIQUE INDEX IF NOT EXISTS support_access_log_one_decision_idx
+  ON public.support_access_log (id)
+  WHERE status IN ('approved', 'rejected');
 
 ALTER TABLE public.support_access_log ENABLE ROW LEVEL SECURITY;
 
