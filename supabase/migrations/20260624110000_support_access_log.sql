@@ -34,7 +34,18 @@ CREATE TABLE IF NOT EXISTS public.support_access_log (
   CONSTRAINT support_access_log_target_org_fk
     FOREIGN KEY (target_org_id) REFERENCES public.anew_organizations (id),
   CONSTRAINT support_access_log_reviewed_by_fk
-    FOREIGN KEY (reviewed_by) REFERENCES public.anew_users (id)
+    FOREIGN KEY (reviewed_by) REFERENCES public.anew_users (id),
+
+  -- Enforce audit-trail integrity: reviewed fields must be set iff decided.
+  CONSTRAINT support_access_log_review_consistency CHECK (
+    (status IN ('approved','rejected') AND reviewed_at IS NOT NULL AND reviewed_by IS NOT NULL)
+    OR status NOT IN ('approved','rejected')
+  ),
+  -- Enforce that approved sessions always have an expiry.
+  CONSTRAINT support_access_log_expires_consistency CHECK (
+    (status = 'approved' AND expires_at IS NOT NULL)
+    OR status <> 'approved'
+  )
 );
 
 -- Indexes on the main filter axes including reviewed_by for audit queries.
@@ -76,6 +87,9 @@ CREATE POLICY support_access_log_insert
       SELECT id FROM public.anew_users
       WHERE auth_user_id = (SELECT auth.uid())
     )
+    AND reviewed_at IS NULL
+    AND reviewed_by IS NULL
+    AND expires_at  IS NULL
   );
 
 -- Explicitly deny UPDATE and DELETE for authenticated users — append-only.
@@ -173,13 +187,6 @@ BEGIN
             NOT public.is_system_admin((SELECT auth.uid()))
             OR organization_id      IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
             OR root_organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
-            OR (
-              public.is_system_admin((SELECT auth.uid()))
-              AND (
-                public.has_active_support_access(organization_id)
-                OR public.has_active_support_access(root_organization_id)
-              )
-            )
           )
         $pol$,
         t
@@ -213,10 +220,6 @@ BEGIN
           WITH CHECK (
             NOT public.is_system_admin((SELECT auth.uid()))
             OR organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
-            OR (
-              public.is_system_admin((SELECT auth.uid()))
-              AND public.has_active_support_access(organization_id)
-            )
           )
         $pol$,
         t
@@ -245,10 +248,6 @@ BEGIN
       WITH CHECK (
         NOT public.is_system_admin((SELECT auth.uid()))
         OR root_organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
-        OR (
-          public.is_system_admin((SELECT auth.uid()))
-          AND public.has_active_support_access(root_organization_id)
-        )
       );
   END IF;
 END $$;
@@ -304,16 +303,6 @@ BEGIN
                   SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
                 )
             )
-            OR (
-              public.is_system_admin((SELECT auth.uid()))
-              AND EXISTS (
-                SELECT 1
-                FROM public.anew_entity_roles er
-                WHERE er.entity_id  = %1$I.entity_id
-                  AND er.deleted_at IS NULL
-                  AND public.has_active_support_access(er.organization_id)
-              )
-            )
           )
         $pol$,
         t
@@ -364,16 +353,6 @@ BEGIN
               SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
             )
         )
-        OR (
-          public.is_system_admin((SELECT auth.uid()))
-          AND EXISTS (
-            SELECT 1
-            FROM public.anew_entity_roles er
-            WHERE er.entity_id  = anew_entities.id
-              AND er.deleted_at IS NULL
-              AND public.has_active_support_access(er.organization_id)
-          )
-        )
       );
   END IF;
 END $$;
@@ -423,17 +402,6 @@ BEGIN
               SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
             )
         )
-        OR (
-          public.is_system_admin((SELECT auth.uid()))
-          AND EXISTS (
-            SELECT 1
-            FROM public.anew_entity_addresses ea
-            JOIN public.anew_entity_roles er ON er.entity_id = ea.entity_id
-            WHERE ea.address_id = anew_addresses.id
-              AND er.deleted_at IS NULL
-              AND public.has_active_support_access(er.organization_id)
-          )
-        )
       );
   END IF;
 END $$;
@@ -482,18 +450,6 @@ BEGIN
               OR cc.root_organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
             )
         )
-        OR (
-          public.is_system_admin((SELECT auth.uid()))
-          AND EXISTS (
-            SELECT 1
-            FROM public.client_contracts cc
-            WHERE cc.id = client_contract_parties.contract_id
-              AND (
-                public.has_active_support_access(cc.organization_id)
-                OR public.has_active_support_access(cc.root_organization_id)
-              )
-          )
-        )
       );
   END IF;
 END $$;
@@ -541,18 +497,6 @@ BEGIN
               p.organization_id      IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
               OR p.root_organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
             )
-        )
-        OR (
-          public.is_system_admin((SELECT auth.uid()))
-          AND EXISTS (
-            SELECT 1
-            FROM public.proposals p
-            WHERE p.id = proposal_items.proposal_id
-              AND (
-                public.has_active_support_access(p.organization_id)
-                OR public.has_active_support_access(p.root_organization_id)
-              )
-          )
         )
       );
   END IF;
@@ -605,18 +549,6 @@ BEGIN
                   q.organization_id      IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
                   OR q.root_organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
                 )
-            )
-            OR (
-              public.is_system_admin((SELECT auth.uid()))
-              AND EXISTS (
-                SELECT 1
-                FROM public.quotes q
-                WHERE q.id = %1$I.quote_id
-                  AND (
-                    public.has_active_support_access(q.organization_id)
-                    OR public.has_active_support_access(q.root_organization_id)
-                  )
-              )
             )
           )
         $pol$,

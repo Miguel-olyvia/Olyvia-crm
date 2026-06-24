@@ -74,7 +74,10 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    if (accessRequest.status !== "pending") {
+    // Revoke of an already-approved session is also allowed (action=rejected, status=approved)
+    const isRevokeOfApproved = action === "rejected" && accessRequest.status === "approved";
+
+    if (accessRequest.status !== "pending" && !isRevokeOfApproved) {
       return new Response(
         JSON.stringify({
           error: "Request is no longer pending",
@@ -84,34 +87,44 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    const targetOrgId: string = accessRequest.target_org_id;
-
-    // ── 4. Verify caller is super_admin of the target org ─────────────────────
-    const { data: roleRows } = await supabase
-      .from("anew_roles")
-      .select("id")
-      .eq("code", "super_admin");
-
-    const superAdminRoleIds = (roleRows || []).map((r: { id: string }) => r.id);
-
-    if (superAdminRoleIds.length === 0) {
-      throw new AuthError("super_admin role not configured", 500);
+    // Self-approval guard — requester cannot approve their own pending request.
+    // Revocation of one's own approved session is intentionally allowed.
+    if (!isRevokeOfApproved && caller.anewUserId === accessRequest.admin_user_id) {
+      throw new AuthError("The requester cannot approve their own support access request", 403);
     }
 
-    const { data: membership } = await supabase
-      .from("anew_memberships")
-      .select("id")
-      .eq("user_id", caller.anewUserId)
-      .eq("organization_id", targetOrgId)
-      .eq("status", "active")
-      .in("role_id", superAdminRoleIds)
-      .maybeSingle();
+    const targetOrgId: string = accessRequest.target_org_id;
+    // Requester may always revoke their own active session without super_admin role.
+    const isOwnRevoke = isRevokeOfApproved && caller.anewUserId === accessRequest.admin_user_id;
 
-    if (!membership) {
-      throw new AuthError(
-        "Only an active super_admin of this organisation can approve or reject support access",
-        403
-      );
+    // ── 4. Verify caller is super_admin of the target org (skip for own revoke) ─
+    if (!isOwnRevoke) {
+      const { data: roleRows } = await supabase
+        .from("anew_roles")
+        .select("id")
+        .eq("code", "super_admin");
+
+      const superAdminRoleIds = (roleRows || []).map((r: { id: string }) => r.id);
+
+      if (superAdminRoleIds.length === 0) {
+        throw new AuthError("super_admin role not configured", 500);
+      }
+
+      const { data: membership } = await supabase
+        .from("anew_memberships")
+        .select("id")
+        .eq("user_id", caller.anewUserId)
+        .eq("organization_id", targetOrgId)
+        .eq("status", "active")
+        .in("role_id", superAdminRoleIds)
+        .maybeSingle();
+
+      if (!membership) {
+        throw new AuthError(
+          "Only an active super_admin of this organisation can approve or reject support access",
+          403
+        );
+      }
     }
 
     // ── 5. Apply the decision using service-role client (table is append-only for authenticated) ──
@@ -133,22 +146,27 @@ serve(async (req: Request): Promise<Response> => {
             reviewed_by: caller.anewUserId,
           };
 
-    const { error: updateError } = await supabase
+    // Filter on current status to prevent phantom 200 on concurrent decisions.
+    const { data: updatedRows, error: updateError } = await supabase
       .from("support_access_log")
       .update(updatePayload)
       .eq("id", request_id)
-      .eq("status", "pending"); // guard against concurrent decisions
+      .eq("status", accessRequest.status)
+      .select("id");
 
     if (updateError) {
       console.error("[approve-support-access] update error:", updateError);
       throw new Error("Failed to record decision");
     }
 
-    // ── 6. Notify the requesting sysadmin of the outcome ──────────────────────
-    // ── 5b. Guard: requester cannot approve their own request ─────────────────
-    if (caller.anewUserId === accessRequest.admin_user_id) {
-      throw new AuthError("The requester cannot approve their own support access request", 403);
+    if (!updatedRows || updatedRows.length === 0) {
+      return new Response(
+        JSON.stringify({ error: "Request was already decided by another reviewer" }),
+        { status: 409, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
     }
+
+    // ── 6. Notify the requesting sysadmin of the outcome ──────────────────────
 
     const { data: requester } = await supabase
       .from("anew_users")
