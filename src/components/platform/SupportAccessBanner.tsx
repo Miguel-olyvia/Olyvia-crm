@@ -30,7 +30,7 @@ export function SupportAccessBanner() {
   const { isSystemAdmin } = usePermissions();
   const queryClient = useQueryClient();
 
-  const { data: activeAccess, refetch } = useQuery<ActiveAccessEntry | null>({
+  const { data: activeAccess } = useQuery<ActiveAccessEntry | null>({
     queryKey: ["support_access_active"],
     queryFn: async () => {
       const now = new Date().toISOString();
@@ -54,15 +54,6 @@ export function SupportAccessBanner() {
     enabled: isSystemAdmin,
     refetchInterval: 60_000,
   });
-
-  // Re-render every minute to keep the countdown accurate
-  useEffect(() => {
-    if (!activeAccess) return;
-    const timer = setInterval(() => {
-      refetch();
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [activeAccess, refetch]);
 
   const revokeMutation = useMutation({
     mutationFn: async (accessId: string) => {

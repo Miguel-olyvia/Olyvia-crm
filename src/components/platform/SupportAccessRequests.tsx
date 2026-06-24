@@ -170,7 +170,7 @@ function SysadminRequestsTable() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      {req.status === "approved" && (
+                      {req.status === "approved" && req.expires_at && new Date(req.expires_at) > new Date() && (
                         <Button
                           variant="outline"
                           size="sm"

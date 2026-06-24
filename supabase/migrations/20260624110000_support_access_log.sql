@@ -58,6 +58,12 @@ CREATE INDEX IF NOT EXISTS support_access_log_org_status_idx
 CREATE INDEX IF NOT EXISTS support_access_log_reviewed_by_idx
   ON public.support_access_log (reviewed_by);
 
+-- Covering index for has_active_support_access() hot path called per-row inside
+-- RESTRICTIVE USING clauses. Includes expires_at to enable index-only scans.
+CREATE INDEX IF NOT EXISTS support_access_log_active_session_idx
+  ON public.support_access_log (admin_user_id, target_org_id, status)
+  INCLUDE (expires_at);
+
 ALTER TABLE public.support_access_log ENABLE ROW LEVEL SECURITY;
 
 -- sysadmin can see all rows (platform-level oversight).
@@ -87,6 +93,7 @@ CREATE POLICY support_access_log_insert
       SELECT id FROM public.anew_users
       WHERE auth_user_id = (SELECT auth.uid())
     )
+    AND requested_at = now()
     AND reviewed_at IS NULL
     AND reviewed_by IS NULL
     AND expires_at  IS NULL
@@ -99,7 +106,8 @@ CREATE POLICY support_access_log_no_update
   AS RESTRICTIVE
   FOR UPDATE
   TO authenticated
-  USING (false);
+  USING (false)
+  WITH CHECK (false);
 
 CREATE POLICY support_access_log_no_delete
   ON public.support_access_log
@@ -120,7 +128,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = public
 AS $$
   SELECT EXISTS (
     SELECT 1
