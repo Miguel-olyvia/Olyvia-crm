@@ -439,15 +439,45 @@ export function AnewLeadContactDialog({
 
   const loadContactHistory = async () => {
     if (!lead) return;
-    
+
+    // Phase 4: contact history is now sourced exclusively from entity_interactions
+    // (the lead_contact_history dual-write was removed). Resolve the lead's entity
+    // first, since older leads may not carry entity_id on the in-memory object.
+    let entityId = lead.entity_id || null;
+    if (!entityId) {
+      const { data: leadData } = await supabase
+        .from("anew_leads")
+        .select("entity_id")
+        .eq("id", lead.id)
+        .maybeSingle();
+      entityId = leadData?.entity_id || null;
+    }
+
+    if (!entityId) {
+      setContactHistory([]);
+      return;
+    }
+
     const { data, error } = await supabase
-      .from("lead_contact_history")
+      .from("entity_interactions")
       .select("*")
-      .eq("lead_id", lead.id)
-      .order("contacted_at", { ascending: false });
+      .eq("entity_id", entityId)
+      .eq("interaction_type", "call")
+      .order("created_at", { ascending: false });
 
     if (!error && data) {
-      setContactHistory(data);
+      // Map entity_interactions rows onto the ContactHistory shape consumed by
+      // the history UI. callback_scheduled_at maps to the interaction's
+      // next_action_date (set when a callback is registered).
+      const mapped: ContactHistory[] = data.map((row: any) => ({
+        id: row.id,
+        contacted_by: row.created_by ?? "",
+        contacted_at: row.interaction_at ?? row.created_at,
+        result: row.result ?? "",
+        notes: row.notes ?? null,
+        callback_scheduled_at: row.next_action_date ?? null,
+      }));
+      setContactHistory(mapped);
       // L7: form de novo contacto arranca sempre vazio para evitar
       // submissão acidental de uma cópia do último contacto.
       // O histórico continua visível na secção própria do diálogo.
@@ -811,27 +841,9 @@ export function AnewLeadContactDialog({
       }
       let scheduledVisitId: string | null = lead.scheduled_visit_id || null;
 
-      // Insert contact history (organization_id = anew model)
-      const { error: historyError } = await supabase
-        .from("lead_contact_history")
-        .insert({
-          lead_id: lead.id,
-          organization_id: companyId,
-          contacted_by: userData?.user?.id,
-          result: contactResult,
-          notes: notes || null,
-          callback_scheduled_at: callbackDatetime
-        } as any);
-
-      if (historyError) {
-        const code = (historyError as any)?.code;
-        if (code === "23503") {
-          throw new Error("Erro de integridade: a lead ou organização não existe na base de dados.");
-        }
-        throw historyError;
-      }
-
-      // Dual-write to entity_interactions for timeline visibility
+      // Phase 4: single source of truth for contact history is entity_interactions.
+      // The legacy lead_contact_history dual-write was removed; historical rows are
+      // preserved in lead_contact_history_deprecated.
       let entityIdForTimeline = lead.entity_id || null;
       if (!entityIdForTimeline) {
         const { data: leadData } = await supabase
@@ -854,6 +866,11 @@ export function AnewLeadContactDialog({
             notes: notes || null,
             subject: "Contacto de lead",
             interaction_at: new Date().toISOString(),
+            // Phase 4: persist callback as the interaction's next action so the
+            // contact history (now sourced from entity_interactions) can render it.
+            ...(callbackDatetime
+              ? { next_action_type: "callback", next_action_date: callbackDatetime }
+              : {}),
             created_by: interactionCreatedBy,
             organization_id: companyId,
           });

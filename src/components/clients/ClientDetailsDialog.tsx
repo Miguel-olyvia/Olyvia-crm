@@ -50,6 +50,38 @@ interface ClientDetailsDialogProps {
   onClientUpdated?: () => void;
 }
 
+interface TimelineExtraEvent {
+  id: string;
+  type: string;
+  title: string;
+  description: string | null;
+  date: string;
+  actor: string | null;
+}
+
+// PT labels for audited field names surfaced in the unified timeline.
+const CLIENT_FIELD_LABELS: Record<string, string> = {
+  display_name: "nome",
+  first_name: "nome próprio",
+  last_name: "apelido",
+  status: "estado",
+  email: "email",
+  phone: "telefone",
+  phone_number: "telefone",
+  notes: "notas",
+  assigned_to: "responsável",
+  vat: "NIF",
+  type: "tipo",
+};
+
+const clientFieldLabel = (field: string): string =>
+  CLIENT_FIELD_LABELS[field] || field.replace(/_/g, " ");
+
+const CLIENT_AUDIT_IGNORED_FIELDS = new Set([
+  "id", "entity_id", "organization_id", "root_organization_id",
+  "created_at", "updated_at", "created_by", "search_text",
+]);
+
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
   probability?: number; created_at?: string; assigned_to?: string;
@@ -85,6 +117,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const { t } = useTranslation();
 
   const [interactions, setInteractions] = useState<any[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<TimelineExtraEvent[]>([]);
   const [portalSends, setPortalSends] = useState<any[]>([]);
   const [tags, setTags] = useState<{ id: string; tag: string; color: string | null }[]>([]);
   const [sourceLead, setSourceLead] = useState<any>(null);
@@ -254,6 +287,83 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         setPortalSends([]);
       }
 
+      // Lifecycle history + field-diff audit log for the unified timeline.
+      const [lifecycleRes, auditRes] = await Promise.all([
+        (supabase as any)
+          .from("anew_entity_history")
+          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at")
+          .eq("entity_id", entityId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        (supabase as any)
+          .from("entity_audit_log")
+          .select("id, table_name, operation, changed_fields, changed_by, created_at")
+          .eq("entity_id", entityId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+
+      // Resolve history/audit actors not already in the map.
+      const historyActorIds = [
+        ...(lifecycleRes.data || []).map((d: any) => d.changed_by),
+        ...(auditRes.data || []).map((d: any) => d.changed_by),
+      ].filter((id: string | null): id is string => !!id && !userMapLocal[id]);
+      const uniqueHistoryActorIds = [...new Set(historyActorIds)];
+      if (uniqueHistoryActorIds.length > 0) {
+        const { data: histUsers } = await supabase.from("anew_users").select("id, name").in("id", uniqueHistoryActorIds);
+        (histUsers || []).forEach((u: any) => { if (u.name) userMapLocal[u.id] = u.name; });
+      }
+
+      const lifecycleEvents: TimelineExtraEvent[] = (lifecycleRes.data || []).map((d: any) => {
+        const isCreated = d.change_type === "created";
+        const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
+        const type = isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
+
+        let title: string;
+        let description: string | null = null;
+        if (isCreated) {
+          title = "Entidade criada";
+        } else if (isRoleStatus) {
+          title = "Estado do ciclo de vida alterado";
+          description = d.old_value && d.new_value ? `${d.old_value} → ${d.new_value}` : (d.new_value || null);
+        } else {
+          title = `Editou ${d.field_name ? clientFieldLabel(d.field_name) : "campo"}`;
+          description = d.old_value || d.new_value ? `${d.old_value ?? "—"} → ${d.new_value ?? "—"}` : null;
+        }
+
+        return {
+          id: `lifecycle-${d.id}`,
+          type,
+          title,
+          description,
+          date: d.created_at,
+          actor: d.changed_by ? (userMapLocal[d.changed_by] || null) : null,
+        };
+      });
+
+      const auditEvents: TimelineExtraEvent[] = [];
+      for (const row of (auditRes.data || []) as any[]) {
+        const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
+        if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
+          Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
+            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))
+            .forEach(([field, diff], idx) => {
+              const oldVal = diff?.old == null ? "—" : String(diff.old);
+              const newVal = diff?.new == null ? "—" : String(diff.new);
+              auditEvents.push({
+                id: `audit-${row.id}-${idx}`,
+                type: "field_change",
+                title: `Editou ${clientFieldLabel(field)}`,
+                description: `${oldVal} → ${newVal}`,
+                date: row.created_at,
+                actor,
+              });
+            });
+        }
+      }
+
+      setHistoryEvents([...lifecycleEvents, ...auditEvents]);
+
       setUserMap(userMapLocal);
     } catch (e) {
       console.error("Error loading enriched data:", e);
@@ -348,7 +458,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         actor: s.actorId ? (userMap[s.actorId] || null) : null,
       });
     });
-    if (client?.created_at) {
+    // Lifecycle + field-diff history from anew_entity_history / entity_audit_log.
+    historyEvents.forEach(h => events.push({ ...h, sentiment: null }));
+    // Synthetic "converted to client" event — only when the entity history has no
+    // creation/lifecycle row already, to avoid duplicate creation entries.
+    const hasLifecycleCreation = historyEvents.some(h => h.id.startsWith("lifecycle-") && h.type === "conversion");
+    if (client?.created_at && !hasLifecycleCreation) {
       events.push({
         id: "client-created", type: "conversion",
         title: "Convertido para Cliente",
@@ -356,9 +471,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         date: client.client_since || client.created_at, actor: null,
       });
     }
-    events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return events;
-  }, [interactions, sendEvents, client, sourceLead, userMap]);
+    // Dedupe field-diff events recorded by both anew_entity_history and entity_audit_log.
+    const seenFieldChanges = new Set<string>();
+    const deduped = events.filter((e) => {
+      if (e.type !== "field_change") return true;
+      const minute = new Date(e.date).toISOString().slice(0, 16);
+      const key = `${e.title}|${e.description ?? ""}|${minute}`;
+      if (seenFieldChanges.has(key)) return false;
+      seenFieldChanges.add(key);
+      return true;
+    });
+    deduped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return deduped;
+  }, [interactions, sendEvents, client, sourceLead, userMap, historyEvents]);
 
   const interactionCount30d = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() - 30);
@@ -832,7 +957,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 <TabsList className="inline-flex w-auto min-w-full">
                   <TabsTrigger value="summary">📊 Resumo</TabsTrigger>
                   <TabsTrigger value="timeline">
-                    📜 Timeline {interactions.length > 0 && <Badge className="ml-1" variant="secondary">{interactions.length}</Badge>}
+                    📜 Timeline {timelineEvents.length > 0 && <Badge className="ml-1" variant="secondary">{timelineEvents.length}</Badge>}
                   </TabsTrigger>
                   <TabsTrigger value="contracts">
                     📑 Contratos {activeContractCount > 0 && <Badge className="ml-1" variant="secondary">{activeContractCount}</Badge>}
@@ -865,7 +990,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* TIMELINE */}
               <TabsContent value="timeline">
-                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} />
+                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} entityId={client?.entity_id} />
               </TabsContent>
 
               {/* CONTRACTS */}

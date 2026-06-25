@@ -2,6 +2,12 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
+import { syncEntityPrimaryAddressFromLead } from "../_shared/addressSanitization.ts";
+import {
+  getWorkflowPermissionForSourceEntity,
+  resolveWorkflowOrganizationFromRecord,
+} from "../_shared/leadsValidation.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const requestSchema = z.object({
   source_entity: z.string(),
@@ -11,13 +17,6 @@ const requestSchema = z.object({
   organization_id: z.string().optional(),
   triggered_by: z.string().optional(),
 });
-import { syncEntityPrimaryAddressFromLead } from "../_shared/addressSanitization.ts";
-import {
-  getWorkflowPermissionForSourceEntity,
-  resolveWorkflowOrganizationFromRecord,
-} from "../_shared/leadsValidation.ts";
-
-import { corsHeaders } from "../_shared/cors.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -35,6 +34,16 @@ serve(async (req) => {
       caller = await resolveCallerIdentity(req, supabase);
     } catch (e) {
       return authErrorResponse(e, corsHeaders);
+    }
+
+    // ── Audit context: tag all subsequent writes as workflow-sourced ──
+    // Must run before any write so the F1 audit trigger attributes correctly.
+    const { error: auditCtxError } = await supabase.rpc("set_audit_context", {
+      p_user_id: caller.anewUserId,
+      p_source: "workflow",
+    });
+    if (auditCtxError) {
+      console.error("set_audit_context failed:", auditCtxError.message);
     }
 
     const body = await req.json();
@@ -129,7 +138,7 @@ serve(async (req) => {
 
       if (permissionError || aliasPermissionError || (!hasPermission && !hasAliasPermission)) {
         return new Response(
-          JSON.stringify({ error: `Sem permissÃ£o funcional para ${source_entity}` }),
+          JSON.stringify({ error: `Sem permissão funcional para ${source_entity}` }),
           { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
         );
       }

@@ -1035,7 +1035,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
 
               {/* TAB: TIMELINE (enhanced, replaces old history) */}
               <TabsContent value="timeline">
-                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} />
+                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} contactId={contactId} entityId={contact?.entity_id} />
               </TabsContent>
 
               {/* TAB: SCORING (new) */}
