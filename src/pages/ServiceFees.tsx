@@ -106,7 +106,8 @@ export default function ServiceFees() {
     if (isSystemAdmin) {
       fetchAllCompanies();
     }
-  }, [isSystemAdmin, userCompanies, activeCompany?.id]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSystemAdmin, activeCompany?.id]);
 
   // Load services when company changes
   useEffect(() => {
@@ -119,10 +120,14 @@ export default function ServiceFees() {
   }, [formData.organization_id]);
 
   const fetchAllCompanies = async () => {
+    if (!activeCompany?.id) return;
     try {
-      const { data, error } = await (supabase as any)
+      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
+      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
+      const { data, error } = await supabase
         .from("anew_organizations")
         .select("id, name")
+        .in("id", subtreeIds)
         .order("name");
 
       if (error) throw error;
@@ -304,7 +309,8 @@ export default function ServiceFees() {
             ...payload,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", editingId);
+          .eq("id", editingId)
+          .eq("organization_id", companyIdToUse);
 
         if (error) throw error;
 
@@ -352,10 +358,17 @@ export default function ServiceFees() {
     if (!deleteId) return;
 
     try {
+      const feeType = feeTypes.find((f) => f.id === deleteId);
+      if (!feeType) {
+        toast({ title: t('serviceFees.toast.deleteError'), description: "Fee type not found.", variant: "destructive" });
+        return;
+      }
+
       const { error } = await supabase
         .from("service_fee_types")
         .delete()
-        .eq("id", deleteId);
+        .eq("id", deleteId)
+        .eq("organization_id", feeType.organization_id ?? "");
 
       if (error) throw error;
 
@@ -474,6 +487,7 @@ export default function ServiceFees() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleEdit(fee)}
+                          aria-label={t('serviceFees.actions.edit')}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -481,6 +495,7 @@ export default function ServiceFees() {
                           variant="ghost"
                           size="icon"
                           onClick={() => setDeleteId(fee.id)}
+                          aria-label={t('serviceFees.actions.delete')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

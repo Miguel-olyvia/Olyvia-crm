@@ -18,7 +18,7 @@ import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDistanceToNow, differenceInDays, format } from "date-fns";
+import { formatDistanceToNow, differenceInDays, format, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ClientDetailsDialog } from "@/components/clients/ClientDetailsDialog";
@@ -117,7 +117,7 @@ const AnewClients = () => {
 
   const [assignedUserMap, setAssignedUserMap] = useState<Map<string, string>>(new Map());
   const [showEmailDialog, setShowEmailDialog] = useState(false);
-  const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string; pdfAttachment?: any }>({ id: "", name: "", email: "" });
+  const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string; pdfAttachment?: { name: string; content: string; mimeType: string } | Blob | File | null }>({ id: "", name: "", email: "" });
   const [showCallDialog, setShowCallDialog] = useState(false);
   const [callTarget, setCallTarget] = useState<{ entityId: string; name: string; phone: string; clientId: string }>({ entityId: "", name: "", phone: "", clientId: "" });
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
@@ -443,11 +443,11 @@ const AnewClients = () => {
       newParams.delete("_t");
       setSearchParams(newParams, { replace: true });
     }
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
-  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading]);
+  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
 
   useEffect(() => {
     const openId = searchParams.get("open");
@@ -461,15 +461,18 @@ const AnewClients = () => {
         return;
       }
 
+      if (!activeCompany?.id) return;
+
       let fetchedClient: ClientRecord | null = null;
       const { data: byId } = await (supabase as any)
         .from("anew_clients")
         .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
         .eq("id", openId)
+        .eq("organization_id", activeCompany.id)
         .maybeSingle();
       fetchedClient = byId as ClientRecord | null;
 
-      if (!fetchedClient && activeCompany?.id) {
+      if (!fetchedClient) {
         const { data: byEntityInActiveOrg } = await (supabase as any)
           .from("anew_clients")
           .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
@@ -486,15 +489,15 @@ const AnewClients = () => {
     };
 
     void openFromQuery();
-  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities]);
+  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
 
-  const loadClients = async (offset: number, isInitial: boolean = false, silent: boolean = false) => {
+  const loadClients = useCallback(async (offset: number, isInitial: boolean = false, silent: boolean = false) => {
     const shouldShowInitialLoader = isInitial && !silent;
     if (shouldShowInitialLoader) setLoading(true);
     else if (!isInitial) setLoadingMore(true);
     try {
       const viewScope = getPermissionScope("clients.view");
-      let internalUserId: string | null = scopeAnewUserId || null;
+      const internalUserId: string | null = scopeAnewUserId || null;
 
       let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
@@ -598,7 +601,7 @@ const AnewClients = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [getPermissionScope, scopeAnewUserId, companyFilter, scopeOrgIds, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
 
   const loadMoreClients = () => { if (!loadingMore && hasMore) loadClients(clients.length); };
 
@@ -607,7 +610,7 @@ const AnewClients = () => {
     try {
       const viewScope = getPermissionScope("clients.view");
       if (viewScope === "NONE") { setAllClients([]); setAllClientsLoaded(true); return; }
-      let internalUserId: string | null = scopeAnewUserId || null;
+      const internalUserId: string | null = scopeAnewUserId || null;
 
       // Server-side search: pre-resolve matching entity_ids (covers full universe, not just first batch)
       let searchEntityIdsList: string[] | null = null;
@@ -712,7 +715,7 @@ const AnewClients = () => {
       if (timer) window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [scopeLoading, isParentOrg, scopeOrgIds, activeCompany?.id, loadAllClients]);
+  }, [scopeLoading, isParentOrg, scopeOrgIds, activeCompany?.id, loadClients, loadAllClients]);
 
   // Realtime: contracts / interactions — bump dashboardKey to force enriched data re-fetch
   useEffect(() => {
@@ -791,13 +794,21 @@ const AnewClients = () => {
   };
 
   const toggleSelectAll = () => { selectedIds.size === displayClients.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(displayClients.map(c => c.id))); };
-  const toggleSelectOne = (id: string) => { const s = new Set(selectedIds); s.has(id) ? s.delete(id) : s.add(id); setSelectedIds(s); };
+  const toggleSelectOne = (id: string) => {
+    if (selectedIds.has(id)) {
+      const next = new Set(selectedIds);
+      next.delete(id);
+      setSelectedIds(next);
+    } else {
+      setSelectedIds(new Set([...selectedIds, id]));
+    }
+  };
 
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0) return;
     try {
       const ids = Array.from(selectedIds);
-      const { error } = await (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids);
+      const { error } = await (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids).eq("organization_id", activeCompany?.id);
       if (error) throw error;
       // Sync entity roles for status changes to/from inactive
       const targetClients = clients.filter(c => selectedIds.has(c.id));
@@ -849,9 +860,7 @@ const AnewClients = () => {
       phone_country_code: companyFormData.phone_country_code, vat: companyFormData.vat, position: "", status: companyFormData.status,
     };
     const schema = clientType === "company" ? contactCompanySchema : contactSchema;
-    console.log('[DEBUG] clientType:', clientType, 'dataToValidate:', JSON.stringify(dataToValidate));
     const validation = schema.safeParse(dataToValidate);
-    console.log('[DEBUG] validation result:', validation.success, validation.success ? 'OK' : JSON.stringify(validation.error.errors));
     if (!validation.success) {
       const errors: Record<string, string> = {};
       validation.error.errors.forEach(err => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
@@ -896,8 +905,9 @@ const AnewClients = () => {
       } else {
         await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
       }
+      if (!entityId) throw new Error('Falha ao criar entidade');
       try {
-        await ensureEntityOrgLink({ entityId: entityId!, organizationId, isPrimary: false });
+        await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
       } catch (e) { console.warn('[org-link] non-fatal', e); }
 
       const status = clientType === "person" ? formData.status : companyFormData.status;
@@ -1039,7 +1049,7 @@ const AnewClients = () => {
         setDetailsOpen(true);
       } else {
         (async () => {
-          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).single();
+          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
           if (data) {
             setSelectedClient(data);
             setDetailsOpen(true);
@@ -1064,7 +1074,7 @@ const AnewClients = () => {
       .limit(1)
       .maybeSingle();
     if (clientRow?.id) {
-      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id);
+      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
     }
     await supabase.from("anew_entity_roles").update({ status: "inactive" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "contact").eq("organization_id", pendingClientData.organizationId);
     await supabase.from("anew_entity_roles").update({ status: "active" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
@@ -1088,7 +1098,7 @@ const AnewClients = () => {
     }
     setSavingClient(true);
     try {
-      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id);
+      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
       await supabase.from("anew_entity_roles").update({ status: pendingClientData.status } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
       toast({ title: "Cliente atualizado", description: `Os dados do cliente "${match.displayName}" foram atualizados.` });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
@@ -1265,6 +1275,14 @@ const AnewClients = () => {
     else { setSortColumn(col); setSortDir("desc"); }
   };
 
+  // Stable ref callback for the scroll container: auto-loads more when content fits on large screens.
+  // Using useCallback avoids React StrictMode calling the inline function twice (null + element).
+  const scrollContainerRef = useCallback((el: HTMLDivElement | null) => {
+    if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
+      loadMoreClients();
+    }
+  }, [hasMore, loadingMore, loadMoreClients]);
+
   if (loading) {
     return (
       <>
@@ -1307,6 +1325,7 @@ const AnewClients = () => {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
                 .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
 
@@ -1335,8 +1354,8 @@ const AnewClients = () => {
             if (alert.action_type === "call_now") {
               const identity = getIdentity(found.entity_id);
               if (identity?.phone) {
-                const phoneNumber = `${identity.phone_country_code || '+351'}${identity.phone}`.replace(/\s/g, '');
-                const a = document.createElement("a"); a.href = `tel:${phoneNumber}`; a.click();
+                const phoneNumber = `${(identity.phone_country_code || '+351').replace(/\s/g, '')}${identity.phone.replace(/\s/g, '')}`;
+                window.location.href = `tel:${phoneNumber}`;
               }
             }
 
@@ -1354,6 +1373,7 @@ const AnewClients = () => {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
                 .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
 
@@ -1452,10 +1472,10 @@ const AnewClients = () => {
         {/* Dashboard View */}
         {activeView === "dashboard" && (
           <ClientsDashboardView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
             loading={enrichLoading && !allClientsLoaded}
           />
@@ -1464,12 +1484,12 @@ const AnewClients = () => {
         {/* Value View */}
         {activeView === "value" && (
           <ClientsValueView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             scopeOrgIds={scopeOrgIds}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
@@ -1482,12 +1502,12 @@ const AnewClients = () => {
         {/* Retention View */}
         {activeView === "retention" && (
           <ClientsRetentionView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
             scopeOrgIds={scopeOrgIds}
             onOpenClient={(entityId) => {
@@ -1636,12 +1656,7 @@ const AnewClients = () => {
           <>
             <Card className="flex flex-col" style={{ maxHeight: 'calc(100vh - 380px)', minHeight: '400px' }}>
               <div
-                ref={(el) => {
-                  // Auto-load more if content fits without scroll (large screens)
-                  if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
-                    loadMoreClients();
-                  }
-                }}
+                ref={scrollContainerRef}
                 className="flex-1 min-h-0 overflow-auto leads-table-scroll"
                 onScroll={(e) => {
                   const el = e.currentTarget;
@@ -1696,14 +1711,19 @@ const AnewClients = () => {
                             {health && <ClientHealthBadge health={health} size="sm" />}
                           </TableCell>
                           <TableCell>
-                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                            <div
+                              role="img"
+                              aria-label={identity?.display_name || 'Cliente'}
+                              className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${
                               health && health.level === 'excellent' ? 'bg-green-100 text-green-700 dark:bg-green-900/30' :
                               health && health.level === 'good' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30' :
                               health && health.level === 'at_risk' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30' :
                               health && health.level === 'critical' ? 'bg-red-100 text-red-700 dark:bg-red-900/30' :
                               'bg-primary/10 text-primary'
                             }`}>
-                              {(identity?.display_name || '??').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                              <span aria-hidden="true">
+                                {(identity?.display_name || '??').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                              </span>
                             </div>
                           </TableCell>
                           <TableCell>
@@ -1789,8 +1809,13 @@ const AnewClients = () => {
                           </TableCell>
                           <TableCell>
                             {sentimentEmoji ? (
-                              <TooltipProvider><Tooltip><TooltipTrigger>
-                                <span className="text-lg">{sentimentEmoji}</span>
+                              <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                                <span
+                                  role="img"
+                                  aria-label={interactionMap.get(client.entity_id)?.lastSentiment === 'positive' ? 'Sentimento positivo' : interactionMap.get(client.entity_id)?.lastSentiment === 'negative' ? 'Sentimento negativo' : 'Sentimento neutro'}
+                                  className="text-lg cursor-default"
+                                  tabIndex={0}
+                                >{sentimentEmoji}</span>
                               </TooltipTrigger><TooltipContent>
                                 {interactionMap.get(client.entity_id)?.lastSentiment === 'positive' ? 'Positivo' :
                                  interactionMap.get(client.entity_id)?.lastSentiment === 'negative' ? 'Negativo' : 'Neutro'}
@@ -1798,7 +1823,7 @@ const AnewClients = () => {
                             ) : <span className="text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell>
-                            <span className="text-xs text-muted-foreground">{format(new Date(client.created_at), 'dd/MM/yyyy')}</span>
+                            <span className="text-xs text-muted-foreground">{(() => { const d = new Date(client.created_at); return isValid(d) ? format(d, 'dd/MM/yyyy') : '—'; })()}</span>
                           </TableCell>
                           <TableCell>
                             <Badge className={statusDisplay.className}>{statusDisplay.label}</Badge>
@@ -1835,7 +1860,7 @@ const AnewClients = () => {
                                         const ph = identity?.phone;
                                         const cc = identity?.phone_country_code || "+351";
                                         if (ph) {
-                                           const a = document.createElement("a"); a.href = `tel:${cc}${ph}`.replace(/\s/g, ""); a.click();
+                                           window.location.href = `tel:${cc.replace(/\s/g, "")}${ph.replace(/\s/g, "")}`;
                                            setTimeout(() => { setCallTarget({ entityId: client.entity_id, name: identity?.display_name || "", phone: ph, clientId: client.id }); setShowCallDialog(true); }, 600);
                                         }
                                       }}
@@ -1873,7 +1898,7 @@ const AnewClients = () => {
                                       const ph = identity?.phone;
                                       const cc = identity?.phone_country_code || "+351";
                                       if (ph) {
-                                         const a = document.createElement("a"); a.href = `tel:${cc}${ph}`.replace(/\s/g, ""); a.click();
+                                         window.location.href = `tel:${cc.replace(/\s/g, "")}${ph.replace(/\s/g, "")}`;
                                          setTimeout(() => { setCallTarget({ entityId: client.entity_id, name: identity?.display_name || "", phone: ph, clientId: client.id }); setShowCallDialog(true); }, 600);
                                       }
                                     }}

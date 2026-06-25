@@ -1220,7 +1220,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
     });
     
     // Fetch attribute pricing info and ranges
-    let attributePricingInfo: Record<string, { pricing_type: string; price_per_unit: number; ranges: any[] }> = {};
+    const attributePricingInfo: Record<string, { pricing_type: string; price_per_unit: number; ranges: any[] }> = {};
     
     if (attrIdsToCheck.length > 0) {
       const { data: attrData } = await supabase

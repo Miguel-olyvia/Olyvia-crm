@@ -172,7 +172,7 @@ export function ProposalPortalDocument({
   useEffect(() => {
     setSelectedQuoteIds(new Set(quotes.map(q => q.id)));
     setSelectedSectionKeys(new Set(allSections.map(s => s.key)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [quotes, allSections]);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -60,28 +60,38 @@ export default function ProposalTemplates() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
-  const [filterCompany, setFilterCompany] = useState<string>("all");
+  const [filterCompany, setFilterCompany] = useState<string>(() => activeCompany?.id ?? "all");
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Keep filterCompany in sync with the active company.
   useEffect(() => {
     if (activeCompany?.id) {
       setFilterCompany(activeCompany.id);
     }
-  }, [activeCompany]);
+  }, [activeCompany?.id]);
 
-  useEffect(() => {
-    fetchTemplates();
-  }, [filterCompany]);
+  // Memoised fetch so the dep array of the effect below is stable across re-renders.
+  const fetchTemplates = useCallback(async () => {
+    // Never fetch without a known filter target — avoids cross-org data leak on
+    // the initial render before activeCompany has resolved.
+    const orgId = activeCompany?.id;
+    if (!orgId) return;
 
-  const fetchTemplates = async () => {
+    setLoading(true);
     try {
       let query = supabase.from("proposal_templates").select("*").order("name") as any;
       if (filterCompany !== "all") {
         query = query.eq("organization_id", filterCompany);
       } else {
-        // restrict to companies the user has access to
+        // Restrict to companies the user belongs to.
         const ids = companies.map(c => c.id);
-        if (ids.length > 0) query = query.in("organization_id", ids);
+        if (ids.length === 0) {
+          // companies not yet resolved — bail out; the effect will re-run once
+          // companies is populated (it is a dep below).
+          setLoading(false);
+          return;
+        }
+        query = query.in("organization_id", ids);
       }
       const { data, error } = await query;
       if (error) throw error;
@@ -91,14 +101,19 @@ export default function ProposalTemplates() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany?.id, filterCompany, companies, toast]);
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
 
 
 
   const handleDelete = async () => {
     if (!deletingId) return;
+    if (!activeCompany?.id) return;
     try {
-      const { error } = await supabase.from("proposal_templates").delete().eq("id", deletingId);
+      const { error } = await supabase.from("proposal_templates").delete().eq("id", deletingId).eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({ title: "Template eliminado" });
       fetchTemplates();

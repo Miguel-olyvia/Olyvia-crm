@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
+import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, FolderTree, Pencil, Trash2, Tag } from "lucide-react";
 import CategoryAttributePricesDialog from "@/components/CategoryAttributePricesDialog";
@@ -116,7 +117,7 @@ export default function ProductCategories() {
     loadTenantCompanies();
   }, [filterTenantId]);
 
-  const loadData = async (reset = true) => {
+  const loadData = useCallback(async (reset = true) => {
     try {
       if (reset) {
         setLoading(true);
@@ -137,7 +138,7 @@ export default function ProductCategories() {
         .range(from, to);
 
 
-      // Filter by company using product_category_companies junction table
+      // Filter by company using product_category_organizations junction table
       // ALWAYS filter by activeCompany first, then apply additional filters
       let categoryIdsToFilter: string[] = [];
 
@@ -147,7 +148,7 @@ export default function ProductCategories() {
           .from("product_category_organizations")
           .select("category_id")
           .eq("organization_id", filterCompanyId);
-        categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+        categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
       } else if (filterTenantId && filterTenantId !== "all") {
         // Organization selected - filter by all companies in that org
         if (tenantCompanyIds.length > 0) {
@@ -155,7 +156,7 @@ export default function ProductCategories() {
             .from("product_category_organizations")
             .select("category_id")
             .in("organization_id", tenantCompanyIds);
-          categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+          categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
         }
       } else if (activeCompany?.id) {
         // ALWAYS filter by activeCompany - this applies to ALL users including admins
@@ -163,7 +164,7 @@ export default function ProductCategories() {
           .from("product_category_organizations")
           .select("category_id")
           .eq("organization_id", activeCompany.id);
-        categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+        categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
       }
 
       // Apply category ID filter
@@ -187,15 +188,15 @@ export default function ProductCategories() {
       const { data, error } = await query;
 
       if (error) throw error;
-      
+
       const newData = (data || []) as unknown as ProductCategory[];
-      
+
       if (reset) {
         setCategories(newData);
       } else {
         setCategories(prev => [...prev, ...newData]);
       }
-      
+
       setHasMore(newData.length === PAGE_SIZE);
     } catch (error: any) {
       toast({
@@ -207,7 +208,7 @@ export default function ProductCategories() {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [activeCompany?.id, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm, page, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
@@ -230,14 +231,16 @@ export default function ProductCategories() {
     if (businessAreaId) {
       loadBusinessAreaName();
     }
-  }, [businessAreaId, activeCompany?.id, userType, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm]);
+    // userType intentionally excluded: it is not read inside loadData and
+    // does not affect the query. Adding it would cause spurious reloads.
+  }, [loadData, businessAreaId]);
 
   // Load more on page change
   useEffect(() => {
     if (page > 0) {
       loadData(false);
     }
-  }, [page]);
+  }, [page, loadData]);
 
   // Infinite scroll observer
   const loadMore = useCallback(() => {
@@ -328,14 +331,15 @@ export default function ProductCategories() {
       const primaryOrgId = uniqueCompanyIds[0] || null;
 
       if (editingCategory) {
+        const updatePayload: TablesUpdate<"product_categories"> = {
+          name: formData.name,
+          description: formData.description || null,
+          sort_order: formData.sort_order,
+          organization_id: primaryOrgId,
+        };
         const { error } = await supabase
           .from("product_categories")
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            sort_order: formData.sort_order,
-            organization_id: primaryOrgId,
-          } as any)
+          .update(updatePayload)
           .eq("id", editingCategory.id);
 
         if (error) throw error;
@@ -351,20 +355,20 @@ export default function ProductCategories() {
           title: t('productCategories.toast.updateSuccess'),
         });
       } else {
+        const insertPayload: TablesInsert<"product_categories"> = {
+          name: formData.name,
+          slug,
+          path,
+          description: formData.description || null,
+          parent_id: formData.parent_id || null,
+          sort_order: formData.sort_order,
+          is_active: true,
+          created_by: businessUserId,
+          organization_id: primaryOrgId,
+        };
         const { data: newCategory, error } = await supabase
           .from("product_categories")
-          .insert({
-            name: formData.name,
-            slug,
-            path,
-            description: formData.description || null,
-            parent_id: formData.parent_id || null,
-            
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-            organization_id: primaryOrgId,
-          } as any)
+          .insert(insertPayload)
           .select("id")
           .single();
 
@@ -406,7 +410,7 @@ export default function ProductCategories() {
       }
 
       handleCloseDialog(false);
-      loadData();
+      await loadData();
     } catch (error: any) {
       toast({
         title: editingCategory ? t('productCategories.toast.updateError') : t('productCategories.toast.createError'),
@@ -420,10 +424,15 @@ export default function ProductCategories() {
     if (!confirm(t('productCategories.toast.deleteConfirm'))) return;
 
     try {
+      const category = categories.find(c => c.id === id);
+      if (!category || !activeCompany?.id) {
+        throw new Error('Category not found or no active company');
+      }
       const { error } = await supabase
         .from("product_categories")
         .delete()
-        .eq("id", id);
+        .eq("id", id)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -432,7 +441,7 @@ export default function ProductCategories() {
         description: t('productCategories.toast.deleteSuccess'),
       });
 
-      loadData();
+      await loadData();
     } catch (error: any) {
       toast({
         title: t('productCategories.toast.error'),
@@ -449,7 +458,7 @@ export default function ProductCategories() {
       .select("organization_id")
       .eq("category_id", category.id);
 
-    const companyIds = companyAssocs?.map((a: any) => a.organization_id) || [];
+    const companyIds = companyAssocs?.map((a) => a.organization_id) || [];
 
     setEditingCategory(category);
     setFormData({
@@ -687,6 +696,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.edit')}
                             onClick={() => openEditDialog(category)}
                           >
                             <Pencil className="w-4 h-4" />
@@ -694,7 +704,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            title="Preços de Opções"
+                            aria-label={t('productCategories.actions.attributePrices')}
                             onClick={() => { setCatPricesCategory({ id: category.id, name: category.name }); setCatPricesOpen(true); }}
                           >
                             <Tag className="w-4 h-4" />
@@ -704,6 +714,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.delete')}
                             onClick={() => handleDelete(category.id)}
                           >
                             <Trash2 className="w-4 h-4" />

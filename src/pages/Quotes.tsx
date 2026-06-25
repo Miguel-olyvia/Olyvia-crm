@@ -974,7 +974,7 @@ export default function Quotes() {
 
   // Filtered quotes
   const filteredQuotes = useMemo(() => {
-    let result = quotes.filter((quote) => {
+    const result = quotes.filter((quote) => {
       if (searchTerm) {
         const search = searchTerm.toLowerCase();
         const quoteNumber = quote.quote_number?.toLowerCase() || "";

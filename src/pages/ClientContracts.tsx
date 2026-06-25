@@ -452,23 +452,28 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id && canView && !scopeLoading,
   });
 
-  // Load portal statuses for contracts
+  // Load portal statuses for contracts.
+  // Uses a cancelled flag to prevent a stale async call (triggered by the previous
+  // activeCompany) from overwriting state that was already set by the new one.
   useEffect(() => {
+    if (!activeCompany?.id || !contracts || contracts.length === 0) return;
+    let cancelled = false;
     const loadPortalStatuses = async () => {
-      if (!activeCompany?.id || !contracts || contracts.length === 0) return;
       const contractIds = contracts.map((c: any) => c.id);
       const { data: portalUsers } = await (supabase as any)
         .from("client_portal_users")
         .select("contract_id, portal_status")
         .eq("organization_id", activeCompany.id)
         .in("contract_id", contractIds);
+      if (cancelled) return;
       const statusMap: Record<string, string> = {};
       (portalUsers || []).forEach((pu: any) => {
         if (pu.contract_id) statusMap[pu.contract_id] = pu.portal_status;
       });
       setContractPortalStatuses(statusMap);
     };
-    loadPortalStatuses();
+    void loadPortalStatuses();
+    return () => { cancelled = true; };
   }, [contracts, activeCompany?.id]);
 
   const { data: proposals = [] } = useQuery({
@@ -490,7 +495,7 @@ const ClientContracts = () => {
         else if (p.deal_id) dealIds.push(p.deal_id);
       });
 
-      let dealEntityMap = new Map<string, string>();
+      const dealEntityMap = new Map<string, string>();
       if (dealIds.length > 0) {
         const { data: deals } = await (supabase as any).from("deals").select("id, entity_id").in("id", dealIds);
         (deals || []).forEach((d: any) => {
@@ -540,8 +545,14 @@ const ClientContracts = () => {
   });
 
   // Computed KPIs
+  // `now` is declared at the component body so that helper functions rendered
+  // during the same render pass (getRowColor, getSubtitle, etc.) share the same
+  // reference without being deps of a memo.  The memos below each capture their
+  // own snapshot so stale comparisons cannot occur when the page is open for long
+  // periods without a re-render.
   const now = new Date();
   const kpis = useMemo(() => {
+    const now = new Date();
     const total = contracts.length;
     const totalValue = contracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
     const drafts = contracts.filter(c => c.status === "draft");
@@ -577,6 +588,7 @@ const ClientContracts = () => {
 
   // Filtered contracts
   const filteredContracts = useMemo(() => {
+    const now = new Date();
     let result = [...contracts];
     if (onlyMine && currentUserId) {
       result = result.filter(c => c.created_by === currentUserId);
@@ -615,6 +627,7 @@ const ClientContracts = () => {
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {
+    const now = new Date();
     const parts: string[] = [];
     const actions: { label: string; action: string; contract?: any }[] = [];
 
@@ -727,7 +740,7 @@ const ClientContracts = () => {
         ? { ...existingPromptValues, ...data.prompt_values }
         : existingPromptValues;
 
-      let updatePayload: any = {
+      const updatePayload: any = {
         contract_template_id: data.template_id || null, start_date: data.start_date || null, end_date: data.end_date || null,
         notes: data.notes || null, payment_terms: data.payment_terms || null,
         prompt_values: Object.keys(mergedPromptValues).length > 0 ? mergedPromptValues : null,
@@ -925,13 +938,21 @@ const ClientContracts = () => {
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
   };
 
+  // Redirect when user lacks view permission. Must be in an effect — calling
+  // navigate() during render is a side effect and causes undefined behaviour.
+  useEffect(() => {
+    if (!permissionsLoading && !canView && !isSystemAdmin && activeCompany) {
+      navigate("/dashboard");
+    }
+  }, [permissionsLoading, canView, isSystemAdmin, activeCompany, navigate]);
+
   if (permissionsLoading) {
     return <Layout><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></Layout>;
   }
 
+  // Show loader while the redirect effect is about to fire.
   if (!canView && !isSystemAdmin && activeCompany) {
-    navigate("/dashboard");
-    return null;
+    return <Layout><div className="flex items-center justify-center h-64"><OlyviaLoader size={40} /></div></Layout>;
   }
 
   if (companyLoading) {

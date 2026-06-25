@@ -233,7 +233,20 @@ const ContractTemplates = () => {
     if (nextBody !== formData.body_html) {
       setFormData(fd => ({ ...fd, body_html: nextBody }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // formData.body_html and formData.doc_settings (as a whole object) are
+  // intentionally excluded from the dep array below.
+  //
+  // • body_html: this effect mutates body_html to reflect doc_settings changes.
+  //   Including it would create an infinite loop:
+  //   effect writes body_html → body_html changes → effect fires again.
+  //   The effect reads the current body_html via closure — safe because it only
+  //   fires when an individual doc_settings field listed below changes.
+  //
+  // • formData.doc_settings (object reference): we list each individual field
+  //   explicitly so that only relevant changes trigger the effect.
+  //   Using the object reference would fire on every keystroke in the editor.
+  //
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isEditorOpen,
     formData.doc_settings?.show_quote_items,
@@ -243,6 +256,8 @@ const ContractTemplates = () => {
     formData.doc_settings?.quote_items_show_unit,
     formData.doc_settings?.quote_items_show_price,
     formData.doc_settings?.quote_items_show_total,
+    // JSON.stringify is used here to get a stable value comparison for an array dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(formData.doc_settings?.quote_items_column_order || []),
     formData.doc_settings?.table_header_color,
     formData.doc_settings?.table_header_text_color,
@@ -341,7 +356,7 @@ const ContractTemplates = () => {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { data: deleted, error } = await (supabase as any).from("client_contract_templates").delete().eq("id", id).select("id");
+      const { data: deleted, error } = await (supabase as any).from("client_contract_templates").delete().eq("id", id).eq("organization_id", activeCompany?.id).select("id");
       if (error) throw error;
       if (!deleted || deleted.length === 0) throw new Error("Sem permissão para eliminar minuta");
     },
@@ -437,13 +452,21 @@ const ContractTemplates = () => {
     }
   };
 
+  // Redirect when user lacks view permission. Must be in an effect — calling
+  // navigate() during render is a side effect and causes undefined behaviour.
+  useEffect(() => {
+    if (!permissionsLoading && !canView && !isSystemAdmin && activeCompany) {
+      navigate("/dashboard");
+    }
+  }, [permissionsLoading, canView, isSystemAdmin, activeCompany, navigate]);
+
   if (permissionsLoading) {
     return <><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></>;
   }
 
+  // Show loader while the redirect effect is about to fire.
   if (!canView && !isSystemAdmin && activeCompany) {
-    navigate("/dashboard");
-    return null;
+    return <><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></>;
   }
 
   const wordCount = formData.body_html ? formData.body_html.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length : 0;

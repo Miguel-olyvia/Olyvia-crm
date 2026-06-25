@@ -251,6 +251,7 @@ const Bundles = () => {
     tableName: "bundles",
     onSuccess: loadBundles,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   useEffect(() => {
@@ -259,14 +260,21 @@ const Bundles = () => {
     }
   }, [permissionsLoading, hasPermission, hasFullAccess, navigate, activeCompany]);
 
-  // Load companies for import
+  // Load companies for import (scoped to active org)
   useEffect(() => {
     const loadCompanies = async () => {
-      const { data } = await supabase.from("anew_organizations").select("id, name");
+      if (!activeCompany?.id) {
+        setCompanies([]);
+        return;
+      }
+      const { data } = await supabase
+        .from("anew_organizations")
+        .select("id, name")
+        .eq("id", activeCompany.id);
       setCompanies(data || []);
     };
     loadCompanies();
-  }, []);
+  }, [activeCompany?.id]);
 
   useEffect(() => {
     if (companyLoading) return;
@@ -329,12 +337,18 @@ const Bundles = () => {
 
   const handleDelete = async () => {
     if (!deleteId) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      setDeleteId(null);
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from("bundles")
         .update({ deleted_at: new Date().toISOString() })
-        .eq("id", deleteId);
+        .eq("id", deleteId)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -358,19 +372,24 @@ const Bundles = () => {
   const handleBulkStatusChange = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
     if (selectedIds.length === 0) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       bulkActions.setProcessing(true);
-      
+
       const isActive = bulkActions.bulkNewStatus === "active";
-      
+
       const { error } = await supabase
         .from("bundles")
-        .update({ 
+        .update({
           status: bulkActions.bulkNewStatus,
           is_active: isActive
         })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -396,14 +415,19 @@ const Bundles = () => {
   const handleBulkDelete = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
     if (selectedIds.length === 0) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       bulkActions.setProcessing(true);
-      
+
       const { error } = await supabase
         .from("bundles")
         .update({ deleted_at: new Date().toISOString() })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 

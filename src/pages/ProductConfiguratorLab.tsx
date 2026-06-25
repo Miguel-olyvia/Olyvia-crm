@@ -108,7 +108,7 @@ export default function ProductConfiguratorLab() {
 
       // Templates lookup (single query)
       const filteredIds = filteredProds.map((p: any) => p.id);
-      let tplMap = new Map<string, { has: boolean; activeVersion: number | null }>();
+      const tplMap = new Map<string, { has: boolean; activeVersion: number | null }>();
       if (filteredIds.length > 0) {
         const { data: tpls } = await supabase
           .from("product_configuration_templates")

@@ -525,7 +525,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');
 
-      let pQuery = supabase
+      const pQuery = supabase
         .from("products")
         .select("id, name, sku, product_prices(price, price_type)")
         .or(orgFilter)
@@ -535,7 +535,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         .order("name")
         .limit(200);
 
-      let sQuery = supabase
+      const sQuery = supabase
         .from("services")
         .select("id, name, sku, service_prices(price, price_type)")
         .or(orgFilter)

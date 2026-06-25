@@ -178,7 +178,7 @@ export function useWhatsApp() {
 
     // Get commercial name and company name
     let commercialName = "Equipa Comercial";
-    let companyName = activeCompany?.name || "";
+    const companyName = activeCompany?.name || "";
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {

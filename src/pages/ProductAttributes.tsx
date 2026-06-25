@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, Settings2, Pencil, Trash2, Shield, Copy } from "lucide-react";
@@ -17,6 +17,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -111,6 +121,14 @@ export default function ProductAttributes() {
   const [palettesDialogOpen, setPalettesDialogOpen] = useState(false);
   const [palettesAttribute, setPalettesAttribute] = useState<ProductAttribute | null>(null);
 
+  // Delete confirmation dialog state (replaces window.confirm)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Valorization-type change confirmation dialog state (replaces window.confirm)
+  const [valorizationConfirm, setValorizationConfirm] = useState<{ count: number } | null>(null);
+  // Ref to store the submit continuation — resolved when user confirms/cancels
+  const valorizationResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+
   // Filter states
   const [filterTenantId, setFilterTenantId] = useState("");
   const [filterCompanyId, setFilterCompanyId] = useState("all");
@@ -162,20 +180,28 @@ export default function ProductAttributes() {
     tableName: "product_attributes",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   const { clearSelection } = bulkActions;
 
-  // Clear and reload when activeCompany changes
+  // Clear immediately on company change, then reload.
+  // loadData is a useCallback whose dep array already includes activeCompany?.id,
+  // so including it here is correct and ensures the effect reruns whenever the
+  // callback identity changes (i.e. when activeCompany changes).
   useEffect(() => {
-    setAttributes([]); // Clear immediately to prevent stale data
+    setAttributes([]);
     bulkActions.clearSelection();
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id]);
+  }, [loadData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -187,7 +213,7 @@ export default function ProductAttributes() {
       if (editingAttribute) {
         const oldValorizationType = editingAttribute.valorization_type || 'none';
         const newValorizationType = (formData.value_type === 'list' || formData.value_type === 'number') ? formData.pricing_type : 'none';
-        
+
         if (oldValorizationType !== newValorizationType) {
           const { count } = await supabase
             .from('product_attribute_values')
@@ -195,9 +221,11 @@ export default function ProductAttributes() {
             .eq('attribute_id', editingAttribute.id);
 
           if (count && count > 0) {
-            const confirmed = window.confirm(
-              `Este atributo está atribuído a ${count} produto(s). A alteração do tipo de valorização irá invalidar os preços calculados. Confirmar e recalcular automaticamente?`
-            );
+            // Show accessible confirmation dialog instead of window.confirm
+            const confirmed = await new Promise<boolean>((resolve) => {
+              valorizationResolveRef.current = resolve;
+              setValorizationConfirm({ count });
+            });
             if (!confirmed) return;
           }
         }
@@ -244,7 +272,8 @@ export default function ProductAttributes() {
         const { error } = await supabase
           .from("product_attributes")
           .update(attributeData)
-          .eq("id", editingAttribute.id);
+          .eq("id", editingAttribute.id)
+          .eq("organization_id", activeCompany.id);
 
         if (error) throw error;
       } else {
@@ -280,13 +309,18 @@ export default function ProductAttributes() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t('productAttributes.toast.deleteConfirm'))) return;
+    // Delegate confirmation to AlertDialog — called after user confirms
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from("product_attributes")
         .delete()
-        .eq("id", id);
+        .eq("id", id)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -302,6 +336,8 @@ export default function ProductAttributes() {
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -452,6 +488,7 @@ export default function ProductAttributes() {
           .from("product_attributes")
           .select("id")
           .eq("code", newCode)
+          .eq("organization_id", activeCompany?.id)
           .maybeSingle();
         if (!existing) break;
         suffix += 1;
@@ -987,6 +1024,7 @@ export default function ProductAttributes() {
                     <Checkbox
                       checked={bulkActions.selectedIds.size === allIds.length && allIds.length > 0}
                       onCheckedChange={() => bulkActions.toggleSelectAll(allIds)}
+                      aria-label={t('common.selectAll')}
                     />
                   </TableHead>
                   <TableHead>{t('productAttributes.table.code')}</TableHead>
@@ -1087,7 +1125,7 @@ export default function ProductAttributes() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleDelete(attr.id)}
+                              onClick={() => setDeleteConfirmId(attr.id)}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -1133,6 +1171,65 @@ export default function ProductAttributes() {
           valueType={palettesAttribute.value_type}
         />
       )}
+
+      {/* Delete confirmation AlertDialog — replaces window.confirm */}
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('productAttributes.toast.deleteConfirm') || "Eliminar atributo?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('productAttributes.deleteConfirmDesc') || "Esta ação não pode ser desfeita. Os valores deste atributo em produtos existentes serão removidos."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deleteConfirmId) handleDelete(deleteConfirmId); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t('common.delete') || "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Valorization-type change confirmation AlertDialog — replaces window.confirm in handleSubmit */}
+      <AlertDialog
+        open={valorizationConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            valorizationResolveRef.current?.(false);
+            valorizationResolveRef.current = null;
+            setValorizationConfirm(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('productAttributes.valorizationChangeTitle') || "Alterar tipo de valorização?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('productAttributes.valorizationChangeDesc', { count: valorizationConfirm?.count ?? 0 }) ||
+                `Este atributo está atribuído a ${valorizationConfirm?.count ?? 0} produto(s). A alteração do tipo de valorização irá invalidar os preços calculados. Confirmar e recalcular automaticamente?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              valorizationResolveRef.current?.(false);
+              valorizationResolveRef.current = null;
+              setValorizationConfirm(null);
+            }}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              valorizationResolveRef.current?.(true);
+              valorizationResolveRef.current = null;
+              setValorizationConfirm(null);
+            }}>
+              {t('common.confirm') || "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

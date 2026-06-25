@@ -364,6 +364,10 @@ export default function AnewLeads() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // selectedLead is intentionally excluded: re-running when a dialog is already
+    // open would clobber the in-flight open state. The effect must only fire when
+    // the ?open= param or org/scope context changes, not when the user navigates
+    // within the already-open detail dialog.
   }, [
     searchParams,
     activeCompanyId,
@@ -573,6 +577,9 @@ export default function AnewLeads() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // toast is stable (useToast ref) and callbacksChecked is intentionally excluded:
+    // including it would re-fire the effect after it sets callbacksChecked=true,
+    // causing an infinite loop. The one-shot toast pattern is intentional.
   }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
   // Determine if active company is a root org (no parent in hierarchy)
@@ -622,6 +629,15 @@ export default function AnewLeads() {
       loadLeads();
       loadStatusCounts();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The secondary loader functions (loadCampaigns, loadLeadSources, loadContactResults,
+    // loadForms, loadCompanyUsers, loadComercialUsers, loadWorkflowStages) are intentionally
+    // excluded from the dep array. This effect is a one-shot initialiser guarded by
+    // initialLoadDoneRef — adding those functions would cause them to re-run on every
+    // render that touches their closure values. loadCampaigns is useCallback-wrapped but
+    // the rest are plain async functions that recreate on every render; they are safe here
+    // because initialLoadDoneRef.current prevents re-entry, and the org-change path resets
+    // that ref via the isRootOrg effect above.
   }, [activeCompanyId, isRootOrg, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
 
@@ -743,7 +759,8 @@ export default function AnewLeads() {
 
     const { data: allHierarchy } = await supabase
       .from("anew_hierarchy")
-      .select("parent_org_id, child_org_id");
+      .select("parent_org_id, child_org_id")
+      .or(`parent_org_id.eq.${rootId},child_org_id.eq.${rootId}`);
 
     if (!allHierarchy) {
       descendantCacheRef.current = { key: rootId, ids: [rootId], hierarchy: [] };
@@ -972,7 +989,7 @@ export default function AnewLeads() {
 
     // 1. Get personal addresses (work addresses) for users
     const entityIds = usersData.map(u => u.entity_id).filter(Boolean) as string[];
-    let userPersonalDistricts: Record<string, string[]> = {};
+    const userPersonalDistricts: Record<string, string[]> = {};
 
     if (entityIds.length > 0) {
       const { data: userAddresses } = await (supabase as any)
@@ -1004,7 +1021,7 @@ export default function AnewLeads() {
     });
 
     const deptEntityIds = Object.values(deptEntityMap).filter(Boolean);
-    let deptDistricts: Record<string, string[]> = {};
+    const deptDistricts: Record<string, string[]> = {};
 
     if (deptEntityIds.length > 0) {
       const { data: deptAddresses } = await (supabase as any)
@@ -1086,6 +1103,7 @@ export default function AnewLeads() {
   };
 
   const loadContactResults = async () => {
+    if (!activeCompanyId) return;
     const { data } = await supabase
       .from("lead_contact_results")
       .select("id, name, icon, color")
@@ -1364,7 +1382,7 @@ export default function AnewLeads() {
     if (configCampaignId) {
       loadFieldDefinitions(configCampaignId);
     }
-  }, [configCampaignId]);
+  }, [configCampaignId, loadFieldDefinitions]);
 
   const loadCampaigns = useCallback(async () => {
     if (!activeCompanyId) return;
@@ -1387,14 +1405,16 @@ export default function AnewLeads() {
     }
   }, [activeCompanyId, configCampaignId]);
 
-  const loadLeadSources = async () => {
-    const { data } = await supabase
+  const loadLeadSources = useCallback(async () => {
+    if (!activeCompanyId) return;
+    let query = supabase
       .from("lead_sources")
       .select("id, name, icon, color")
-      .eq("is_active", true)
-      .order("name");
+      .eq("is_active", true);
+    query = query.or(`organization_id.eq.${activeCompanyId},organization_id.is.null`);
+    const { data } = await query.order("name");
     if (data) setLeadSources(data);
-  };
+  }, [activeCompanyId]);
 
 
   // Load leads with server-side pagination
@@ -1876,7 +1896,7 @@ export default function AnewLeads() {
     }
   };
 
-  const loadFieldDefinitions = async (campaignId: string) => {
+  const loadFieldDefinitions = useCallback(async (campaignId: string) => {
     if (!campaignId) return;
 
     // Try to get form_id from campaign — form_fields has correct contact_field_mapping
@@ -1935,7 +1955,15 @@ export default function AnewLeads() {
       setFieldDefs(data || []);
       loadReferenceData(data || []);
     }
-  };
+  // loadReferenceData is a plain async function defined below; it captures activeCompanyId
+  // via its own closure. It is intentionally excluded here because wrapping it in
+  // useCallback would create a circular dependency chain — loadFieldDefinitions would
+  // depend on loadReferenceData which would depend on activeCompanyId, requiring both
+  // to be re-created together on every org change. The useEffect that calls this
+  // function depends on [configCampaignId, loadFieldDefinitions], ensuring it re-runs
+  // whenever the campaign or org changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Load reference data for fields that store IDs (ref_district, ref_company, etc.)
   const loadReferenceData = async (fields: FieldDefinition[]) => {
@@ -2596,7 +2624,7 @@ export default function AnewLeads() {
     }
 
     if (sourceContactId && clientId) {
-      let contactUpdateQuery: any = supabase
+      const contactUpdateQuery: any = supabase
         .from("anew_contacts")
         .update({ converted_to_client_id: clientId, converted_at: nowIso, status: "inactive" })
         .eq("entity_id", lead.entity_id)
@@ -2666,6 +2694,10 @@ export default function AnewLeads() {
   }, [navigate]);
 
   const handleCreateLead = async () => {
+    if (!activeCompanyId) {
+      toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
+      return;
+    }
     // Merge base + extra campaign fields for validation
     const allFieldDefs = [...createLeadFieldDefs, ...extraCampaignFieldDefs];
     // Validate required fields
@@ -2708,8 +2740,8 @@ export default function AnewLeads() {
         try {
           const { error } = await supabase.from(rec.table).delete().eq("id", rec.id);
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
+        } catch (e: unknown) {
+          failures.push({ what: `${rec.table}:${rec.id}`, reason: e instanceof Error ? e.message : String(e) });
         }
       }
       if (failures.length > 0) {
@@ -3305,7 +3337,7 @@ export default function AnewLeads() {
           }
           entityRenamePayloadForPostCommit = nameUpdate;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Lead creation error:', err);
         if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
@@ -3393,6 +3425,10 @@ export default function AnewLeads() {
   // declined.
   const handleDuplicateCreateAnyway = async (reuseEntityIdArg?: string) => {
     if (!pendingLeadData) return;
+    if (!activeCompanyId) {
+      toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
+      return;
+    }
     // Guard: when wired directly to an onClick handler, React passes the
     // MouseEvent as the first argument. Only accept plain string ids; anything
     // else (event objects, etc.) is treated as "no reuse" to avoid sending a
@@ -3450,8 +3486,8 @@ export default function AnewLeads() {
         try {
           const { error } = await supabase.from(rec.table).delete().eq("id", rec.id);
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
+        } catch (e: unknown) {
+          failures.push({ what: `${rec.table}:${rec.id}`, reason: e instanceof Error ? e.message : String(e) });
         }
       }
       if (failures.length > 0) {
@@ -3599,7 +3635,7 @@ export default function AnewLeads() {
         entityIdForPostCommit = entityId;
         newLeadIdForPostCommit = newLead?.id || null;
         cleanFieldValuesForPostCommit = cleanFieldValues;
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[create-anyway] failed:', err);
         if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
@@ -3656,8 +3692,8 @@ export default function AnewLeads() {
       await linkEntityToOrg(match.entityId, activeCompanyId);
       // Reuse the (now-shared) entity instead of creating a new one.
       await handleDuplicateCreateAnyway(match.entityId);
-    } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Não foi possível partilhar a entidade", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
       setCreatingLead(false);
     }
   };
@@ -3686,7 +3722,7 @@ export default function AnewLeads() {
     } else {
       // Fetch and open even if not in current page
       (async () => {
-        const { data } = await (supabase as any).from("anew_leads").select("*").eq("id", match.id).single();
+        const { data } = await (supabase as any).from("anew_leads").select("*").eq("id", match.id).eq("organization_id", activeCompanyId).single();
         if (data) {
           setSelectedLead(data);
           setShowDetails(true);
@@ -3705,10 +3741,10 @@ export default function AnewLeads() {
       const { fieldValues } = pendingLeadData;
       const { _assigned_to, ...cleanFieldValues } = fieldValues;
       // Merge field_values — existing lead gets new data overlaid, and status becomes "new" if it was lost/rejected
-      const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).single();
+      const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).eq("organization_id", activeCompanyId).single();
       const mergedValues = { ...(existingLead?.field_values || {}), ...cleanFieldValues };
       const newStatus = ["lost", "rejected"].includes(existingLead?.status) ? "new" : existingLead?.status;
-      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id);
+      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId);
       toast({ title: "Lead atualizada", description: `Os dados da lead "${match.displayName}" foram atualizados.` });
       setDuplicateDialogOpen(false);
       setShowCreateLead(false);
@@ -3777,7 +3813,7 @@ export default function AnewLeads() {
         .eq("id", createLeadCampaignId)
         .single();
 
-      let formIdToUse = campaign?.form_id || "";
+      const formIdToUse = campaign?.form_id || "";
       if (formIdToUse) {
         setCreateLeadFormId(formIdToUse);
       }

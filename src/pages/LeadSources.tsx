@@ -110,14 +110,21 @@ const LeadSources = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [activeCompany]);
 
   const loadData = async () => {
+    if (!activeCompany?.id) {
+      setSources([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const [sourcesRes, organizationsRes] = await Promise.all([
         supabase
           .from("lead_sources")
           .select("*, anew_organizations(name)")
+          .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
           .order("name"),
         supabase.from("anew_organizations").select("id, name").in("type", ["empresa", "holding"]),
       ]);

@@ -257,10 +257,10 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
       // 7. Get performance data - leads assigned per user
       const authUserIds = users?.filter((u: any) => u.auth_user_id).map((u: any) => u.auth_user_id) || [];
 
-      let leadCounts = new Map<string, number>();
-      let dealCounts = new Map<string, number>();
-      let dealValues = new Map<string, number>();
-      let convertedCounts = new Map<string, number>();
+      const leadCounts = new Map<string, number>();
+      const dealCounts = new Map<string, number>();
+      const dealValues = new Map<string, number>();
+      const convertedCounts = new Map<string, number>();
 
       if (userIds.length > 0) {
         // Leads assigned to these users (by anew_users.id)

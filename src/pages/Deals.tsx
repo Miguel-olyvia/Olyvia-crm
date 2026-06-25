@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -182,11 +183,7 @@ const Deals = () => {
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 400);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  const debouncedSearch = useDebounce(searchTerm, 400);
   const truncatedWarnedRef = useRef<string | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
@@ -429,15 +426,14 @@ const Deals = () => {
     } finally {
       setStatsLoading(false);
     }
-  }, [activeCompany?.id, stages]);
+  // fetchDealsDashboardStats does not read `stages` — it only reads cachedChildrenMapRef and activeCompany.id.
+  // Removing `stages` from deps prevents an extra double-fire (loadData sets stages → stages change → stats fire again).
+  }, [activeCompany?.id]);
 
-  // Stable ref so loadData doesn't depend on fetchDealsDashboardStats identity
+  // Stable ref so loadData doesn't depend on fetchDealsDashboardStats identity.
+  // Stats are triggered exclusively via fetchStatsRef.current() inside loadData.
   const fetchStatsRef = useRef(fetchDealsDashboardStats);
   fetchStatsRef.current = fetchDealsDashboardStats;
-
-  useEffect(() => {
-    if (activeCompany?.id && stages.length > 0) fetchDealsDashboardStats();
-  }, [activeCompany?.id, stages, fetchDealsDashboardStats]);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -474,10 +470,14 @@ const Deals = () => {
     return ownIds.has(deal.created_by || "") || ownIds.has(deal.assigned_to || "");
   }, [getPermissionScope, scopeAnewUserId, teamBusinessUserIds, isSystemAdmin]);
 
-  const isDisqualifiedStage = () => {
+  // Compare by stage_key (config-stable) rather than display name so locale/rename changes don't break the check.
+  // Falls back to name comparison when stage_key is not set (legacy data).
+  const isDisqualifiedStage = useMemo(() => {
     const selectedStage = stages.find(s => s.id === formData.stage_id);
-    return selectedStage?.name === 'Desqualificado';
-  };
+    if (!selectedStage) return false;
+    if (selectedStage.stage_key) return selectedStage.stage_key === 'disqualified';
+    return selectedStage.name === 'Desqualificado';
+  }, [stages, formData.stage_id]);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -566,7 +566,14 @@ const Deals = () => {
         let searchIdsQuery = (supabase.from("deals") as any)
           .select("id")
           .is("deleted_at", null);
-        if (scopeOrgIdsArr.length > 0) searchIdsQuery = searchIdsQuery.in("organization_id", scopeOrgIdsArr);
+        if (scopeOrgIdsArr.length > 0) {
+          searchIdsQuery = searchIdsQuery.in("organization_id", scopeOrgIdsArr);
+        } else {
+          // No active org — abort to prevent unscoped cross-org search
+          setLoading(false);
+          setLoadingMore(false);
+          return;
+        }
         if (matchedEntityIds.length > 0) {
           searchIdsQuery = searchIdsQuery.or(`title.ilike.%${escTerm}%,entity_id.in.(${matchedEntityIds.join(",")})`);
         } else {
@@ -596,6 +603,11 @@ const Deals = () => {
 
       if (scopeOrgIdsArr.length > 0) {
         dealsQuery = dealsQuery.in("organization_id", scopeOrgIdsArr);
+      } else {
+        // No active org — abort to prevent unscoped cross-org fetch
+        setLoading(false);
+        setLoadingMore(false);
+        return;
       }
       if (searchDealIds) {
         dealsQuery = dealsQuery.in("id", searchDealIds);
@@ -741,14 +753,15 @@ const Deals = () => {
       // Update total count
       if (!append) {
         if (isFullScope) {
+          // Use the full org subtree (scopeOrgIdsArr) so the count matches the rows actually loaded.
+          // Using only activeCompany.id here would under-count when the user is a parent-org admin
+          // and child-org deals are included in the main query.
           let countQuery = supabase
             .from("deals")
-            .select("id", { count: 'exact', head: true });
-          
-          if (activeCompany?.id) {
-            countQuery = countQuery.eq("organization_id", activeCompany.id);
-          }
-          
+            .select("id", { count: 'exact', head: true })
+            .is("deleted_at", null)
+            .in("organization_id", scopeOrgIdsArr);
+
           const { count } = await countQuery;
           setTotalCount(count || 0);
         } else {
@@ -777,16 +790,28 @@ const Deals = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [toast, t, formData.stage_id, activeCompany?.id, companyUserType, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch]);
+  // Intentionally omitted from deps:
+  //   - formData.stage_id: only used once on initial load to set a default; including it would
+  //     recreate loadData on every stage selection in the form, triggering a full reload mid-form.
+  //   - companyUserType: not read inside the callback; its effects are expressed via scopeLoading/getPermissionScope.
+  // Sorting (sortColumn/sortDirection) is applied client-side on the already-loaded page; PAGE_SIZE=200
+  // makes a full client-sort acceptable. If server-side sort is ever required, add them here and to the reset effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast, t, activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch]);
 
   useEffect(() => {
-    // Reset and reload when company, userType, scope readiness, or search changes
+    // Reset and reload when company, scope readiness, or search changes.
     if (scopeLoading) return; // Wait for permissions to resolve
     setDeals([]);
     setDashboardDeals([]);
     setTotalCount(0);
     currentPageRef.current = 0;
     loadData();
+    // Intentionally omitted from deps:
+    //   - loadData: stable enough via its own deps; including it would create an infinite loop
+    //     because loadData sets state that re-renders the component.
+    //   - sortColumn / sortDirection: sorting is applied fully client-side (see loadData comment).
+    //   - stageFilter / dateFrom / dateTo: client-side filters, do not need a server re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, companyUserType, scopeLoading, debouncedSearch]);
 
@@ -1054,7 +1079,7 @@ const Deals = () => {
 
   // Filtered and sorted deals (search is applied server-side; here only stage/date)
   const filteredDeals = useMemo(() => {
-    let result = deals.filter((deal) => {
+    const result = deals.filter((deal) => {
       // Stage filter
       if (stageFilter !== "all" && deal.deal_stages?.id !== stageFilter) {
         return false;
@@ -1119,12 +1144,17 @@ const Deals = () => {
 
   // Kanban drag handler
   const handleKanbanStageDrop = useCallback(async (dealId: string, newStageId: string, oldStageId: string) => {
+    // Guard: activeCompany?.id can be undefined; passing undefined to .eq() causes Supabase JS v2
+    // to coerce it to the string "undefined", producing a silent no-op update.
+    if (!activeCompany?.id) return;
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
+
       await (supabase.from("deals") as any)
         .update({ stage_id: newStageId })
-        .eq("id", dealId);
+        .eq("id", dealId)
+        .eq("organization_id", activeCompany.id);
 
       // Execute workflow for stage change
       try {
@@ -1223,8 +1253,8 @@ const Deals = () => {
             const productIds = items.filter((i: any) => i.product_id).map((i: any) => i.product_id);
             const serviceIds = items.filter((i: any) => i.service_id).map((i: any) => i.service_id);
             
-            let productMap: Record<string, { name: string; price: number }> = {};
-            let serviceMap: Record<string, { name: string; price: number }> = {};
+            const productMap: Record<string, { name: string; price: number }> = {};
+            const serviceMap: Record<string, { name: string; price: number }> = {};
             
             if (productIds.length > 0) {
               const { data: products } = await supabase.from("products").select("id, name, base_price").in("id", productIds);
@@ -1466,12 +1496,19 @@ const Deals = () => {
         }
       }
 
+      // Guard: activeCompany?.id must be present before any write.
+      // If absent, .eq("organization_id", undefined) in Supabase JS v2 coerces undefined to the
+      // string "undefined", making the WHERE clause match nothing — a silent no-op update/insert.
+      if (!activeCompany?.id) {
+        throw new Error("Nenhuma organização ativa. Selecione uma organização e tente novamente.");
+      }
+
       const dealData = {
         title: formData.title,
         value,
         stage_id: formData.stage_id,
-        organization_id: activeCompany?.id || null,
-        root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
+        organization_id: activeCompany.id,
+        root_organization_id: resolvedRootOrgId || activeCompany.id,
         lead_id: formData.lead_id || null,
         client_id: resolvedClientId,
         contact_id: resolvedContactId,
@@ -1479,15 +1516,17 @@ const Deals = () => {
         probability,
         description: formData.description || null,
         expected_close_date: formData.expected_close_date || null,
-        lost_reason: isDisqualifiedStage() ? (formData.lost_reason || null) : null,
+        lost_reason: isDisqualifiedStage ? (formData.lost_reason || null) : null,
       };
 
       if (editingId) {
-        const { error } = await (supabase.from("deals") as any)
-          .update(dealData)
-          .eq("id", editingId);
+        const { error, count } = await (supabase.from("deals") as any)
+          .update(dealData, { count: "exact" })
+          .eq("id", editingId)
+          .eq("organization_id", activeCompany.id);
 
         if (error) throw error;
+        if (count === 0) throw new Error("Deal not found or access denied.");
 
         if (originalStageId && formData.stage_id !== originalStageId) {
           try {
@@ -1954,24 +1993,43 @@ const Deals = () => {
                             if (entity) {
                               setSelectedEntity({ type: entity.type, id: entity.id, name: entity.name, email: entity.email, phone: entity.phone, entityId: entity.entityId });
                               setEntityType(entity.type);
-                              // Contacts are treated as leads for deals (use entity_id to resolve the lead)
+                              // Contacts are treated as leads for deals (use entity_id to resolve the lead).
+                              // Both lookups run in parallel; errors are caught and logged so the form
+                              // can still proceed with entity_id only (no silent swallowing).
                               if (entity.type === 'contact' && entity.entityId) {
-                                // Find the lead linked to the same entity
-                                (supabase.from("anew_leads") as any).select("id").eq("entity_id", entity.entityId).eq("organization_id", activeCompany?.id || "").maybeSingle().then(({ data: linkedLead }: any) => {
-                                  if (linkedLead) {
-                                    setFormData(prev => ({ ...prev, lead_id: linkedLead.id, client_id: "" }));
-                                  } else {
-                                    // No lead found — check if client exists for this entity
-                                    (supabase as any).from("anew_clients").select("id").eq("entity_id", entity.entityId).eq("organization_id", activeCompany?.id || "").maybeSingle().then(({ data: linkedClient }: any) => {
-                                      if (linkedClient) {
-                                        setFormData(prev => ({ ...prev, lead_id: "", client_id: linkedClient.id }));
-                                      } else {
-                                        // No lead or client found — use entity_id only
-                                        setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
-                                      }
-                                    });
+                                const resolveContactEntity = async () => {
+                                  const orgId = activeCompany?.id || "";
+                                  try {
+                                    const [leadRes, clientRes] = await Promise.all([
+                                      (supabase.from("anew_leads") as any)
+                                        .select("id")
+                                        .eq("entity_id", entity.entityId)
+                                        .eq("organization_id", orgId)
+                                        .maybeSingle(),
+                                      (supabase as any)
+                                        .from("anew_clients")
+                                        .select("id")
+                                        .eq("entity_id", entity.entityId)
+                                        .eq("organization_id", orgId)
+                                        .maybeSingle(),
+                                    ]);
+                                    if (leadRes.error) throw leadRes.error;
+                                    if (clientRes.error) throw clientRes.error;
+                                    if (leadRes.data) {
+                                      setFormData(prev => ({ ...prev, lead_id: leadRes.data.id, client_id: "" }));
+                                    } else if (clientRes.data) {
+                                      setFormData(prev => ({ ...prev, lead_id: "", client_id: clientRes.data.id }));
+                                    } else {
+                                      // No lead or client found — use entity_id only
+                                      setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
+                                    }
+                                  } catch (err) {
+                                    console.error("Error resolving contact entity for deal form:", err);
+                                    toast({ title: "Erro", description: "Não foi possível resolver a entidade do contacto.", variant: "destructive" });
+                                    setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
                                   }
-                                });
+                                };
+                                resolveContactEntity();
                               } else {
                                 setFormData({
                                   ...formData,
@@ -1999,7 +2057,7 @@ const Deals = () => {
                           rows={3}
                         />
                       </div>
-                      {isDisqualifiedStage() && (
+                      {isDisqualifiedStage && (
                         <div className="col-span-2 space-y-2">
                           <Label htmlFor="lost_reason">Motivo da Desqualificação *</Label>
                           <Textarea
@@ -2186,10 +2244,15 @@ const Deals = () => {
                 </div>
                 
                 <div className="w-[160px]">
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateFrom') || 'Data desde'}</label>
+                  <Label htmlFor="filter-date-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateFrom') || 'Data desde'}</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}>
+                      <Button
+                        id="filter-date-from"
+                        variant="outline"
+                        aria-label={t('deals.dateFrom') || 'Data desde'}
+                        className={cn("w-full justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}
+                      >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {dateFrom ? format(dateFrom, "dd/MM/yyyy") : t('deals.selectDate') || 'Selecionar'}
                       </Button>
@@ -2199,12 +2262,17 @@ const Deals = () => {
                     </PopoverContent>
                   </Popover>
                 </div>
-                
+
                 <div className="w-[160px]">
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateTo') || 'Data até'}</label>
+                  <Label htmlFor="filter-date-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateTo') || 'Data até'}</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !dateTo && "text-muted-foreground")}>
+                      <Button
+                        id="filter-date-to"
+                        variant="outline"
+                        aria-label={t('deals.dateTo') || 'Data até'}
+                        className={cn("w-full justify-start text-left font-normal", !dateTo && "text-muted-foreground")}
+                      >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {dateTo ? format(dateTo, "dd/MM/yyyy") : t('deals.selectDate') || 'Selecionar'}
                       </Button>
@@ -2337,16 +2405,20 @@ const Deals = () => {
                           const isLost = isLostStage(deal.deal_stages);
 
                           return (
-                            <TableRow 
-                              key={deal.id} 
+                            <TableRow
+                              key={deal.id}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Ver detalhes do pedido: ${deal.title}`}
                               className={cn(
-                                "cursor-pointer hover:bg-muted/50",
+                                "cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                                 selectedIds.has(deal.id) && "bg-muted/30",
                                 isStalled && !isWon && !isLost && "bg-amber-50/50 dark:bg-amber-950/10",
                                 isWon && "bg-emerald-50/50 dark:bg-emerald-950/10",
                                 isZeroValueAdvanced && "bg-red-50/30 dark:bg-red-950/10"
                               )}
                               onClick={() => handleViewDetails(deal)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleViewDetails(deal); } }}
                             >
                               <TableCell onClick={(e) => e.stopPropagation()}>
                                 <Checkbox

@@ -76,6 +76,27 @@ interface Category {
 type SortField = 'sku' | 'name' | 'category_name' | 'retail_price' | 'company_name' | 'supplier_name' | 'is_active';
 type SortDirection = 'asc' | 'desc' | null;
 
+interface SortableHeaderProps {
+  field: SortField;
+  children: React.ReactNode;
+  onSort: (field: SortField) => void;
+  getSortIcon: (field: SortField) => React.ReactNode;
+}
+
+function SortableHeader({ field, children, onSort, getSortIcon }: SortableHeaderProps) {
+  return (
+    <TableHead
+      className="cursor-pointer hover:bg-muted/50 select-none"
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center">
+        {children}
+        {getSortIcon(field)}
+      </div>
+    </TableHead>
+  );
+}
+
 export default function ServiceCatalogItems() {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -110,18 +131,35 @@ export default function ServiceCatalogItems() {
 
   useEffect(() => {
     loadData();
-  }, [selectedCompanyId, selectedCategoryId, userCompanies, isSystemAdmin]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId, selectedCategoryId, activeCompany?.id, isSystemAdmin]);
 
   const loadData = async () => {
     try {
       setLoading(true);
 
-      if (isSystemAdmin && allCompanies.length === 0) {
+      // Resolve the company list for system admins into a local variable so it
+      // is available synchronously in the same execution — never seed from the
+      // stale allCompanies React state, which has not been flushed yet on the
+      // first render and may hold a previous render's value on subsequent calls.
+      let localCompanies: { id: string; name: string }[] = [];
+
+      if (isSystemAdmin) {
+        if (!activeCompany?.id) {
+          // No active company context — nothing to show.
+          setServices([]);
+          setCategories([]);
+          return;
+        }
+        const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
+        const subtreeIds = await resolveOrgSubtree(activeCompany.id);
         const { data: companiesData } = await supabase
           .from("anew_organizations")
           .select("id, name")
+          .in("id", subtreeIds)
           .order("name");
-        setAllCompanies(companiesData || []);
+        localCompanies = companiesData || [];
+        setAllCompanies(localCompanies);
       }
 
       let categoriesQuery = supabase
@@ -130,7 +168,17 @@ export default function ServiceCatalogItems() {
         .is("parent_id", null)
         .eq("is_active", true);
 
-      if (!isSystemAdmin && userCompanies.length > 0) {
+      if (isSystemAdmin) {
+        const companyIds = localCompanies.map(c => c.id);
+        if (companyIds.length > 0) {
+          categoriesQuery = categoriesQuery.in("organization_id", companyIds);
+        } else {
+          // No companies in subtree — return empty result set.
+          setCategories([]);
+          setServices([]);
+          return;
+        }
+      } else if (userCompanies.length > 0) {
         const companyIds = userCompanies.map(c => c.id);
         categoriesQuery = categoriesQuery.in("organization_id", companyIds);
       }
@@ -156,8 +204,13 @@ export default function ServiceCatalogItems() {
         } else {
           servicesQuery = servicesQuery.in("organization_id", companyIds);
         }
-      } else if (selectedCompanyId !== "all") {
+      } else if (isSystemAdmin && selectedCompanyId !== "all") {
         servicesQuery = servicesQuery.eq("organization_id", selectedCompanyId);
+      } else if (isSystemAdmin) {
+        // System admins scoped to the subtree — localCompanies is always populated
+        // here because we returned early above when it was empty.
+        const allCompanyIds = localCompanies.map(c => c.id);
+        servicesQuery = servicesQuery.in("organization_id", allCompanyIds);
       }
 
       if (selectedCategoryId !== "all") {
@@ -253,10 +306,17 @@ export default function ServiceCatalogItems() {
     if (!deleteItemId) return;
 
     try {
+      const service = services.find((s) => s.id === deleteItemId);
+      if (!service) {
+        toast({ title: t('serviceCatalog.toast.error'), description: "Service not found.", variant: "destructive" });
+        return;
+      }
+
       const { error } = await supabase
         .from("services")
         .delete()
-        .eq("id", deleteItemId);
+        .eq("id", deleteItemId)
+        .eq("organization_id", service.organization_id ?? "");
 
       if (error) throw error;
 
@@ -315,18 +375,6 @@ export default function ServiceCatalogItems() {
 
     setShowBulkUploadDialog(false);
   };
-
-  const SortableHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
-    <TableHead 
-      className="cursor-pointer hover:bg-muted/50 select-none"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center">
-        {children}
-        {getSortIcon(field)}
-      </div>
-    </TableHead>
-  );
 
   return (
     <>
@@ -419,13 +467,13 @@ export default function ServiceCatalogItems() {
           <Table>
             <TableHeader>
               <TableRow>
-                <SortableHeader field="sku">{t('serviceCatalog.table.sku')}</SortableHeader>
-                <SortableHeader field="name">{t('serviceCatalog.table.name')}</SortableHeader>
-                <SortableHeader field="category_name">{t('serviceCatalog.table.category')}</SortableHeader>
-                <SortableHeader field="retail_price">{t('serviceCatalog.table.salePrice')}</SortableHeader>
-                <SortableHeader field="company_name">{t('serviceCatalog.table.company')}</SortableHeader>
-                <SortableHeader field="supplier_name">{t('serviceCatalog.table.supplier')}</SortableHeader>
-                <SortableHeader field="is_active">{t('serviceCatalog.table.status')}</SortableHeader>
+                <SortableHeader field="sku" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.sku')}</SortableHeader>
+                <SortableHeader field="name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.name')}</SortableHeader>
+                <SortableHeader field="category_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.category')}</SortableHeader>
+                <SortableHeader field="retail_price" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.salePrice')}</SortableHeader>
+                <SortableHeader field="company_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.company')}</SortableHeader>
+                <SortableHeader field="supplier_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.supplier')}</SortableHeader>
+                <SortableHeader field="is_active" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.status')}</SortableHeader>
                 <TableHead className="text-right">{t('serviceCatalog.table.actions')}</TableHead>
               </TableRow>
             </TableHeader>

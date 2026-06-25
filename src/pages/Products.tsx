@@ -43,6 +43,16 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -118,6 +128,7 @@ export default function Products() {
     warnings: string[];
   } | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<{productId: string; field: string} | null>(null);
   const [editingValue, setEditingValue] = useState<string>("");
   const [pricesDialogOpen, setPricesDialogOpen] = useState(false);
@@ -164,6 +175,14 @@ export default function Products() {
     levelSelections: [],
   });
   const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>(defaultOrgSelection);
+
+  // Reset organizationSelection whenever the active company changes so a stale org ID
+  // cannot survive a company switch and end up written to a different org's product.
+  useEffect(() => {
+    setOrganizationSelection(defaultOrgSelection());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // defaultOrgSelection closes over activeCompany; activeCompany?.id is the only trigger needed.
+  }, [activeCompany?.id]);
 
   const [priceFormData, setPriceFormData] = useState<PriceFormData>({
     purchase: 0,
@@ -252,8 +271,9 @@ export default function Products() {
 
   const loadProducts = useCallback(async (pageNum: number, reset: boolean = false, orgIds?: string[]) => {
     const filters = filtersRef.current;
-    // Use passed orgIds, fallback to descendantIds state, then single activeCompanyId
-    const effectiveOrgIds = orgIds ?? (descendantIds.length > 0 ? descendantIds : (filters.activeCompanyId ? [filters.activeCompanyId] : []));
+    // Use passed orgIds, fallback to descendantIdsRef (stable ref avoids recreating callback on every company change),
+    // then single activeCompanyId
+    const effectiveOrgIds = orgIds ?? (descendantIdsRef.current.length > 0 ? descendantIdsRef.current : (filters.activeCompanyId ? [filters.activeCompanyId] : []));
     
     if (reset) {
       setLoading(true);
@@ -379,7 +399,8 @@ export default function Products() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [t, toast, descendantIds]);
+  // descendantIds intentionally omitted — read via descendantIdsRef to keep the callback stable
+  }, [t, toast]);
 
   const loadMetadata = useCallback(async () => {
     // Wait for descendant IDs to resolve before loading metadata
@@ -423,9 +444,7 @@ export default function Products() {
             .order("name");
         })();
       } else {
-        brandsPromise = Promise.resolve(
-          supabase.from("brands").select("id, name, organization_id").order("name")
-        );
+        brandsPromise = Promise.resolve({ data: [], error: null });
       }
 
       // Fetch organizations as tree from active company
@@ -477,7 +496,7 @@ export default function Products() {
           return { data: allOrgs, error: null };
         })();
       } else {
-        companiesPromise = Promise.resolve(supabase.from("anew_organizations").select("id, name, type"));
+        companiesPromise = Promise.resolve({ data: [], error: null });
       }
 
       // Load suppliers (filtered by org)
@@ -500,7 +519,9 @@ export default function Products() {
         categoriesQuery,
         brandsPromise,
         companiesPromise,
-        supabase.from("uom").select("id, code, description").eq("is_active", true).order("code"),
+        activeCompany?.id
+          ? supabase.from("uom").select("id, code, description").eq("is_active", true).eq("organization_id", activeCompany.id).order("code")
+          : Promise.resolve({ data: [], error: null }),
         suppliersPromise,
       ]);
 
@@ -515,8 +536,13 @@ export default function Products() {
       setCompanies(companiesRes.data || []);
     } catch (error: any) {
       console.error("Failed to load metadata:", error);
+      toast({
+        title: t('products.toast.metadataError') || "Erro ao carregar metadados",
+        description: error.message,
+        variant: "destructive",
+      });
     }
-  }, [activeCompany?.id, userType, descendantIds]);
+  }, [activeCompany?.id, userType, descendantIds, t, toast]);
 
   const loadData = useCallback(async () => {
     setPage(0);
@@ -529,22 +555,32 @@ export default function Products() {
     tableName: "products",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
-  // Trigger reload when filters change - use separate effect from loadProducts
+  // Trigger reload when filters change or when descendantIds resolve after a company switch.
+  // descendantIds (state) is the single trigger for company-switch reloads; loadProducts is
+  // intentionally omitted from the dep array because it is now stable (reads via ref).
   useEffect(() => {
-    if (activeCompany?.id && descendantIds.length === 0) return; // Wait for descendant IDs to resolve
+    // Wait for the hierarchy effect to resolve descendant IDs before loading.
+    // When activeCompany is set but descendantIds is still empty, the hierarchy
+    // fetch is still in-flight — skip until it resolves.
+    if (activeCompany?.id && descendantIds.length === 0) return;
     setPage(0);
     setHasMore(true);
     loadProducts(0, true, descendantIds);
-  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds, loadProducts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // loadProducts is stable (dep array is [t, toast]); descendantIds is the intentional trigger
+    // for company switches; the filter values are read via filtersRef inside loadProducts.
+  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
 
   // Load metadata separately (only when company changes)
   useEffect(() => {
     loadMetadata();
   }, [loadMetadata]);
 
-  // Infinite scroll observer
+  // Infinite scroll observer — descendantIds is included so the callback always uses the current
+  // org tree after a company switch, preventing stale-closure loads from a previous company.
   useEffect(() => {
     if (loading) return;
 
@@ -568,10 +604,15 @@ export default function Products() {
         observerRef.current.disconnect();
       }
     };
-  }, [loading, hasMore, loadingMore, page, loadProducts]);
+  }, [loading, hasMore, loadingMore, page, loadProducts, descendantIds]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     // Category and organization are optional - they may not exist yet
 
@@ -611,7 +652,8 @@ export default function Products() {
         const { error } = await supabase
           .from("products")
           .update(productData)
-          .eq("id", editingProduct.id);
+          .eq("id", editingProduct.id)
+          .eq("organization_id", activeCompany?.id);
 
         if (error) throw error;
         productId = editingProduct.id;
@@ -620,7 +662,8 @@ export default function Products() {
         await supabase
           .from("product_organizations")
           .delete()
-          .eq("product_id", editingProduct.id);
+          .eq("product_id", editingProduct.id)
+          .eq("organization_id", activeCompany?.id);
 
         toast({
           title: t('products.toast.updateSuccess'),
@@ -771,7 +814,11 @@ export default function Products() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t('products.toast.deleteConfirm'))) return;
+    // Delegate to the AlertDialog — this function is called after confirmation
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -787,7 +834,8 @@ export default function Products() {
           deleted_at: new Date().toISOString(),
           deleted_by: businessUserId,
         })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -803,6 +851,8 @@ export default function Products() {
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -1087,6 +1137,11 @@ export default function Products() {
   };
 
   const saveInlineEdit = async (productId: string, field: string) => {
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      cancelEditing();
+      return;
+    }
     if (field === "category_id") {
       // For category, we don't need to check if value is empty as it's a select
       try {
@@ -1096,7 +1151,8 @@ export default function Products() {
         const { error } = await supabase
           .from("products")
           .update(updateData)
-          .eq("id", productId);
+          .eq("id", productId)
+          .eq("organization_id", activeCompany?.id);
 
         if (error) throw error;
 
@@ -1129,7 +1185,8 @@ export default function Products() {
       const { error } = await supabase
         .from("products")
         .update(updateData)
-        .eq("id", productId);
+        .eq("id", productId)
+        .eq("organization_id", activeCompany?.id);
 
       if (error) throw error;
 
@@ -1190,13 +1247,14 @@ export default function Products() {
 
   // Bulk category update handler
   const handleBulkCategoryUpdate = async () => {
-    if (!bulkCategoryId) return;
+    if (!bulkCategoryId || !activeCompany?.id) return;
     try {
       const selectedIds = Array.from(bulkActions.selectedIds);
       const { error } = await supabase
         .from("products")
         .update({ category_id: bulkCategoryId, subcategory_id: null })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1217,13 +1275,14 @@ export default function Products() {
 
   // Bulk subcategory update handler
   const handleBulkSubcategoryUpdate = async () => {
-    if (!bulkSubcategoryId) return;
+    if (!bulkSubcategoryId || !activeCompany?.id) return;
     try {
       const selectedIds = Array.from(bulkActions.selectedIds);
       const { error } = await supabase
         .from("products")
         .update({ subcategory_id: bulkSubcategoryId })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1245,16 +1304,17 @@ export default function Products() {
 
   // Bulk product type update handler
   const handleBulkProductTypeUpdate = async () => {
-    if (!bulkProductType) return;
+    if (!bulkProductType || !activeCompany?.id) return;
     try {
       const selectedIds = Array.from(bulkActions.selectedIds);
       const isSellable = bulkProductType === "sale" || bulkProductType === "both";
       const isPurchasable = bulkProductType === "purchase" || bulkProductType === "both";
-      
+
       const { error } = await supabase
         .from("products")
         .update({ is_sellable: isSellable, is_purchasable: isPurchasable })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1275,13 +1335,14 @@ export default function Products() {
 
   const handleBulkUomUpdate = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
-    if (selectedIds.length === 0 || !bulkUomId) return;
+    if (selectedIds.length === 0 || !bulkUomId || !activeCompany?.id) return;
 
     try {
       const { error } = await supabase
         .from("products")
         .update({ uom_id: bulkUomId })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1321,13 +1382,19 @@ export default function Products() {
     const files = inputEl.files;
     if (!files || files.length === 0) return;
 
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      inputEl.value = '';
+      return;
+    }
+
     let totalNew = 0;
     let totalUpdated = 0;
     let totalPrices = 0;
     let totalSkipped = 0;
     const allSkipped: { line: number; sku: string; reason: string; file: string }[] = [];
     const allWarnings: string[] = [];
-    let failedFiles: string[] = [];
+    const failedFiles: string[] = [];
 
     try {
     for (const file of Array.from(files)) {
@@ -1363,6 +1430,7 @@ export default function Products() {
             let q = supabase
               .from("products")
               .select("id, sku, organization_id")
+              .eq("organization_id", activeCompany?.id)
               .range(from, from + PAGE_SIZE - 1);
             q = trashed ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
             const { data, error } = await q;
@@ -1385,10 +1453,11 @@ export default function Products() {
           }
         });
 
-        // Busca todas as categorias visíveis (sem filtro de org) para o import
+        // Busca categorias da org activa para o import
         const { data: allCategoriesForImport } = await supabase
           .from("product_categories")
-          .select("id, name, parent_id, organization_id");
+          .select("id, name, parent_id, organization_id")
+          .eq("organization_id", activeCompany?.id);
         const allCats = allCategoriesForImport || categories;
         const parentCategories = allCats.filter((c: any) => !c.parent_id);
         const subcategories = allCats.filter((c: any) => c.parent_id);
@@ -1481,7 +1550,7 @@ export default function Products() {
         // Update existing products (matched in JS via existingProducts)
         for (const product of productsToUpdate) {
           const { id, ...updateData } = product;
-          const { error } = await supabase.from("products").update(updateData).eq("id", id);
+          const { error } = await supabase.from("products").update(updateData).eq("id", id).eq("organization_id", activeCompany?.id);
           if (error) throw error;
         }
 
@@ -1502,6 +1571,7 @@ export default function Products() {
         const updateProductIds = [...new Set(normalizedPricesToUpdate.map((p: any) => p.product_id))];
 
         for (const productId of updateProductIds) {
+          // product_prices has no organization_id column; scope is enforced via product_id FK
           const { error: deletePriceError } = await supabase
             .from("product_prices")
             .delete()
@@ -2215,12 +2285,17 @@ export default function Products() {
                                value={editingValue}
                                onValueChange={(value) => {
                                  setEditingValue(value);
-                                 // Save immediately when selecting
+                                 // Save immediately when selecting — scoped to activeCompany to match all other write paths
+                                 if (!activeCompany?.id) {
+                                   cancelEditing();
+                                   return;
+                                 }
                                  const updateData = { category_id: value };
                                  supabase
                                    .from("products")
                                    .update(updateData)
                                    .eq("id", product.id)
+                                   .eq("organization_id", activeCompany.id)
                                    .then(({ error }) => {
                                      if (error) {
                                        toast({
@@ -2348,7 +2423,7 @@ export default function Products() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => handleDelete(product.id)}
+                                onClick={() => setDeleteConfirmId(product.id)}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
@@ -2606,6 +2681,27 @@ export default function Products() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Delete confirmation AlertDialog — replaces window.confirm for accessibility */}
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('products.toast.deleteConfirm') || "Eliminar produto?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('products.toast.deleteConfirmDesc') || "Esta ação não pode ser desfeita. O produto será marcado como eliminado."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deleteConfirmId) handleDelete(deleteConfirmId); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t('common.delete') || "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

@@ -244,7 +244,7 @@ export function ProposalDetailsDialog({
           .limit(5),
       ]);
 
-      let loadedItems: ProposalItem[] = itemsRes.data || [];
+      const loadedItems: ProposalItem[] = itemsRes.data || [];
       
       // Fallback: populate items from quote lines if proposal_items is empty
       setItems(loadedItems);

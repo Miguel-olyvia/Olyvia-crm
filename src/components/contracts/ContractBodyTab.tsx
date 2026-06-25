@@ -110,7 +110,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const finalizeGeneration = async (html: string, templateId: string, templateName: string, promptValues: Record<string, string>) => {
     // Apply auto-resolved substitutions (empresa_nome, etc.) — html may be raw baseWithItems
     // from GenerateFromTemplateDialog which passes pre-substitution HTML to allow full token detection.
-    let base = variableData ? substituteVariables(html, variableData as any) : html;
+    const base = variableData ? substituteVariables(html, variableData as any) : html;
     // Bake prompt values filled by the user permanently into the body.
     let withPrompts = base;
     for (const [k, v] of Object.entries(promptValues)) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -100,6 +100,48 @@ export function ExportAuditLog() {
     enabled: !!activeCompany?.id,
   });
 
+  const businessUserIds = useMemo(
+    () => [...new Set(entries.map((e) => e.business_user_id).filter((id): id is string => id !== null))],
+    [entries]
+  );
+  const orphanAuthUserIds = useMemo(
+    () => [...new Set(entries.filter((e) => !e.business_user_id).map((e) => e.auth_user_id))],
+    [entries]
+  );
+
+  const { data: usersByBizId = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["anew_users_biz", businessUserIds],
+    queryFn: async () => {
+      const { data } = await supabase.from("anew_users").select("id, name").in("id", businessUserIds);
+      return (data ?? []) as { id: string; name: string }[];
+    },
+    enabled: businessUserIds.length > 0,
+  });
+
+  const { data: usersByAuthId = [] } = useQuery<{ auth_user_id: string; name: string }[]>({
+    queryKey: ["anew_users_auth", orphanAuthUserIds],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("anew_users")
+        .select("auth_user_id, name")
+        .in("auth_user_id", orphanAuthUserIds);
+      return (data ?? []) as { auth_user_id: string; name: string }[];
+    },
+    enabled: orphanAuthUserIds.length > 0,
+  });
+
+  const userNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const u of usersByBizId) map.set(u.id, u.name);
+    for (const u of usersByAuthId) map.set(u.auth_user_id, u.name);
+    return map;
+  }, [usersByBizId, usersByAuthId]);
+
+  const resolveUserName = (entry: ExportAuditEntry): string => {
+    const key = entry.business_user_id ?? entry.auth_user_id;
+    return userNameMap.get(key) ?? (key.slice(0, 8) + "…");
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -171,10 +213,8 @@ export function ExportAuditLog() {
                     <TableCell className="whitespace-nowrap text-sm">
                       {format(new Date(entry.created_at), "dd/MM/yyyy HH:mm", { locale: pt })}
                     </TableCell>
-                    <TableCell className="text-sm font-mono text-muted-foreground">
-                      {entry.business_user_id
-                        ? entry.business_user_id.slice(0, 8) + "…"
-                        : entry.auth_user_id.slice(0, 8) + "…"}
+                    <TableCell className="text-sm text-muted-foreground">
+                      {resolveUserName(entry)}
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">{moduleLabel(entry.module)}</Badge>

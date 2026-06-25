@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import Layout from "@/components/Layout";
@@ -110,7 +110,7 @@ interface FormField {
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [childOrgs, setChildOrgs] = useState<ChildOrganization[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -214,46 +214,37 @@ const Campaigns = () => {
     return labels[type] || type.charAt(0).toUpperCase() + type.slice(1);
   };
 
-  useEffect(() => {
-    loadData();
-  }, [activeCompany]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      let campaignsQuery = supabase
-        .from("campaigns")
-        .select("*, organization:anew_organizations!campaigns_organization_id_anew_fkey(name), lead_sources(id, name, icon, color), forms(id, name)");
-
-      if (activeCompany) {
-        campaignsQuery = campaignsQuery.eq("organization_id", activeCompany.id);
+      if (!activeCompany?.id) {
+        setCampaigns([]);
+        setLoading(false);
+        return;
       }
 
-      const sourcesQuery = supabase
+      let campaignsQuery = supabase
+        .from("campaigns")
+        .select("*, organization:anew_organizations!campaigns_organization_id_anew_fkey(name), lead_sources(id, name, icon, color), forms(id, name)")
+        .eq("organization_id", activeCompany.id);
+
+      let sourcesQuery = supabase
         .from("lead_sources")
         .select("id, name, icon, color")
         .eq("is_active", true)
         .order("name");
 
-      if (activeCompany) {
-        sourcesQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
-      }
+      sourcesQuery = sourcesQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
 
       const [campaignsRes, organizationsRes, childOrgsRes, countriesRes, sourcesRes, formsRes] = await Promise.all([
         campaignsQuery.order("created_at", { ascending: false }),
-        activeCompany 
-          ? Promise.resolve({ data: [{ id: activeCompany.id, name: activeCompany.name }], error: null })
-          : supabase.from("anew_organizations").select("id, name").in("type", ["empresa"]),
-        activeCompany
-          ? supabase.from("anew_hierarchy").select("child_org_id, anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type)").eq("parent_org_id", activeCompany.id).then(res => ({
-              data: (res.data || []).map((h: any) => ({ id: (h as any).anew_organizations?.id, name: (h as any).anew_organizations?.name, type: (h as any).anew_organizations?.type || '' })).filter((d: any) => d.id),
-              error: res.error
-            }))
-          : Promise.resolve({ data: [] as ChildOrganization[], error: null }),
+        Promise.resolve({ data: [{ id: activeCompany.id, name: activeCompany.name }], error: null }),
+        supabase.from("anew_hierarchy").select("child_org_id, anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type)").eq("parent_org_id", activeCompany.id).then(res => ({
+            data: (res.data || []).map((h: any) => ({ id: (h as any).anew_organizations?.id, name: (h as any).anew_organizations?.name, type: (h as any).anew_organizations?.type || '' })).filter((d: any) => d.id),
+            error: res.error
+          })),
         supabase.from("administrative_divisions").select("country_code").eq("admin_level", 1),
         sourcesQuery,
-        activeCompany
-          ? supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).eq("organization_id", activeCompany.id).order("is_primary", { ascending: false })
-          : supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).order("is_primary", { ascending: false }),
+        supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).eq("organization_id", activeCompany.id).order("is_primary", { ascending: false }),
       ]);
 
       if (campaignsRes.error) throw campaignsRes.error;
@@ -337,7 +328,11 @@ const Campaigns = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany, toast, t]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const loadFormFields = async (formId: string) => {
     if (!formId) {
@@ -355,7 +350,11 @@ const Campaigns = () => {
       if (error) throw error;
       setFormFields(data || []);
     } catch (error: any) {
-      console.error("Error loading form fields:", error);
+      toast({
+        title: t('campaigns.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
       setFormFields([]);
     }
   };
@@ -477,7 +476,7 @@ const Campaigns = () => {
       });
 
       handleCloseDialog();
-      loadData();
+      void loadData();
     } catch (error: any) {
       toast({
         title: editingCampaign ? t('campaigns.toast.updateError') : t('campaigns.toast.createError'),
@@ -507,7 +506,7 @@ const Campaigns = () => {
 
       setDeleteDialogOpen(false);
       setCampaignToDelete(null);
-      loadData();
+      void loadData();
     } catch (error: any) {
       toast({
         title: t('campaigns.toast.deleteError'),
@@ -617,16 +616,16 @@ const Campaigns = () => {
     setVisibleCount(PAGE_SIZE);
   }, [searchQuery, statusFilter, typeFilter, organizationFilter, orgTypeFilters]);
 
-  const filteredCampaigns = campaigns
+  const filteredCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
-      const matchesSearch = !searchQuery || 
+      const matchesSearch = !searchQuery ||
         campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         campaign.description?.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       const matchesStatus = statusFilter === "all" || campaign.status === statusFilter;
       const matchesType = typeFilter === "all" || campaign.type === typeFilter;
       const matchesOrganization = organizationFilter === "all" || campaign.organization_id === organizationFilter;
-      
+
       // Dynamic org type filters
       const matchesOrgTypes = Object.entries(orgTypeFilters).every(([type, filterId]) => {
         if (filterId === "all" || !filterId) return true;
@@ -635,7 +634,8 @@ const Campaigns = () => {
 
       return matchesSearch && matchesStatus && matchesType && matchesOrganization && matchesOrgTypes;
     })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+  [campaigns, searchQuery, statusFilter, typeFilter, organizationFilter, orgTypeFilters]);
 
   const paginatedCampaigns = filteredCampaigns.slice(0, visibleCount);
   const hasMore = visibleCount < filteredCampaigns.length;
@@ -671,20 +671,20 @@ const Campaigns = () => {
     });
   };
 
-  if (loading) {
+  if (companyLoading) {
     return (
       <>
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center h-64">
           <OlyviaLoader size={40} />
         </div>
       </>
     );
   }
 
-  if (companyLoading) {
+  if (loading) {
     return (
       <>
-        <div className="flex items-center justify-center h-64">
+        <div className="flex items-center justify-center py-12">
           <OlyviaLoader size={40} />
         </div>
       </>

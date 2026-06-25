@@ -168,11 +168,10 @@ const Proposals = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { t } = useTranslation();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
-  const { isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { alerts: proposalAlerts, dismissAlert: dismissProposalAlert } = useModuleAlerts('proposal', activeCompany?.id);
   const alertSettings = useAlertSettings();
@@ -233,7 +232,7 @@ const Proposals = () => {
       setSearchEntityIdSet(new Set(ids));
     })();
     return () => { cancelled = true; };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, toast]);
   const [statusFilter, setStatusFilter] = useState<string>(stageFromUrl || "all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -288,13 +287,19 @@ const Proposals = () => {
   
   const [visualEditorProposalId, setVisualEditorProposalId] = useState<string | null>(null);
 
-  // Auto-fill value field from inline quotes + selected quotes total
+  // Auto-fill value field from inline quotes + selected quotes total.
+  // Compares the computed total against the current formData.value before writing
+  // to avoid unnecessary re-renders when selectedQuotes' reference changes but
+  // the actual total is unchanged.
   useEffect(() => {
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
     const inlineTotal = inlineQuotes.reduce((sum, q) => sum + calcInlineQuoteTotal(q), 0);
     const total = quotesTotal + inlineTotal;
     if (total > 0) {
-      setFormData(prev => ({ ...prev, value: total.toFixed(2) }));
+      setFormData(prev => {
+        const next = total.toFixed(2);
+        return prev.value === next ? prev : { ...prev, value: next };
+      });
     }
   }, [inlineQuotes, selectedQuotes]);
 
@@ -507,10 +512,10 @@ const Proposals = () => {
   const submitLockRef = useRef(false);
 
   useEffect(() => {
-    if (!permissionsLoading && activeCompany && !hasPermission("proposals.view")) {
+    if (!permissionsLoading && activeCompany && !isSystemAdmin && !hasPermission("proposals.view")) {
       navigate("/dashboard");
     }
-  }, [permissionsLoading, hasPermission, navigate, activeCompany]);
+  }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
   const loadWorkflowStages = useCallback(async () => {
     const { data: orgStages } = await (supabase
@@ -660,7 +665,8 @@ const Proposals = () => {
         const proposalIds = proposalsData.map(p => p.id);
         const { data: links } = await (supabase.from("pipeline_links") as any)
           .select("id, proposal_id, deal_id, quote_id, contract_id, status")
-          .in("proposal_id", proposalIds);
+          .in("proposal_id", proposalIds)
+          .eq("organization_id", activeCompany?.id);
         
         const linksMap: Record<string, any> = {};
         (links || []).forEach((l: any) => {
@@ -672,6 +678,7 @@ const Proposals = () => {
         const { data: quotesLinked } = await (supabase.from("quotes") as any)
           .select("proposal_id")
           .in("proposal_id", proposalIds)
+          .eq("organization_id", activeCompany?.id)
           .not("proposal_id", "is", null);
         const quotesSet = new Set<string>();
         (quotesLinked || []).forEach((q: any) => {
@@ -697,7 +704,7 @@ const Proposals = () => {
         const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
         
         // Fetch deal entity_ids for proposals without entity_id
-        let dealEntityMap: Record<string, string> = {};
+        const dealEntityMap: Record<string, string> = {};
         if (dealIds.length > 0) {
           const { data: dealEntities } = await supabase
             .from("deals")
@@ -768,7 +775,6 @@ const Proposals = () => {
     t,
     activeCompany?.id,
     isSystemAdmin,
-    companyUserType,
     permissionsLoading,
     scopeLoading,
     getPermissionScope,
@@ -785,10 +791,11 @@ const Proposals = () => {
     const openId = searchParams.get("open");
     if (!openId || selectedProposal) return;
 
+    let cancelled = false;
     const openFromQuery = async () => {
       const found = proposals.find(p => p.id === openId);
       if (found) {
-        handleViewDetails(found);
+        if (!cancelled) handleViewDetails(found);
         return;
       }
 
@@ -796,15 +803,17 @@ const Proposals = () => {
         .from("proposals")
         .select("*")
         .eq("id", openId)
+        .eq("organization_id", activeCompany?.id)
         .maybeSingle();
 
-      if (fetchedProposal) {
+      if (!cancelled && fetchedProposal) {
         handleViewDetails(fetchedProposal as Proposal);
       }
     };
 
     void openFromQuery();
-  }, [searchParams, proposals, selectedProposal]);
+    return () => { cancelled = true; };
+  }, [searchParams, proposals, selectedProposal, handleViewDetails, activeCompany?.id]);
 
   useEffect(() => {
     if (workflowStages.length > 0 && !formData.stage_id) {
@@ -812,21 +821,27 @@ const Proposals = () => {
     }
   }, [workflowStages, formData.stage_id]);
 
-  // Resolve commercial names
+  // Resolve commercial names.
+  // comercialNamesMap is included in deps so the effect re-evaluates which IDs
+  // are still missing after each resolution batch.  The cancelled flag prevents
+  // a stale async call from overwriting a later result.
   useEffect(() => {
     const ids = new Set<string>();
     proposals.forEach(p => { const a = (p as any).assigned_to; if (a) ids.add(a); });
     const missing = Array.from(ids).filter(id => !comercialNamesMap[id]);
     if (missing.length === 0) return;
+    let cancelled = false;
     (async () => {
       const { data } = await supabase.from("anew_users").select("id, name").in("id", missing);
+      if (cancelled) return;
       if (data) setComercialNamesMap(prev => {
         const next = { ...prev };
         (data as any[]).forEach(u => { next[u.id] = u.name || "Utilizador"; });
         return next;
       });
     })();
-  }, [proposals]);
+    return () => { cancelled = true; };
+  }, [proposals, comercialNamesMap]);
 
   const handleEdit = async (proposal: Proposal) => {
     setEditingId(proposal.id);
@@ -877,50 +892,50 @@ const Proposals = () => {
       }
     }
     setDealSearch("");
-    
-    const { data: quotesData } = await supabase
-      .from("quotes")
-      .select("id, quote_number, total, estado")
-      .eq("proposal_id", proposal.id);
-    
-    if (quotesData) {
-      setSelectedQuotes(quotesData.map(q => ({
+    setQuoteSearch("");
+
+    // Fetch quotes and proposal items in parallel — no data dependency between them.
+    const [quotesRes, itemsRes] = await Promise.all([
+      supabase
+        .from("quotes")
+        .select("id, quote_number, total, estado")
+        .eq("proposal_id", proposal.id)
+        .eq("organization_id", activeCompany?.id),
+      supabase
+        .from("proposal_items")
+        .select("id, description, quantity, unit_price, vat_rate, sort_order")
+        .eq("proposal_id", proposal.id)
+        .eq("organization_id", activeCompany?.id)
+        .order("sort_order"),
+    ]);
+
+    setSelectedQuotes(
+      (quotesRes.data || []).map(q => ({
         id: q.id,
         quote_number: q.quote_number,
         total: q.total,
         estado: q.estado,
-      })));
-    } else {
-      setSelectedQuotes([]);
-    }
-    setQuoteSearch("");
-    
-    const { data: itemsData } = await supabase
-      .from("proposal_items")
-      .select("id, description, quantity, unit_price, vat_rate, sort_order")
-      .eq("proposal_id", proposal.id)
-      .order("sort_order");
-    
-    if (itemsData) {
-      setProposalItems(itemsData.map(item => ({
+      }))
+    );
+
+    setProposalItems(
+      (itemsRes.data || []).map(item => ({
         id: item.id,
         description: item.description,
         quantity: Number(item.quantity),
         unit_price: Number(item.unit_price),
         vat_rate: Number(item.vat_rate),
         sort_order: item.sort_order || 0,
-      })));
-    } else {
-      setProposalItems([]);
-    }
-    
+      }))
+    );
+
     setOpen(true);
   };
 
-  const handleViewDetails = (proposal: Proposal) => {
+  const handleViewDetails = useCallback((proposal: Proposal) => {
     setSelectedProposal(proposal);
     setDetailsOpen(true);
-  };
+  }, []);
 
   const openProposalById = async (proposalId?: string | null) => {
     if (!proposalId) return;
@@ -935,6 +950,7 @@ const Proposals = () => {
       .from("proposals")
       .select("*")
       .eq("id", proposalId)
+      .eq("organization_id", activeCompany?.id)
       .maybeSingle();
 
     if (fetchedProposal) {
@@ -996,12 +1012,14 @@ const Proposals = () => {
 
   const handleBulkStatusChange = async () => {
     if (!bulkNewStatus) return;
+    if (!activeCompany?.id) return;
     try {
       const stage = workflowStages.find(s => s.id === bulkNewStatus);
       const { error } = await supabase
         .from("proposals")
         .update({ stage_id: bulkNewStatus, status: stage?.name || 'draft' })
-        .in("id", selectedIds);
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
       setSelectedIds([]);
@@ -1197,6 +1215,9 @@ const Proposals = () => {
       };
 
       let savedProposalId: string | null = null;
+      // Hoisted here so it is accessible both inside the if (savedProposalId) block
+      // and in the post-block check below — avoids the previous @ts-ignore workaround.
+      const skippedQuotes: Array<{ title: string; reason: string }> = [];
 
       // Resolve business user id up-front: required for inline quote inserts in
       // both edit and create paths (identity boundary — quotes.created_by is a
@@ -1245,30 +1266,15 @@ const Proposals = () => {
 
         const selectedQuoteIds = selectedQuotes.map(q => q.id);
         if (selectedQuoteIds.length > 0) {
-          const { error: unlinkError } = await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).not("id", "in", `(${selectedQuoteIds.join(",")})`);
+          const { error: unlinkError } = await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id).not("id", "in", `(${selectedQuoteIds.join(",")})`);
           if (unlinkError) console.error("Error unlinking quotes:", unlinkError);
-          const { error: linkError } = await supabase.from("quotes").update({ proposal_id: savedProposalId }).in("id", selectedQuoteIds);
+          const { error: linkError } = await supabase.from("quotes").update({ proposal_id: savedProposalId }).in("id", selectedQuoteIds).eq("organization_id", activeCompany?.id);
           if (linkError) console.error("Error linking quotes:", linkError);
         } else {
-          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId);
+          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id);
         }
 
         // Save inline quotes
-        console.log('[Proposals.submit] inlineQuotes snapshot', {
-          proposalId: savedProposalId,
-          count: inlineQuotes.length,
-          quotes: inlineQuotes.map(q => ({
-            title: q.title,
-            totalLines: q.lines?.length ?? 0,
-            validLines: (q.lines || []).filter(l => l.qt > 0).length,
-            linesPreview: (q.lines || []).map(l => ({
-              qt: l.qt,
-              desc: l.descricao_snapshot?.slice(0, 40),
-            })),
-          })),
-        });
-
-        const skippedQuotes: Array<{ title: string; reason: string }> = [];
 
         for (const iq of inlineQuotes) {
           // Pre-compute valid lines and skip the quote entirely if there is nothing to persist.
@@ -1374,7 +1380,7 @@ const Proposals = () => {
           const { error: linesError } = await supabase.from("quote_lines").insert(finalLines);
           if (linesError) throw linesError;
         }
-        await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId);
+        await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id);
         if (proposalItems.length > 0) {
           await supabase.from("proposal_items").insert(
             proposalItems.map((item, index) => ({
@@ -1391,15 +1397,11 @@ const Proposals = () => {
 
       // If any inline quote was skipped, warn the user explicitly and keep the dialog open
       // so they can fix the offending lines and re-submit.
-      // (skippedQuotes only exists in the create/edit branch above; guard with a local check.)
-      const lateSkipped: Array<{ title: string; reason: string }> =
-        // @ts-ignore - skippedQuotes is declared in the inner block scope above
-        typeof skippedQuotes !== "undefined" ? skippedQuotes : [];
-      if (lateSkipped.length > 0) {
-        const list = lateSkipped.map(s => `• "${s.title}" — ${s.reason}`).join("\n");
-        console.warn('[Proposals.submit] some inline quotes were not persisted', lateSkipped);
+      if (skippedQuotes.length > 0) {
+        const list = skippedQuotes.map(s => `• "${s.title}" — ${s.reason}`).join("\n");
+        console.warn('[Proposals.submit] some inline quotes were not persisted', skippedQuotes);
         toast({
-          title: `${lateSkipped.length} orçamento(s) não gravado(s)`,
+          title: `${skippedQuotes.length} orçamento(s) não gravado(s)`,
           description: `A proposta foi gravada mas o(s) seguinte(s) orçamento(s) foi(ram) ignorado(s):\n${list}\n\nCorrija e grave novamente.`,
           variant: "destructive",
         });
@@ -1518,11 +1520,11 @@ const Proposals = () => {
     );
   };
 
-  // Helper to get stage name
-  const getStageName = (proposal: Proposal): string => {
+  // Helper to get stage name — memoised so useMemo dep arrays are stable.
+  const getStageName = useCallback((proposal: Proposal): string => {
     const stage = getProposalStage(proposal);
     return stage?.name || proposal.status || "";
-  };
+  }, [getProposalStage]);
 
   // Stats
   const stats = useMemo(() => {
@@ -1590,23 +1592,29 @@ const Proposals = () => {
     });
 
     return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
-  }, [proposals, workflowStages, getProposalStage]);
+  }, [proposals, workflowStages, getProposalStage, getStageName]);
 
   // Filter and sort
   const filteredProposals = useMemo(() => {
     const now = new Date();
     return proposals
       .filter(proposal => {
+        // "Só os meus" — filter to proposals assigned to the current user.
+        // scopeAnewUserId is the anew_users.id of the current user.
+        if (onlyMine && scopeAnewUserId) {
+          if ((proposal as any).assigned_to !== scopeAnewUserId) return false;
+        }
+
         if (statusFilter !== "all") {
           const stage = getProposalStage(proposal);
           if (stage?.id !== statusFilter && proposal.status !== statusFilter) return false;
         }
-        
+
         if (noResponseFilter) {
           const sn = getStageName(proposal);
           if (!((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5)) return false;
         }
-        
+
         if (expiredFilter) {
           if (!(proposal.valid_until && isPast(parseISO(proposal.valid_until)))) return false;
         }
@@ -1614,7 +1622,7 @@ const Proposals = () => {
         if (noValidityFilter) {
           if (proposal.valid_until) return false;
         }
-        
+
         const term = debouncedSearch.trim();
         const searchLower = term.toLowerCase();
         const proposalDate = new Date(proposal.created_at);
@@ -1652,7 +1660,7 @@ const Proposals = () => {
         if (typeof aVal === "string" && typeof bVal === "string") return sortDirection === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
         return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
       });
-  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, workflowStages, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, comercialFilter]);
+  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, getStageName, comercialFilter, onlyMine, scopeAnewUserId]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -2204,7 +2212,7 @@ const Proposals = () => {
                                     }
 
                                     const entityIds = dealsData.map((d: any) => d.entity_id).filter(Boolean);
-                                    let entityMap: Record<string, any> = {};
+                                    const entityMap: Record<string, any> = {};
                                     if (entityIds.length > 0) {
                                       const [entRes, emailRes, phoneRes] = await Promise.all([
                                         supabase.from("anew_entities").select("id, display_name").in("id", entityIds),
@@ -2241,7 +2249,7 @@ const Proposals = () => {
                                         setDealSearchResults([]);
                                         
                                         // Load existing quotes for this deal
-                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).neq("estado", "rascunho").order("created_at", { ascending: false });
+                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).neq("estado", "rascunho").order("created_at", { ascending: false });
                                         if (dealQuotes && dealQuotes.length > 0) {
                                           setSelectedQuotes(dealQuotes.map(q => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
                                         } else {

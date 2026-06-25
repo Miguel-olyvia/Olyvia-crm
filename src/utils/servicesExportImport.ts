@@ -432,10 +432,13 @@ export async function parseServicesCSV(
       const existingId = existing.get(sku);
 
       if (existingId) {
+        // Anchor the update to the calling org — prevents a crafted CSV from
+        // overwriting services belonging to a different tenant.
         const { error } = await supabase
           .from("services")
           .update(serviceData)
-          .eq("id", existingId);
+          .eq("id", existingId)
+          .eq("organization_id", organizationId);
         if (error) throw error;
         serviceId = existingId;
         report.updated++;
@@ -451,8 +454,14 @@ export async function parseServicesCSV(
         report.inserted++;
       }
 
-      // Sync prices: delete existing then insert (purchase + retail)
-      await supabase.from("service_prices").delete().eq("service_id", serviceId);
+      // Sync prices: delete only prices owned by this org, then insert fresh rows.
+      // Scoping the delete to organization_id prevents a crafted CSV from removing
+      // prices that belong to a different tenant sharing the same service record.
+      await supabase
+        .from("service_prices")
+        .delete()
+        .eq("service_id", serviceId)
+        .eq("organization_id", organizationId);
 
       const priceRows = [
         {

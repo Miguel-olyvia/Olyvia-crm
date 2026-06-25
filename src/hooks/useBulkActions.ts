@@ -7,9 +7,10 @@ export interface BulkActionOptions {
   tableName: string;
   onSuccess?: () => void;
   softDelete?: boolean; // Use soft delete (is_deleted) instead of hard delete
+  organizationId?: string; // When provided, all writes are scoped to this org
 }
 
-export function useBulkActions({ tableName, onSuccess, softDelete = false }: BulkActionOptions) {
+export function useBulkActions({ tableName, onSuccess, softDelete = false, organizationId }: BulkActionOptions) {
   const { toast } = useToast();
   const { t } = useTranslation();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -56,14 +57,16 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false }: Bul
         updateData.status = bulkNewStatus;
       }
 
+      if (!organizationId) throw new Error("organizationId required for bulk status change");
       const { error } = await (supabase
         .from(tableName as any)
         .update(updateData as any)
-        .in("id", Array.from(selectedIds)) as any);
+        .in("id", Array.from(selectedIds))
+        .eq("organization_id", organizationId) as any);
 
       if (error) throw error;
 
-      toast({ 
+      toast({
         title: t('common.statusUpdated'),
         description: `${selectedIds.size} registos atualizados.`
       });
@@ -91,6 +94,7 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false }: Bul
       const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
       const businessUserId = await resolveBusinessUserId(user.id);
 
+      if (!organizationId) throw new Error("organizationId required for bulk delete");
       if (softDelete) {
         const { error } = await (supabase
           .from(tableName as any)
@@ -99,14 +103,16 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false }: Bul
             deleted_at: new Date().toISOString(),
             deleted_by: businessUserId,
           } as any)
-          .in("id", Array.from(selectedIds)) as any);
+          .in("id", Array.from(selectedIds))
+          .eq("organization_id", organizationId) as any);
 
         if (error) throw error;
       } else {
         const { error } = await (supabase
           .from(tableName as any)
           .delete()
-          .in("id", Array.from(selectedIds)) as any);
+          .in("id", Array.from(selectedIds))
+          .eq("organization_id", organizationId) as any);
 
         if (error) throw error;
       }
@@ -137,14 +143,16 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false }: Bul
       const updateData: Record<string, unknown> = {};
       updateData[companyField] = bulkNewCompanyId;
 
+      if (!organizationId) throw new Error("organizationId required for bulk company change");
       const { error } = await (supabase
         .from(tableName as any)
         .update(updateData as any)
-        .in("id", Array.from(selectedIds)) as any);
+        .in("id", Array.from(selectedIds))
+        .eq("organization_id", organizationId) as any);
 
       if (error) throw error;
 
-      toast({ 
+      toast({
         title: t('common.orgUpdated'),
         description: `${selectedIds.size} registos atualizados.`
       });

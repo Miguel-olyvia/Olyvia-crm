@@ -443,7 +443,7 @@ const AnewContacts = () => {
       const contactPool = allContacts.length > 0 ? allContacts : contacts;
       const found = findScopedContactByRef(contactPool, openId, currentScopeOptions);
       if (found) {
-        await openContactDetails(found);
+        await openContactDetailsRef.current?.(found);
         setSearchParams({});
         return;
       }
@@ -467,7 +467,7 @@ const AnewContacts = () => {
       const fetchedContact = findScopedContactByRef((fetchedContacts || []) as any[], openId, currentScopeOptions);
 
       if (fetchedContact) {
-        await openContactDetails(fetchedContact as ContactRecord);
+        await openContactDetailsRef.current?.(fetchedContact as ContactRecord);
         setSearchParams({});
       }
     };
@@ -502,9 +502,10 @@ const AnewContacts = () => {
       clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [scopeLoading, isParentOrg]);
+  }, [scopeLoading, isParentOrg, activeCompany?.id]);
 
   const loadContactsRef = useRef<(offset: number, isInitial?: boolean) => Promise<void>>();
+  const openContactDetailsRef = useRef<(contact: ContactRecord) => Promise<void>>();
   const contactsLengthRef = useRef(0);
   const hasLoadedContactsRef = useRef(false);
   useEffect(() => { contactsLengthRef.current = contacts.length; }, [contacts.length]);
@@ -639,7 +640,7 @@ const AnewContacts = () => {
     } catch (error: any) {
       toast({ title: t('contacts.toast.loadContactsError'), description: error.message, variant: "destructive" });
     } finally { setLoading(false); setLoadingMore(false); }
-  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope]);
+  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope, getPermissionScope]);
 
   // Keep a stable ref to loadContacts for infinite scroll
   useEffect(() => { loadContactsRef.current = loadContacts; }, [loadContacts]);
@@ -660,7 +661,7 @@ const AnewContacts = () => {
       newParams.delete("_t");
       setSearchParams(newParams, { replace: true });
     }
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   // Initial load + reload on filter changes — also invalidate caches
   useEffect(() => {
@@ -687,12 +688,12 @@ const AnewContacts = () => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const [interactions, tags, deals, sentiment, proposals, quotes] = await Promise.all([
-      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, id").in("entity_id", batch).gte("interaction_at", thirtyDaysAgo.toISOString())),
-      selectInBatches(uniqueIds, batch => supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", batch)),
-      selectInBatches(uniqueIds, batch => (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", batch).is("lost_reason", null)) as Promise<any[]>,
-      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", batch).not("sentiment", "is", null).order("interaction_at", { ascending: false })),
-      selectInBatches(uniqueIds, batch => (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", batch).neq("status", "rejeitada")) as Promise<any[]>,
-      selectInBatches(uniqueIds, batch => (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", batch).neq("estado", "perdido")) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, id").in("entity_id", batch).eq("organization_id", activeCompany?.id).gte("interaction_at", thirtyDaysAgo.toISOString())),
+      selectInBatches(uniqueIds, batch => supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", batch).eq("organization_id", activeCompany?.id)),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", batch).eq("organization_id", activeCompany?.id).is("lost_reason", null)) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", batch).eq("organization_id", activeCompany?.id).not("sentiment", "is", null).order("interaction_at", { ascending: false })),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", batch).eq("organization_id", activeCompany?.id).neq("status", "rejeitada")) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", batch).eq("organization_id", activeCompany?.id).neq("estado", "perdido")) as Promise<any[]>,
     ]);
     const counts: Record<string, number> = {};
     (interactions || []).forEach((i: any) => { counts[i.entity_id] = (counts[i.entity_id] || 0) + 1; });
@@ -773,7 +774,7 @@ const AnewContacts = () => {
     const sentiments: Record<string, string> = {};
     (sentiment || []).forEach((s: any) => { if (!sentiments[s.entity_id]) sentiments[s.entity_id] = s.sentiment; });
     setLastSentiments(prev => ({ ...prev, ...sentiments }));
-  }, []);
+  }, [activeCompany?.id]);
 
   // Defer supplementary data loading — run after initial render, not blocking the list display
   const supplementaryLoadedRef = useRef<Set<string>>(new Set());
@@ -1089,7 +1090,7 @@ const AnewContacts = () => {
       score: getHealthScore(c.entity_id, c.last_interaction_at).score,
       entityId: c.entity_id,
     }));
-  }, [contacts, allContacts, lastInteractions, dealsData, proposalsData, interactionCounts, getIdentity, getHealthScore]);
+  }, [contacts, allContacts, lastInteractions, dealsData, proposalsData, interactionCounts, getIdentity, getHealthScore, quotesData]);
 
   // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
   // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
@@ -1135,7 +1136,7 @@ const AnewContacts = () => {
       pipeline: totalPipeline, withDeals, withProposals, withPipeline, withoutDeals,
       noContact7d, avgHealth: source.length > 0 ? Math.round(totalScore / source.length) : 0,
     };
-  }, [contacts, allContacts, filteredContacts, totalCount, lastInteractions, dealsData, proposalsData, quotesData, interactionCounts, getIdentity, serverAlertCounts, hasActiveClientFilter, getPermissionScope]);
+  }, [contacts, allContacts, filteredContacts, totalCount, lastInteractions, dealsData, proposalsData, quotesData, interactionCounts, getIdentity, serverAlertCounts, hasActiveClientFilter, getPermissionScope, getHealthScore]);
 
   // Active filter count
   const activeFilterCount = [
@@ -1196,14 +1197,14 @@ const AnewContacts = () => {
   const findAvailableSlots = async (userId: string, count: number): Promise<{ start: Date; end: Date }[]> => {
     const slots: { start: Date; end: Date }[] = [];
     const now = new Date();
-    let searchStart = new Date(now); searchStart.setMinutes(0,0,0);
+    const searchStart = new Date(now); searchStart.setMinutes(0,0,0);
     if (searchStart.getHours() < 9) searchStart.setHours(9);
     else if (searchStart.getHours() >= 18) { searchStart.setDate(searchStart.getDate()+1); searchStart.setHours(9); }
     else searchStart.setHours(searchStart.getHours()+1);
     const searchEnd = new Date(searchStart); searchEnd.setDate(searchEnd.getDate()+14);
     const { data: assignedItems } = await (supabase as any).from("schedule_items").select("id, start_datetime, end_datetime, status").eq("assigned_to_user_id", userId).neq("status","cancelled").gte("start_datetime", searchStart.toISOString()).lte("start_datetime", searchEnd.toISOString());
     const busyTimes = (assignedItems||[]).map((item:any)=>({start:new Date(item.start_datetime),end:new Date(item.end_datetime)}));
-    let currentDate = new Date(searchStart); let daysSearched = 0;
+    const currentDate = new Date(searchStart); let daysSearched = 0;
     while (slots.length < count && daysSearched < 14) {
       const dow = currentDate.getDay();
       if (dow === 0 || dow === 6) { currentDate.setDate(currentDate.getDate()+1); currentDate.setHours(9,0,0,0); daysSearched++; continue; }
@@ -1450,7 +1451,7 @@ const AnewContacts = () => {
       setDetailsOpen(true);
     } else {
       (async () => {
-        const { data } = await (supabase as any).from("anew_contacts").select("*, anew_entities!anew_contacts_entity_id_fkey(*)").eq("id", match.id).single();
+        const { data } = await (supabase as any).from("anew_contacts").select("*, anew_entities!anew_contacts_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
         if (data) {
           setSelectedContact(data);
           setDetailsOpen(true);
@@ -1465,7 +1466,7 @@ const AnewContacts = () => {
     if (!pendingContactData) return;
     setSavingContact(true);
     try {
-      const { error: updContactErr } = await supabase.from("anew_contacts").update({ status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId } as any).eq("id", match.id);
+      const { error: updContactErr } = await supabase.from("anew_contacts").update({ status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId } as any).eq("id", match.id).eq("organization_id", activeCompany?.id);
       if (updContactErr) throw updContactErr;
       const { error: updRoleErr } = await supabase.from("anew_entity_roles").update({ status: pendingContactData.roleStatus } as any).eq("entity_id", pendingContactData.entityId).eq("role", "contact").eq("organization_id", pendingContactData.organizationId);
       if (updRoleErr) throw updRoleErr;
@@ -1683,7 +1684,7 @@ const AnewContacts = () => {
     } catch (error: any) { toast({ title: t('contacts.import.failed'), description: error.message, variant: "destructive" }); }
   };
 
-  const openContactDetails = async (contact: ContactRecord) => {
+  const openContactDetails = useCallback(async (contact: ContactRecord) => {
     let targetContact = contact;
     let identity = getIdentity(contact.entity_id);
 
@@ -1711,7 +1712,10 @@ const AnewContacts = () => {
       vat: identity?.vat || '', position: (targetContact as any).position || '',
     });
     setDetailsOpen(true);
-  };
+  }, [getIdentity, resolveEntities]);
+
+  // Keep a stable ref to openContactDetails for effects that capture it in a dep-free closure
+  useEffect(() => { openContactDetailsRef.current = openContactDetails; }, [openContactDetails]);
 
   // Loading state is now shown inline in the table area instead of blocking the whole page
 
@@ -2119,6 +2123,7 @@ const AnewContacts = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
+                        <TooltipProvider delayDuration={200}>
                         {filteredContacts.map((contact) => {
                           const identity = getIdentity(contact.entity_id);
                           const healthScore = getHealthScore(contact.entity_id, contact.last_interaction_at);
@@ -2325,6 +2330,7 @@ const AnewContacts = () => {
                             </TableRow>
                           );
                         })}
+                        </TooltipProvider>
                       </TableBody>
                     </Table>
                     {/* Infinite scroll sentinel - inside scrollable container */}
@@ -2530,7 +2536,7 @@ const AnewContacts = () => {
                 <div className="space-y-2"><Label>{t('contacts.schedule.type')}</Label><Select value={scheduleFormData.visit_type} onValueChange={(v) => setScheduleFormData({...scheduleFormData, visit_type: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="meeting">{t('contacts.schedule.type.meeting')}</SelectItem><SelectItem value="phone_call">{t('contacts.schedule.type.phoneCall')}</SelectItem><SelectItem value="site_visit">{t('contacts.schedule.type.siteVisit')}</SelectItem></SelectContent></Select></div>
                 <div className="space-y-2"><Label>{t('contacts.schedule.location')}</Label><Input value={scheduleFormData.location} onChange={(e) => setScheduleFormData({...scheduleFormData, location: e.target.value})} /></div>
               </div>
-              {suggestedSlots.length > 0 && (<div className="space-y-2"><Label className="text-sm font-medium">{t('contacts.schedule.availableSlots')}</Label><div className="flex flex-wrap gap-2">{suggestedSlots.map((slot, i) => (<Button key={i} type="button" variant="outline" size="sm" onClick={() => selectSuggestedSlot(slot)}>{format(slot.start, "dd/MM HH:mm")} - {format(slot.end, "HH:mm")}</Button>))}</div></div>)}
+              {suggestedSlots.length > 0 && (<div className="space-y-2"><Label className="text-sm font-medium">{t('contacts.schedule.availableSlots')}</Label><div className="flex flex-wrap gap-2">{suggestedSlots.map((slot) => (<Button key={slot.start.toISOString()} type="button" variant="outline" size="sm" onClick={() => selectSuggestedSlot(slot)}>{format(slot.start, "dd/MM HH:mm")} - {format(slot.end, "HH:mm")}</Button>))}</div></div>)}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>{t('contacts.schedule.startDateTime')}</Label><Input type="datetime-local" value={scheduleFormData.start_time} onChange={(e) => setScheduleFormData({...scheduleFormData, start_time: e.target.value})} /></div>
                 <div className="space-y-2"><Label>{t('contacts.schedule.endDateTime')}</Label><Input type="datetime-local" value={scheduleFormData.end_time} onChange={(e) => setScheduleFormData({...scheduleFormData, end_time: e.target.value})} /></div>

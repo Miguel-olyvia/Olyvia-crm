@@ -3285,7 +3285,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         dealsData.forEach((d: any) => d.entity_id && allEntityIds.add(d.entity_id));
                         contactsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
                         clientsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
-                        let entityMap: Record<string, any> = {};
+                        const entityMap: Record<string, any> = {};
                         if (allEntityIds.size > 0) {
                           const { data: entities } = await (supabase as any)
                             .from("anew_entities").select("id, display_name")

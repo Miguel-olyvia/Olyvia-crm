@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, Tags, Pencil, Trash2, Shield } from "lucide-react";
@@ -83,6 +83,7 @@ export default function Brands() {
     businessUnitId: "",
     departmentId: "",
     secondaryCompanyIds: [],
+    selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
     levelSelections: [],
   });
 
@@ -93,13 +94,13 @@ export default function Brands() {
 
   const isAdmin = userType === 'system_admin' || userType === 'tenant_admin';
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       // Get brand IDs associated with the active company via junction table
       let brandIdsToFilter: string[] = [];
-      
+
       if (filterCompanyId && filterCompanyId !== "all") {
         const { data: brandOrgs } = await supabase
           .from("brand_organizations")
@@ -114,7 +115,7 @@ export default function Brands() {
           .eq("organization_id", activeCompany.id);
         brandIdsToFilter = brandOrgs?.map((bc: any) => bc.brand_id) || [];
       }
-      
+
       if (brandIdsToFilter.length === 0) {
         setBrands([]);
         setLoading(false);
@@ -144,18 +145,19 @@ export default function Brands() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany?.id, userType, filterCompanyId, filterStatus, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
     tableName: "brands",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   useEffect(() => {
     loadData();
-  }, [activeCompany?.id, userType, filterCompanyId, filterStatus]);
+  }, [loadData]);
 
   const generateSlug = (name: string) => {
     return name
@@ -166,6 +168,11 @@ export default function Brands() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -206,16 +213,11 @@ export default function Brands() {
         const { error } = await supabase
           .from("brands")
           .update(brandData)
-          .eq("id", editingBrand.id);
+          .eq("id", editingBrand.id)
+          .eq("organization_id", activeCompany.id);
 
         if (error) throw error;
         brandId = editingBrand.id;
-
-        // Update company associations
-        await supabase
-          .from("brand_organizations")
-          .delete()
-          .eq("brand_id", editingBrand.id);
 
         toast({
           title: t('brands.toast.updateSuccess'),
@@ -236,7 +238,9 @@ export default function Brands() {
         });
       }
 
-      // Insert company associations
+      // Upsert company associations first, then remove stale ones.
+      // Insert-before-delete prevents the brand from becoming org-orphaned
+      // if the delete succeeds but the subsequent insert fails.
       if (allCompanyIds.length > 0) {
         const companyAssociations = allCompanyIds.map((companyId) => ({
           brand_id: brandId,
@@ -244,9 +248,22 @@ export default function Brands() {
           created_by: businessUserId,
         }));
 
-        await supabase
+        const { error: assocError } = await supabase
           .from("brand_organizations")
-          .insert(companyAssociations);
+          .upsert(companyAssociations, { onConflict: "brand_id,organization_id", ignoreDuplicates: true });
+
+        if (assocError) throw assocError;
+      }
+
+      // Only delete associations NOT in the new set (safe because inserts already succeeded above)
+      if (editingBrand) {
+        const { error: delError } = await supabase
+          .from("brand_organizations")
+          .delete()
+          .eq("brand_id", brandId)
+          .not("organization_id", "in", `(${allCompanyIds.join(",")})`);
+
+        if (delError) throw delError;
       }
 
       handleCloseDialog(false);
@@ -262,12 +279,18 @@ export default function Brands() {
 
   const handleDelete = async () => {
     if (!deleteBrandId) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      setDeleteBrandId(null);
+      return;
+    }
 
     try {
       const { error } = await supabase
         .from("brands")
         .delete()
-        .eq("id", deleteBrandId);
+        .eq("id", deleteBrandId)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -511,26 +534,8 @@ export default function Brands() {
           deletePermission="brands.delete"
         />
 
-        {loading || permissionsLoading ? (
-          <div className="text-center py-8">{t('brands.loading')}</div>
-        ) : !canView ? (
-          <div className="flex items-center justify-center min-h-[40vh]">
-            <Card className="w-full max-w-md">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-12 h-12 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
-                  <Shield className="w-6 h-6 text-destructive" />
-                </div>
-                <CardTitle>{t('brands.accessDenied')}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center">
-                <p className="text-muted-foreground">
-                  {t('brands.noPermissionFull')}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="border rounded-lg">
+        {/* Access and loading checks are handled before this JSX via early returns above */}
+        <div className="border rounded-lg">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -538,6 +543,7 @@ export default function Brands() {
                     <Checkbox
                       checked={bulkActions.selectedIds.size === allIds.length && allIds.length > 0}
                       onCheckedChange={() => bulkActions.toggleSelectAll(allIds)}
+                      aria-label={t('common.selectAll')}
                     />
                   </TableHead>
                   <TableHead>{t('brands.table.name')}</TableHead>
@@ -624,7 +630,6 @@ export default function Brands() {
               </TableBody>
             </Table>
           </div>
-        )}
       </div>
 
       <BulkStatusDialog

@@ -74,7 +74,7 @@ function calculateClientHealth(
     };
   }
 
-  let base = 50;
+  const base = 50;
 
   // Last contact
   let lastContact = -20;

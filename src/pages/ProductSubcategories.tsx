@@ -122,7 +122,7 @@ export default function ProductSubcategories() {
   const isAdmin = isSystemAdmin;
   const canSelectCompanyInForm = isAdmin || hasPermission('products.manage');
 
-  const loadCompanies = async () => {
+  const loadCompanies = useCallback(async () => {
     if (!isAdmin) return;
 
     try {
@@ -141,9 +141,9 @@ export default function ProductSubcategories() {
         variant: "destructive",
       });
     }
-  };
+  }, [isAdmin, t, toast]);
 
-  const loadFormParentCategories = async (companyId: string | null) => {
+  const loadFormParentCategories = useCallback(async (companyId: string | null) => {
     if (!companyId) {
       setFormParentCategories([]);
       return;
@@ -156,14 +156,14 @@ export default function ProductSubcategories() {
 
     if (companyCatsError) throw companyCatsError;
 
-    const categoryIds = [...new Set(companyCats?.map((c: any) => c.category_id) || [])];
+    const categoryIds = [...new Set(companyCats?.map((c) => c.category_id) || [])];
 
     if (categoryIds.length === 0) {
       setFormParentCategories([]);
       return;
     }
 
-    const parentsResult: any = await supabase
+    const { data: parentsData, error: parentsError } = await supabase
       .from("product_categories")
       .select("id, name")
       .is("parent_id", null)
@@ -171,11 +171,11 @@ export default function ProductSubcategories() {
       .in("id", categoryIds)
       .order("name");
 
-    if (parentsResult.error) throw parentsResult.error;
-    setFormParentCategories((parentsResult.data || []) as ParentCategory[]);
-  };
+    if (parentsError) throw parentsError;
+    setFormParentCategories((parentsData || []) as ParentCategory[]);
+  }, []);
 
-  const loadData = async (reset: boolean = true) => {
+  const loadData = useCallback(async (reset: boolean = true) => {
     try {
       if (reset) {
         setLoading(true);
@@ -191,7 +191,7 @@ export default function ProductSubcategories() {
 
       // Load parent categories (those without parent_id)
       let parentsData: ParentCategory[] = [];
-      
+
       // Determine effective filter: specific company filter takes precedence
       const effectiveCompanyId =
         filterCompanyId && filterCompanyId !== "all"
@@ -199,7 +199,7 @@ export default function ProductSubcategories() {
           : null;
 
       // Get user's accessible company IDs for company_admin
-      const userCompanyIds = contextCompanies.map(c => c.id);
+      const userCompanyIds = contextCompanies.map((c) => c.id);
 
       // If organization filter is set, get companies from that tenant
       let tenantCompanyIds: string[] = [];
@@ -214,7 +214,7 @@ export default function ProductSubcategories() {
 
         if (tenantCompaniesError) throw tenantCompaniesError;
 
-        tenantCompanyIds = (tenantCompanies || []).map((c: any) => c.child_org_id);
+        tenantCompanyIds = (tenantCompanies || []).map((c) => c.child_org_id);
 
         // Selected organization has no companies -> show empty state (no error)
         if (tenantCompanyIds.length === 0) {
@@ -245,25 +245,25 @@ export default function ProductSubcategories() {
           .select("category_id")
           .in("organization_id", filterByCompanyIds);
 
-        const categoryIds = [...new Set(companyCats?.map((c: any) => c.category_id) || [])];
+        const categoryIds = [...new Set(companyCats?.map((c) => c.category_id) || [])];
 
         if (categoryIds.length > 0) {
-          const parentsResult: any = await supabase
+          const { data: parentsRows, error: parentsError } = await supabase
             .from("product_categories")
             .select("id, name")
             .is("parent_id", null)
             .eq("is_active", true)
             .in("id", categoryIds)
             .order("name");
-          if (parentsResult.error) throw parentsResult.error;
-          parentsData = (parentsResult.data || []) as ParentCategory[];
+          if (parentsError) throw parentsError;
+          parentsData = (parentsRows || []) as ParentCategory[];
         }
       }
 
       setParentCategories(parentsData);
 
       // Load subcategories (those with parent_id) with pagination
-      let subsQuery: any = supabase
+      let subsQuery = supabase
         .from("product_categories")
         .select(`
           id,
@@ -281,9 +281,14 @@ export default function ProductSubcategories() {
         .order("path")
         .range(from, to);
 
-      if (filterByCompanyIds && filterByCompanyIds.length > 0) {
-        subsQuery = subsQuery.in("organization_id", filterByCompanyIds);
+      // ALWAYS require org filter — no unscoped queries allowed
+      if (!filterByCompanyIds || filterByCompanyIds.length === 0) {
+        setParentCategories([]);
+        setSubcategories([]);
+        setHasMore(false);
+        return;
       }
+      subsQuery = subsQuery.in("organization_id", filterByCompanyIds);
 
       if (filterStatus !== "all") {
         subsQuery = subsQuery.eq("is_active", filterStatus === "active");
@@ -298,35 +303,45 @@ export default function ProductSubcategories() {
         subsQuery = subsQuery.ilike("name", `%${debouncedSearchTerm}%`);
       }
 
-      const subsResult = await subsQuery;
-      if (subsResult.error) throw subsResult.error;
-      
+      const { data: subsData, error: subsError } = await subsQuery;
+      if (subsError) throw subsError;
+
       // Resolve organization names via junction table
-      const subOrgIds = [...new Set((subsResult.data || []).map((s: any) => s.organization_id as string).filter(Boolean))];
+      const subOrgIds = [
+        ...new Set(
+          (subsData || [])
+            .map((s) => (s as { organization_id?: string }).organization_id)
+            .filter((id): id is string => !!id)
+        ),
+      ];
       let orgNameMap: Record<string, string> = {};
       if (subOrgIds.length > 0) {
         const { data: orgs } = await supabase
           .from("anew_organizations")
           .select("id, name")
-          .in("id", subOrgIds as string[]);
-        orgNameMap = Object.fromEntries((orgs || []).map((o: any) => [o.id, o.name]));
+          .in("id", subOrgIds);
+        orgNameMap = Object.fromEntries((orgs || []).map((o) => [o.id, o.name]));
       }
 
-      const formattedSubs = (subsResult.data || []).map((sub: any) => ({
-        ...sub,
-        parent_name: sub.parent?.name || "",
-        organization_name: orgNameMap[sub.organization_id] || "",
-      }));
+      const formattedSubs = (subsData || []).map((sub) => {
+        const subWithParent = sub as typeof sub & { parent?: { name?: string } };
+        const orgId = (sub as { organization_id?: string }).organization_id ?? "";
+        return {
+          ...sub,
+          parent_name: subWithParent.parent?.name || "",
+          organization_name: orgNameMap[orgId] || "",
+        };
+      });
 
       // Check if there are more results
       if (formattedSubs.length < PAGE_SIZE) {
         setHasMore(false);
       }
-      
+
       if (reset) {
-        setSubcategories(formattedSubs);
+        setSubcategories(formattedSubs as ProductSubcategory[]);
       } else {
-        setSubcategories(prev => [...prev, ...formattedSubs]);
+        setSubcategories((prev) => [...prev, ...(formattedSubs as ProductSubcategory[])]);
       }
     } catch (error: any) {
       toast({
@@ -338,7 +353,19 @@ export default function ProductSubcategories() {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [
+    page,
+    filterCompanyId,
+    filterTenantId,
+    filterStatus,
+    filterParentId,
+    debouncedSearchTerm,
+    selectedCompanyId,
+    contextCompanies,
+    isAdmin,
+    t,
+    toast,
+  ]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
@@ -393,15 +420,15 @@ export default function ProductSubcategories() {
     if (page > 0) {
       loadData(false);
     }
-  }, [page]);
+  }, [page, loadData]);
 
   useEffect(() => {
     loadCompanies();
-  }, [isAdmin]);
+  }, [loadCompanies]);
 
   useEffect(() => {
     loadData(true);
-  }, [filterTenantId, filterCompanyId, filterStatus, filterParentId, debouncedSearchTerm, contextCompanies]);
+  }, [loadData]);
 
   const generateSlug = (name: string) => {
     return name
@@ -481,7 +508,7 @@ export default function ProductSubcategories() {
       }
 
       handleCloseDialog();
-      loadData();
+      await loadData();
     } catch (error: any) {
       toast({
         title: t('productSubcategories.toast.saveError'),
@@ -495,17 +522,25 @@ export default function ProductSubcategories() {
     if (!subcategoryToDelete) return;
 
     try {
+      // Verify subcategory ownership before any Supabase call
+      const sub = subcategories.find(s => s.id === subcategoryToDelete);
+      if (!sub?.organization_id) {
+        throw new Error('Subcategory not found or no organization context');
+      }
+
       // Limpar referências em produtos soft-deleted (não bloqueiam de forma legítima)
+      // Scope to the subcategory's org so no cross-tenant records are touched
       await supabase
         .from("products")
         .update({ subcategory_id: null })
         .eq("subcategory_id", subcategoryToDelete)
+        .eq("organization_id", sub.organization_id)
         .not("deleted_at", "is", null);
-
       const { error } = await supabase
         .from("product_categories")
         .delete()
-        .eq("id", subcategoryToDelete);
+        .eq("id", subcategoryToDelete)
+        .eq("organization_id", sub.organization_id);
 
       if (error) {
         // Check if it's a foreign key constraint error
@@ -528,7 +563,7 @@ export default function ProductSubcategories() {
       
       setDeleteDialogOpen(false);
       setSubcategoryToDelete(null);
-      loadData();
+      await loadData();
     } catch (error: any) {
       toast({
         title: t('productSubcategories.toast.deleteError'),
@@ -585,8 +620,7 @@ export default function ProductSubcategories() {
         variant: "destructive",
       });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, selectedCompanyIdForForm]);
+  }, [open, selectedCompanyIdForForm, loadFormParentCategories, toast, t]);
 
   const filteredParentCategories = formParentCategories;
 
@@ -731,11 +765,11 @@ export default function ProductSubcategories() {
             onStatusFilterChange={setFilterStatus}
             extraFilters={
               <div className="min-w-[200px]">
-                <label className="text-sm font-medium mb-1 block">
+                <label htmlFor="filter-parent-id" className="text-sm font-medium mb-1 block">
                   {t('productSubcategories.form.parentCategory')}
                 </label>
                 <Select value={filterParentId} onValueChange={setFilterParentId}>
-                  <SelectTrigger>
+                  <SelectTrigger id="filter-parent-id">
                     <SelectValue placeholder={t('common.all')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -830,6 +864,7 @@ export default function ProductSubcategories() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  aria-label={t('common.edit')}
                                   onClick={() => openEditDialog(sub)}
                                 >
                                   <Pencil className="w-4 h-4" />
@@ -837,7 +872,7 @@ export default function ProductSubcategories() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  title="Preços de Opções"
+                                  aria-label={t('productSubcategories.actions.attributePrices')}
                                   onClick={() => { setCatPricesCategory({ id: sub.id, name: sub.name }); setCatPricesOpen(true); }}
                                 >
                                   <Tag className="w-4 h-4" />
@@ -847,6 +882,7 @@ export default function ProductSubcategories() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  aria-label={t('common.delete')}
                                   onClick={() => openDeleteDialog(sub.id)}
                                 >
                                   <Trash2 className="w-4 h-4" />

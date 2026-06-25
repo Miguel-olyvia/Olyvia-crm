@@ -62,7 +62,7 @@ interface ServiceCategory {
 export default function ServiceCategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType } = useCompany();
+  const { companies: userCompanies, userType, activeCompany } = useCompany();
   const [searchParams] = useSearchParams();
   const businessAreaId = searchParams.get("area");
   const [businessAreaName, setBusinessAreaName] = useState<string>("");
@@ -96,15 +96,19 @@ export default function ServiceCategories() {
     if (isSystemAdmin) {
       loadAllCompanies();
     }
-  }, [businessAreaId, isSystemAdmin]);
+  }, [businessAreaId, isSystemAdmin, activeCompany?.id]);
 
   const loadAllCompanies = async () => {
+    if (!activeCompany?.id) return;
     try {
+      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
+      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
       const { data, error } = await supabase
         .from("anew_organizations")
         .select("id, name")
+        .in("id", subtreeIds)
         .order("name");
-      
+
       if (error) throw error;
       setAllCompanies(data || []);
     } catch (error: any) {
@@ -130,8 +134,18 @@ export default function ServiceCategories() {
   };
 
   const loadCategories = async () => {
+    // Only load if we have an active company to scope to
+    if (!activeCompany?.id) {
+      setCategories([]);
+      setLoading(false);
+      return;
+    }
+
     try {
-      let query = supabase
+      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
+      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
+
+      const { data, error } = await supabase
         .from("service_categories")
         .select(`
           *,
@@ -139,16 +153,8 @@ export default function ServiceCategories() {
           anew_organizations!organization_id(name)
         `)
         .is("parent_id", null)
+        .in("organization_id", subtreeIds)
         .order("name");
-
-
-      // Filter by user's companies if not system admin
-      if (!isSystemAdmin && userCompanies.length > 0) {
-        const companyIds = userCompanies.map(c => c.id);
-        query = query.in("organization_id", companyIds);
-      }
-
-      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -204,7 +210,8 @@ export default function ServiceCategories() {
             organization_id: formData.organization_id,
             sort_order: formData.sort_order,
           } as any)
-          .eq("id", editingCategory.id);
+          .eq("id", editingCategory.id)
+          .eq("organization_id", editingCategory.organization_id ?? "");
 
         if (error) throw error;
 
@@ -255,7 +262,8 @@ export default function ServiceCategories() {
       const { error } = await supabase
         .from("service_categories")
         .delete()
-        .eq("id", categoryToDelete.id);
+        .eq("id", categoryToDelete.id)
+        .eq("organization_id", categoryToDelete.organization_id);
 
       if (error) throw error;
 
@@ -297,7 +305,7 @@ export default function ServiceCategories() {
       slug: "",
       description: "",
       parent_id: "",
-      organization_id: userCompanies.length === 1 ? userCompanies[0].id : "",
+      organization_id: activeCompany?.id || "",
       sort_order: 0,
     });
   };
@@ -343,12 +351,12 @@ export default function ServiceCategories() {
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="organization_id">{t('serviceCategories.form.company')}</Label>
+                  <Label id="org-select-label">{t('serviceCategories.form.company')}</Label>
                   <Select
                     value={formData.organization_id}
                     onValueChange={(value) => setFormData({ ...formData, organization_id: value })}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-labelledby="org-select-label">
                       <SelectValue placeholder={t('serviceCategories.form.selectCompany')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -470,6 +478,7 @@ export default function ServiceCategories() {
                             variant="ghost"
                             size="icon"
                             onClick={() => openEditDialog(category)}
+                            aria-label={t('serviceCategories.actions.edit')}
                           >
                             <Pencil className="w-4 h-4" />
                           </Button>
@@ -479,6 +488,7 @@ export default function ServiceCategories() {
                             variant="ghost"
                             size="icon"
                             onClick={() => openDeleteDialog(category)}
+                            aria-label={t('serviceCategories.actions.delete')}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>

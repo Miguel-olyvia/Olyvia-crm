@@ -65,7 +65,7 @@ export function useComercialUsers(activeCompanyId: string | null | undefined) {
         .eq("status", "active");
 
       const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
-      let roleCodeMap: Record<string, string> = {};
+      const roleCodeMap: Record<string, string> = {};
       if (roleIds.length > 0) {
         const { data: rolesData } = await supabase
           .from("anew_roles")

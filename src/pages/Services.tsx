@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -81,10 +81,12 @@ interface Service {
 }
 
 // Helper functions for organization selection compatibility
-const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
+const getPrimaryOrgId = (sel: any): string | null =>
+  sel?.companyId || sel?.levelSelections?.[0]?.selectedIds?.[0] || null;
 const getAllOrgIds = (sel: any): string[] => {
   if (sel?.selectedCompanyIds?.length) return sel.selectedCompanyIds;
-  if (sel?.levelSelections?.length) return sel.levelSelections.map((l: any) => l.id);
+  if (sel?.levelSelections?.length)
+    return sel.levelSelections.flatMap((l: any) => l.selectedIds ?? []);
   if (sel?.companyId) return [sel.companyId];
   return [];
 };
@@ -138,7 +140,7 @@ export default function Services() {
     vat_rate: 23,
   });
 
-  const defaultOrgSelection = (): OrganizationSelection => ({
+  const defaultOrgSelection = useCallback((): OrganizationSelection => ({
     tenantId: "",
     companyId: activeCompany?.id || "",
     businessUnitId: "",
@@ -146,8 +148,8 @@ export default function Services() {
     secondaryCompanyIds: [],
     selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
     levelSelections: [],
-  });
-  const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>(defaultOrgSelection);
+  }), [activeCompany?.id]);
+  const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>(() => defaultOrgSelection());
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("services.view")) {
@@ -155,18 +157,7 @@ export default function Services() {
     }
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
-  // Reload when active company changes
-  useEffect(() => {
-    setServices([]);
-    setCategoryFilter("all");
-    setSubcategoryFilter("all");
-    setCompanyFilter("all");
-    setSupplierFilter("all");
-    setSearchTerm("");
-    loadData();
-  }, [activeCompany?.id]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
 
     // Only fetch if we have an active company
@@ -184,29 +175,25 @@ export default function Services() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      // Collect active company + descendants only (do not include sibling organizations)
-      const { data: hierarchy } = await supabase
-        .from("anew_hierarchy")
-        .select("parent_org_id, child_org_id")
-        .order("created_at");
-
-      const childMap = new Map<string, string[]>();
-      (hierarchy || []).forEach((h: any) => {
-        const children = childMap.get(h.parent_org_id) || [];
-        children.push(h.child_org_id);
-        childMap.set(h.parent_org_id, children);
-      });
-
+      // Collect active company + descendants only (do not include sibling organizations).
+      // Fetch hierarchy rows iteratively, expanding from the known org set each round,
+      // so only the active company's subtree is loaded — no cross-tenant rows.
       const allOrgIds: string[] = [activeCompany.id];
-      const queue = [activeCompany.id];
-      while (queue.length > 0) {
-        const currentId = queue.shift()!;
-        for (const childId of childMap.get(currentId) || []) {
-          if (!allOrgIds.includes(childId)) {
-            allOrgIds.push(childId);
-            queue.push(childId);
+      let frontier = [activeCompany.id];
+      while (frontier.length > 0) {
+        const { data: hierarchyBatch } = await supabase
+          .from("anew_hierarchy")
+          .select("parent_org_id, child_org_id")
+          .in("parent_org_id", frontier);
+        if (!hierarchyBatch || hierarchyBatch.length === 0) break;
+        const newChildren: string[] = [];
+        for (const h of hierarchyBatch) {
+          if (!allOrgIds.includes(h.child_org_id)) {
+            allOrgIds.push(h.child_org_id);
+            newChildren.push(h.child_org_id);
           }
         }
+        frontier = newChildren;
       }
 
       // Store for use in copyLastService
@@ -252,12 +239,13 @@ export default function Services() {
       // Load service organization associations separately
       const loadedServices = servicesRes.data || [];
       const serviceIds = loadedServices.map((s: any) => s.id);
-      let serviceOrgsMap = new Map<string, string[]>();
+      const serviceOrgsMap = new Map<string, string[]>();
       if (serviceIds.length > 0) {
         const { data: serviceOrgs } = await supabase
           .from("service_organizations")
           .select("service_id, organization_id")
-          .in("service_id", serviceIds);
+          .in("service_id", serviceIds)
+          .in("organization_id", allOrgIds);
         (serviceOrgs || []).forEach((so: any) => {
           const arr = serviceOrgsMap.get(so.service_id) || [];
           arr.push(so.organization_id);
@@ -283,7 +271,19 @@ export default function Services() {
     } finally {
       setLoading(false);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id]);
+
+  // Reload when active company changes
+  useEffect(() => {
+    setServices([]);
+    setCategoryFilter("all");
+    setSubcategoryFilter("all");
+    setCompanyFilter("all");
+    setSupplierFilter("all");
+    setSearchTerm("");
+    loadData();
+  }, [activeCompany?.id, loadData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,6 +303,13 @@ export default function Services() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
+
+      // Resolve business user ID once for reuse throughout the handler
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
+        return;
+      }
 
       // Resolve root org
       let rootOrgId = primaryCompanyId;
@@ -332,34 +339,39 @@ export default function Services() {
       if (formData.description) serviceData.long_desc = formData.description;
       if (formData.category_id) serviceData.service_category_id = formData.category_id;
       if (formData.subcategory_id) serviceData.service_subcategory_id = formData.subcategory_id;
-      
 
       let serviceId: string;
 
       if (editingService) {
+        // primaryCompanyId is already validated non-null above
         const { error } = await supabase
           .from("services")
           .update(serviceData)
-          .eq("id", editingService.id);
+          .eq("id", editingService.id)
+          .eq("organization_id", primaryCompanyId);
 
         if (error) throw error;
         serviceId = editingService.id;
 
-        // Update company associations - delete old ones and insert new
-        await supabase
+        // Update company associations - delete only org-owned rows, then insert new
+        const { data: existingOrgs } = await supabase
           .from("service_organizations")
-          .delete()
-          .eq("service_id", editingService.id);
+          .select("id")
+          .eq("service_id", editingService.id)
+          .eq("organization_id", primaryCompanyId);
+
+        if (existingOrgs && existingOrgs.length > 0) {
+          const idsToDelete = existingOrgs.map((o: any) => o.id);
+          await supabase
+            .from("service_organizations")
+            .delete()
+            .in("id", idsToDelete);
+        }
 
         toast({
           title: t("services.toast.updateSuccess"),
         });
       } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-          return;
-        }
         serviceData.created_by = businessUserId;
         const { data: newService, error } = await supabase
           .from("services")
@@ -376,17 +388,12 @@ export default function Services() {
       }
 
       const allOrgIds = getAllOrgIds(organizationSelection);
-        
+
       if (allOrgIds.length > 0) {
-      const assocBusinessUserId = await resolveCurrentBusinessUserId();
-        if (!assocBusinessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
         const orgAssociations = allOrgIds.map((orgId) => ({
           service_id: serviceId,
           organization_id: orgId,
-          created_by: assocBusinessUserId,
+          created_by: businessUserId,
         }));
 
         const { error: assocError } = await supabase
@@ -406,40 +413,38 @@ export default function Services() {
 
       for (const { type, value } of priceTypes) {
         // Check if price exists
+        const orgIdsForPrice = getAllOrgIds(organizationSelection);
         const { data: existingPrice, error: existingPriceError } = await supabase
           .from("service_prices")
           .select("id")
           .eq("service_id", serviceId)
           .eq("price_type", type)
+          .in("organization_id", orgIdsForPrice.length > 0 ? orgIdsForPrice : [primaryCompanyId])
           .maybeSingle();
 
         if (existingPriceError) throw existingPriceError;
 
-        const priceBusinessUserId = await resolveCurrentBusinessUserId();
-        if (!priceBusinessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
         const priceRecord = {
           service_id: serviceId,
           price_type: type,
           price: value || 0,
           currency: priceData.currency,
           vat_rate: priceData.vat_rate,
-          created_by: priceBusinessUserId,
+          created_by: businessUserId,
         };
 
         if (existingPrice) {
           const { error: updatePriceError } = await supabase
             .from("service_prices")
             .update(priceRecord)
-            .eq("id", existingPrice.id);
+            .eq("id", existingPrice.id)
+            .in("organization_id", orgIdsForPrice.length > 0 ? orgIdsForPrice : [primaryCompanyId]);
 
           if (updatePriceError) throw updatePriceError;
         } else {
           const { error: insertPriceError } = await supabase
             .from("service_prices")
-            .insert(priceRecord);
+            .insert({ ...priceRecord, organization_id: primaryCompanyId });
 
           if (insertPriceError) throw insertPriceError;
         }
@@ -463,9 +468,14 @@ export default function Services() {
 
   const handleDeleteConfirm = async () => {
     if (!serviceToDelete) return;
+    if (!activeCompany?.id) return;
 
     try {
-      const { error } = await supabase.from("services").delete().eq("id", serviceToDelete.id);
+      const { error } = await supabase
+        .from("services")
+        .delete()
+        .eq("id", serviceToDelete.id)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -580,7 +590,8 @@ export default function Services() {
     const { data: prices } = await supabase
       .from("service_prices")
       .select("price_type, price, currency, vat_rate")
-      .eq("service_id", service.id);
+      .eq("service_id", service.id)
+      .in("organization_id", allOrgIdsRef.current.length > 0 ? allOrgIdsRef.current : [service.organization_id || ""]);
 
     if (prices && prices.length > 0) {
       const priceMap: ServicePriceFormData = {
@@ -604,7 +615,8 @@ export default function Services() {
     const { data: serviceOrgs } = await supabase
       .from("service_organizations")
       .select("organization_id")
-      .eq("service_id", service.id);
+      .eq("service_id", service.id)
+      .in("organization_id", allOrgIdsRef.current.length > 0 ? allOrgIdsRef.current : [service.organization_id || ""]);
 
     const associatedOrgIds = serviceOrgs?.map((sc: any) => sc.organization_id) || [];
     const primaryOrgId = service.organization_id || (associatedOrgIds.length > 0 ? associatedOrgIds[0] : "");
@@ -659,6 +671,10 @@ export default function Services() {
       cancelEditing();
       return;
     }
+    if (!activeCompany?.id) {
+      cancelEditing();
+      return;
+    }
 
     try {
       const updateData: any = {};
@@ -667,7 +683,8 @@ export default function Services() {
       const { error } = await supabase
         .from("services")
         .update(updateData)
-        .eq("id", serviceId);
+        .eq("id", serviceId)
+        .eq("organization_id", activeCompany.id);
 
       if (error) throw error;
 
@@ -726,7 +743,8 @@ export default function Services() {
       const { data: pricesData } = await supabase
         .from("service_prices")
         .select("price_type, price, currency, vat_rate")
-        .eq("service_id", lastService.id);
+        .eq("service_id", lastService.id)
+        .in("organization_id", allOrgIdsRef.current.length > 0 ? allOrgIdsRef.current : [activeCompany?.id || ""]);
 
       // Set form data (with empty SKU - user must provide new one)
       setFormData({
@@ -791,11 +809,14 @@ export default function Services() {
     return matchesSearch && matchesCategory && matchesSubcategory && matchesCompany && matchesSupplier;
   });
 
-  // Bulk actions hook - must be after loadData and filteredServices
+  // Bulk actions hook - must be after loadData and filteredServices.
+  // organizationId is required; all bulk writes are anchored to the active
+  // company — cross-tenant mutations are prevented.
   const bulkActions = useBulkActions({
     tableName: "services",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   const toggleSelectAll = () => {

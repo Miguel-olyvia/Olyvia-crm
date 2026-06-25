@@ -506,7 +506,7 @@ export default function UsersNew() {
         orgsQuery = orgsQuery.in("id", Array.from(scopeOrgIds));
       }
 
-      let filteredOrgsData = await orgsQuery;
+      const filteredOrgsData = await orgsQuery;
       
       if (filteredOrgsData.error) throw filteredOrgsData.error;
       
@@ -552,7 +552,7 @@ export default function UsersNew() {
 
       // Fetch all memberships separately
       const userIds = (usersData || []).map((u: any) => u.id);
-      let membershipsMap: Record<string, any[]> = {};
+      const membershipsMap: Record<string, any[]> = {};
       if (userIds.length > 0) {
         const { data: membershipsData } = await (supabase as any)
           .from("anew_memberships")
@@ -561,7 +561,7 @@ export default function UsersNew() {
 
         // Fetch roles for these memberships
         const roleIds = [...new Set((membershipsData || []).map((m: any) => m.role_id).filter(Boolean))];
-        let rolesMap: Record<string, { code: string; name: string }> = {};
+        const rolesMap: Record<string, { code: string; name: string }> = {};
         if (roleIds.length > 0) {
           const { data: rolesData } = await (supabase as any)
             .from("anew_roles")
@@ -574,7 +574,7 @@ export default function UsersNew() {
 
         // Fetch organizations for memberships
         const memberOrgIds = [...new Set((membershipsData || []).map((m: any) => m.organization_id).filter(Boolean))];
-        let memberOrgsMap: Record<string, { id: string; name: string; type: string }> = {};
+        const memberOrgsMap: Record<string, { id: string; name: string; type: string }> = {};
         if (memberOrgIds.length > 0) {
           const { data: memberOrgsData } = await (supabase as any)
             .from("anew_organizations")
@@ -598,7 +598,7 @@ export default function UsersNew() {
 
       // Fetch phones from unified entity table
       const entityIds = (usersData || []).map((u: any) => u.entity_id).filter(Boolean);
-      let phonesMap: Record<string, any[]> = {};
+      const phonesMap: Record<string, any[]> = {};
       if (entityIds.length > 0) {
         const { data: phonesData } = await (supabase as any)
           .from("anew_entity_phones")
@@ -1031,39 +1031,50 @@ export default function UsersNew() {
           throw updateError;
         }
 
-        if (selectedUser.entity_id) {
-          await (supabase as any)
+        // Backfill: users created before the entity migration may have no entity_id.
+        // Create one now so the rest of the save can proceed normally.
+        let effectiveEntityId: string = selectedUser.entity_id ?? "";
+        if (!effectiveEntityId) {
+          const { data: newEntity, error: entityCreateError } = await (supabase as any)
             .from("anew_entities")
-            .update({ display_name: formData.name, updated_at: new Date().toISOString() })
-            .eq("id", selectedUser.entity_id);
+            .insert({ type: "person", display_name: formData.name, created_by: createdBy })
+            .select("id")
+            .single();
+          if (entityCreateError) {
+            console.error("[UserEdit] Failed to create entity for user:", entityCreateError);
+            throw new Error("Não foi possível criar o registo de identidade do utilizador.");
+          }
+          effectiveEntityId = newEntity.id;
+          await supabase.from("anew_users").update({ entity_id: effectiveEntityId }).eq("id", selectedUser.id);
         }
+
+        await (supabase as any)
+          .from("anew_entities")
+          .update({ display_name: formData.name, updated_at: new Date().toISOString() })
+          .eq("id", effectiveEntityId);
 
         // Use canonical entity_id, NOT anew_users.id, for entity-keyed tables.
         // Atomic upsert via RPC (rolls back if any sub-step fails).
-        if (selectedUser.entity_id) {
-          console.log("[UserEdit] Upserting identity for entity", selectedUser.entity_id);
-          const { error: identityError } = await (supabase as any).rpc("upsert_entity_identity", {
-            p_entity_id: selectedUser.entity_id,
-            p_emails: formEmails.map((e) => ({
-              email: e.email,
-              email_type: e.email_type,
-              is_primary: e.is_primary,
-            })),
-            p_phones: formPhones.map((p) => ({
-              phone_number: p.phone_number,
-              country_code: p.country_code,
-              phone_type: p.phone_type,
-              is_primary: p.is_primary,
-            })),
-            p_addresses: null, // addresses handled separately further down
-            p_created_by: createdBy,
-          });
-          if (identityError) {
-            console.error("[UserEdit] upsert_entity_identity failed:", identityError);
-            throw identityError;
-          }
-        } else {
-          console.warn("[UserEdit] selectedUser has no entity_id; skipping identity upsert");
+        console.log("[UserEdit] Upserting identity for entity", effectiveEntityId);
+        const { error: identityError } = await (supabase as any).rpc("upsert_entity_identity", {
+          p_entity_id: effectiveEntityId,
+          p_emails: formEmails.map((e) => ({
+            email: e.email,
+            email_type: e.email_type,
+            is_primary: e.is_primary,
+          })),
+          p_phones: formPhones.map((p) => ({
+            phone_number: p.phone_number,
+            country_code: p.country_code,
+            phone_type: p.phone_type,
+            is_primary: p.is_primary,
+          })),
+          p_addresses: null, // addresses handled separately further down
+          p_created_by: createdBy,
+        });
+        if (identityError) {
+          console.error("[UserEdit] upsert_entity_identity failed:", identityError);
+          throw identityError;
         }
 
         const existingMembershipIds = (selectedUser.memberships || []).map(m => m.id);
@@ -1145,16 +1156,12 @@ export default function UsersNew() {
         }
 
         if (isAddressVisible()) {
-          if (!selectedUser.entity_id) {
-            throw new Error("Utilizador sem entity_id; não é possível gravar moradas.");
-          }
-
           const validAddresses = prepareValidAddresses(formAddresses);
 
           await supabase
             .from("anew_entity_addresses")
             .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", selectedUser.entity_id)
+            .eq("entity_id", effectiveEntityId)
             .is("valid_to", null);
 
           for (const addr of validAddresses) {
@@ -1179,7 +1186,7 @@ export default function UsersNew() {
             if (addressError) throw addressError;
 
             const { error: linkError } = await (supabase as any).from("anew_entity_addresses").insert({
-              entity_id: selectedUser.entity_id,
+              entity_id: effectiveEntityId,
               address_id: newAddress.id,
               address_type: addr.address_type || "home",
               is_primary: addr.is_primary,
@@ -1195,10 +1202,10 @@ export default function UsersNew() {
           await (supabase as any)
             .from("anew_entity_fiscal_entities")
             .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", selectedUser.entity_id)
+            .eq("entity_id", effectiveEntityId)
             .is("valid_to", null);
 
-          let { data: existingFiscal } = await supabase
+          const { data: existingFiscal } = await supabase
             .from("fiscal_entities")
             .select("id")
             .eq("nif", formFiscalData.nif)
@@ -1226,7 +1233,7 @@ export default function UsersNew() {
 
           if (fiscalEntityId) {
             await (supabase as any).from("anew_entity_fiscal_entities").insert({
-              entity_id: selectedUser.entity_id,
+              entity_id: effectiveEntityId,
               fiscal_entity_id: fiscalEntityId,
               is_primary: true,
               valid_from: new Date().toISOString(),

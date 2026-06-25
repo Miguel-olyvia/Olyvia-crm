@@ -474,7 +474,7 @@ export function ProposalCreateDialog({
     // Also resolve matching entity IDs (by name/email/phone/NIF) for cross-field search.
     const { ids: matchingEntityIds } = await searchEntityIds(searchTerm);
 
-    let baseSelect = "id, title, probability, value, description, expected_close_date, entity_id, deal_stages(name)";
+    const baseSelect = "id, title, probability, value, description, expected_close_date, entity_id, deal_stages(name)";
     const dedupe = (arr: any[]) => {
       const seen = new Set<string>();
       const out: any[] = [];
@@ -514,7 +514,7 @@ export function ProposalCreateDialog({
     }
 
     const entityIds = dealsData.map((d: any) => d.entity_id).filter(Boolean);
-    let entityMap: Record<string, any> = {};
+    const entityMap: Record<string, any> = {};
     if (entityIds.length > 0) {
       const [entRes, emailRes, phoneRes] = await Promise.all([
         supabase.from("anew_entities").select("id, display_name").in("id", entityIds),
