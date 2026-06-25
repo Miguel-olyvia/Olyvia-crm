@@ -759,8 +759,7 @@ export default function AnewLeads() {
 
     const { data: allHierarchy } = await supabase
       .from("anew_hierarchy")
-      .select("parent_org_id, child_org_id")
-      .or(`parent_org_id.eq.${rootId},child_org_id.eq.${rootId}`);
+      .select("parent_org_id, child_org_id");
 
     if (!allHierarchy) {
       descendantCacheRef.current = { key: rootId, ids: [rootId], hierarchy: [] };
