@@ -445,52 +445,6 @@ const AnewClients = () => {
     }
   }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
-  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
-
-  useEffect(() => {
-    const openId = searchParams.get("open");
-    if (!openId || selectedClient) return;
-
-    const openFromQuery = async () => {
-      const found = clients.find((c) => c.id === openId || c.entity_id === openId);
-      if (found) {
-        await openClientDetails(found);
-        setSearchParams({});
-        return;
-      }
-
-      if (!activeCompany?.id) return;
-
-      let fetchedClient: ClientRecord | null = null;
-      const { data: byId } = await (supabase as any)
-        .from("anew_clients")
-        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
-        .eq("id", openId)
-        .eq("organization_id", activeCompany.id)
-        .maybeSingle();
-      fetchedClient = byId as ClientRecord | null;
-
-      if (!fetchedClient) {
-        const { data: byEntityInActiveOrg } = await (supabase as any)
-          .from("anew_clients")
-          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
-          .eq("entity_id", openId)
-          .eq("organization_id", activeCompany.id)
-          .maybeSingle();
-        fetchedClient = byEntityInActiveOrg as ClientRecord | null;
-      }
-
-      if (fetchedClient) {
-        await openClientDetails(fetchedClient as ClientRecord);
-        setSearchParams({});
-      }
-    };
-
-    void openFromQuery();
-  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
-
   const loadClients = useCallback(async (offset: number, isInitial: boolean = false, silent: boolean = false) => {
     const shouldShowInitialLoader = isInitial && !silent;
     if (shouldShowInitialLoader) setLoading(true);
@@ -602,6 +556,52 @@ const AnewClients = () => {
       setLoadingMore(false);
     }
   }, [getPermissionScope, scopeAnewUserId, companyFilter, scopeOrgIds, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+
+  useEffect(() => {
+    if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
+  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
+
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (!openId || selectedClient) return;
+
+    const openFromQuery = async () => {
+      const found = clients.find((c) => c.id === openId || c.entity_id === openId);
+      if (found) {
+        await openClientDetails(found);
+        setSearchParams({});
+        return;
+      }
+
+      if (!activeCompany?.id) return;
+
+      let fetchedClient: ClientRecord | null = null;
+      const { data: byId } = await (supabase as any)
+        .from("anew_clients")
+        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+        .eq("id", openId)
+        .eq("organization_id", activeCompany.id)
+        .maybeSingle();
+      fetchedClient = byId as ClientRecord | null;
+
+      if (!fetchedClient) {
+        const { data: byEntityInActiveOrg } = await (supabase as any)
+          .from("anew_clients")
+          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+          .eq("entity_id", openId)
+          .eq("organization_id", activeCompany.id)
+          .maybeSingle();
+        fetchedClient = byEntityInActiveOrg as ClientRecord | null;
+      }
+
+      if (fetchedClient) {
+        await openClientDetails(fetchedClient as ClientRecord);
+        setSearchParams({});
+      }
+    };
+
+    void openFromQuery();
+  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
 
   const loadMoreClients = () => { if (!loadingMore && hasMore) loadClients(clients.length); };
 

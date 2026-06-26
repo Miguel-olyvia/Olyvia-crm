@@ -1377,6 +1377,75 @@ export default function AnewLeads() {
     return rawStatus;
   }, [isVisitScheduledSignal]);
 
+  const loadFieldDefinitions = useCallback(async (campaignId: string) => {
+    if (!campaignId) return;
+
+    // Try to get form_id from campaign — form_fields has correct contact_field_mapping
+    const { data: campaignRow } = await supabase
+      .from("campaigns")
+      .select("form_id")
+      .eq("id", campaignId)
+      .maybeSingle();
+
+    if (campaignRow?.form_id) {
+      // NOTE: `default_value` lives on `lead_field_definitions` (HubSpot Property Model),
+      // NOT on `form_fields` — including it here causes a 400 (column does not exist).
+      const { data: formFields, error: ffError } = await supabase
+        .from("form_fields")
+        .select("id, form_id, field_key, field_label, field_type, is_required, is_active, sort_order, options, placeholder, contact_field_mapping, client_field_mapping")
+        .eq("form_id", campaignRow.form_id)
+        .eq("is_active", true)
+        .order("sort_order");
+
+      if (!ffError && formFields && formFields.length > 0) {
+        // Map form_fields to same FieldDefinition shape
+        const mapped = formFields.map((f: any) => ({
+          id: f.id,
+          campaign_id: campaignId,
+          field_key: f.field_key,
+          field_label: f.field_label,
+          field_type: f.field_type,
+          is_required: f.is_required,
+          is_unique: false,
+          is_active: f.is_active,
+          sort_order: f.sort_order,
+          options: f.options,
+          placeholder: f.placeholder,
+          default_value: null,
+          organization_id: null,
+          contact_field_mapping: f.contact_field_mapping,
+          client_field_mapping: f.client_field_mapping,
+        }));
+        setFieldDefs(mapped as any);
+        loadReferenceData(mapped as any);
+        return;
+      }
+    }
+
+    // Fallback: legacy lead_field_definitions
+    const { data, error } = await supabase
+      .from("lead_field_definitions")
+      .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
+      .eq("campaign_id", campaignId)
+      .eq("is_active", true)
+      .order("sort_order");
+
+    if (error) {
+      console.error("Error loading field definitions:", error);
+    } else {
+      setFieldDefs(data || []);
+      loadReferenceData(data || []);
+    }
+  // loadReferenceData is a plain async function defined below; it captures activeCompanyId
+  // via its own closure. It is intentionally excluded here because wrapping it in
+  // useCallback would create a circular dependency chain — loadFieldDefinitions would
+  // depend on loadReferenceData which would depend on activeCompanyId, requiring both
+  // to be re-created together on every org change. The useEffect that calls this
+  // function depends on [configCampaignId, loadFieldDefinitions], ensuring it re-runs
+  // whenever the campaign or org changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (configCampaignId) {
       loadFieldDefinitions(configCampaignId);
@@ -1894,75 +1963,6 @@ export default function AnewLeads() {
       refreshSingleLead(leadId);
     }
   };
-
-  const loadFieldDefinitions = useCallback(async (campaignId: string) => {
-    if (!campaignId) return;
-
-    // Try to get form_id from campaign — form_fields has correct contact_field_mapping
-    const { data: campaignRow } = await supabase
-      .from("campaigns")
-      .select("form_id")
-      .eq("id", campaignId)
-      .maybeSingle();
-
-    if (campaignRow?.form_id) {
-      // NOTE: `default_value` lives on `lead_field_definitions` (HubSpot Property Model),
-      // NOT on `form_fields` — including it here causes a 400 (column does not exist).
-      const { data: formFields, error: ffError } = await supabase
-        .from("form_fields")
-        .select("id, form_id, field_key, field_label, field_type, is_required, is_active, sort_order, options, placeholder, contact_field_mapping, client_field_mapping")
-        .eq("form_id", campaignRow.form_id)
-        .eq("is_active", true)
-        .order("sort_order");
-
-      if (!ffError && formFields && formFields.length > 0) {
-        // Map form_fields to same FieldDefinition shape
-        const mapped = formFields.map((f: any) => ({
-          id: f.id,
-          campaign_id: campaignId,
-          field_key: f.field_key,
-          field_label: f.field_label,
-          field_type: f.field_type,
-          is_required: f.is_required,
-          is_unique: false,
-          is_active: f.is_active,
-          sort_order: f.sort_order,
-          options: f.options,
-          placeholder: f.placeholder,
-          default_value: null,
-          organization_id: null,
-          contact_field_mapping: f.contact_field_mapping,
-          client_field_mapping: f.client_field_mapping,
-        }));
-        setFieldDefs(mapped as any);
-        loadReferenceData(mapped as any);
-        return;
-      }
-    }
-
-    // Fallback: legacy lead_field_definitions
-    const { data, error } = await supabase
-      .from("lead_field_definitions")
-      .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
-      .eq("campaign_id", campaignId)
-      .eq("is_active", true)
-      .order("sort_order");
-
-    if (error) {
-      console.error("Error loading field definitions:", error);
-    } else {
-      setFieldDefs(data || []);
-      loadReferenceData(data || []);
-    }
-  // loadReferenceData is a plain async function defined below; it captures activeCompanyId
-  // via its own closure. It is intentionally excluded here because wrapping it in
-  // useCallback would create a circular dependency chain — loadFieldDefinitions would
-  // depend on loadReferenceData which would depend on activeCompanyId, requiring both
-  // to be re-created together on every org change. The useEffect that calls this
-  // function depends on [configCampaignId, loadFieldDefinitions], ensuring it re-runs
-  // whenever the campaign or org changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Load reference data for fields that store IDs (ref_district, ref_company, etc.)
   const loadReferenceData = async (fields: FieldDefinition[]) => {

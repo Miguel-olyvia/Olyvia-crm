@@ -787,6 +787,11 @@ const Proposals = () => {
     }
   }, [loadData, permissionsLoading, scopeLoading]);
 
+  const handleViewDetails = useCallback((proposal: Proposal) => {
+    setSelectedProposal(proposal);
+    setDetailsOpen(true);
+  }, []);
+
   useEffect(() => {
     const openId = searchParams.get("open");
     if (!openId || selectedProposal) return;
@@ -931,11 +936,6 @@ const Proposals = () => {
 
     setOpen(true);
   };
-
-  const handleViewDetails = useCallback((proposal: Proposal) => {
-    setSelectedProposal(proposal);
-    setDetailsOpen(true);
-  }, []);
 
   const openProposalById = async (proposalId?: string | null) => {
     if (!proposalId) return;
