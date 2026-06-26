@@ -932,6 +932,11 @@ export default function UsersNew() {
   };
 
   const handleSave = async () => {
+    if (companyLoading || !activeCompany) {
+      toast.warning("Aguarda...", { description: "Contexto da organização ainda a carregar. Tenta novamente." });
+      return;
+    }
+
     // Helper to check if address field is visible based on template
     const isAddressVisible = (): boolean => {
       // No template = base mode, address is visible by default
