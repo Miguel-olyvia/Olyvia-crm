@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 
 interface ClientContractsTabProps {
   entityId: string;
+  clientId: string;
   organizationId: string;
 }
 
@@ -32,13 +33,13 @@ const STATUS_DISPLAY: Record<string, { label: string; className: string }> = {
   draft: { label: "Rascunho", className: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30" },
 };
 
-export function ClientContractsTab({ entityId, organizationId }: ClientContractsTabProps) {
+export function ClientContractsTab({ entityId, clientId, organizationId }: ClientContractsTabProps) {
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadContracts();
-  }, [entityId, organizationId]);
+  }, [entityId, clientId, organizationId]);
 
   const loadContracts = async () => {
     setLoading(true);
@@ -46,7 +47,7 @@ export function ClientContractsTab({ entityId, organizationId }: ClientContracts
       const { data } = await (supabase as any)
         .from("client_contracts")
         .select("id, title:contract_number, status, total_value, start_date, end_date, payment_terms, created_at")
-        .eq("entity_id", entityId)
+        .or(`entity_id.eq.${entityId},client_id.eq.${clientId}`)
         .eq("organization_id", organizationId)
         .order("created_at", { ascending: false });
       setContracts(data || []);

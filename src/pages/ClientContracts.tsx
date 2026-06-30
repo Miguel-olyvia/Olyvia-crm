@@ -701,6 +701,7 @@ const ClientContracts = () => {
         }
       }
 
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data: inserted, error } = await (supabase as any).from("client_contracts").insert({
         client_id: clientId, entity_id: resolvedEntityId || null, organization_id: activeCompany.id,
         root_organization_id: rootOrgId, proposal_id: data.proposal_id, contract_template_id: data.template_id || null,
@@ -723,6 +724,7 @@ const ClientContracts = () => {
           (variableData as any).signatario_nome,
           (variableData as any).signatario_cargo,
         );
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         await (supabase as any).from("client_contracts").update({ contract_body_html: finalHtml }).eq("id", inserted.id);
       }
     },
@@ -746,6 +748,10 @@ const ClientContracts = () => {
         prompt_values: Object.keys(mergedPromptValues).length > 0 ? mergedPromptValues : null,
       };
 
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
       const { error } = await supabase.from("client_contracts").update(updatePayload).eq("id", data.id);
       if (error) throw error;
     },
@@ -826,9 +832,13 @@ const ClientContracts = () => {
       return;
     }
     const { data: { user: authUser } } = await supabase.auth.getUser();
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (businessUserId) {
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+    }
     const { error } = await (supabase as any).from("client_contracts").update({
       status: newStatus,
-      status_changed_by: authUser?.id || null,
+      status_changed_by: businessUserId || authUser?.id || null,
       status_changed_at: new Date().toISOString(),
     }).eq("id", contractId);
     if (error) { toast.error("Erro ao mudar estado"); return; }

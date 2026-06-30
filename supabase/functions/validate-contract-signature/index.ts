@@ -273,6 +273,7 @@ const handler = async (req: Request): Promise<Response> => {
 
       if (allSigned) {
         // Update contract status to signed
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'signature' });
         await supabase
           .from('client_contracts')
           .update({ status: 'signed' })
