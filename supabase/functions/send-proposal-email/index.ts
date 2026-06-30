@@ -45,6 +45,15 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
   return out;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Generate proposal email HTML
 function generateProposalEmailHtml(
   proposal: any,
@@ -83,7 +92,7 @@ function generateProposalEmailHtml(
             <td style="padding: 40px;">
               ${customMessage ? `
                 <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-                  ${customMessage}
+                  ${escapeHtml(customMessage)}
                 </p>
               ` : `
                 <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
@@ -93,7 +102,7 @@ function generateProposalEmailHtml(
               
               ${proposal.description ? `
                 <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
-                  ${proposal.description.substring(0, 200)}${proposal.description.length > 200 ? '...' : ''}
+                  ${escapeHtml(proposal.description?.substring(0, 200) ?? '')}${proposal.description.length > 200 ? '...' : ''}
                 </p>
               ` : ''}
               
@@ -169,23 +178,30 @@ const handler = async (req: Request): Promise<Response> => {
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
-    const { proposal_id, sender_user_id, recipient_email, recipient_name, recipients, cc, subject, message } = parsed.data;
+    const { proposal_id, recipient_email, recipient_name, recipients, cc, subject, message } = parsed.data;
     const toListInput = sanitizeEmailList(recipients, 10);
     if (recipient_email && !toListInput.some((e) => e.toLowerCase() === recipient_email.toLowerCase())) {
       toListInput.unshift(recipient_email);
     }
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
-    // ── Auth: resolve caller from JWT, ignore sender_user_id from body ──
-    let userId: string | undefined;
+    // ── Auth: mandatory JWT — reject immediately without Authorization header ──
     const authHeader = req.headers.get("authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await supabaseClient.auth.getUser(token);
-      userId = user?.id;
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
-    // Only fallback to sender_user_id if no auth (should not happen with verify_jwt=true)
-    if (!userId) userId = sender_user_id;
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user: callerUser }, error: authError } = await supabaseClient.auth.getUser(token);
+    if (authError || !callerUser) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+    const userId: string = callerUser.id;
 
     // Get proposal with all related data
     const { data: proposal, error: proposalError } = await supabaseClient
@@ -281,6 +297,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     let trackingOk = true;
     try {
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient.from("proposal_sends").insert({
         proposal_id,
         organization_id: proposal.organization_id,
@@ -293,11 +310,13 @@ const handler = async (req: Request): Promise<Response> => {
         channel: "email",
       });
 
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient
         .from("proposals")
         .update({ status: "sent", sent_at: new Date().toISOString() })
         .eq("id", proposal_id);
 
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient.from("email_logs").insert({
         organization_id: proposal.organization_id,
         entity_id: proposal.entity_id ?? null,

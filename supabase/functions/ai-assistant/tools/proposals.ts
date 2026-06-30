@@ -63,6 +63,7 @@ const createProposal: Handler = async (ctx, args): Promise<ToolResult> => {
     args.valid_until ||
     new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { data, error } = await supabase
     .from("proposals")
     .insert({
@@ -290,7 +291,7 @@ const getProposalDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const updateProposal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.proposal_id || !UUID_RE.test(String(args.proposal_id))) {
     return { success: false, message: "proposal_id inválido." };
@@ -334,6 +335,7 @@ const updateProposal: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: "Nada para actualizar — passa pelo menos um campo." };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: upErr } = await supabase
     .from("proposals")
     .update(patch)
@@ -348,7 +350,7 @@ const updateProposal: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const cancelProposal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.proposal_id || !UUID_RE.test(String(args.proposal_id))) {
     return { success: false, message: "proposal_id inválido." };
@@ -372,6 +374,7 @@ const cancelProposal: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: `Proposta ${p.proposal_number ?? p.id} já foi aceite — não pode ser cancelada.` };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: rpcErr } = await supabase.rpc("soft_delete_business_entity", {
     p_kind: "proposal",
     p_id: args.proposal_id,

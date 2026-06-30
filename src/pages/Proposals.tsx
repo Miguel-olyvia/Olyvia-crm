@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+﻿import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -966,6 +966,9 @@ const Proposals = () => {
   const handleDeleteConfirm = async () => {
     if (!deletingId) return;
     try {
+      const businessUserIdDel = await resolveCurrentBusinessUserId();
+      if (!businessUserIdDel) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdDel, p_source: 'ui' });
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: deletingId });
       if (error) throw error;
       toast({ title: t('proposals.toast.deleteSuccess'), description: t('proposals.toast.movedToTrashDesc') });
@@ -996,11 +999,13 @@ const Proposals = () => {
 
   const handleBulkDelete = async () => {
     try {
-      const results = await Promise.all(
-        selectedIds.map(id => (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: id }))
-      );
-      const firstError = results.find(r => r.error)?.error;
-      if (firstError) throw firstError;
+      const businessUserIdBulkDel = await resolveCurrentBusinessUserId();
+      if (!businessUserIdBulkDel) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      for (const id of selectedIds) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkDel, p_source: 'ui' });
+        const { error: delErr } = await (supabase as any).rpc('soft_delete_business_entity', { p_kind: 'proposal', p_id: id });
+        if (delErr) throw delErr;
+      }
       toast({ title: t('common.deleteSuccess'), description: `${selectedIds.length} propostas movidas para o lixo.` });
       setSelectedIds([]);
       setBulkDeleteDialogOpen(false);
@@ -1014,6 +1019,9 @@ const Proposals = () => {
     if (!bulkNewStatus) return;
     if (!activeCompany?.id) return;
     try {
+      const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
+      if (!businessUserIdBulkSt) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkSt, p_source: 'ui' });
       const stage = workflowStages.find(s => s.id === bulkNewStatus);
       const { error } = await supabase
         .from("proposals")
@@ -1103,6 +1111,8 @@ const Proposals = () => {
         assigned_to: formData.assigned_to || null,
       };
 
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
         .insert({ ...proposalData, created_by: businessUserId })
@@ -1229,6 +1239,7 @@ const Proposals = () => {
       }
 
       if (editingId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const { error } = await supabase.from("proposals").update(proposalData).eq("id", editingId);
         if (error) throw error;
         savedProposalId = editingId;
@@ -1251,6 +1262,7 @@ const Proposals = () => {
         }
         toast({ title: t('proposals.toast.updateSuccess') });
       } else {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const { data, error } = await supabase.from("proposals").insert({
           ...proposalData,
           created_by: businessUserId,
@@ -1264,6 +1276,7 @@ const Proposals = () => {
         const proposalEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || proposalData.entity_id || null;
         await resolveSendProposalAlerts(proposalEntityId, activeCompany.id);
 
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const selectedQuoteIds = selectedQuotes.map(q => q.id);
         if (selectedQuoteIds.length > 0) {
           const { error: unlinkError } = await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id).not("id", "in", `(${selectedQuoteIds.join(",")})`);
@@ -1368,6 +1381,7 @@ const Proposals = () => {
 
           const totalSemIva = sanitizedLines.reduce((s, l) => s + l.total_sem_iva, 0);
           const grandTotal = sanitizedLines.reduce((s, l) => s + l.total_com_desconto, 0);
+          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
           const { data: newQuote, error: qError } = await (supabase.from("quotes") as any)
             .insert({ ...quoteData, subtotal: totalSemIva, total: grandTotal })
@@ -1380,6 +1394,7 @@ const Proposals = () => {
           const { error: linesError } = await supabase.from("quote_lines").insert(finalLines);
           if (linesError) throw linesError;
         }
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id);
         if (proposalItems.length > 0) {
           await supabase.from("proposal_items").insert(
@@ -1440,6 +1455,12 @@ const Proposals = () => {
   const handleRenewValidity = async () => {
     if (!renewProposalId || !renewDate) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+        return;
+      }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { error } = await supabase
         .from("proposals")
         .update({ valid_until: renewDate })
@@ -1473,6 +1494,9 @@ const Proposals = () => {
       const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
       if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
       const oldStageId = selectedProposal.stage_id;
+      const businessUserIdAccept = await resolveCurrentBusinessUserId();
+      if (!businessUserIdAccept) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
       await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", selectedProposal.id);
       await supabase.functions.invoke('execute-workflow', {
         body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
@@ -1493,6 +1517,9 @@ const Proposals = () => {
       const rejectedStage = workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
       if (!rejectedStage) { toast({ title: "Erro", description: "Estágio 'Rejeitada' não encontrado", variant: "destructive" }); return; }
       const oldStageId = selectedProposal.stage_id;
+      const businessUserIdReject = await resolveCurrentBusinessUserId();
+      if (!businessUserIdReject) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
       await supabase.from("proposals").update({ stage_id: rejectedStage.id, status: "rejected", rejected_at: new Date().toISOString() }).eq("id", selectedProposal.id);
       await supabase.functions.invoke('execute-workflow', {
         body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }

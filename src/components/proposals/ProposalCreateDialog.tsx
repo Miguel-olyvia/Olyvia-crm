@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+﻿import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
@@ -279,6 +279,7 @@ export function ProposalCreateDialog({
         template_id: templateId,
       };
 
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
         .insert({ ...proposalData, created_by: businessUserId })
@@ -353,6 +354,7 @@ export function ProposalCreateDialog({
 
       let savedProposalId: string | null = null;
       if (editingId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const { error } = await supabase.from("proposals").update(proposalData).eq("id", editingId);
         if (error) throw error;
         savedProposalId = editingId;
@@ -365,6 +367,7 @@ export function ProposalCreateDialog({
         }
         toast({ title: t('proposals.toast.updateSuccess') });
       } else {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const { data, error } = await supabase.from("proposals").insert({ ...proposalData, created_by: businessUserId }).select("id").single();
         if (error) throw error;
         savedProposalId = data.id;
@@ -373,6 +376,7 @@ export function ProposalCreateDialog({
 
       if (savedProposalId) {
         await resolveSendProposalAlerts(proposalData.entity_id, activeCompany.id);
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
         const selectedQuoteIds = selectedQuotes.map(q => q.id);
         if (selectedQuoteIds.length > 0) {
@@ -428,6 +432,7 @@ export function ProposalCreateDialog({
 
           const totalSemIva = linesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
           const grandTotal = linesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
+          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
           const { data: newQuote, error: qError } = await (supabase.from("quotes") as any)
             .insert({ ...quoteData, subtotal: totalSemIva, total: grandTotal })
@@ -439,7 +444,9 @@ export function ProposalCreateDialog({
           if (linesError) throw linesError;
         }
 
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId);
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         if (proposalItems.length > 0) {
           await supabase.from("proposal_items").insert(
             proposalItems.map((item, index) => ({
