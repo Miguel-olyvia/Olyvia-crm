@@ -3759,9 +3759,11 @@ export default function AnewLeads() {
     }
   };
 
-  const BASE_FIELD_KEYS = ['first_name', 'last_name', 'email', 'phone', 'company_name', 'address', 'postal_code', 'city', 'notes'];
+  // address, postal_code e city removidos por RGPD (minimização de dados):
+  // morada/NIF só devem aparecer no fluxo de cliente/faturação, não na ficha de lead.
+  const BASE_FIELD_KEYS = ['first_name', 'last_name', 'email', 'phone', 'company_name', 'notes'];
   const BASE_FIELD_KEY_SET = new Set(BASE_FIELD_KEYS.map((key) => key.toLowerCase()));
-  const BASE_CONTACT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'mobile', 'address', 'postal_code', 'city', 'notes']);
+  const BASE_CONTACT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'mobile', 'notes']);
   const BASE_CLIENT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'company_name', 'name', 'notes']);
 
   const isMappedToBaseLeadField = (field: {
@@ -3788,10 +3790,8 @@ export default function AnewLeads() {
       { id: 'base_email', campaign_id: null, organization_id: null, field_key: 'email', field_label: t('leads.fields.email'), field_type: 'email', is_required: false, sort_order: 3, contact_field_mapping: 'email' },
       { id: 'base_phone', campaign_id: null, organization_id: null, field_key: 'phone', field_label: t('leads.fields.phone'), field_type: 'phone', is_required: false, sort_order: 4, contact_field_mapping: 'phone' },
       { id: 'base_company', campaign_id: null, organization_id: null, field_key: 'company_name', field_label: t('leads.fields.companyName'), field_type: 'text', is_required: false, sort_order: 5, client_field_mapping: 'name' },
-      { id: 'base_address', campaign_id: null, organization_id: null, field_key: 'address', field_label: t('leads.fields.address') || 'Morada', field_type: 'text', is_required: false, sort_order: 6 },
-      { id: 'base_postal_code', campaign_id: null, organization_id: null, field_key: 'postal_code', field_label: t('leads.fields.postalCode') || 'Código Postal', field_type: 'text', is_required: false, sort_order: 7 },
-      { id: 'base_city', campaign_id: null, organization_id: null, field_key: 'city', field_label: t('leads.fields.city') || 'Cidade', field_type: 'text', is_required: false, sort_order: 8 },
-      { id: 'base_notes', campaign_id: null, organization_id: null, field_key: 'notes', field_label: t('leads.fields.notes'), field_type: 'textarea', is_required: false, sort_order: 9 },
+      // address, postal_code e city removidos por RGPD: morada só no fluxo de cliente/faturação.
+      { id: 'base_notes', campaign_id: null, organization_id: null, field_key: 'notes', field_label: t('leads.fields.notes'), field_type: 'textarea', is_required: false, sort_order: 6 },
     ];
     setCreateLeadFieldDefs(baseFields as any);
   }, []);
