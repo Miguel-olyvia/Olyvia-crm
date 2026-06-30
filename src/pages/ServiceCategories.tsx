@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
+import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, FolderTree, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -62,7 +64,7 @@ interface ServiceCategory {
 export default function ServiceCategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType, activeCompany } = useCompany();
+  const { companies: userCompanies, userType } = useCompany();
   const [searchParams] = useSearchParams();
   const businessAreaId = searchParams.get("area");
   const [businessAreaName, setBusinessAreaName] = useState<string>("");
@@ -88,6 +90,74 @@ export default function ServiceCategories() {
   // Get available companies based on user access
   const availableCompanies = isSystemAdmin ? allCompanies : userCompanies;
 
+  const loadAllCompanies = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("anew_organizations")
+        .select("id, name")
+        .order("name");
+
+      if (error) throw error;
+      setAllCompanies(data || []);
+    } catch (error: unknown) {
+      // Non-critical: system admin company list. Failure is silent; the list
+      // remains empty and the UI falls back to showing no filter options.
+      void error;
+    }
+  }, []);
+
+  const loadBusinessAreaName = useCallback(async () => {
+    if (!businessAreaId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from("anew_organizations")
+        .select("name")
+        .eq("id", businessAreaId)
+        .single();
+
+      if (error) throw error;
+      setBusinessAreaName(data?.name || "");
+    } catch (error: unknown) {
+      void error;
+    }
+  }, [businessAreaId]);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      let query = supabase
+        .from("service_categories")
+        .select(`
+          *,
+          parent_category:service_categories!parent_id(name),
+          anew_organizations!organization_id(name)
+        `)
+        .is("parent_id", null)
+        .order("name");
+
+      // Filter by user's companies if not system admin
+      if (!isSystemAdmin && userCompanies.length > 0) {
+        const companyIds = userCompanies.map(c => c.id);
+        query = query.in("organization_id", companyIds);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setCategories((data || []) as unknown as ServiceCategory[]);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
+      toast({
+        title: t('serviceCategories.toast.loadError'),
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [isSystemAdmin, userCompanies, t, toast]);
+
   useEffect(() => {
     loadCategories();
     if (businessAreaId) {
@@ -96,79 +166,7 @@ export default function ServiceCategories() {
     if (isSystemAdmin) {
       loadAllCompanies();
     }
-  }, [businessAreaId, isSystemAdmin, activeCompany?.id]);
-
-  const loadAllCompanies = async () => {
-    if (!activeCompany?.id) return;
-    try {
-      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
-      const { data, error } = await supabase
-        .from("anew_organizations")
-        .select("id, name")
-        .in("id", subtreeIds)
-        .order("name");
-
-      if (error) throw error;
-      setAllCompanies(data || []);
-    } catch (error: any) {
-      console.error("Error loading companies:", error);
-    }
-  };
-
-  const loadBusinessAreaName = async () => {
-    if (!businessAreaId) return;
-    
-    try {
-      const { data, error } = await supabase
-        .from("anew_organizations")
-        .select("name")
-        .eq("id", businessAreaId)
-        .single();
-      
-      if (error) throw error;
-      setBusinessAreaName(data?.name || "");
-    } catch (error: any) {
-      console.error("Error loading business area:", error);
-    }
-  };
-
-  const loadCategories = async () => {
-    // Only load if we have an active company to scope to
-    if (!activeCompany?.id) {
-      setCategories([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
-
-      const { data, error } = await supabase
-        .from("service_categories")
-        .select(`
-          *,
-          parent_category:service_categories!parent_id(name),
-          anew_organizations!organization_id(name)
-        `)
-        .is("parent_id", null)
-        .in("organization_id", subtreeIds)
-        .order("name");
-
-      if (error) throw error;
-
-      setCategories((data || []) as unknown as ServiceCategory[]);
-    } catch (error: any) {
-      toast({
-        title: t('serviceCategories.toast.loadError'),
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [loadCategories, loadBusinessAreaName, loadAllCompanies, businessAreaId, isSystemAdmin]);
 
   const generateSlug = (name: string) => {
     return name
@@ -195,33 +193,31 @@ export default function ServiceCategories() {
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
-        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-        return;
+        throw new Error("Perfil de utilizador não encontrado");
       }
 
       const slug = formData.slug || generateSlug(formData.name);
 
-      if (editingCategory) {
-        const { error } = await supabase
-          .from("service_categories")
-          .update({
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (editingCategory) {
+          const updatePayload: TablesUpdate<"service_categories"> = {
             name: formData.name,
             description: formData.description || null,
             organization_id: formData.organization_id,
             sort_order: formData.sort_order,
-          } as any)
-          .eq("id", editingCategory.id)
-          .eq("organization_id", editingCategory.organization_id ?? "");
+          };
+          const { error } = await supabase
+            .from("service_categories")
+            .update(updatePayload)
+            .eq("id", editingCategory.id);
 
-        if (error) throw error;
+          if (error) throw error;
 
-        toast({
-          title: t('serviceCategories.toast.updateSuccess'),
-        });
-      } else {
-        const { error } = await supabase
-          .from("service_categories")
-          .insert({
+          toast({
+            title: t('serviceCategories.toast.updateSuccess'),
+          });
+        } else {
+          const insertPayload: TablesInsert<"service_categories"> = {
             name: formData.name,
             slug,
             description: formData.description || null,
@@ -230,21 +226,25 @@ export default function ServiceCategories() {
             sort_order: formData.sort_order,
             is_active: true,
             created_by: businessUserId,
-          } as any);
+          };
+          const { error } = await supabase
+            .from("service_categories")
+            .insert(insertPayload);
 
-        if (error) throw error;
+          if (error) throw error;
 
-        toast({
-          title: t('serviceCategories.toast.createSuccess'),
-        });
-      }
+          toast({
+            title: t('serviceCategories.toast.createSuccess'),
+          });
+        }
+      });
 
       handleCloseDialog(false);
-      loadCategories();
-    } catch (error: any) {
+      await loadCategories();
+    } catch (error: unknown) {
       toast({
         title: editingCategory ? t('serviceCategories.toast.updateError') : t('serviceCategories.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -259,24 +259,28 @@ export default function ServiceCategories() {
     if (!categoryToDelete) return;
 
     try {
-      const { error } = await supabase
-        .from("service_categories")
-        .delete()
-        .eq("id", categoryToDelete.id)
-        .eq("organization_id", categoryToDelete.organization_id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("service_categories")
+          .delete()
+          .eq("id", categoryToDelete.id);
+
+        if (error) throw error;
+      });
 
       toast({
         title: t('serviceCategories.toast.success'),
         description: t('serviceCategories.toast.deleteSuccess'),
       });
 
-      loadCategories();
-    } catch (error: any) {
+      await loadCategories();
+    } catch (error: unknown) {
       toast({
         title: t('serviceCategories.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     } finally {
@@ -305,7 +309,7 @@ export default function ServiceCategories() {
       slug: "",
       description: "",
       parent_id: "",
-      organization_id: activeCompany?.id || "",
+      organization_id: userCompanies.length === 1 ? userCompanies[0].id : "",
       sort_order: 0,
     });
   };
@@ -351,12 +355,12 @@ export default function ServiceCategories() {
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label id="org-select-label">{t('serviceCategories.form.company')}</Label>
+                  <Label htmlFor="organization_id">{t('serviceCategories.form.company')}</Label>
                   <Select
                     value={formData.organization_id}
                     onValueChange={(value) => setFormData({ ...formData, organization_id: value })}
                   >
-                    <SelectTrigger aria-labelledby="org-select-label">
+                    <SelectTrigger>
                       <SelectValue placeholder={t('serviceCategories.form.selectCompany')} />
                     </SelectTrigger>
                     <SelectContent>
@@ -477,8 +481,8 @@ export default function ServiceCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.edit')}
                             onClick={() => openEditDialog(category)}
-                            aria-label={t('serviceCategories.actions.edit')}
                           >
                             <Pencil className="w-4 h-4" />
                           </Button>
@@ -487,8 +491,8 @@ export default function ServiceCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.delete')}
                             onClick={() => openDeleteDialog(category)}
-                            aria-label={t('serviceCategories.actions.delete')}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
