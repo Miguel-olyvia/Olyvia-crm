@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -45,6 +47,21 @@ import { Trash2, Search, Download, Upload, ArrowUpDown, ArrowUp, ArrowDown } fro
 import { PermissionGate } from "@/components/PermissionGate";
 import { Badge } from "@/components/ui/badge";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+
+interface CatalogProduct {
+  id: string;
+  sku: string | null;
+  name: string;
+  description: string | null;
+  is_active: boolean | null;
+  created_at: string;
+  category_id: string | null;
+  brand_id: string | null;
+  organization_id: string | null;
+  product_categories: { name: string } | null;
+  brands: { name: string } | null;
+  product_prices: { price: number; price_type: string }[] | null;
+}
 
 interface CatalogItem {
   id: string;
@@ -98,11 +115,7 @@ const CatalogItems = () => {
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
   // Load data when filters change
-  useEffect(() => {
-    loadData();
-  }, [selectedCompanyId, selectedCategoryId, userCompanies, isSystemAdmin]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
 
@@ -159,14 +172,14 @@ const CatalogItems = () => {
       if (productsError) throw productsError;
 
       // Map to CatalogItem format - find retail price from prices array
-      const mappedItems: CatalogItem[] = (productsData || []).map((product: any) => {
-        const retailPrice = product.product_prices?.find((p: any) => p.price_type === 'retail');
+      const mappedItems: CatalogItem[] = (productsData || []).map((product: CatalogProduct) => {
+        const retailPrice = product.product_prices?.find((p) => p.price_type === 'retail');
         return {
           id: product.id,
           sku: product.sku,
           name: product.name,
           description: product.description,
-          is_active: product.is_active,
+          is_active: product.is_active ?? false,
           retail_price: retailPrice?.price || null,
           category_name: product.product_categories?.name || null,
           brand_name: product.brands?.name || null,
@@ -184,7 +197,11 @@ const CatalogItems = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCompanyId, selectedCategoryId, userCompanies, isSystemAdmin, allCompanies.length, toast, t]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -255,8 +272,13 @@ const CatalogItems = () => {
     if (!deleteItemId) return;
 
     try {
-      await supabase.from("product_prices").delete().eq("product_id", deleteItemId);
-      const { error } = await supabase.from("products").delete().eq("id", deleteItemId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      const { error } = await withAuditContext(supabase, businessUserId, async () => {
+        await supabase.from("product_prices").delete().eq("product_id", deleteItemId);
+        return await supabase.from("products").delete().eq("id", deleteItemId);
+      });
 
       if (error) throw error;
 

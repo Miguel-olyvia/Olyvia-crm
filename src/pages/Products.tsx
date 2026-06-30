@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -71,6 +72,7 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 
 interface Product {
   id: string;
@@ -628,10 +630,12 @@ export default function Products() {
       // Determine the primary organization - use selected or active company
       const primaryOrgId = getPrimaryOrgId(organizationSelection) || activeCompany?.id || null;
 
-      const productData: any = {
+      await withAuditContext(supabase, businessUserId, async () => {
+
+      const productData: TablesUpdate<"products"> = {
         sku: formData.sku,
         name: formData.name,
-        status: formData.status,
+        status: formData.status as TablesUpdate<"products">["status"],
         is_active: true,
         is_sellable: formData.product_type === "sale" || formData.product_type === "both",
         is_purchasable: formData.product_type === "purchase" || formData.product_type === "both",
@@ -670,10 +674,15 @@ export default function Products() {
         });
       } else {
         // Create new product — created_by must be anew_users.id (fail-closed)
-        productData.created_by = businessUserId;
+        const insertData: TablesInsert<"products"> = {
+          ...productData,
+          created_by: businessUserId,
+          sku: formData.sku,
+          name: formData.name,
+        };
         const { data: newProduct, error } = await supabase
           .from("products")
-          .insert(productData)
+          .insert(insertData)
           .select("id")
           .single();
 
@@ -762,7 +771,7 @@ export default function Products() {
 
       // Save attributes
       for (const av of attributeFormData) {
-        const valueData: any = {
+        const valueData: TablesInsert<"product_attribute_values"> = {
           product_id: productId,
           attribute_id: av.attribute_id
         };
@@ -802,6 +811,8 @@ export default function Products() {
         .update({ supplier_id: selectedSupplierId || null })
         .eq("id", productId);
 
+      }); // end withAuditContext
+
       handleCloseDialog(false);
       loadData();
     } catch (error: any) {
@@ -823,19 +834,21 @@ export default function Products() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
-      const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
-      const businessUserId = await resolveBusinessUserId(user.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
       // Soft delete - mark as deleted instead of removing
-      const { error } = await supabase
-        .from("products")
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-          deleted_by: businessUserId,
-        })
-        .eq("id", id)
-        .eq("organization_id", activeCompany.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("products")
+          .update({
+            is_deleted: true,
+            deleted_at: new Date().toISOString(),
+            deleted_by: businessUserId,
+          })
+          .eq("id", id)
+          .eq("organization_id", activeCompany.id)
+      );
 
       if (error) throw error;
 
@@ -1145,14 +1158,19 @@ export default function Products() {
     if (field === "category_id") {
       // For category, we don't need to check if value is empty as it's a select
       try {
-        const updateData: any = {};
+        const businessUserId = await resolveCurrentBusinessUserId();
+        if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+        const updateData: Partial<Record<string, unknown>> = {};
         updateData[field] = editingValue;
 
-        const { error } = await supabase
-          .from("products")
-          .update(updateData)
-          .eq("id", productId)
-          .eq("organization_id", activeCompany?.id);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("products")
+            .update(updateData)
+            .eq("id", productId)
+            .eq("organization_id", activeCompany?.id)
+        );
 
         if (error) throw error;
 
@@ -1179,14 +1197,19 @@ export default function Products() {
     }
 
     try {
-      const updateData: any = {};
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      const updateData: Partial<Record<string, unknown>> = {};
       updateData[field] = editingValue.trim();
 
-      const { error } = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", productId)
-        .eq("organization_id", activeCompany?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("products")
+          .update(updateData)
+          .eq("id", productId)
+          .eq("organization_id", activeCompany?.id)
+      );
 
       if (error) throw error;
 
@@ -1249,12 +1272,16 @@ export default function Products() {
   const handleBulkCategoryUpdate = async () => {
     if (!bulkCategoryId || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
-      const { error } = await supabase
-        .from("products")
-        .update({ category_id: bulkCategoryId, subcategory_id: null })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ category_id: bulkCategoryId, subcategory_id: null })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1277,12 +1304,16 @@ export default function Products() {
   const handleBulkSubcategoryUpdate = async () => {
     if (!bulkSubcategoryId || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
-      const { error } = await supabase
-        .from("products")
-        .update({ subcategory_id: bulkSubcategoryId })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ subcategory_id: bulkSubcategoryId })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1306,15 +1337,19 @@ export default function Products() {
   const handleBulkProductTypeUpdate = async () => {
     if (!bulkProductType || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
       const isSellable = bulkProductType === "sale" || bulkProductType === "both";
       const isPurchasable = bulkProductType === "purchase" || bulkProductType === "both";
 
-      const { error } = await supabase
-        .from("products")
-        .update({ is_sellable: isSellable, is_purchasable: isPurchasable })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ is_sellable: isSellable, is_purchasable: isPurchasable })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1338,11 +1373,16 @@ export default function Products() {
     if (selectedIds.length === 0 || !bulkUomId || !activeCompany?.id) return;
 
     try {
-      const { error } = await supabase
-        .from("products")
-        .update({ uom_id: bulkUomId })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ uom_id: bulkUomId })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),

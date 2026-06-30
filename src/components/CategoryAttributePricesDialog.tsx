@@ -6,9 +6,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
+import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { useToast } from "@/hooks/use-toast";
 import { Tag, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Props {
   open: boolean;
@@ -130,24 +133,35 @@ export default function CategoryAttributePricesDialog({
 
         if (!options || options.length === 0) continue;
 
-        const existingMap = new Map<string, any>();
-        (existingPrices || []).forEach((ep: any) => {
+        type ExistingPrice = {
+          id: string;
+          attribute_id: string;
+          value_option: string;
+          price: number;
+          is_available: boolean;
+          sort_order: number;
+        };
+        type InheritedPrice = Omit<ExistingPrice, 'id'> & { category_id: string | null };
+        type AttrOption = { value_text: string; display_name: string | null; hex_color: string | null };
+
+        const existingMap = new Map<string, ExistingPrice>();
+        (existingPrices || []).forEach((ep: ExistingPrice) => {
           if (ep.attribute_id === attr.id) {
             existingMap.set(ep.value_option, ep);
           }
         });
 
-        const inheritedMap = new Map<string, any>();
-        const inheritedForAttr = (inheritedPrices || []).filter((ip: any) => ip.attribute_id === attr.id);
-        options.forEach((opt: any) => {
-          const match = inheritedForAttr.find((ip: any) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[0])
-            || inheritedForAttr.find((ip: any) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[1])
-            || inheritedForAttr.find((ip: any) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[2])
-            || inheritedForAttr.find((ip: any) => ip.value_option === opt.value_text && ip.category_id === null);
+        const inheritedMap = new Map<string, InheritedPrice>();
+        const inheritedForAttr = (inheritedPrices || []).filter((ip: InheritedPrice) => ip.attribute_id === attr.id);
+        options.forEach((opt: AttrOption) => {
+          const match = inheritedForAttr.find((ip: InheritedPrice) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[0])
+            || inheritedForAttr.find((ip: InheritedPrice) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[1])
+            || inheritedForAttr.find((ip: InheritedPrice) => ip.value_option === opt.value_text && ip.category_id === inheritedCategoryIds[2])
+            || inheritedForAttr.find((ip: InheritedPrice) => ip.value_option === opt.value_text && ip.category_id === null);
           if (match) inheritedMap.set(opt.value_text, match);
         });
 
-        rows[attr.id] = options.map((opt: any, idx: number) => {
+        rows[attr.id] = options.map((opt: AttrOption, idx: number) => {
           const existing = existingMap.get(opt.value_text);
           const inherited = inheritedMap.get(opt.value_text);
           return {
@@ -174,16 +188,19 @@ export default function CategoryAttributePricesDialog({
       } else if (!selectedAttrId || !attrsWithOptions.find(a => a.id === selectedAttrId)) {
         setSelectedAttrId(attrsWithOptions[0]?.id || null);
       }
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Erro", description: err instanceof Error ? err.message : 'Erro desconhecido', variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, [categoryId, toast, selectedAttrId]);
+  // propAttributeId determines which attributes are fetched; selectedAttrId is set
+  // inside the callback itself so must NOT be a dep (would cause a reload loop).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryId, propAttributeId, toast]);
 
   useEffect(() => {
     if (open && categoryId) loadData();
-  }, [open, categoryId]);
+  }, [open, categoryId, loadData]);
 
   const updateRow = (attrId: string, index: number, updates: Partial<ValueRow>) => {
     setValueRows(prev => {
@@ -196,8 +213,11 @@ export default function CategoryAttributePricesDialog({
   const handleSave = async () => {
     setSaving(true);
     try {
-      const updates: any[] = [];
-      const inserts: any[] = [];
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const updates: Array<TablesUpdate<"product_attribute_value_prices"> & { id: string }> = [];
+      const inserts: Array<TablesInsert<"product_attribute_value_prices">> = [];
 
       Object.entries(valueRows).forEach(([attrId, rows]) => {
         rows.forEach(row => {
@@ -208,6 +228,7 @@ export default function CategoryAttributePricesDialog({
               is_available: row.is_available,
               price: row.price,
               sort_order: row.sort_order,
+              updated_at: new Date().toISOString(),
             });
           } else {
             inserts.push({
@@ -223,25 +244,34 @@ export default function CategoryAttributePricesDialog({
         });
       });
 
-      for (const u of updates) {
-        const { error } = await supabase
-          .from("product_attribute_value_prices")
-          .update({ is_available: u.is_available, price: u.price, sort_order: u.sort_order, updated_at: new Date().toISOString() })
-          .eq("id", u.id);
-        if (error) throw error;
-      }
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Batch updates in parallel to avoid O(N) sequential round-trips.
+        if (updates.length > 0) {
+          await Promise.all(
+            updates.map(u => {
+              const { id, ...fields } = u;
+              return supabase
+                .from("product_attribute_value_prices")
+                .update(fields)
+                .eq("id", id)
+                .throwOnError();
+            })
+          );
+        }
 
-      if (inserts.length > 0) {
-        const { error } = await supabase
-          .from("product_attribute_value_prices")
-          .insert(inserts);
-        if (error) throw error;
-      }
+        if (inserts.length > 0) {
+          const { error } = await supabase
+            .from("product_attribute_value_prices")
+            .insert(inserts);
+          if (error) throw error;
+        }
+      });
 
       toast({ title: "Guardado", description: "Preços de categoria atualizados." });
       onOpenChange(false);
-    } catch (err: any) {
-      toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Erro desconhecido";
+      toast({ title: "Erro ao guardar", description: message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -278,6 +308,7 @@ export default function CategoryAttributePricesDialog({
                     const counts = activeCounts[attr.id];
                     return (
                       <button
+                        type="button"
                         key={attr.id}
                         onClick={() => setSelectedAttrId(attr.id)}
                         className={cn(
