@@ -16,6 +16,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -44,7 +46,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCompany } from "@/contexts/CompanyContext";
-import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 interface Service {
   id: string;
@@ -75,27 +76,6 @@ interface Category {
 
 type SortField = 'sku' | 'name' | 'category_name' | 'retail_price' | 'company_name' | 'supplier_name' | 'is_active';
 type SortDirection = 'asc' | 'desc' | null;
-
-interface SortableHeaderProps {
-  field: SortField;
-  children: React.ReactNode;
-  onSort: (field: SortField) => void;
-  getSortIcon: (field: SortField) => React.ReactNode;
-}
-
-function SortableHeader({ field, children, onSort, getSortIcon }: SortableHeaderProps) {
-  return (
-    <TableHead
-      className="cursor-pointer hover:bg-muted/50 select-none"
-      onClick={() => onSort(field)}
-    >
-      <div className="flex items-center">
-        {children}
-        {getSortIcon(field)}
-      </div>
-    </TableHead>
-  );
-}
 
 export default function ServiceCatalogItems() {
   const navigate = useNavigate();
@@ -131,35 +111,18 @@ export default function ServiceCatalogItems() {
 
   useEffect(() => {
     loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, selectedCategoryId, activeCompany?.id, isSystemAdmin]);
+  }, [selectedCompanyId, selectedCategoryId, userCompanies, isSystemAdmin]);
 
   const loadData = async () => {
     try {
       setLoading(true);
 
-      // Resolve the company list for system admins into a local variable so it
-      // is available synchronously in the same execution — never seed from the
-      // stale allCompanies React state, which has not been flushed yet on the
-      // first render and may hold a previous render's value on subsequent calls.
-      let localCompanies: { id: string; name: string }[] = [];
-
-      if (isSystemAdmin) {
-        if (!activeCompany?.id) {
-          // No active company context — nothing to show.
-          setServices([]);
-          setCategories([]);
-          return;
-        }
-        const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-        const subtreeIds = await resolveOrgSubtree(activeCompany.id);
+      if (isSystemAdmin && allCompanies.length === 0) {
         const { data: companiesData } = await supabase
           .from("anew_organizations")
           .select("id, name")
-          .in("id", subtreeIds)
           .order("name");
-        localCompanies = companiesData || [];
-        setAllCompanies(localCompanies);
+        setAllCompanies(companiesData || []);
       }
 
       let categoriesQuery = supabase
@@ -168,17 +131,7 @@ export default function ServiceCatalogItems() {
         .is("parent_id", null)
         .eq("is_active", true);
 
-      if (isSystemAdmin) {
-        const companyIds = localCompanies.map(c => c.id);
-        if (companyIds.length > 0) {
-          categoriesQuery = categoriesQuery.in("organization_id", companyIds);
-        } else {
-          // No companies in subtree — return empty result set.
-          setCategories([]);
-          setServices([]);
-          return;
-        }
-      } else if (userCompanies.length > 0) {
+      if (!isSystemAdmin && userCompanies.length > 0) {
         const companyIds = userCompanies.map(c => c.id);
         categoriesQuery = categoriesQuery.in("organization_id", companyIds);
       }
@@ -204,13 +157,8 @@ export default function ServiceCatalogItems() {
         } else {
           servicesQuery = servicesQuery.in("organization_id", companyIds);
         }
-      } else if (isSystemAdmin && selectedCompanyId !== "all") {
+      } else if (selectedCompanyId !== "all") {
         servicesQuery = servicesQuery.eq("organization_id", selectedCompanyId);
-      } else if (isSystemAdmin) {
-        // System admins scoped to the subtree — localCompanies is always populated
-        // here because we returned early above when it was empty.
-        const allCompanyIds = localCompanies.map(c => c.id);
-        servicesQuery = servicesQuery.in("organization_id", allCompanyIds);
       }
 
       if (selectedCategoryId !== "all") {
@@ -306,19 +254,17 @@ export default function ServiceCatalogItems() {
     if (!deleteItemId) return;
 
     try {
-      const service = services.find((s) => s.id === deleteItemId);
-      if (!service) {
-        toast({ title: t('serviceCatalog.toast.error'), description: "Service not found.", variant: "destructive" });
-        return;
-      }
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
 
-      const { error } = await supabase
-        .from("services")
-        .delete()
-        .eq("id", deleteItemId)
-        .eq("organization_id", service.organization_id ?? "");
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("services")
+          .delete()
+          .eq("id", deleteItemId);
 
-      if (error) throw error;
+        if (error) throw error;
+      });
 
       toast({
         title: t('serviceCatalog.toast.success'),
@@ -338,29 +284,33 @@ export default function ServiceCatalogItems() {
   };
 
   const handleExport = () => {
-    downloadStandardXlsx({
-      sheetName: "Catálogo de serviços",
-      columns: [
-        { key: "sku", header: t('serviceCatalog.table.sku'), width: 16 },
-        { key: "name", header: t('serviceCatalog.table.name'), width: 30 },
-        { key: "category", header: t('serviceCatalog.table.category'), width: 22 },
-        { key: "price", header: t('serviceCatalog.table.salePrice'), type: "number", width: 16 },
-        { key: "currency", header: "Moeda", width: 10 },
-        { key: "company", header: t('serviceCatalog.table.company'), width: 26 },
-        { key: "supplier", header: t('serviceCatalog.table.supplier'), width: 26 },
-        { key: "active", header: t('serviceCatalog.table.status'), type: "boolean", width: 10 },
-      ],
-      rows: filteredAndSortedServices.map((service) => ({
-        sku: service.sku,
-        name: service.name,
-        category: service.category_name,
-        price: service.retail_price,
-        currency: service.currency,
-        company: service.company_name,
-        supplier: service.supplier_name,
-        active: service.is_active,
-      })),
-    }, `catalogo_servicos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const rows = [
+      [t('serviceCatalog.table.sku'), t('serviceCatalog.table.name'), t('serviceCatalog.table.category'), t('serviceCatalog.table.salePrice'), "Currency", t('serviceCatalog.table.company'), t('serviceCatalog.table.supplier'), t('serviceCatalog.table.status')],
+      ...filteredAndSortedServices.map((service) => [
+        service.sku,
+        service.name,
+        service.category_name || "",
+        service.retail_price || 0,
+        service.currency,
+        service.company_name || "",
+        service.supplier_name || "",
+        service.is_active ? t('serviceCatalog.active') : t('serviceCatalog.inactive'),
+      ]),
+    ];
+    
+    const csvContent = rows.map(row => 
+      row.map(cell => `"${cell}"`).join(";")
+    ).join("\r\n");
+
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "catalogo_servicos.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -375,6 +325,18 @@ export default function ServiceCatalogItems() {
 
     setShowBulkUploadDialog(false);
   };
+
+  const SortableHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
+    <TableHead 
+      className="cursor-pointer hover:bg-muted/50 select-none"
+      onClick={() => handleSort(field)}
+    >
+      <div className="flex items-center">
+        {children}
+        {getSortIcon(field)}
+      </div>
+    </TableHead>
+  );
 
   return (
     <>
@@ -467,13 +429,13 @@ export default function ServiceCatalogItems() {
           <Table>
             <TableHeader>
               <TableRow>
-                <SortableHeader field="sku" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.sku')}</SortableHeader>
-                <SortableHeader field="name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.name')}</SortableHeader>
-                <SortableHeader field="category_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.category')}</SortableHeader>
-                <SortableHeader field="retail_price" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.salePrice')}</SortableHeader>
-                <SortableHeader field="company_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.company')}</SortableHeader>
-                <SortableHeader field="supplier_name" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.supplier')}</SortableHeader>
-                <SortableHeader field="is_active" onSort={handleSort} getSortIcon={getSortIcon}>{t('serviceCatalog.table.status')}</SortableHeader>
+                <SortableHeader field="sku">{t('serviceCatalog.table.sku')}</SortableHeader>
+                <SortableHeader field="name">{t('serviceCatalog.table.name')}</SortableHeader>
+                <SortableHeader field="category_name">{t('serviceCatalog.table.category')}</SortableHeader>
+                <SortableHeader field="retail_price">{t('serviceCatalog.table.salePrice')}</SortableHeader>
+                <SortableHeader field="company_name">{t('serviceCatalog.table.company')}</SortableHeader>
+                <SortableHeader field="supplier_name">{t('serviceCatalog.table.supplier')}</SortableHeader>
+                <SortableHeader field="is_active">{t('serviceCatalog.table.status')}</SortableHeader>
                 <TableHead className="text-right">{t('serviceCatalog.table.actions')}</TableHead>
               </TableRow>
             </TableHeader>

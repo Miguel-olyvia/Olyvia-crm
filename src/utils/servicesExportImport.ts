@@ -1,6 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
-import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 // CSV column headers (aligned with import template)
 const CSV_HEADERS = [
@@ -92,47 +91,46 @@ export async function exportServicesToCSV(
       entry.vat_rate = p.vat_rate;
   });
 
-  const rows = services.map((svc) => {
+  const rows: string[][] = [];
+  rows.push(CSV_HEADERS);
+
+  for (const svc of services) {
     const pr = priceMap.get(svc.id) || {
       purchase: 0,
       retail: 0,
       currency: "EUR",
       vat_rate: 23,
     };
-    return {
-      sku: svc.sku,
-      name: svc.name,
-      description: svc.long_desc || svc.short_desc,
-      status: svc.is_active === false ? "inativo" : "ativo",
-      category: svc.service_categories?.name,
-      subcategory: svc.subcategory?.name,
-      serviceType: labelServiceType(svc.service_type),
-      company: svc.anew_organizations?.name,
-      vatRate: pr.vat_rate,
-      purchasePrice: pr.purchase,
-      retailPrice: pr.retail,
-      currency: pr.currency || "EUR",
-    };
-  });
 
-  downloadStandardXlsx({
-    sheetName: "Serviços",
-    columns: [
-      { key: "sku", header: "SKU", width: 16 },
-      { key: "name", header: "Nome", width: 30 },
-      { key: "description", header: "Descrição", width: 40 },
-      { key: "status", header: "Estado", width: 14 },
-      { key: "category", header: "Categoria", width: 22 },
-      { key: "subcategory", header: "Subcategoria", width: 22 },
-      { key: "serviceType", header: "Tipo serviço", width: 16 },
-      { key: "company", header: "Empresa", width: 26 },
-      { key: "vatRate", header: "Taxa IVA", type: "number", width: 12 },
-      { key: "purchasePrice", header: "Preço compra", type: "number", width: 16 },
-      { key: "retailPrice", header: "Preço venda", type: "number", width: 16 },
-      { key: "currency", header: "Moeda", width: 10 },
-    ],
-    rows,
-  }, `servicos_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    rows.push([
+      svc.sku || "",
+      svc.name || "",
+      svc.long_desc || svc.short_desc || "",
+      svc.is_active === false ? "inativo" : "ativo",
+      svc.service_categories?.name || "",
+      svc.subcategory?.name || "",
+      labelServiceType(svc.service_type),
+      svc.anew_organizations?.name || "",
+      fmtDecimal(pr.vat_rate),
+      fmtDecimal(pr.purchase),
+      fmtDecimal(pr.retail),
+      pr.currency || "EUR",
+    ]);
+  }
+
+  // BOM + ; separator (Excel PT/EU default; preserves UTF-8 acentuação)
+  const csv =
+    "\uFEFF" + rows.map((r) => r.map(escapeCsv).join(";")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `servicos_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 // ============================================================
@@ -298,13 +296,14 @@ export async function parseServicesCSV(
   }
 
   // Resolve business user id (anew_users.id) — required by RLS on service_prices.created_by
-  let businessUserId = userId;
-  const { data: anewUser } = await supabase
+  const { data: anewUser, error: anewUserError } = await supabase
     .from("anew_users")
     .select("id")
     .eq("auth_user_id", userId)
     .maybeSingle();
-  if (anewUser?.id) businessUserId = anewUser.id;
+  if (anewUserError) throw new Error(`Erro ao resolver identidade do utilizador: ${anewUserError.message}`);
+  if (!anewUser?.id) throw new Error("Perfil de utilizador não encontrado (anew_users). Verifique se o utilizador está registado.");
+  const businessUserId = anewUser.id;
 
   // Pre-load categories & subcategories for this org
   const { data: categoriesData } = await supabase
@@ -374,49 +373,51 @@ export async function parseServicesCSV(
       const currency =
         iCurrency !== -1 ? (cols[iCurrency] || "EUR").trim() : "EUR";
 
-      let categoryId: string | null = null;
-      if (catName) {
-        const catKey = catName.toLowerCase();
-        if (catMap.has(catKey)) {
-          categoryId = catMap.get(catKey)!;
-        } else if (createdCatCache.has(catKey)) {
-          categoryId = createdCatCache.get(catKey)!;
-        } else {
-          const { data: newCat, error: catErr } = await (supabase as any)
-            .from('service_categories')
-            .insert({ name: catName, organization_id: organizationId, created_by: userId })
-            .select('id')
-            .single();
-          if (!catErr && newCat) {
-            categoryId = newCat.id;
-            catMap.set(catKey, newCat.id);
-            createdCatCache.set(catKey, newCat.id);
+      await supabase.rpc("set_audit_context", { p_user_id: businessUserId, p_source: "csv_import" });
+      try {
+        let categoryId: string | null = null;
+        if (catName) {
+          const catKey = catName.toLowerCase();
+          if (catMap.has(catKey)) {
+            categoryId = catMap.get(catKey)!;
+          } else if (createdCatCache.has(catKey)) {
+            categoryId = createdCatCache.get(catKey)!;
+          } else {
+            const { data: newCat, error: catErr } = await (supabase as any)
+              .from('service_categories')
+              .insert({ name: catName, organization_id: organizationId, created_by: businessUserId })
+              .select('id')
+              .single();
+            if (!catErr && newCat) {
+              categoryId = newCat.id;
+              catMap.set(catKey, newCat.id);
+              createdCatCache.set(catKey, newCat.id);
+            }
           }
         }
-      }
 
-      let subcategoryId: string | null = null;
-      if (subName) {
-        const subKey = subName.toLowerCase();
-        if (subMap.has(subKey)) {
-          subcategoryId = subMap.get(subKey)!;
-        } else if (createdCatCache.has(subKey)) {
-          subcategoryId = createdCatCache.get(subKey)!;
-        } else {
-          const { data: newSub, error: subErr } = await (supabase as any)
-            .from('service_categories')
-            .insert({ name: subName, organization_id: organizationId, created_by: userId })
-            .select('id')
-            .single();
-          if (!subErr && newSub) {
-            subcategoryId = newSub.id;
-            subMap.set(subKey, newSub.id);
-            createdCatCache.set(subKey, newSub.id);
+        let subcategoryId: string | null = null;
+        if (subName) {
+          const subKey = subName.toLowerCase();
+          if (subMap.has(subKey)) {
+            subcategoryId = subMap.get(subKey)!;
+          } else if (createdCatCache.has(subKey)) {
+            subcategoryId = createdCatCache.get(subKey)!;
+          } else {
+            const { data: newSub, error: subErr } = await (supabase as any)
+              .from('service_categories')
+              .insert({ name: subName, organization_id: organizationId, created_by: businessUserId })
+              .select('id')
+              .single();
+            if (!subErr && newSub) {
+              subcategoryId = newSub.id;
+              subMap.set(subKey, newSub.id);
+              createdCatCache.set(subKey, newSub.id);
+            }
           }
         }
-      }
 
-      const serviceData: any = {
+        const serviceData: any = {
         sku,
         name,
         slug: name.toLowerCase().replace(/\s+/g, "-"),
@@ -426,79 +427,75 @@ export async function parseServicesCSV(
         organization_id: organizationId,
         service_category_id: categoryId,
         service_subcategory_id: subcategoryId,
-      };
+        };
 
-      let serviceId: string;
-      const existingId = existing.get(sku);
+        let serviceId: string;
+        const existingId = existing.get(sku);
 
-      if (existingId) {
-        // Anchor the update to the calling org — prevents a crafted CSV from
-        // overwriting services belonging to a different tenant.
-        const { error } = await supabase
-          .from("services")
-          .update(serviceData)
-          .eq("id", existingId)
-          .eq("organization_id", organizationId);
-        if (error) throw error;
-        serviceId = existingId;
-        report.updated++;
-      } else {
-        serviceData.created_by = userId;
-        const { data: inserted, error } = await supabase
-          .from("services")
-          .insert(serviceData)
+        if (existingId) {
+          const { error } = await supabase
+            .from("services")
+            .update(serviceData)
+            .eq("id", existingId);
+          if (error) throw error;
+          serviceId = existingId;
+          report.updated++;
+        } else {
+          serviceData.created_by = businessUserId;
+          const { data: inserted, error } = await supabase
+            .from("services")
+            .insert(serviceData)
+            .select("id")
+            .single();
+          if (error) throw error;
+          serviceId = inserted.id;
+          report.inserted++;
+        }
+  
+        // Sync prices: delete existing then insert (purchase + retail)
+        const { error: priceDeleteError } = await supabase.from("service_prices").delete().eq("service_id", serviceId);
+        if (priceDeleteError) throw priceDeleteError;
+  
+        const priceRows = [
+          {
+            service_id: serviceId,
+            price_type: "purchase",
+            price: purchasePrice,
+            currency,
+            vat_rate: vatRate,
+            created_by: businessUserId,
+          },
+          {
+            service_id: serviceId,
+            price_type: "retail",
+            price: retailPrice,
+            currency,
+            vat_rate: vatRate,
+            created_by: businessUserId,
+          },
+        ];
+        const { error: priceErr } = await supabase
+          .from("service_prices")
+          .insert(priceRows);
+        if (priceErr) throw priceErr;
+  
+        // Ensure service_organizations link
+        const { data: link } = await supabase
+          .from("service_organizations")
           .select("id")
-          .single();
-        if (error) throw error;
-        serviceId = inserted.id;
-        report.inserted++;
-      }
-
-      // Sync prices: delete only prices owned by this org, then insert fresh rows.
-      // Scoping the delete to organization_id prevents a crafted CSV from removing
-      // prices that belong to a different tenant sharing the same service record.
-      await supabase
-        .from("service_prices")
-        .delete()
-        .eq("service_id", serviceId)
-        .eq("organization_id", organizationId);
-
-      const priceRows = [
-        {
-          service_id: serviceId,
-          price_type: "purchase",
-          price: purchasePrice,
-          currency,
-          vat_rate: vatRate,
-          created_by: businessUserId,
-        },
-        {
-          service_id: serviceId,
-          price_type: "retail",
-          price: retailPrice,
-          currency,
-          vat_rate: vatRate,
-          created_by: businessUserId,
-        },
-      ];
-      const { error: priceErr } = await supabase
-        .from("service_prices")
-        .insert(priceRows);
-      if (priceErr) throw priceErr;
-
-      // Ensure service_organizations link
-      const { data: link } = await supabase
-        .from("service_organizations")
-        .select("id")
-        .eq("service_id", serviceId)
-        .eq("organization_id", organizationId)
-        .maybeSingle();
-      if (!link) {
-        await supabase.from("service_organizations").insert({
-          service_id: serviceId,
-          organization_id: organizationId,
-          created_by: userId,
-        });
+          .eq("service_id", serviceId)
+          .eq("organization_id", organizationId)
+          .maybeSingle();
+        if (!link) {
+          const { error: orgLinkError } = await supabase.from("service_organizations").insert({
+            service_id: serviceId,
+            organization_id: organizationId,
+            created_by: businessUserId,
+          });
+          if (orgLinkError) throw orgLinkError;
+        }
+      } finally {
+        await supabase.rpc("clear_audit_context").catch(() => {});
       }
     } catch (err: any) {
       report.errors.push({

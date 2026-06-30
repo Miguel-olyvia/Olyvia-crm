@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -106,8 +107,7 @@ export default function ServiceFees() {
     if (isSystemAdmin) {
       fetchAllCompanies();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSystemAdmin, activeCompany?.id]);
+  }, [isSystemAdmin, userCompanies, activeCompany?.id]);
 
   // Load services when company changes
   useEffect(() => {
@@ -120,14 +120,10 @@ export default function ServiceFees() {
   }, [formData.organization_id]);
 
   const fetchAllCompanies = async () => {
-    if (!activeCompany?.id) return;
     try {
-      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-      const subtreeIds = await resolveOrgSubtree(activeCompany.id);
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from("anew_organizations")
         .select("id, name")
-        .in("id", subtreeIds)
         .order("name");
 
       if (error) throw error;
@@ -302,42 +298,44 @@ export default function ServiceFees() {
         vat_rate: formData.apply_vat ? (parseFloat(formData.vat_rate) || 0) : 0,
       };
 
-      if (editingId) {
-        const { error } = await supabase
-          .from("service_fee_types")
-          .update({
-            ...payload,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingId)
-          .eq("organization_id", companyIdToUse);
-
-        if (error) throw error;
-
-        toast({
-          title: t('serviceFees.toast.updateSuccess'),
-          description: t('serviceFees.toast.updateSuccessDesc'),
-        });
-      } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
-        const { error } = await supabase
-          .from("service_fee_types")
-          .insert([{
-            ...payload,
-            created_by: businessUserId,
-          }]);
-
-        if (error) throw error;
-
-        toast({
-          title: t('serviceFees.toast.createSuccess'),
-          description: t('serviceFees.toast.createSuccessDesc'),
-        });
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
+        return;
       }
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (editingId) {
+          const { error } = await supabase
+            .from("service_fee_types")
+            .update({
+              ...payload,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingId);
+
+          if (error) throw error;
+
+          toast({
+            title: t('serviceFees.toast.updateSuccess'),
+            description: t('serviceFees.toast.updateSuccessDesc'),
+          });
+        } else {
+          const { error } = await supabase
+            .from("service_fee_types")
+            .insert([{
+              ...payload,
+              created_by: businessUserId,
+            }]);
+
+          if (error) throw error;
+
+          toast({
+            title: t('serviceFees.toast.createSuccess'),
+            description: t('serviceFees.toast.createSuccessDesc'),
+          });
+        }
+      });
 
       setShowDialog(false);
       resetForm();
@@ -358,19 +356,17 @@ export default function ServiceFees() {
     if (!deleteId) return;
 
     try {
-      const feeType = feeTypes.find((f) => f.id === deleteId);
-      if (!feeType) {
-        toast({ title: t('serviceFees.toast.deleteError'), description: "Fee type not found.", variant: "destructive" });
-        return;
-      }
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
 
-      const { error } = await supabase
-        .from("service_fee_types")
-        .delete()
-        .eq("id", deleteId)
-        .eq("organization_id", feeType.organization_id ?? "");
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("service_fee_types")
+          .delete()
+          .eq("id", deleteId);
 
-      if (error) throw error;
+        if (error) throw error;
+      });
 
       toast({
         title: t('serviceFees.toast.deleteSuccess'),
@@ -487,7 +483,6 @@ export default function ServiceFees() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleEdit(fee)}
-                          aria-label={t('serviceFees.actions.edit')}
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -495,7 +490,6 @@ export default function ServiceFees() {
                           variant="ghost"
                           size="icon"
                           onClick={() => setDeleteId(fee.id)}
-                          aria-label={t('serviceFees.actions.delete')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

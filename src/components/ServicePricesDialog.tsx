@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -120,7 +121,7 @@ export default function ServicePricesDialog({
       }
 
       // Calculate promotional price if using percentage
-      const finalPromotionalPrice = promoType === 'percentage' && promoPercentage > 0 
+      const finalPromotionalPrice = promoType === 'percentage' && promoPercentage > 0
         ? prices.retail * (1 - promoPercentage / 100)
         : prices.promotional;
 
@@ -130,45 +131,47 @@ export default function ServicePricesDialog({
         { type: 'promotional', value: finalPromotionalPrice }
       ];
 
-      for (const { type, value } of priceTypes) {
-        if (value && value > 0) {
-          const priceData: any = {
-            service_id: serviceId,
-            price_type: type,
-            price: value,
-            currency: prices.currency,
-            vat_rate: prices.vat_rate,
-            created_by: businessUserId
-          };
+      await withAuditContext(supabase, businessUserId, async () => {
+        for (const { type, value } of priceTypes) {
+          if (value && value > 0) {
+            const priceData: any = {
+              service_id: serviceId,
+              price_type: type,
+              price: value,
+              currency: prices.currency,
+              vat_rate: prices.vat_rate,
+              created_by: businessUserId
+            };
 
-          if (type === 'promotional') {
-            if (prices.promo_from) priceData.valid_from = prices.promo_from;
-            if (prices.promo_to) priceData.valid_to = prices.promo_to;
-          }
+            if (type === 'promotional') {
+              if (prices.promo_from) priceData.valid_from = prices.promo_from;
+              if (prices.promo_to) priceData.valid_to = prices.promo_to;
+            }
 
-          if (existingPriceIds[type]) {
-            // Update existing price
-            const { error } = await supabase
-              .from('service_prices')
-              .update(priceData)
-              .eq('id', existingPriceIds[type]);
-            
-            if (error) throw error;
-          } else {
-            // Insert new price
-            const { error } = await supabase
-              .from('service_prices')
-              .insert(priceData);
-            
-            if (error) throw error;
+            if (existingPriceIds[type]) {
+              // Update existing price
+              const { error } = await supabase
+                .from('service_prices')
+                .update(priceData)
+                .eq('id', existingPriceIds[type]);
+
+              if (error) throw error;
+            } else {
+              // Insert new price
+              const { error } = await supabase
+                .from('service_prices')
+                .insert(priceData);
+
+              if (error) throw error;
+            }
           }
         }
-      }
+      });
 
       toast({
         title: "Preços atualizados com sucesso!"
       });
-      
+
       onOpenChange(false);
     } catch (error: any) {
       toast({

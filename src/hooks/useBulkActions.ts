@@ -2,6 +2,8 @@ import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 export interface BulkActionOptions {
   tableName: string;
@@ -58,13 +60,18 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
       }
 
       if (!organizationId) throw new Error("organizationId required for bulk status change");
-      const { error } = await (supabase
-        .from(tableName as any)
-        .update(updateData as any)
-        .in("id", Array.from(selectedIds))
-        .eq("organization_id", organizationId) as any);
 
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase
+          .from(tableName as any)
+          .update(updateData as any)
+          .in("id", Array.from(selectedIds))
+          .eq("organization_id", organizationId) as any);
+        if (error) throw error;
+      });
 
       toast({
         title: t('common.statusUpdated'),
@@ -73,10 +80,10 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
       clearSelection();
       setBulkStatusDialogOpen(false);
       onSuccess?.();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('common.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
@@ -89,33 +96,32 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
     setProcessing(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("User not authenticated");
-      const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
-      const businessUserId = await resolveBusinessUserId(user.id);
-
       if (!organizationId) throw new Error("organizationId required for bulk delete");
-      if (softDelete) {
-        const { error } = await (supabase
-          .from(tableName as any)
-          .update({
-            is_deleted: true,
-            deleted_at: new Date().toISOString(),
-            deleted_by: businessUserId,
-          } as any)
-          .in("id", Array.from(selectedIds))
-          .eq("organization_id", organizationId) as any);
 
-        if (error) throw error;
-      } else {
-        const { error } = await (supabase
-          .from(tableName as any)
-          .delete()
-          .in("id", Array.from(selectedIds))
-          .eq("organization_id", organizationId) as any);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
-        if (error) throw error;
-      }
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (softDelete) {
+          const { error } = await (supabase
+            .from(tableName as any)
+            .update({
+              is_deleted: true,
+              deleted_at: new Date().toISOString(),
+              deleted_by: businessUserId,
+            } as any)
+            .in("id", Array.from(selectedIds))
+            .eq("organization_id", organizationId) as any);
+          if (error) throw error;
+        } else {
+          const { error } = await (supabase
+            .from(tableName as any)
+            .delete()
+            .in("id", Array.from(selectedIds))
+            .eq("organization_id", organizationId) as any);
+          if (error) throw error;
+        }
+      });
 
       toast({ 
         title: t('common.deleteSuccess'),
@@ -124,10 +130,10 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
       clearSelection();
       setBulkDeleteDialogOpen(false);
       onSuccess?.();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('common.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
@@ -144,13 +150,18 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
       updateData[companyField] = bulkNewCompanyId;
 
       if (!organizationId) throw new Error("organizationId required for bulk company change");
-      const { error } = await (supabase
-        .from(tableName as any)
-        .update(updateData as any)
-        .in("id", Array.from(selectedIds))
-        .eq("organization_id", organizationId) as any);
 
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase
+          .from(tableName as any)
+          .update(updateData as any)
+          .in("id", Array.from(selectedIds))
+          .eq("organization_id", organizationId) as any);
+        if (error) throw error;
+      });
 
       toast({
         title: t('common.orgUpdated'),
@@ -160,10 +171,10 @@ export function useBulkActions({ tableName, onSuccess, softDelete = false, organ
       setBulkOrgDialogOpen(false);
       setBulkNewCompanyId("");
       onSuccess?.();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('common.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
