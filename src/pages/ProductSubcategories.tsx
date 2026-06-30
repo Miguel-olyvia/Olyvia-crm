@@ -51,6 +51,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductSubcategory {
   id: string;
@@ -109,6 +110,9 @@ export default function ProductSubcategories() {
   // Pagination states
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(0);
+  // pageRef mirrors page state so loadData can read the current page value
+  // without closing over `page` as a useCallback dependency (CAT-HOOK-001).
+  const pageRef = useRef(0);
   const [hasMore, setHasMore] = useState(true);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -133,11 +137,11 @@ export default function ProductSubcategories() {
 
       if (companiesResult.error) throw companiesResult.error;
       setAdminCompanies((companiesResult.data || []) as Company[]);
-    } catch (error: any) {
-      console.error("Error loading organizations:", error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     }
@@ -179,13 +183,17 @@ export default function ProductSubcategories() {
     try {
       if (reset) {
         setLoading(true);
+        pageRef.current = 0;
         setPage(0);
         setHasMore(true);
       } else {
         setLoadingMore(true);
       }
 
-      const currentPage = reset ? 0 : page;
+      // Read current page from ref so `page` state is not a dep of this callback.
+      // This prevents a reload loop when the infinite-scroll useEffect fires on
+      // page increment (CAT-HOOK-001).
+      const currentPage = reset ? 0 : pageRef.current;
       const from = currentPage * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
 
@@ -343,10 +351,10 @@ export default function ProductSubcategories() {
       } else {
         setSubcategories((prev) => [...prev, ...(formattedSubs as ProductSubcategory[])]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productSubcategories.toast.loadError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     } finally {
@@ -354,7 +362,8 @@ export default function ProductSubcategories() {
       setLoadingMore(false);
     }
   }, [
-    page,
+    // `page` intentionally omitted: read via pageRef.current to avoid reload loop
+    // on every infinite-scroll page increment (CAT-HOOK-001).
     filterCompanyId,
     filterTenantId,
     filterStatus,
@@ -372,6 +381,7 @@ export default function ProductSubcategories() {
     tableName: "product_categories",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   // Debounce search term
@@ -415,9 +425,11 @@ export default function ProductSubcategories() {
     };
   }, [hasMore, loadingMore, loading, loadMore]);
 
-  // Load data when page changes (for infinite scroll)
+  // Load data when page changes (for infinite scroll).
+  // Sync pageRef before calling loadData so the callback reads the new page value.
   useEffect(() => {
     if (page > 0) {
+      pageRef.current = page;
       loadData(false);
     }
   }, [page, loadData]);
@@ -461,8 +473,9 @@ export default function ProductSubcategories() {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error(t('productSubcategories.toast.notAuthenticated'));
+      // resolveCurrentBusinessUserId() performs its own auth.getUser() internally and
+      // handles the null case — a separate getUser() call here is redundant and creates
+      // a divergent early-exit error path on transient auth failures (PROD-DEAD-AUTH-CALL-SUBMIT).
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
@@ -471,36 +484,38 @@ export default function ProductSubcategories() {
       const path = parentCategory ? `${parentCategory.name.toLowerCase()}/${slug}` : slug;
 
       if (editingSubcategory) {
-        const { error } = await supabase
-          .from("product_categories")
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            sort_order: formData.sort_order,
-            parent_id: formData.parent_id,
-            organization_id: companyId,
-          })
-          .eq("id", editingSubcategory.id);
-
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("product_categories")
+            .update({
+              name: formData.name,
+              description: formData.description || null,
+              sort_order: formData.sort_order,
+              parent_id: formData.parent_id,
+              organization_id: companyId,
+            })
+            .eq("id", editingSubcategory.id);
+          if (error) throw error;
+        });
 
         toast({
           title: t('productSubcategories.toast.updateSuccess'),
         });
       } else {
-        const { error } = await supabase.from("product_categories").insert({
-          name: formData.name,
-          slug,
-          path,
-          description: formData.description || null,
-          parent_id: formData.parent_id,
-          organization_id: companyId,
-          sort_order: formData.sort_order,
-          is_active: true,
-          created_by: businessUserId,
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("product_categories").insert({
+            name: formData.name,
+            slug,
+            path,
+            description: formData.description || null,
+            parent_id: formData.parent_id,
+            organization_id: companyId,
+            sort_order: formData.sort_order,
+            is_active: true,
+            created_by: businessUserId,
+          });
+          if (error) throw error;
         });
-
-        if (error) throw error;
 
         toast({
           title: t('productSubcategories.toast.createSuccess'),
@@ -509,10 +524,10 @@ export default function ProductSubcategories() {
 
       handleCloseDialog();
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productSubcategories.toast.saveError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -522,52 +537,61 @@ export default function ProductSubcategories() {
     if (!subcategoryToDelete) return;
 
     try {
-      // Verify subcategory ownership before any Supabase call
+      // Verify subcategory ownership before any Supabase call.
       const sub = subcategories.find(s => s.id === subcategoryToDelete);
       if (!sub?.organization_id) {
         throw new Error('Subcategory not found or no organization context');
       }
 
-      // Limpar referências em produtos soft-deleted (não bloqueiam de forma legítima)
-      // Scope to the subcategory's org so no cross-tenant records are touched
-      await supabase
-        .from("products")
-        .update({ subcategory_id: null })
-        .eq("subcategory_id", subcategoryToDelete)
-        .eq("organization_id", sub.organization_id)
-        .not("deleted_at", "is", null);
-      const { error } = await supabase
-        .from("product_categories")
-        .delete()
-        .eq("id", subcategoryToDelete)
-        .eq("organization_id", sub.organization_id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
-      if (error) {
-        // Check if it's a foreign key constraint error
-        if (error.code === "23503") {
-          toast({
-            title: t('productSubcategories.toast.cannotDelete'),
-            description: t('productSubcategories.toast.inUseByProducts'),
-            variant: "destructive",
-          });
-          setDeleteDialogOpen(false);
-          setSubcategoryToDelete(null);
-          return;
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Clear references in soft-deleted products so they don't block the DELETE.
+        // Scoped to the subcategory's org to avoid cross-tenant mutations.
+        // throwOnError() ensures a silent UPDATE failure (e.g. RLS rejection) is surfaced
+        // before the DELETE proceeds, preventing orphaned FK references (AUDIT-CAT-05).
+        await supabase
+          .from("products")
+          .update({ subcategory_id: null })
+          .eq("subcategory_id", subcategoryToDelete)
+          .eq("organization_id", sub.organization_id)
+          .not("deleted_at", "is", null)
+          .throwOnError();
+
+        const { error } = await supabase
+          .from("product_categories")
+          .delete()
+          .eq("id", subcategoryToDelete)
+          .eq("organization_id", sub.organization_id);
+
+        if (error) {
+          // Foreign key constraint: subcategory is still in use by active products.
+          if (error.code === "23503") {
+            toast({
+              title: t('productSubcategories.toast.cannotDelete'),
+              description: t('productSubcategories.toast.inUseByProducts'),
+              variant: "destructive",
+            });
+            setDeleteDialogOpen(false);
+            setSubcategoryToDelete(null);
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
 
       toast({
         title: t('productSubcategories.toast.deleteSuccess'),
       });
-      
+
       setDeleteDialogOpen(false);
       setSubcategoryToDelete(null);
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productSubcategories.toast.deleteError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
       setDeleteDialogOpen(false);
@@ -613,10 +637,10 @@ export default function ProductSubcategories() {
   useEffect(() => {
     if (!open) return;
 
-    loadFormParentCategories(selectedCompanyIdForForm || null).catch((error: any) => {
+    loadFormParentCategories(selectedCompanyIdForForm || null).catch((error: unknown) => {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     });
