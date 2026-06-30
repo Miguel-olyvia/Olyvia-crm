@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface ProductAttribute {
@@ -113,46 +115,49 @@ export function BulkAttributesDialog({
 
     setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      // For each product and each attribute, upsert the value
-      for (const productId of selectedProductIds) {
-        for (const av of attributeValues) {
-          // Check if attribute value already exists
-          const { data: existing } = await supabase
-            .from('product_attribute_values')
-            .select('id')
-            .eq('product_id', productId)
-            .eq('attribute_id', av.attribute_id)
-            .single();
+      // Wrap the entire upsert loop in a single audit context so every write
+      // records the acting user when audit triggers are active on this table.
+      await withAuditContext(supabase, businessUserId, async () => {
+        for (const productId of selectedProductIds) {
+          for (const av of attributeValues) {
+            // Check if attribute value already exists
+            const { data: existing } = await supabase
+              .from('product_attribute_values')
+              .select('id')
+              .eq('product_id', productId)
+              .eq('attribute_id', av.attribute_id)
+              .single();
 
-          if (existing) {
-            // Update existing
-            const { error } = await supabase
-              .from('product_attribute_values')
-              .update({
-                value_text: av.value_text || null,
-                value_number: av.value_number || null,
-                value_bool: av.value_bool || null,
-              })
-              .eq('id', existing.id);
-            if (error) throw error;
-          } else {
-            // Insert new
-            const { error } = await supabase
-              .from('product_attribute_values')
-              .insert({
-                product_id: productId,
-                attribute_id: av.attribute_id,
-                value_text: av.value_text || null,
-                value_number: av.value_number || null,
-                value_bool: av.value_bool || null,
-              });
-            if (error) throw error;
+            if (existing) {
+              // Update existing
+              const { error } = await supabase
+                .from('product_attribute_values')
+                .update({
+                  value_text: av.value_text || null,
+                  value_number: av.value_number || null,
+                  value_bool: av.value_bool || null,
+                })
+                .eq('id', existing.id);
+              if (error) throw error;
+            } else {
+              // Insert new
+              const { error } = await supabase
+                .from('product_attribute_values')
+                .insert({
+                  product_id: productId,
+                  attribute_id: av.attribute_id,
+                  value_text: av.value_text || null,
+                  value_number: av.value_number || null,
+                  value_bool: av.value_bool || null,
+                });
+              if (error) throw error;
+            }
           }
         }
-      }
+      })
 
       toast({
         title: t('bulkAttributes.success'),

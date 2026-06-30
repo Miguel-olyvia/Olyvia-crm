@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Pencil, Trash2, Search } from "lucide-react";
@@ -73,10 +75,10 @@ export default function UnitsOfMeasure() {
 
       if (error) throw error;
       setUnits(data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
@@ -117,42 +119,49 @@ export default function UnitsOfMeasure() {
 
     setSaving(true);
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        throw new Error('Perfil de utilizador não encontrado.');
+      }
+
       if (editingUnit) {
         // Only allow editing org-owned records; global records (organization_id IS NULL) are read-only
         if (!editingUnit.organization_id || !activeCompany?.id) {
           throw new Error('Cannot edit a global UOM record or missing active company');
         }
-        const { error } = await supabase
-          .from("uom")
-          .update({
-            code: formData.code.trim(),
-            description: formData.description.trim() || null,
-          })
-          .eq("id", editingUnit.id)
-          .eq("organization_id", activeCompany.id);
-
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("uom")
+            .update({
+              code: formData.code.trim(),
+              description: formData.description.trim() || null,
+            })
+            .eq("id", editingUnit.id)
+            .eq("organization_id", activeCompany.id);
+          if (error) throw error;
+        });
         toast({ title: t("uom.updatedSuccess") });
       } else {
         if (!activeCompany?.id) {
           throw new Error('No active company — cannot create UOM without an organization scope');
         }
-        const { error } = await supabase.from("uom").insert({
-          code: formData.code.trim(),
-          description: formData.description.trim() || null,
-          organization_id: activeCompany.id,
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("uom").insert({
+            code: formData.code.trim(),
+            description: formData.description.trim() || null,
+            organization_id: activeCompany.id,
+          });
+          if (error) throw error;
         });
-
-        if (error) throw error;
         toast({ title: t("uom.addedSuccess") });
       }
 
       setDialogOpen(false);
       loadUnits();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
@@ -168,21 +177,26 @@ export default function UnitsOfMeasure() {
       if (!unitToDelete.organization_id || !activeCompany?.id) {
         throw new Error('Cannot delete a global UOM record or missing active company');
       }
-      const { error } = await supabase
-        .from("uom")
-        .delete()
-        .eq("id", unitToDelete.id)
-        .eq("organization_id", activeCompany.id);
-
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        throw new Error('Perfil de utilizador não encontrado.');
+      }
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("uom")
+          .delete()
+          .eq("id", unitToDelete.id)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
       toast({ title: t("uom.deletedSuccess") });
       setDeleteDialogOpen(false);
       setUnitToDelete(null);
       loadUnits();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     }

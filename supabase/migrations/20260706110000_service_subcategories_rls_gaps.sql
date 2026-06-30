@@ -320,7 +320,7 @@ CREATE POLICY service_categories_update
       -- Subcategory: edit permission + pre-update parent org visible.
       (parent_id IS NOT NULL)
       AND public.has_anew_permission((SELECT auth.uid()), 'service_subcategories.edit')
-      AND public.get_service_category_org_id(parent_id) IN (
+      AND public.get_service_category_org_id(parent_id, 0) IN (
         SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
       )
     )
@@ -351,7 +351,7 @@ CREATE POLICY service_categories_update
       AND public.has_anew_permission((SELECT auth.uid()), 'service_subcategories.edit')
       AND EXISTS (
         SELECT 1
-        FROM   (SELECT public.get_service_category_org_id(parent_id) AS resolved_org) r
+        FROM   (SELECT public.get_service_category_org_id(parent_id, 0) AS resolved_org) r
         WHERE  r.resolved_org IN (
                  SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
                )

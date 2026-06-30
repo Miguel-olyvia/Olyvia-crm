@@ -522,7 +522,7 @@ export default function Products() {
         brandsPromise,
         companiesPromise,
         activeCompany?.id
-          ? supabase.from("uom").select("id, code, description").eq("is_active", true).eq("organization_id", activeCompany.id).order("code")
+          ? supabase.from("uom").select("id, code, description").eq("is_active", true).or(`organization_id.eq.${activeCompany.id},organization_id.is.null`).order("code")
           : Promise.resolve({ data: [], error: null }),
         suppliersPromise,
       ]);

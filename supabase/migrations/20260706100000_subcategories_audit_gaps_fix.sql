@@ -56,6 +56,8 @@
 -- 1. get_product_category_org_id(uuid, int) — add recursion depth guard
 -- ============================================================
 -- Replaces the Wave 7 definition.
+-- NOTE: the baseline (uuid) overload still exists alongside (uuid, int DEFAULT 0).
+-- All calls below use explicit 2-argument form (x, 0) to avoid ambiguity.
 --
 -- Added parameter: depth int DEFAULT 0 (backward-compatible; callers using
 -- the single-argument form are unaffected — PostgreSQL resolves the default).
@@ -149,10 +151,10 @@ GRANT EXECUTE ON FUNCTION public.get_product_category_org_id(uuid, int) TO servi
 -- safe for migrations applied via supabase db push (no transaction timeout in migration context).
 
 UPDATE public.product_categories AS pc
-SET    organization_id = public.get_product_category_org_id(pc.parent_id)
+SET    organization_id = public.get_product_category_org_id(pc.parent_id, 0)
 WHERE  pc.parent_id IS NOT NULL
   AND  pc.organization_id IS NULL
-  AND  public.get_product_category_org_id(pc.parent_id) IS NOT NULL;
+  AND  public.get_product_category_org_id(pc.parent_id, 0) IS NOT NULL;
 
 -- Note: rows where COALESCE(parent_id, parent_category_id) resolves but parent_id IS NULL
 -- (parent stored in parent_category_id only) are also covered via the COALESCE inside
@@ -161,11 +163,11 @@ WHERE  pc.parent_id IS NOT NULL
 -- parent_category_id is populated (parent_id IS NULL), they would not match this WHERE
 -- clause. A second pass covers those:
 UPDATE public.product_categories AS pc
-SET    organization_id = public.get_product_category_org_id(pc.parent_category_id)
+SET    organization_id = public.get_product_category_org_id(pc.parent_category_id, 0)
 WHERE  pc.parent_id IS NULL
   AND  pc.parent_category_id IS NOT NULL
   AND  pc.organization_id IS NULL
-  AND  public.get_product_category_org_id(pc.parent_category_id) IS NOT NULL;
+  AND  public.get_product_category_org_id(pc.parent_category_id, 0) IS NOT NULL;
 
 
 -- ============================================================
@@ -243,7 +245,7 @@ CREATE POLICY product_categories_update
       -- Subcategory: edit permission + pre-update parent org visible.
       parent_id IS NOT NULL
       AND public.has_anew_permission((SELECT auth.uid()), 'product_subcategories.edit')
-      AND public.get_product_category_org_id(parent_id) IN (
+      AND public.get_product_category_org_id(parent_id, 0) IN (
         SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
       )
     )
@@ -277,7 +279,7 @@ CREATE POLICY product_categories_update
       AND public.has_anew_permission((SELECT auth.uid()), 'product_subcategories.edit')
       AND EXISTS (
         SELECT 1
-        FROM   (SELECT public.get_product_category_org_id(parent_id) AS resolved_org) r
+        FROM   (SELECT public.get_product_category_org_id(parent_id, 0) AS resolved_org) r
         WHERE  r.resolved_org IN (
                  SELECT public.get_user_visible_org_ids((SELECT auth.uid()))
                )

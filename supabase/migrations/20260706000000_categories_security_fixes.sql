@@ -318,6 +318,8 @@ DROP POLICY IF EXISTS "Authenticated users can update attribute value prices"   
 DROP POLICY IF EXISTS "Authenticated users can delete attribute value prices"    ON public.product_attribute_value_prices;
 
 -- SELECT: org-scoped rows + null-org (category defaults) are readable.
+-- Drop by new name too in case a prior wave (e.g. 20260703020000) already created it.
+DROP POLICY IF EXISTS product_attribute_value_prices_select ON public.product_attribute_value_prices;
 CREATE POLICY product_attribute_value_prices_select
   ON public.product_attribute_value_prices
   FOR SELECT
@@ -331,6 +333,7 @@ CREATE POLICY product_attribute_value_prices_select
   );
 
 -- INSERT: products.manage permission required; org must be non-null and in visible orgs.
+DROP POLICY IF EXISTS product_attribute_value_prices_insert ON public.product_attribute_value_prices;
 CREATE POLICY product_attribute_value_prices_insert
   ON public.product_attribute_value_prices
   FOR INSERT
@@ -347,6 +350,7 @@ CREATE POLICY product_attribute_value_prices_insert
   );
 
 -- UPDATE: products.manage + pre- and post-update org must be in visible orgs.
+DROP POLICY IF EXISTS product_attribute_value_prices_update ON public.product_attribute_value_prices;
 CREATE POLICY product_attribute_value_prices_update
   ON public.product_attribute_value_prices
   FOR UPDATE
@@ -371,6 +375,7 @@ CREATE POLICY product_attribute_value_prices_update
   );
 
 -- DELETE: products.manage + org must be in visible orgs.
+DROP POLICY IF EXISTS product_attribute_value_prices_delete ON public.product_attribute_value_prices;
 CREATE POLICY product_attribute_value_prices_delete
   ON public.product_attribute_value_prices
   FOR DELETE

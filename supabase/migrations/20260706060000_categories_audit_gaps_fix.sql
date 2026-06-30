@@ -285,6 +285,9 @@ CREATE INDEX IF NOT EXISTS idx_category_attributes_category
 -- USING intentionally excludes IS NULL rows from non-admin UPDATE (consistent with Wave 4
 -- rationale: category-default rows are readable but only writable by system admins).
 
+-- The live policy on the remote DB may carry its original baseline name.
+-- Drop both names to guarantee the old policy is removed before creating the replacement.
+DROP POLICY IF EXISTS "Authenticated users can update attribute value prices" ON public.product_attribute_value_prices;
 DROP POLICY IF EXISTS product_attribute_value_prices_update ON public.product_attribute_value_prices;
 
 CREATE POLICY product_attribute_value_prices_update

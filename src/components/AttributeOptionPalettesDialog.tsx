@@ -29,6 +29,17 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface AttributeOptionPalettesDialogProps {
   open: boolean;
@@ -108,6 +119,7 @@ export default function AttributeOptionPalettesDialog({
   const [priceCategoryId, setPriceCategoryId] = useState<string | null>(null);
   const [priceCategoryName, setPriceCategoryName] = useState("");
   const [duplicatingGroupId, setDuplicatingGroupId] = useState<string | null>(null);
+  const [deleteConfirmGroupId, setDeleteConfirmGroupId] = useState<string | null>(null);
   const [duplicateName, setDuplicateName] = useState("");
 
   const getCategoryParentId = (category: Pick<Category, "parent_id" | "parent_category_id">) =>
@@ -142,19 +154,21 @@ export default function AttributeOptionPalettesDialog({
         if (!userData.user) throw new Error("User not authenticated");
         const businessUserId = await resolveCurrentBusinessUserId();
         if (!businessUserId) throw new Error("Business user not resolved");
-        const { data: newGroup, error: createError } = await (supabase as any)
-          .from('attribute_option_groups')
-          .insert({
-            attribute_id: attributeId,
-            organization_id: activeCompany.id,
-            name: attributeLabel,
-            sort_order: 0,
-            created_by: businessUserId
-          })
-          .select()
-          .single();
-
-        if (createError) throw createError;
+        const newGroup = await withAuditContext(supabase, businessUserId, async () => {
+          const { data, error: createError } = await (supabase as any)
+            .from('attribute_option_groups')
+            .insert({
+              attribute_id: attributeId,
+              organization_id: activeCompany.id,
+              name: attributeLabel,
+              sort_order: 0,
+              created_by: businessUserId
+            })
+            .select()
+            .single();
+          if (createError) throw createError;
+          return data;
+        });
 
         // Migrate legacy allowed_values if any
         if (globalAllowedValues.length > 0) {
@@ -164,9 +178,11 @@ export default function AttributeOptionPalettesDialog({
             display_name: v,
             sort_order: i
           }));
-          await (supabase as any)
-            .from('attribute_option_group_values')
-            .insert(valuesToInsert);
+          await withAuditContext(supabase, businessUserId, async () => {
+            await (supabase as any)
+              .from('attribute_option_group_values')
+              .insert(valuesToInsert);
+          });
         }
 
         // Reload groups after auto-creation
@@ -250,18 +266,19 @@ export default function AttributeOptionPalettesDialog({
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       
-      const { error } = await (supabase as any)
-        .from('attribute_option_groups')
-        .insert({
-          attribute_id: attributeId,
-          organization_id: activeCompany.id,
-          name: newGroupName.trim(),
-          description: newGroupDescription.trim() || null,
-          sort_order: groups.length,
-          created_by: businessUserId
-        });
-
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase as any)
+          .from('attribute_option_groups')
+          .insert({
+            attribute_id: attributeId,
+            organization_id: activeCompany.id,
+            name: newGroupName.trim(),
+            description: newGroupDescription.trim() || null,
+            sort_order: groups.length,
+            created_by: businessUserId
+          });
+        if (error) throw error;
+      });
       
       toast({ title: hasHexColor ? "Paleta criada com sucesso" : "Grupo criado com sucesso" });
       setNewGroupName("");
@@ -287,17 +304,24 @@ export default function AttributeOptionPalettesDialog({
     }
   };
 
-  const handleDeleteGroup = async (groupId: string) => {
-    if (!confirm(hasHexColor ? "Tem certeza que deseja eliminar esta paleta? Isto removerá todas as cores associadas." : "Tem certeza que deseja eliminar este grupo? Isto removerá todas as opções associadas.")) return;
-    
-    try {
-      const { error } = await (supabase as any)
-        .from('attribute_option_groups')
-        .delete()
-        .eq('id', groupId);
+  const handleDeleteGroup = (groupId: string) => {
+    // Show accessible confirmation dialog instead of window.confirm
+    setDeleteConfirmGroupId(groupId);
+  };
 
-      if (error) throw error;
-      
+  const executeDeleteGroup = async (groupId: string) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase as any)
+          .from('attribute_option_groups')
+          .delete()
+          .eq('id', groupId);
+        if (error) throw error;
+      });
+
       toast({ title: hasHexColor ? "Paleta eliminada" : "Grupo eliminado" });
       if (selectedGroupId === groupId) setSelectedGroupId(null);
       loadData();
@@ -307,6 +331,8 @@ export default function AttributeOptionPalettesDialog({
         description: error.message,
         variant: "destructive"
       });
+    } finally {
+      setDeleteConfirmGroupId(null);
     }
   };
 
@@ -329,20 +355,22 @@ export default function AttributeOptionPalettesDialog({
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
 
-      const { data: newGroup, error: createError } = await (supabase as any)
-        .from('attribute_option_groups')
-        .insert({
-          attribute_id: attributeId,
-          organization_id: activeCompany.id,
-          name: duplicateName.trim(),
-          description: sourceGroup.description,
-          sort_order: groups.length,
-          created_by: businessUserId,
-        })
-        .select()
-        .single();
-
-      if (createError) throw createError;
+      const newGroup = await withAuditContext(supabase, businessUserId, async () => {
+        const { data, error: createError } = await (supabase as any)
+          .from('attribute_option_groups')
+          .insert({
+            attribute_id: attributeId,
+            organization_id: activeCompany.id,
+            name: duplicateName.trim(),
+            description: sourceGroup.description,
+            sort_order: groups.length,
+            created_by: businessUserId,
+          })
+          .select()
+          .single();
+        if (createError) throw createError;
+        return data;
+      });
 
       // Copy all values from source group
       const sourceValues = groupValues[groupId] || [];
@@ -355,9 +383,11 @@ export default function AttributeOptionPalettesDialog({
           sort_order: i,
           is_active: v.is_active,
         }));
-        await (supabase as any)
-          .from('attribute_option_group_values')
-          .insert(valuesToInsert);
+        await withAuditContext(supabase, businessUserId, async () => {
+          await (supabase as any)
+            .from('attribute_option_group_values')
+            .insert(valuesToInsert);
+        });
       }
 
       toast({ title: hasHexColor ? "Paleta duplicada com sucesso" : "Grupo duplicado com sucesso" });
@@ -380,17 +410,21 @@ export default function AttributeOptionPalettesDialog({
     try {
       const existingValues = groupValues[groupId] || [];
       
-      const { error } = await (supabase as any)
-        .from('attribute_option_group_values')
-        .insert({
-          group_id: groupId,
-          value_text: newValueText.trim().toUpperCase(),
-          display_name: newValueText.trim(),
-          hex_color: newValueHexColor || null,
-          sort_order: existingValues.length
-        });
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase as any)
+          .from('attribute_option_group_values')
+          .insert({
+            group_id: groupId,
+            value_text: newValueText.trim().toUpperCase(),
+            display_name: newValueText.trim(),
+            hex_color: newValueHexColor || null,
+            sort_order: existingValues.length
+          });
+        if (error) throw error;
+      });
       
       setNewValueText("");
       setNewValueHexColor("");
@@ -406,12 +440,16 @@ export default function AttributeOptionPalettesDialog({
 
   const handleRemoveValueFromGroup = async (valueId: string) => {
     try {
-      const { error } = await (supabase as any)
-        .from('attribute_option_group_values')
-        .delete()
-        .eq('id', valueId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase as any)
+          .from('attribute_option_group_values')
+          .delete()
+          .eq('id', valueId);
+        if (error) throw error;
+      });
       loadData();
     } catch (error: any) {
       toast({
@@ -446,12 +484,16 @@ export default function AttributeOptionPalettesDialog({
         return;
       }
 
-      const { error } = await (supabase as any)
-        .from('attribute_option_group_values')
-        .insert(valuesToInsert);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
-      
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await (supabase as any)
+          .from('attribute_option_group_values')
+          .insert(valuesToInsert);
+        if (error) throw error;
+      });
+
       toast({ title: `${valuesToInsert.length} valores importados` });
       loadData();
     } catch (error: any) {
@@ -465,35 +507,44 @@ export default function AttributeOptionPalettesDialog({
 
   const handleAssignPaletteToCategory = async (categoryId: string, groupId: string | null) => {
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+
       if (groupId) {
         // Upsert the palette assignment
         const existing = categoryPalettes[categoryId];
         if (existing) {
-          const { error } = await (supabase as any)
-            .from('category_attribute_palettes')
-            .update({ base_group_id: groupId })
-            .eq('id', existing.id);
-          if (error) throw error;
+          await withAuditContext(supabase, businessUserId, async () => {
+            const { error } = await (supabase as any)
+              .from('category_attribute_palettes')
+              .update({ base_group_id: groupId })
+              .eq('id', existing.id);
+            if (error) throw error;
+          });
         } else {
-          const { error } = await (supabase as any)
-            .from('category_attribute_palettes')
-            .insert({
-              category_id: categoryId,
-              attribute_id: attributeId,
-              base_group_id: groupId
-            });
-          if (error) throw error;
+          await withAuditContext(supabase, businessUserId, async () => {
+            const { error } = await (supabase as any)
+              .from('category_attribute_palettes')
+              .insert({
+                category_id: categoryId,
+                attribute_id: attributeId,
+                base_group_id: groupId
+              });
+            if (error) throw error;
+          });
         }
         toast({ title: hasHexColor ? "Paleta atribuída à categoria" : "Grupo atribuído à categoria" });
       } else {
         // Remove assignment
         const existing = categoryPalettes[categoryId];
         if (existing) {
-          const { error } = await (supabase as any)
-            .from('category_attribute_palettes')
-            .delete()
-            .eq('id', existing.id);
-          if (error) throw error;
+          await withAuditContext(supabase, businessUserId, async () => {
+            const { error } = await (supabase as any)
+              .from('category_attribute_palettes')
+              .delete()
+              .eq('id', existing.id);
+            if (error) throw error;
+          });
           toast({ title: hasHexColor ? "Paleta removida da categoria" : "Grupo removido da categoria" });
         }
       }
@@ -887,6 +938,34 @@ export default function AttributeOptionPalettesDialog({
           attributeId={attributeId}
         />
       )}
+
+      {/* Delete group confirmation AlertDialog — replaces window.confirm */}
+      <AlertDialog
+        open={deleteConfirmGroupId !== null}
+        onOpenChange={(open) => { if (!open) setDeleteConfirmGroupId(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {hasHexColor ? "Eliminar paleta?" : "Eliminar grupo?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {hasHexColor
+                ? "Tem certeza que deseja eliminar esta paleta? Isto removerá todas as cores associadas."
+                : "Tem certeza que deseja eliminar este grupo? Isto removerá todas as opções associadas."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deleteConfirmGroupId) executeDeleteGroup(deleteConfirmGroupId); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
