@@ -27,33 +27,22 @@ interface CompanyContextType {
 interface AnewUserRow { id: string }
 interface HierarchyLinkRow { child_org_id: string; parent_org_id: string | null }
 interface OrganizationRow { id: string; name: string; logo_url?: string | null; type?: string | null }
-interface RoleRow { code: string | null; name: string | null }
-interface MembershipRow { role_id: string | null; organization_id?: string | null }
+
+// Shape returned by get_user_context RPC
+interface UserContextRpc {
+  business_user_id: string | null;
+  is_system_admin: boolean;
+  org_ids: string[];
+  memberships: Array<{ organization_id: string; role_id: string; role_code: string }>;
+  permissions: string[];
+}
 
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
-// Helper: get anew_user id from auth user id
+// Helper: get anew_user id from auth user id (still used for org membership list in loadUserCompanies)
 async function getAnewUserId(authUserId: string): Promise<string | null> {
   const { data } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", authUserId).maybeSingle();
   return (data as AnewUserRow | null)?.id || null;
-}
-
-// Helper: build ancestor chain for an org (up to 10 levels)
-async function buildAncestorChain(orgId: string): Promise<string[]> {
-  const chain: string[] = [orgId];
-  let currentId = orgId;
-  for (let i = 0; i < 10; i++) {
-    const { data } = await (supabase as any)
-      .from("anew_hierarchy")
-      .select("parent_org_id")
-      .eq("child_org_id", currentId)
-      .maybeSingle();
-    const link = data as Pick<HierarchyLinkRow, "parent_org_id"> | null;
-    if (!link?.parent_org_id) break;
-    chain.push(link.parent_org_id);
-    currentId = link.parent_org_id;
-  }
-  return chain;
 }
 
 // Role priority map — higher index = higher privilege
@@ -68,40 +57,6 @@ const ROLE_PRIORITY: Record<string, number> = {
 
 // No normalization — userType always reflects the real role code.
 // UI visibility is driven by PermissionsContext/PermissionGate, not userType checks.
-
-// Helper: find the user's HIGHEST role across the ancestor chain, returns { code, name }
-async function resolveRole(anewUserId: string, orgId: string): Promise<{ code: string; name: string } | null> {
-  const chain = await buildAncestorChain(orgId);
-  let best: { code: string; name: string } | null = null;
-  let bestPriority = -Infinity;
-
-  for (const oid of chain) {
-    // Read as array — a user may have multiple active memberships in the same org
-    // (different roles). Pick the highest-priority one.
-    const { data: memberships } = await supabase.from("anew_memberships")
-      .select("role_id")
-      .eq("user_id", anewUserId)
-      .eq("organization_id", oid)
-      .eq("status", "active");
-    if (memberships && memberships.length > 0) {
-      const roleIds = (memberships as MembershipRow[]).map((m) => m.role_id).filter(Boolean);
-      if (roleIds.length === 0) continue;
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      for (const role of (roles || []) as RoleRow[]) {
-        const code = role?.code || null;
-        const name = role?.name || code || "";
-        const priority = code ? (ROLE_PRIORITY[code] ?? 0) : -1;
-        if (priority > bestPriority) {
-          bestPriority = priority;
-          best = { code: code || "org_viewer", name };
-        }
-      }
-      // Short-circuit if we already found the highest possible role
-      if (bestPriority >= ROLE_PRIORITY.system_admin) break;
-    }
-  }
-  return best;
-}
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -147,70 +102,74 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Determine user type using anew tables only — returns { tipo, roleName }
-  const determineUserType = useCallback(async (authUserId: string, companyId: string | null): Promise<{ tipo: string; roleName: string }> => {
-    const cacheKey = `${authUserId}-${companyId || 'none'}`;
+  // Determine user type exclusively via get_user_context RPC (server-side).
+  // Direct queries to anew_memberships / anew_roles are forbidden here.
+  const determineUserType = useCallback(async (_authUserId: string, companyId: string | null): Promise<{ tipo: string; roleName: string }> => {
+    // Cache key still scoped to (user, company) but the RPC uses auth.uid() internally —
+    // _authUserId is kept in the signature for call-site compatibility only.
+    const cacheKey = `${_authUserId}-${companyId || 'none'}`;
     const cached = userTypeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return { tipo: cached.tipo, roleName: cached.roleName };
     }
 
-    const anewId = await getAnewUserId(authUserId);
-    if (!anewId) {
+    const { data: rawCtx, error } = await (supabase as any).rpc("get_user_context");
+    if (error || !rawCtx) {
       const result = { tipo: "", roleName: "" };
       userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
       return result;
     }
 
-    // 1. Check for system_admin membership (org-less or any org)
-    const { data: sysMemb } = await supabase.from("anew_memberships")
-      .select("role_id")
-      .eq("user_id", anewId)
-      .eq("status", "active");
+    const ctx = rawCtx as UserContextRpc;
 
-    if (sysMemb && sysMemb.length > 0) {
-      const roleIds = sysMemb.map(m => m.role_id);
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      const sysRole = roles?.find(r => r.code === "system_admin");
-      if (sysRole) {
-        const result = { tipo: "system_admin", roleName: sysRole.name || "System Admin" };
-        userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-        return result;
-      }
-    }
-
-    // 2. If company context, resolve role via ancestor traversal
-    if (companyId) {
-      const resolved = await resolveRole(anewId, companyId);
-      if (resolved) {
-        const result = { tipo: resolved.code, roleName: resolved.name };
-        userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-        return result;
-      }
-    }
-
-    // 3. Find highest role across all memberships
-    if (sysMemb && sysMemb.length > 0) {
-      const roleIds = sysMemb.map(m => m.role_id);
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      const rolePriority = ["super_admin", "org_admin", "org_editor", "org_viewer"];
-      for (const rp of rolePriority) {
-        const found = roles?.find(r => r.code === rp);
-        if (found) {
-          const result = { tipo: rp, roleName: found.name || rp };
-          userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-          return result;
-        }
-      }
-      // Return first role code found
-      const first = roles?.[0];
-      const result = { tipo: first?.code || "", roleName: first?.name || "" };
+    if (!ctx.business_user_id) {
+      const result = { tipo: "", roleName: "" };
       userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
       return result;
     }
 
-    // No memberships at all — user has no role
-    const result = { tipo: "", roleName: "" };
+    // 1. system_admin is set server-side — trust it unconditionally
+    if (ctx.is_system_admin) {
+      const result = { tipo: "system_admin", roleName: "System Admin" };
+      userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
+      return result;
+    }
+
+    const memberships = Array.isArray(ctx.memberships) ? ctx.memberships : [];
+
+    // 2. If a company context is provided, find the highest-priority role the
+    //    user holds in that specific org via direct membership.
+    if (companyId) {
+      const orgMemberships = memberships.filter(m => m.organization_id === companyId);
+      let best: { tipo: string; roleName: string } | null = null;
+      let bestPriority = -Infinity;
+      for (const m of orgMemberships) {
+        const code = m.role_code || "";
+        const priority = ROLE_PRIORITY[code] ?? 0;
+        if (priority > bestPriority) {
+          bestPriority = priority;
+          best = { tipo: code, roleName: code };
+        }
+      }
+      if (best) {
+        userTypeCache.set(cacheKey, { ...best, timestamp: Date.now() });
+        return best;
+      }
+    }
+
+    // 3. No direct match (or no companyId) — pick the highest role across all memberships
+    let best: { tipo: string; roleName: string } | null = null;
+    let bestPriority = -Infinity;
+    for (const m of memberships) {
+      const code = m.role_code || "";
+      const priority = ROLE_PRIORITY[code] ?? 0;
+      if (priority > bestPriority) {
+        bestPriority = priority;
+        best = { tipo: code, roleName: code };
+      }
+    }
+
+    const result = best ?? { tipo: "", roleName: "" };
     userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
     return result;
   }, []);

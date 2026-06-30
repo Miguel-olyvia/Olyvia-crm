@@ -20585,6 +20585,11 @@ export type Database = {
           entity_id: string
         }[]
       }
+      set_audit_context: {
+        Args: { p_user_id: string; p_source?: string }
+        Returns: void
+      }
+      clear_audit_context: { Args: Record<PropertyKey, never>; Returns: void }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       soft_delete_business_entity: {

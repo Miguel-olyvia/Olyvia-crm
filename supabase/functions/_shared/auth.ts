@@ -59,10 +59,14 @@ export async function resolveCallerIdentity(
 }
 
 /**
- * Validates that the caller has an active membership in the given organization.
- * 
+ * Validates that the caller has visibility over the given organization.
+ *
+ * Delegates to the canonical DB function get_user_visible_org_ids(_auth_uid)
+ * which handles all cases: direct membership, hierarchy ancestors/descendants,
+ * cross-associations, and the system_admin full-access shortcut.
+ *
  * SERVICE_ROLE callers always pass (internal calls).
- * 
+ *
  * @returns true if authorized, false otherwise.
  */
 export async function validateOrgScope(
@@ -76,36 +80,57 @@ export async function validateOrgScope(
   // If no organization_id provided, we can't validate scope
   if (!organizationId) return false;
 
-  const { data: membership } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin.rpc(
+    "get_user_visible_org_ids",
+    { _auth_uid: caller.authUid }
+  );
+
+  if (error) {
+    console.error("validateOrgScope: RPC get_user_visible_org_ids failed", error);
+    return false;
+  }
+
+  // data is an array of UUIDs (SETOF uuid returned as rows by PostgREST)
+  const visibleOrgIds: string[] = Array.isArray(data) ? data : [];
+  return visibleOrgIds.includes(organizationId);
+}
+
+/**
+ * Checks whether an anew_user (identified by anewUserId) holds a specific
+ * permission code via their active memberships in a given organization.
+ *
+ * Looks up: anew_memberships → anew_role_permissions
+ * Does NOT fall back to system-wide permissions — the organization_id scope
+ * is intentional for the portal RBAC gate.
+ *
+ * @returns true if the user has the permission in the org, false otherwise.
+ */
+export async function checkUserPermission(
+  supabaseAdmin: any,
+  anewUserId: string,
+  permissionCode: string,
+  organizationId?: string
+): Promise<boolean> {
+  let query = supabaseAdmin
     .from("anew_memberships")
-    .select("id")
-    .eq("user_id", caller.anewUserId)
-    .eq("organization_id", organizationId)
+    .select("anew_role_permissions!inner(permission_code)")
+    .eq("user_id", anewUserId)
     .eq("status", "active")
-    .maybeSingle();
+    .eq("anew_role_permissions.permission_code", permissionCode)
+    .limit(1);
 
-  if (membership) return true;
+  if (organizationId) {
+    query = query.eq("organization_id", organizationId);
+  }
 
-  // Check if user has access via hierarchy (parent org membership gives access to child orgs)
-  const { data: userMemberships } = await supabaseAdmin
-    .from("anew_memberships")
-    .select("organization_id")
-    .eq("user_id", caller.anewUserId)
-    .eq("status", "active");
+  const { data, error } = await query;
 
-  if (!userMemberships || userMemberships.length === 0) return false;
+  if (error) {
+    console.error("checkUserPermission: query failed", { permissionCode, error });
+    return false;
+  }
 
-  const userOrgIds = userMemberships.map((m: any) => m.organization_id);
-
-  // Check if organizationId is a descendant of any of the user's orgs
-  const { data: hierarchyMatch } = await supabaseAdmin
-    .from("anew_hierarchy")
-    .select("id")
-    .eq("child_org_id", organizationId)
-    .in("parent_org_id", userOrgIds)
-    .maybeSingle();
-
-  return !!hierarchyMatch;
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**

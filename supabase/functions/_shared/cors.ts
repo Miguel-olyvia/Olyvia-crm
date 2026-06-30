@@ -2,7 +2,16 @@
  * Shared CORS headers for authenticated Edge Functions.
  *
  * In production, set ALLOWED_ORIGIN=https://app.olyvia.pt (or your actual domain).
- * In development (env var absent), falls back to "*" so local Supabase works without config.
+ *
+ * SECURITY: The wildcard "*" MUST NOT be used as a fallback in production because
+ * authenticated functions (e.g. export-data) expose personal data. Any browser from
+ * any domain could call these functions cross-origin if the origin is unrestricted.
+ *
+ * Resolution order:
+ *   1. ALLOWED_ORIGIN env var is set → use that value (covers both dev and prod).
+ *   2. SUPABASE_URL contains "localhost" or "127.0.0.1" → local dev, allow "*".
+ *   3. Otherwise (production runtime without ALLOWED_ORIGIN) → use the known
+ *      production origin as a safe fallback instead of falling back to "*".
  *
  * Public functions (book-slot, create-lead, insert-lead, update-lead,
  * public-availability, get-campaign-form, get-form-data, get-campaign-districts,
@@ -10,7 +19,24 @@
  * corsHeaders with "Access-Control-Allow-Origin": "*" and do NOT import from here.
  */
 
-const allowedOrigin = Deno.env.get("ALLOWED_ORIGIN") ?? "*";
+const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
+
+function resolveAllowedOrigin(): string {
+  const explicit = Deno.env.get("ALLOWED_ORIGIN");
+  if (explicit) return explicit;
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  const isLocalDev =
+    supabaseUrl.includes("localhost") || supabaseUrl.includes("127.0.0.1");
+  if (isLocalDev) return "*";
+
+  // Production runtime without ALLOWED_ORIGIN set: use the known safe origin
+  // rather than allowing all origins. Set ALLOWED_ORIGIN explicitly if this
+  // needs to change (e.g. staging domain, preview URLs).
+  return PRODUCTION_ORIGIN;
+}
+
+const allowedOrigin = resolveAllowedOrigin();
 
 /**
  * Base CORS headers for authenticated functions.
