@@ -80,13 +80,30 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
 
       const docLabel = documentType === "contract" ? "Contrato" : "Proposta";
 
-      // Show credentials if available (new account or SMTP failure with password)
-      if (data.temp_password) {
-        sonnerToast.success(`${docLabel} enviado para o Portal Cliente`, {
-          description: `Email: ${data.email}\nPassword: ${data.temp_password}\n\n${data.smtp_warning ? "⚠️ Email não enviado (erro SMTP) — entregue manualmente ao cliente." : "✅ Email com credenciais enviado ao cliente."}\n\nℹ️ Apenas o link de login foi copiado para a área de transferência. Por segurança, a password não é copiada — entrega-a através de um canal seguro.`,
+      // BASE-USR-012: backend suppresses temp_password when SMTP succeeds.
+      // Cases after the security fix:
+      //   A) temp_password + smtp_warning=true  -> SMTP failed; show credentials for manual delivery
+      //   B) smtp_warning=true, no temp_password -> SMTP failed; prompt out-of-band
+      //   C) no temp_password, no smtp_warning   -> normal success
+      if (data.temp_password && data.smtp_warning) {
+        // Case A: SMTP failure with credentials available
+        sonnerToast.warning(`Falha no envio de email — entrega manual necessária`, {
+          description: `Email: ${data.email}
+Password: ${data.temp_password}
+
+O email não foi enviado (erro SMTP). Entregue as credenciais ao cliente por um canal seguro (ex: telefone ou mensagem cifrada).
+
+Apenas o link de login foi copiado para a área de transferência.`,
+          duration: 15000,
+        });
+      } else if (data.smtp_warning) {
+        // Case B: SMTP failure without credentials in response
+        sonnerToast.warning(`Falha no envio de email`, {
+          description: `O email não foi enviado (erro SMTP). Contacte o cliente (${data.email ?? "email desconhecido"}) por outro canal para lhe fornecer as credenciais de acesso ao portal.`,
           duration: 12000,
         });
       } else {
+        // Case C: normal success
         sonnerToast.success(
           data.is_new_account ? `Conta criada e ${docLabel.toLowerCase()} enviado para o portal` : `${docLabel} enviado para o Portal Cliente`,
           {
@@ -95,7 +112,6 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
           }
         );
       }
-
       options?.onSuccess?.();
     } catch (err: any) {
       const rawCode = (err?.message || "").trim();

@@ -236,6 +236,9 @@ export function SendEntityEmailDialog({
       // contract_sends para módulo contratos
       if (module === "contracts" && contractId) {
         try {
+          if (interactionCreatedBy) {
+            await supabase.rpc('set_audit_context', { p_user_id: interactionCreatedBy, p_source: 'ui' });
+          }
           await (supabase as any).from("contract_sends").insert({
             contract_id: contractId,
             organization_id: organizationId || null,

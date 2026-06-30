@@ -192,7 +192,9 @@ serve(async (req) => {
       }
 
       // Generate 6-digit code
-      const code = String(Math.floor(100000 + Math.random() * 900000));
+      const array = new Uint32Array(1);
+      crypto.getRandomValues(array);
+      const code = String(array[0] % 900000 + 100000);
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
       // Store OTP (B1: bind to auth_user_id so it can only be used by the same user)

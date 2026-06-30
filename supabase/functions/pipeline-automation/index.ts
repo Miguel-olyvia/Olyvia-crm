@@ -893,6 +893,7 @@ serve(async (req) => {
 
         const contractNumber = `CT-${Date.now().toString(36).toUpperCase()}`;
 
+        await supabase.rpc('set_audit_context', { p_user_id: resolvedCreatedBy, p_source: 'pipeline' });
         const { data: contract, error } = await supabase
           .from("client_contracts")
           .insert({
@@ -936,6 +937,9 @@ serve(async (req) => {
       if (contractErr || !contract) throw new Error("Contract not found");
 
       // Update contract status to signed
+      if (caller.anewUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: caller.anewUserId, p_source: 'pipeline' });
+      }
       await supabase.from("client_contracts").update({ status: "signed" }).eq("id", contract_id);
 
       // Trigger execute-workflow to handle full client conversion logic

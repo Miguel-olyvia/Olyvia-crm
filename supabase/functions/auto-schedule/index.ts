@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
+import { corsHeaders as _corsBase } from "../_shared/cors.ts";
 
 const getNearestResourcesSchema = z.object({
   postal_code: z.string().min(1),
@@ -45,9 +46,13 @@ const requestSchema = z.object({
   use_proximity: z.boolean().optional(),
 });
 
+// Extend the shared safe CORS headers with the extra headers this function needs.
+// Never use "?? *" as a fallback — _corsBase resolves the origin securely.
 const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_ORIGIN") ?? "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-api-key, x-internal-source",
+  ..._corsBase,
+  "Access-Control-Allow-Headers":
+    _corsBase["Access-Control-Allow-Headers"] +
+    ", x-api-key, x-internal-source",
 };
 
 const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY');

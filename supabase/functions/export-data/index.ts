@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 import { resolveCallerIdentity } from "../_shared/auth.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 import {
   getEffectiveColumns,
   getExportDefinition,
@@ -20,12 +21,6 @@ const exportRequestSchema = z.object({
     dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   }).optional().default({}),
 });
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": Deno.env.get("ALLOWED_ORIGIN") ?? "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 const MAX_EXPORT_ROWS = 10_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

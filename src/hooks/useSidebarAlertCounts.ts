@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedAuthUser } from '@/lib/cachedAuth';
 import { resolveOrgSubtree } from '@/lib/orgSubtree';
@@ -90,16 +90,24 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
     }
   }, [activeOrgId]);
 
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
   useEffect(() => {
-    let channel: RealtimeChannel | undefined;
+    let cancelled = false;
 
     fetchCounts();
 
     const setupRealtimeSubscription = async () => {
       const { data: user } = await getCachedAuthUser();
-      if (!user.user) return;
+      if (!user.user || cancelled) return;
 
-      channel = supabase
+      // Cleanup any stale channel before subscribing (StrictMode safety)
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      const channel = supabase
         .channel('sidebar-alert-counts')
         .on(
           'postgres_changes',
@@ -114,6 +122,8 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
           }
         )
         .subscribe();
+
+      channelRef.current = channel;
     };
 
     setupRealtimeSubscription();
@@ -121,8 +131,12 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
     const interval = setInterval(fetchCounts, 180000);
 
     return () => {
+      cancelled = true;
       clearInterval(interval);
-      if (channel) supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [fetchCounts]);
 

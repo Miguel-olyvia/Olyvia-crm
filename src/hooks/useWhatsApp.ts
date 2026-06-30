@@ -248,6 +248,9 @@ export function useWhatsApp() {
       // Document send tracking (channel = whatsapp). Failure must NOT mark send as failed.
       if (ctx.module === "contracts" && ctx.contractId) {
         try {
+          if (createdBy) {
+            await supabase.rpc('set_audit_context', { p_user_id: createdBy, p_source: 'ui' });
+          }
           await (supabase as any).from("contract_sends").insert({
             contract_id: ctx.contractId,
             organization_id: organizationId,

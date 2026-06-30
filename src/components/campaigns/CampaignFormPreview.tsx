@@ -235,9 +235,9 @@ export function CampaignFormPreview({
   }
 
   const primaryColor = sanitizeCSSValue(branding?.primary_color || '#85D3BE', 'color');
-  const radioButtonColor = branding?.radio_button_color || primaryColor;
-  const iconColor = branding?.icon_color || '#000000';
-  const iconSelectedColor = branding?.icon_selected_color || '#000000';
+  const radioButtonColor = sanitizeCSSValue(branding?.radio_button_color || primaryColor, 'color');
+  const iconColor = sanitizeCSSValue(branding?.icon_color || '#000000', 'color');
+  const iconSelectedColor = sanitizeCSSValue(branding?.icon_selected_color || '#000000', 'color');
 
   useEffect(() => {
     if (open && campaignId) {

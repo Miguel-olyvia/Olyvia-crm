@@ -252,7 +252,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Searching for:", searchQuery);
+    // TODO: implement global search
   };
 
   const handleNotificationClick = async (notification: Notification) => {
@@ -362,11 +362,13 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       <header className="h-14 border-b border-sidebar-border bg-sidebar fixed top-0 right-0 left-0 md:left-16 z-[450] px-4 flex items-center justify-between gap-4">
         <CompanySwitcher />
 
-        <form onSubmit={handleSearch} className="flex-1 max-w-xl">
+        <form onSubmit={handleSearch} className="flex-1 max-w-xl" aria-label="Pesquisa global (brevemente disponível)" aria-disabled="true">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sidebar-foreground/70" />
             <Input
               type="search"
+              disabled
+              aria-disabled="true"
               placeholder={t('header.searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

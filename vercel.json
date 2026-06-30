@@ -8,7 +8,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://www.google-analytics.com https://stats.g.doubleclick.net; frame-src https://www.googletagmanager.com; object-src 'none';"
+          "value": "default-src 'self'; script-src 'self' https://www.googletagmanager.com https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://www.google-analytics.com https://stats.g.doubleclick.net; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
         },
         {
           "key": "X-Content-Type-Options",
