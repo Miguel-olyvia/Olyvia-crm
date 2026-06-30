@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Tags, Pencil, Trash2, Shield } from "lucide-react";
+import { Plus, Search, Tags, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -45,6 +45,7 @@ import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Brand {
   id: string;
@@ -106,14 +107,14 @@ export default function Brands() {
           .from("brand_organizations")
           .select("brand_id")
           .eq("organization_id", filterCompanyId);
-        brandIdsToFilter = brandOrgs?.map((bc: any) => bc.brand_id) || [];
+        brandIdsToFilter = brandOrgs?.map((bc) => bc.brand_id) || [];
       } else if (activeCompany?.id) {
         // ALWAYS filter by activeCompany for all users including admins
         const { data: brandOrgs } = await supabase
           .from("brand_organizations")
           .select("brand_id")
           .eq("organization_id", activeCompany.id);
-        brandIdsToFilter = brandOrgs?.map((bc: any) => bc.brand_id) || [];
+        brandIdsToFilter = brandOrgs?.map((bc) => bc.brand_id) || [];
       }
 
       if (brandIdsToFilter.length === 0) {
@@ -136,16 +137,16 @@ export default function Brands() {
 
       if (error) throw error;
       setBrands(data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('brands.toast.loadError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  }, [activeCompany?.id, userType, filterCompanyId, filterStatus, t, toast]);
+  }, [activeCompany?.id, filterCompanyId, filterStatus, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
@@ -183,10 +184,10 @@ export default function Brands() {
       const slug = formData.slug || generateSlug(formData.name);
 
       // Validate company selection - system_admin and tenant_admin can proceed without selection
-      const allCompanyIds = organizationSelection.companyId 
+      const allCompanyIds = organizationSelection.companyId
         ? [organizationSelection.companyId, ...organizationSelection.secondaryCompanyIds]
         : organizationSelection.secondaryCompanyIds;
-        
+
       if (allCompanyIds.length === 0 && !isAdmin) {
         toast({
           title: t('common.error'),
@@ -196,41 +197,43 @@ export default function Brands() {
         return;
       }
 
-      const brandData: any = {
+      const brandPayload = {
         name: formData.name,
         slug,
         is_active: true,
-        organization_id: activeCompany?.id || null,
+        organization_id: activeCompany?.id ?? null,
+        ...(formData.description ? { description: formData.description } : {}),
+        ...(formData.website ? { website: formData.website } : {}),
+        ...(formData.logo_url ? { logo_url: formData.logo_url } : {}),
       };
-
-      if (formData.description) brandData.description = formData.description;
-      if (formData.website) brandData.website = formData.website;
-      if (formData.logo_url) brandData.logo_url = formData.logo_url;
 
       let brandId: string;
 
       if (editingBrand) {
-        const { error } = await supabase
-          .from("brands")
-          .update(brandData)
-          .eq("id", editingBrand.id)
-          .eq("organization_id", activeCompany.id);
-
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("brands")
+            .update(brandPayload)
+            .eq("id", editingBrand.id)
+            .eq("organization_id", activeCompany.id);
+          if (error) throw error;
+        });
         brandId = editingBrand.id;
 
         toast({
           title: t('brands.toast.updateSuccess'),
         });
       } else {
-        brandData.created_by = businessUserId;
-        const { data: newBrand, error } = await supabase
-          .from("brands")
-          .insert(brandData)
-          .select("id")
-          .single();
-
-        if (error) throw error;
+        const insertPayload = { ...brandPayload, created_by: businessUserId };
+        const newBrand = await withAuditContext(supabase, businessUserId, async () => {
+          const { data, error } = await supabase
+            .from("brands")
+            .insert(insertPayload)
+            .select("id")
+            .single();
+          if (error) throw error;
+          return data;
+        });
         brandId = newBrand.id;
 
         toast({
@@ -241,6 +244,7 @@ export default function Brands() {
       // Upsert company associations first, then remove stale ones.
       // Insert-before-delete prevents the brand from becoming org-orphaned
       // if the delete succeeds but the subsequent insert fails.
+      // Both junction table operations share the same audit context window.
       if (allCompanyIds.length > 0) {
         const companyAssociations = allCompanyIds.map((companyId) => ({
           brand_id: brandId,
@@ -248,30 +252,39 @@ export default function Brands() {
           created_by: businessUserId,
         }));
 
-        const { error: assocError } = await supabase
-          .from("brand_organizations")
-          .upsert(companyAssociations, { onConflict: "brand_id,organization_id", ignoreDuplicates: true });
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error: assocError } = await supabase
+            .from("brand_organizations")
+            .upsert(companyAssociations, { onConflict: "brand_id,organization_id", ignoreDuplicates: true });
+          if (assocError) throw assocError;
 
-        if (assocError) throw assocError;
-      }
-
-      // Only delete associations NOT in the new set (safe because inserts already succeeded above)
-      if (editingBrand) {
-        const { error: delError } = await supabase
-          .from("brand_organizations")
-          .delete()
-          .eq("brand_id", brandId)
-          .not("organization_id", "in", `(${allCompanyIds.join(",")})`);
-
-        if (delError) throw delError;
+          // Only delete associations NOT in the new set (safe because inserts already succeeded above)
+          if (editingBrand) {
+            const { error: delError } = await supabase
+              .from("brand_organizations")
+              .delete()
+              .eq("brand_id", brandId)
+              .not("organization_id", "in", `(${allCompanyIds.join(",")})`);
+            if (delError) throw delError;
+          }
+        });
+      } else if (editingBrand) {
+        // No target companies — remove all associations
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error: delError } = await supabase
+            .from("brand_organizations")
+            .delete()
+            .eq("brand_id", brandId);
+          if (delError) throw delError;
+        });
       }
 
       handleCloseDialog(false);
       loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: editingBrand ? t('brands.toast.updateError') : t('brands.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     }
@@ -286,13 +299,17 @@ export default function Brands() {
     }
 
     try {
-      const { error } = await supabase
-        .from("brands")
-        .delete()
-        .eq("id", deleteBrandId)
-        .eq("organization_id", activeCompany.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("brands")
+          .delete()
+          .eq("id", deleteBrandId)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
 
       toast({
         title: t('brands.toast.success'),
@@ -300,10 +317,10 @@ export default function Brands() {
       });
 
       loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('brands.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
@@ -318,7 +335,7 @@ export default function Brands() {
       .select("organization_id")
       .eq("brand_id", brand.id);
 
-    const companyIds = companyAssocs?.map((a: any) => a.organization_id) || [];
+    const companyIds = companyAssocs?.map((a) => a.organization_id) || [];
 
     setEditingBrand(brand);
     setFormData({
@@ -337,6 +354,7 @@ export default function Brands() {
       businessUnitId: "",
       departmentId: "",
       secondaryCompanyIds: secondaryIds,
+      selectedCompanyIds: companyIds,
       levelSelections: [],
     });
     
@@ -358,6 +376,7 @@ export default function Brands() {
       businessUnitId: "",
       departmentId: "",
       secondaryCompanyIds: [],
+      selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
   };
