@@ -52,6 +52,7 @@ import { formatCurrency } from "@/lib/utils";
 import { exportBundlesToCSV, parseBundlesCSV, downloadBundlesTemplate } from "@/utils/bundlesExportImport";
 import { PermissionGate } from "@/components/PermissionGate";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Bundle {
   id: string;
@@ -344,11 +345,16 @@ const Bundles = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from("bundles")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", deleteId)
-        .eq("organization_id", activeCompany.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundles")
+          .update({ deleted_at: new Date().toISOString() })
+          .eq("id", deleteId)
+          .eq("organization_id", activeCompany.id)
+      );
 
       if (error) throw error;
 
@@ -380,16 +386,21 @@ const Bundles = () => {
     try {
       bulkActions.setProcessing(true);
 
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
       const isActive = bulkActions.bulkNewStatus === "active";
 
-      const { error } = await supabase
-        .from("bundles")
-        .update({
-          status: bulkActions.bulkNewStatus,
-          is_active: isActive
-        })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundles")
+          .update({
+            status: bulkActions.bulkNewStatus,
+            is_active: isActive
+          })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
 
       if (error) throw error;
 
@@ -423,11 +434,16 @@ const Bundles = () => {
     try {
       bulkActions.setProcessing(true);
 
-      const { error } = await supabase
-        .from("bundles")
-        .update({ deleted_at: new Date().toISOString() })
-        .in("id", selectedIds)
-        .eq("organization_id", activeCompany.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundles")
+          .update({ deleted_at: new Date().toISOString() })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
 
       if (error) throw error;
 
@@ -531,7 +547,9 @@ const Bundles = () => {
 
       // Insert new bundles
       if (result.bundlesToInsert.length > 0) {
-        const { error } = await supabase.from("bundles").insert(result.bundlesToInsert);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.from("bundles").insert(result.bundlesToInsert)
+        );
         if (error) throw error;
       }
       checkCancelled();
@@ -539,7 +557,9 @@ const Bundles = () => {
       // Update existing bundles
       for (const bundle of result.bundlesToUpdate) {
         const { id, ...updateData } = bundle;
-        const { error } = await supabase.from("bundles").update(updateData).eq("id", id);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.from("bundles").update(updateData).eq("id", id)
+        );
         if (error) throw error;
       }
 

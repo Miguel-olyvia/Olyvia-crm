@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -180,19 +182,24 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
     }
 
     try {
-      const { data, error } = await supabase
-        .from("bundle_choice_groups")
-        .insert({
-          bundle_id: bundleId,
-          name: newGroupForm.name.trim(),
-          description: newGroupForm.description.trim() || null,
-          min_selections: newGroupForm.min_selections,
-          max_selections: newGroupForm.max_selections,
-          is_required: newGroupForm.is_required,
-          sort_order: groups.length,
-        })
-        .select()
-        .single();
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundle_choice_groups")
+          .insert({
+            bundle_id: bundleId,
+            name: newGroupForm.name.trim(),
+            description: newGroupForm.description.trim() || null,
+            min_selections: newGroupForm.min_selections,
+            max_selections: newGroupForm.max_selections,
+            is_required: newGroupForm.is_required,
+            sort_order: groups.length,
+          })
+          .select()
+          .single()
+      );
 
       if (error) throw error;
 
@@ -222,16 +229,26 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
 
   const handleDeleteGroup = async (groupId: string) => {
     try {
-      // First remove components from this group
-      await supabase
-        .from("bundle_components")
-        .delete()
-        .eq("choice_group_id", groupId);
-      
-      const { error } = await supabase
-        .from("bundle_choice_groups")
-        .delete()
-        .eq("id", groupId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      // Remove components belonging to this group first (within audit context).
+      // Error is checked explicitly — a failure here aborts the parent delete
+      // to avoid leaving orphaned bundle_components with a dangling choice_group_id.
+      const { error: componentsError } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundle_components")
+          .delete()
+          .eq("choice_group_id", groupId)
+      );
+      if (componentsError) throw componentsError;
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundle_choice_groups")
+          .delete()
+          .eq("id", groupId)
+      );
 
       if (error) throw error;
 
@@ -287,6 +304,9 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
     if (!addItemsGroupId || selectedItems.size === 0) return;
 
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
       const group = groups.find(g => g.id === addItemsGroupId);
       const existingCount = group?.components?.length || 0;
 
@@ -301,9 +321,11 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
         sort_order: existingCount + index,
       }));
 
-      const { error } = await supabase
-        .from("bundle_components")
-        .insert(newComponents);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundle_components")
+          .insert(newComponents)
+      );
 
       if (error) throw error;
 
@@ -324,10 +346,15 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
 
   const handleDeleteComponent = async (compId: string) => {
     try {
-      const { error } = await supabase
-        .from("bundle_components")
-        .delete()
-        .eq("id", compId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("bundle_components")
+          .delete()
+          .eq("id", compId)
+      );
 
       if (error) throw error;
 

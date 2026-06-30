@@ -27,6 +27,7 @@ import { Package, Settings, ListPlus } from "lucide-react";
 import BundleComponentsEditor from "./BundleComponentsEditor";
 import BundleChoiceGroupsEditor from "./BundleChoiceGroupsEditor";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Bundle {
   id: string;
@@ -152,24 +153,28 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
       };
 
       if (bundleId) {
-        const { error } = await supabase
-          .from("bundles")
-          .update(bundleData)
-          .eq("id", bundleId);
-        
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("bundles")
+            .update(bundleData)
+            .eq("id", bundleId)
+        );
+
         if (error) throw error;
-        
+
         toast({
           title: t('bundles.toast.updated'),
           description: t('bundles.toast.updatedDescription'),
         });
       } else {
-        const { data, error } = await supabase
-          .from("bundles")
-          .insert([{ ...bundleData, created_by: businessUserId }])
-          .select()
-          .single();
-        
+        const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("bundles")
+            .insert([{ ...bundleData, created_by: businessUserId }])
+            .select()
+            .single()
+        );
+
         if (error) throw error;
         
         setBundleId(data.id);
