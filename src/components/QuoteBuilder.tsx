@@ -1863,6 +1863,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         template_id: formData.pdf_template_id || null,
       };
 
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+
       if (quoteId) {
         const { error } = await supabase
           .from("quotes")
@@ -1936,6 +1938,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         if (linesError) throw linesError;
       }
 
+      // SET LOCAL GUC resets after each await — re-establish audit context before fee writes.
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+
       // Sempre limpar fees existentes em modo edição (mesmo quando o utilizador
       // remove todas as taxas — caso contrário ficariam órfãs em quote_fees).
       if (quoteId) {
@@ -1945,6 +1950,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .eq("quote_id", savedQuoteId);
         if (delFeesError) throw delFeesError;
       }
+
+      // Re-establish audit context before quote_fees INSERT (SET LOCAL reset after previous await).
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
       if (totals.fees && totals.fees.length > 0) {
         const feesToInsert = totals.fees.map(fee => ({
@@ -1963,6 +1971,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         if (feesError) throw feesError;
       }
 
+
+      // Re-establish audit context before quotes totals UPDATE.
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
       const { error: updateError } = await supabase
         .from("quotes")
@@ -1987,6 +1998,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             .is("deleted_at", null);
           if (linkedQuotesError) throw linkedQuotesError;
           const proposalValue = (linkedQuotes || []).reduce((sum, q) => sum + (Number(q.total) || 0), 0);
+          // Re-establish audit context before proposals UPDATE.
+          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
           await (supabase.from("proposals") as any)
             .update({ value: proposalValue })
             .eq("id", formData.proposal_id);
@@ -1997,6 +2010,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       if (savedQuoteId && formData.deal_id) {
         try {
+          // Re-establish audit context before pipeline_links UPDATE/INSERT.
+          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
           const { data: existingLink } = await (supabase.from("pipeline_links") as any)
             .select("id")
             .eq("deal_id", formData.deal_id)
@@ -2040,6 +2055,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           created_by: businessUserId,
         };
 
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
         const { data: newIQ, error: iqError } = await (supabase.from("quotes") as any)
           .insert(iqData)
           .select("id")

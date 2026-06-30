@@ -29,7 +29,7 @@ const requestSchema = z.object({
   recipients: z.array(z.string()).optional(),
   cc: z.array(z.string()).optional(),
   subject: z.string().optional(),
-  message: z.string().optional(),
+  message: z.string().max(2000).optional(),
   attachments: z.array(z.unknown()).optional(),
 });
 
@@ -51,6 +51,15 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
   return out;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function generateQuoteEmailHtml(quote: any, customMessage?: string, senderName?: string, logoUrl?: string | null): string {
   const primaryColor = "#7c3aed";
   const quoteNumber = quote.quote_number || quote.id.slice(0, 8);
@@ -66,7 +75,7 @@ function generateQuoteEmailHtml(quote: any, customMessage?: string, senderName?:
 <tr><td style="background:linear-gradient(135deg,${primaryColor},#4c1d95);padding:40px;text-align:center;">
 <h1 style="color:#ffffff;margin:0;font-size:24px;">Orçamento ${quoteNumber}</h1></td></tr>
 <tr><td style="padding:40px;">
-${customMessage ? `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;white-space:pre-line;">${customMessage}</p>` : 
+${customMessage ? `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;white-space:pre-line;">${escapeHtml(customMessage)}</p>` : 
 `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;">${senderName ? `${senderName} enviou-lhe` : 'Foi-lhe enviado'} um orçamento para análise.</p>`}
 </td></tr>
 <tr><td style="background-color:#f9fafb;padding:24px;text-align:center;border-top:1px solid #e5e7eb;">
@@ -78,6 +87,14 @@ ${logoHtml}
 const handler = async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
   }
 
   try {
@@ -127,20 +144,22 @@ const handler = async (req: Request): Promise<Response> => {
       if (!safeAttachments.length) safeAttachments = undefined;
     }
 
-    let userId: string | undefined;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await supabaseClient.auth.getUser(token);
-      userId = user?.id;
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
+    const userId: string = user.id;
 
     const { data: quote, error: quoteError } = await supabaseClient
       .from("quotes").select("*").eq("id", quote_id).single();
     if (quoteError || !quote) throw new Error("Quote not found");
 
     // ── Scope check: verify caller has access to quote's organization ──
-    if (userId && quote.organization_id) {
+    if (quote.organization_id) {
       const { data: anewUser } = await supabaseClient.from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
       if (!anewUser) {
         throw new Error("Utilizador não encontrado no sistema");
@@ -164,11 +183,9 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     let senderName: string | null = null;
-    if (userId) {
-      const { data: sender } = await supabaseClient
-        .from("anew_users").select("display_name").eq("auth_user_id", userId).maybeSingle();
-      senderName = sender?.display_name || null;
-    }
+    const { data: sender } = await supabaseClient
+      .from("anew_users").select("display_name").eq("auth_user_id", userId).maybeSingle();
+    senderName = sender?.display_name || null;
 
     const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseClient, {
       authUserId: userId,
@@ -203,12 +220,9 @@ const handler = async (req: Request): Promise<Response> => {
     let trackingOk = true;
     try {
       // Resolve business sender id
-      let senderAnewUserId: string | null = null;
-      if (userId) {
-        const { data: anewUser } = await supabaseClient
-          .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
-        senderAnewUserId = anewUser?.id ?? null;
-      }
+      const { data: anewUserTracking } = await supabaseClient
+        .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
+      const senderAnewUserId: string | null = anewUserTracking?.id ?? null;
 
       // Backfill quotes.entity_id se NULL via cliente_id
       let resolvedEntityId: string | null = quote.entity_id ?? null;
@@ -217,12 +231,24 @@ const handler = async (req: Request): Promise<Response> => {
           .from("anew_clients").select("entity_id, organization_id").eq("id", quote.cliente_id).maybeSingle();
         if (client?.entity_id && (!quote.organization_id || quote.organization_id === client.organization_id)) {
           resolvedEntityId = client.entity_id;
+          await supabaseClient.rpc('set_audit_context', {
+            p_user_id: senderAnewUserId,
+            p_source: 'email',
+          });
           await supabaseClient.from("quotes").update({ entity_id: resolvedEntityId }).eq("id", quote_id);
         }
       }
 
+      await supabaseClient.rpc('set_audit_context', {
+        p_user_id: senderAnewUserId,
+        p_source: 'email',
+      });
       await supabaseClient.from("quotes").update({ estado: "enviado" }).eq("id", quote_id);
 
+      await supabaseClient.rpc('set_audit_context', {
+        p_user_id: senderAnewUserId,
+        p_source: 'email',
+      });
       await supabaseClient.from("quote_sends").insert({
         quote_id,
         organization_id: quote.organization_id,

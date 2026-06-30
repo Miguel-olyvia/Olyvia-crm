@@ -77,6 +77,7 @@ import { QuotesPipelineMini } from "@/components/quotes/QuotesPipelineMini";
 import { resolveLineUnitCosts, resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 interface Quote {
   id: string;
@@ -1053,6 +1054,12 @@ export default function Quotes() {
   const handleDelete = async () => {
     if (!deleteQuoteId) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+        return;
+      }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "quote", p_id: deleteQuoteId });
       if (error) throw error;
       toast({ title: t('quotes.toast.deleteSuccess'), description: t('quotes.toast.deleteDescription') });
@@ -1068,6 +1075,12 @@ export default function Quotes() {
     if (selectedIds.size === 0 || !bulkNewStatus) return;
     setProcessing(true);
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+        return;
+      }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const idsArr = Array.from(selectedIds);
       for (let i = 0; i < idsArr.length; i += 30) {
         const chunk = idsArr.slice(i, i + 30);
@@ -1139,6 +1152,12 @@ export default function Quotes() {
   const handleAcceptQuote = async (quote: Quote) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) {
+      toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+      return;
+    }
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
     if (!error) {
       try {
@@ -1164,6 +1183,12 @@ export default function Quotes() {
   };
 
   const handleMarkAsLost = async (quoteId: string, reason: string) => {
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) {
+      toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+      return;
+    }
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'perdido', observacoes: reason } as any).eq("id", quoteId);
     if (!error) {
       toast({ title: "Orçamento marcado como perdido" });
@@ -1197,6 +1222,12 @@ export default function Quotes() {
   };
 
   const handleMarkAsSent = async (quoteId: string) => {
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) {
+      toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+      return;
+    }
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'enviado' }).eq("id", quoteId);
     if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
 
@@ -1219,6 +1250,7 @@ export default function Quotes() {
         const { data: ent } = await supabase.from("anew_entities").select("display_name").eq("id", entityId).maybeSingle();
         recipientName = ent?.display_name ?? null;
       }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       await (supabase as any).from("quote_sends").insert({
         quote_id: quoteId,
         organization_id: quote?.organization_id ?? null,

@@ -137,6 +137,10 @@ serve(async (req) => {
       total: src.total,
     };
 
+    const auditUserId = caller.isServiceRole ? null : caller.anewUserId;
+    if (auditUserId) {
+      await supabaseAdmin.rpc('set_audit_context', { p_user_id: auditUserId, p_source: 'system' });
+    }
     const { data: inserted, error: insErr } = await supabaseAdmin
       .from("quotes")
       .insert(newQuote)

@@ -295,6 +295,7 @@ const createQuote: Handler = async (ctx, args): Promise<ToolResult> => {
 
   if (templateId) insertPayload.template_id = templateId;
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { data, error } = await supabase
     .from("quotes")
     .insert(insertPayload)
@@ -819,7 +820,7 @@ async function recalcQuoteTotals(supabase: any, quoteId: string): Promise<void> 
 }
 
 const addQuoteItems: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -855,6 +856,7 @@ const addQuoteItems: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: `Orçamento está em estado '${quote.estado}'. Só rascunhos aceitam novas linhas — usa duplicate_quote para criar uma cópia editável.` };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { added, skipped } = await resolveAndInsertQuoteLines(supabase, organizationId, args.quote_id, items);
   const firstReason = skipped[0]?.reason ? ` Motivo: ${skipped[0].reason}` : "";
   if (added === 0) {
@@ -873,7 +875,7 @@ const addQuoteItems: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const setQuoteTemplate: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -921,6 +923,7 @@ const setQuoteTemplate: Handler = async (ctx, args): Promise<ToolResult> => {
     if (!tpl) return { success: false, message: "Layout de PDF não encontrado, fora da organização ou inactivo." };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: upErr } = await supabase
     .from("quotes")
     .update({ template_id: templateId })
@@ -992,7 +995,7 @@ const listQuoteModels: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const setQuoteModel: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1037,6 +1040,7 @@ const setQuoteModel: Handler = async (ctx, args): Promise<ToolResult> => {
     if (!model) return { success: false, message: "Modelo rápido não encontrado, fora da organização ou inactivo. Usa list_quote_models." };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: upErr } = await supabase
     .from("quotes")
     .update({ modelo_base: codigo })
@@ -1261,7 +1265,7 @@ const getQuoteDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const removeQuoteLines: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1298,6 +1302,7 @@ const removeQuoteLines: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: `${foreign.length} line_id(s) não pertencem a este orçamento.` };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: delErr } = await supabase
     .from("quote_lines")
     .delete()
@@ -1339,7 +1344,7 @@ function recomputeLineTotals(line: any, patch: any): { total_sem_iva: number; to
 }
 
 const updateQuoteLine: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1396,6 +1401,7 @@ const updateQuoteLine: Handler = async (ctx, args): Promise<ToolResult> => {
   const totals = recomputeLineTotals(line, patch);
   Object.assign(patch, totals);
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: upErr } = await supabase
     .from("quote_lines")
     .update(patch)
@@ -1412,7 +1418,7 @@ const updateQuoteLine: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const updateQuote: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1455,6 +1461,7 @@ const updateQuote: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: "Nada para actualizar — passa pelo menos um campo." };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: upErr } = await supabase
     .from("quotes")
     .update(patch)
@@ -1487,7 +1494,7 @@ export const deleteQuoteDef: ToolDef = {
 };
 
 const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1511,6 +1518,7 @@ const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: `Não posso cancelar orçamento ${quote.quote_number ?? quote.id} — está em estado '${quote.estado}'.` };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const { error: rpcErr } = await supabase.rpc("soft_delete_business_entity", {
     p_kind: "quote",
     p_id: args.quote_id,
@@ -1846,7 +1854,7 @@ export const addQuoteFeeDef: ToolDef = {
 };
 
 const addQuoteFee: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1915,6 +1923,7 @@ const addQuoteFee: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: "Já existe uma taxa LINE_PERCENTAGE no orçamento. Remove a anterior antes de adicionar outra." };
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const res = await replaceQuoteFees(supabase, args.quote_id, newSelection, overrides, ctxCalc.feeLines);
   if (!res.success) return res;
 
@@ -1948,7 +1957,7 @@ export const removeQuoteFeeDef: ToolDef = {
 };
 
 const removeQuoteFee: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1999,6 +2008,7 @@ const removeQuoteFee: Handler = async (ctx, args): Promise<ToolResult> => {
     }
   }
 
+  await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ai-assistant' });
   const res = await replaceQuoteFees(supabase, args.quote_id, newSelection, overrides, ctxCalc.feeLines);
   if (!res.success) return res;
 
