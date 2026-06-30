@@ -36,6 +36,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductCategory {
   id: string;
@@ -198,10 +199,10 @@ export default function ProductCategories() {
       }
 
       setHasMore(newData.length === PAGE_SIZE);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productCategories.toast.loadError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     } finally {
@@ -215,6 +216,7 @@ export default function ProductCategories() {
     tableName: "product_categories",
     onSuccess: () => loadData(true),
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   // Debounce search term
@@ -274,22 +276,22 @@ export default function ProductCategories() {
     };
   }, [hasMore, loadingMore, loading, loadMore]);
 
-  const loadBusinessAreaName = async () => {
+  const loadBusinessAreaName = useCallback(async () => {
     if (!businessAreaId) return;
-    
+
     try {
       const { data, error } = await supabase
         .from("anew_organizations")
         .select("name")
         .eq("id", businessAreaId)
         .single();
-      
+
       if (error) throw error;
       setBusinessAreaName(data?.name || "");
-    } catch (error: any) {
-      console.error("Error loading business area:", error);
+    } catch {
+      // Non-critical: business area name display only. Failure is silent.
     }
-  };
+  }, [businessAreaId]);
 
   const generateSlug = (name: string) => {
     return name
@@ -337,19 +339,23 @@ export default function ProductCategories() {
           sort_order: formData.sort_order,
           organization_id: primaryOrgId,
         };
-        const { error } = await supabase
-          .from("product_categories")
-          .update(updatePayload)
-          .eq("id", editingCategory.id);
 
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("product_categories")
+            .update(updatePayload)
+            .eq("id", editingCategory.id);
+          if (error) throw error;
+
+          // Delete existing associations inside the same audit context so any
+          // audit trigger on product_category_organizations also gets the actor.
+          await supabase
+            .from("product_category_organizations")
+            .delete()
+            .eq("category_id", editingCategory.id);
+        });
+
         categoryId = editingCategory.id;
-
-        // Update company associations
-        await supabase
-          .from("product_category_organizations")
-          .delete()
-          .eq("category_id", editingCategory.id);
 
         toast({
           title: t('productCategories.toast.updateSuccess'),
@@ -366,13 +372,18 @@ export default function ProductCategories() {
           created_by: businessUserId,
           organization_id: primaryOrgId,
         };
-        const { data: newCategory, error } = await supabase
-          .from("product_categories")
-          .insert(insertPayload)
-          .select("id")
-          .single();
 
-        if (error) throw error;
+        const newCategory = await withAuditContext(supabase, businessUserId, async () => {
+          const { data, error } = await supabase
+            .from("product_categories")
+            .insert(insertPayload)
+            .select("id")
+            .single();
+          if (error) throw error;
+          return data;
+        });
+
+        if (!newCategory) throw new Error("Insert retornou sem dados — possível rejeição silenciosa por RLS");
         categoryId = newCategory.id;
 
         toast({
@@ -380,30 +391,30 @@ export default function ProductCategories() {
         });
       }
 
-      // Insert company associations
+      // Insert company associations (within audit context so junction inserts are attributed).
       const companyAssociations = uniqueCompanyIds.map((companyId) => ({
         category_id: categoryId,
         organization_id: companyId,
         created_by: businessUserId,
       }));
 
-      const { error: assocError } = await supabase
-        .from("product_category_organizations")
-        .insert(companyAssociations);
+      const { error: assocError } = await withAuditContext(supabase, businessUserId, async () => {
+        const result = await supabase
+          .from("product_category_organizations")
+          .insert(companyAssociations);
+        return result;
+      });
 
       if (assocError) {
-        console.error("Error inserting company associations:", assocError);
-
-        // If this was a new category, rollback the created category so it doesn't become orphaned/invisible
+        // If this was a new category, rollback so it doesn't become orphaned/invisible.
+        // Wrapped in withAuditContext so the compensating DELETE is attributed (AUDIT-CAT-01).
         if (!editingCategory) {
-          const { error: rollbackError } = await supabase
-            .from("product_categories")
-            .delete()
-            .eq("id", categoryId);
-
-          if (rollbackError) {
-            console.error("Rollback failed for product_categories:", rollbackError);
-          }
+          await withAuditContext(supabase, businessUserId, async () => {
+            await supabase
+              .from("product_categories")
+              .delete()
+              .eq("id", categoryId);
+          });
         }
 
         throw assocError;
@@ -411,10 +422,10 @@ export default function ProductCategories() {
 
       handleCloseDialog(false);
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: editingCategory ? t('productCategories.toast.updateError') : t('productCategories.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -428,13 +439,18 @@ export default function ProductCategories() {
       if (!category || !activeCompany?.id) {
         throw new Error('Category not found or no active company');
       }
-      const { error } = await supabase
-        .from("product_categories")
-        .delete()
-        .eq("id", id)
-        .eq("organization_id", activeCompany.id);
 
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("product_categories")
+          .delete()
+          .eq("id", id)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
 
       toast({
         title: t('productCategories.toast.success'),
@@ -442,10 +458,10 @@ export default function ProductCategories() {
       });
 
       await loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productCategories.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
