@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, Pencil, Trash2, Info } from "lucide-react";
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -21,7 +22,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,12 +55,13 @@ interface ServiceSubcategory {
   id: string;
   name: string;
   slug: string;
+  // path and description are nullable in the DB; coerced to string on load.
   path: string;
   description: string;
   is_active: boolean;
   sort_order: number;
   parent_id: string;
-  organization_id?: string | null;
+  organization_id: string | null;
   parent_name?: string;
   parent_company_name?: string;
 }
@@ -72,10 +73,23 @@ interface ParentCategory {
   anew_organizations?: { name: string };
 }
 
+// Shape of raw rows returned by the subcategory SELECT query (CAT-ANY-001).
+interface SubRow {
+  id: string;
+  name: string;
+  slug: string;
+  path: string | null;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number;
+  parent_id: string;
+  organization_id: string | null;
+}
+
 export default function ServiceSubcategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType, activeCompany, isLoading: contextLoading } = useCompany();
+  const { companies: userCompanies, userType, isLoading: contextLoading } = useCompany();
   const [subcategories, setSubcategories] = useState<ServiceSubcategory[]>([]);
   const [parentCategories, setParentCategories] = useState<ParentCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,32 +108,9 @@ export default function ServiceSubcategories() {
 
   const isSystemAdmin = userType === "system_admin";
 
-  useEffect(() => {
-    // Esperar que o contexto carregue antes de buscar dados
-    if (contextLoading) return;
-    loadData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, isSystemAdmin, contextLoading]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      // Resolve the org scope once and reuse for both queries.
-      // System admins are scoped to the active company's subtree.
-      // Regular users are scoped to their assigned companies.
-      // Neither path is ever left unfiltered.
-      let scopeIds: string[];
-
-      // Both system admins and regular users are scoped to the active company's
-      // subtree only — never to the full list of all user's companies.
-      if (!activeCompany?.id) {
-        setParentCategories([]);
-        setSubcategories([]);
-        setLoading(false);
-        return;
-      }
-      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-      scopeIds = await resolveOrgSubtree(activeCompany.id);
-
+      // Load parent categories (those without parent_id) - filtered by user's companies
       let parentsQuery = supabase
         .from("service_categories")
         .select("id, name, organization_id, anew_organizations!organization_id(name)")
@@ -127,14 +118,10 @@ export default function ServiceSubcategories() {
         .eq("is_active", true)
         .order("name");
 
-      if (scopeIds.length > 0) {
-        parentsQuery = parentsQuery.in("organization_id", scopeIds);
-      } else {
-        // No accessible companies — short-circuit with empty state.
-        setParentCategories([]);
-        setSubcategories([]);
-        setLoading(false);
-        return;
+      // Filter by user's companies if not system admin
+      if (!isSystemAdmin && userCompanies.length > 0) {
+        const companyIds = userCompanies.map(c => c.id);
+        parentsQuery = parentsQuery.in("organization_id", companyIds);
       }
 
       const { data: parents, error: parentsError } = await parentsQuery;
@@ -142,7 +129,11 @@ export default function ServiceSubcategories() {
       if (parentsError) throw parentsError;
       setParentCategories((parents || []) as ParentCategory[]);
 
-      // Load subcategories (those with parent_id) using the same scope.
+      // Load subcategories (those with parent_id).
+      // Apply the org filter server-side for non-admin users to avoid transferring the
+      // full service_categories table and relying on client-side filtering as the only
+      // org-scope mechanism (SVC-CLIENT-SIDE-FILTER-UNSCOPED).
+      const companyIds = userCompanies.map((c) => c.id);
       let subsQuery = supabase
         .from("service_categories")
         .select(`
@@ -154,11 +145,14 @@ export default function ServiceSubcategories() {
           is_active,
           sort_order,
           parent_id,
-           organization_id
+          organization_id
         `)
         .not("parent_id", "is", null)
-        .in("organization_id", scopeIds)
         .order("path");
+
+      if (!isSystemAdmin && companyIds.length > 0) {
+        subsQuery = subsQuery.in("organization_id", companyIds);
+      }
 
       const { data: subs, error: subsError } = await subsQuery;
 
@@ -167,29 +161,39 @@ export default function ServiceSubcategories() {
       // Usar parentCategories já carregadas para enriquecer os dados
       const parentCategoriesData = (parents || []) as ParentCategory[];
 
-      const filteredSubs = subs || [];
+      const filteredSubs: SubRow[] = (subs || []) as SubRow[];
 
-      const formattedSubs = filteredSubs.map((sub: any) => {
+      const formattedSubs = filteredSubs.map((sub: SubRow) => {
         const parentCat = parentCategoriesData.find(p => p.id === sub.parent_id);
         return {
           ...sub,
+          // Coerce nullable DB fields to string to satisfy ServiceSubcategory interface.
+          path: sub.path ?? "",
+          description: sub.description ?? "",
           parent_name: parentCat?.name || "",
           parent_company_name: parentCat?.anew_organizations?.name || "",
-          organization_id: sub.organization_id || parentCat?.organization_id,
+          organization_id: sub.organization_id ?? parentCat?.organization_id ?? null,
         };
       });
 
       setSubcategories(formattedSubs);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: t('serviceSubcategories.toast.loadError'),
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [isSystemAdmin, userCompanies, t, toast]);
+
+  useEffect(() => {
+    // Esperar que o contexto carregue antes de buscar dados
+    if (contextLoading) return;
+    loadData();
+  }, [loadData, contextLoading]);
 
   const generateSlug = (name: string) => {
     return name
@@ -211,13 +215,12 @@ export default function ServiceSubcategories() {
     }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error(t('serviceSubcategories.toast.notAuthenticated'));
-
+      // resolveCurrentBusinessUserId() performs its own auth.getUser() internally and
+      // handles the null case — a separate getUser() call here is redundant and creates
+      // a divergent early-exit error path on transient auth failures (SVC-DEAD-AUTH-CALL-SUBMIT).
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
-        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-        return;
+        throw new Error("Perfil de utilizador não encontrado");
       }
 
       // Validar que a categoria pai existe
@@ -247,52 +250,53 @@ export default function ServiceSubcategories() {
       const slug = `${parentSlug}-${baseSlug}`;
       const path = `${parentCategory.name.toLowerCase()}/${baseSlug}`;
 
-      if (editingSubcategory) {
-        const { error } = await supabase
-          .from("service_categories")
-          .update({
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (editingSubcategory) {
+          const { error } = await supabase
+            .from("service_categories")
+            .update({
+              name: formData.name,
+              slug,
+              path,
+              description: formData.description || null,
+              sort_order: formData.sort_order,
+              parent_id: formData.parent_id,
+              organization_id: parentCategory.organization_id,
+            })
+            .eq("id", editingSubcategory.id);
+
+          if (error) throw error;
+
+          toast({
+            title: t('serviceSubcategories.toast.updateSuccess'),
+          });
+        } else {
+          const { error } = await supabase.from("service_categories").insert({
             name: formData.name,
             slug,
             path,
             description: formData.description || null,
-            sort_order: formData.sort_order,
             parent_id: formData.parent_id,
+            sort_order: formData.sort_order,
+            is_active: true,
+            created_by: businessUserId,
             organization_id: parentCategory.organization_id,
-          })
-          .eq("id", editingSubcategory.id)
-          .eq("organization_id", editingSubcategory.organization_id ?? "");
+          });
 
-        if (error) throw error;
+          if (error) throw error;
 
-        toast({
-          title: t('serviceSubcategories.toast.updateSuccess'),
-        });
-      } else {
-        const { error } = await supabase.from("service_categories").insert({
-          name: formData.name,
-          slug,
-          path,
-          description: formData.description || null,
-          parent_id: formData.parent_id,
-          sort_order: formData.sort_order,
-          is_active: true,
-          created_by: businessUserId,
-          organization_id: parentCategory.organization_id,
-        });
-
-        if (error) throw error;
-
-        toast({
-          title: t('serviceSubcategories.toast.createSuccess'),
-        });
-      }
+          toast({
+            title: t('serviceSubcategories.toast.createSuccess'),
+          });
+        }
+      });
 
       handleCloseDialog();
-      loadData();
-    } catch (error: any) {
+      await loadData();
+    } catch (error: unknown) {
       toast({
         title: t('serviceSubcategories.toast.saveError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -300,55 +304,73 @@ export default function ServiceSubcategories() {
 
   const handleDelete = async () => {
     if (!subcategoryToDelete) return;
-    if (!activeCompany?.id) return;
 
     try {
-      const { resolveOrgSubtree } = await import("@/lib/orgSubtree");
-      const scopeIds = await resolveOrgSubtree(activeCompany.id);
+      // Resolve org from local state before entering withAuditContext — mirrors the
+      // defense-in-depth pattern used in ProductSubcategories.handleDelete.
+      // This adds an application-layer org scope to both mutations even when RLS is
+      // correctly configured, preventing cross-org DELETE on any RLS misconfiguration
+      // (SVC-DELETE-NO-ORG-SCOPE).
+      const sub = subcategories.find(s => s.id === subcategoryToDelete);
+      const resolvedOrgId = sub?.organization_id ?? null;
 
-      // Limpar referências em serviços soft-deleted (não bloqueiam de forma legítima)
-      await supabase
-        .from("services")
-        .update({ service_subcategory_id: null })
-        .eq("service_subcategory_id", subcategoryToDelete)
-        .not("deleted_at", "is", null)
-        .in("organization_id", scopeIds.length > 0 ? scopeIds : ["__none__"]);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
 
-      // Resolve the subcategory's org_id for the DELETE ownership check
-      const subcategoryOrgId = subcategories.find((s) => s.id === subcategoryToDelete)?.organization_id ?? null;
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Limpar referências em serviços soft-deleted (não bloqueiam de forma legítima).
+        // throwOnError() ensures a silent UPDATE failure (e.g. RLS rejection) is surfaced
+        // before the DELETE proceeds, preventing orphaned FK references (AUDIT-CAT-04).
+        // Scoped to the subcategory's org for defense-in-depth.
+        const servicesUpdate = supabase
+          .from("services")
+          .update({ service_subcategory_id: null })
+          .eq("service_subcategory_id", subcategoryToDelete)
+          .not("deleted_at", "is", null);
 
-      const { error } = await supabase
-        .from("service_categories")
-        .delete()
-        .eq("id", subcategoryToDelete)
-        .eq("organization_id", subcategoryOrgId ?? "");
+        // Add org scope when we have a resolved org; omit when null (system admin / global row).
+        const scopedServicesUpdate = resolvedOrgId
+          ? servicesUpdate.eq("organization_id", resolvedOrgId)
+          : servicesUpdate;
 
-      if (error) {
-        // Check if it's a foreign key constraint error
-        if (error.code === "23503") {
-          toast({
-            title: t('serviceSubcategories.toast.cannotDelete'),
-            description: t('serviceSubcategories.toast.inUseError'),
-            variant: "destructive",
-          });
-          setDeleteDialogOpen(false);
-          setSubcategoryToDelete(null);
-          return;
+        await scopedServicesUpdate.throwOnError();
+
+        const deleteQuery = supabase
+          .from("service_categories")
+          .delete()
+          .eq("id", subcategoryToDelete);
+
+        const { error } = await (resolvedOrgId
+          ? deleteQuery.eq("organization_id", resolvedOrgId)
+          : deleteQuery);
+
+        if (error) {
+          // Check if it's a foreign key constraint error
+          if (error.code === "23503") {
+            toast({
+              title: t('serviceSubcategories.toast.cannotDelete'),
+              description: t('serviceSubcategories.toast.inUseError'),
+              variant: "destructive",
+            });
+            setDeleteDialogOpen(false);
+            setSubcategoryToDelete(null);
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
+      });
 
       toast({
         title: t('serviceSubcategories.toast.deleteSuccess'),
       });
-      
+
       setDeleteDialogOpen(false);
       setSubcategoryToDelete(null);
-      loadData();
-    } catch (error: any) {
+      await loadData();
+    } catch (error: unknown) {
       toast({
         title: t('serviceSubcategories.toast.deleteError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
       setDeleteDialogOpen(false);
@@ -406,15 +428,13 @@ export default function ServiceSubcategories() {
             <h1 className="text-3xl font-bold">{t('serviceSubcategories.title')}</h1>
             <p className="text-muted-foreground">{t('serviceSubcategories.subtitle')}</p>
           </div>
-          <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) handleCloseDialog(); else setOpen(true); }}>
-            <PermissionGate permission="service_subcategories.create">
-              <DialogTrigger asChild>
-                <Button onClick={resetForm}>
-                  <Plus className="w-4 h-4 mr-2" />
-                  {t('serviceSubcategories.addSubcategory')}
-                </Button>
-              </DialogTrigger>
-            </PermissionGate>
+          <PermissionGate permission="service_subcategories.create">
+            <Button onClick={() => { resetForm(); setOpen(true); }}>
+              <Plus className="w-4 h-4 mr-2" />
+              {t('serviceSubcategories.addSubcategory')}
+            </Button>
+          </PermissionGate>
+          <Dialog open={open} onOpenChange={setOpen}>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>
@@ -573,8 +593,8 @@ export default function ServiceSubcategories() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            aria-label={t('common.edit')}
                             onClick={() => openEditDialog(sub)}
-                            aria-label={t('serviceSubcategories.actions.edit')}
                           >
                             <Pencil className="w-4 h-4" />
                           </Button>
@@ -583,8 +603,8 @@ export default function ServiceSubcategories() {
                           <Button
                             variant="ghost"
                             size="sm"
+                            aria-label={t('common.delete')}
                             onClick={() => openDeleteDialog(sub.id)}
-                            aria-label={t('serviceSubcategories.actions.delete')}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
