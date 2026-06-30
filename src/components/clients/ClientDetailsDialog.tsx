@@ -995,7 +995,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* CONTRACTS */}
               <TabsContent value="contracts">
-                {client.entity_id && client.organization_id && <ClientContractsTab entityId={client.entity_id} organizationId={client.organization_id} />}
+                {client.entity_id && client.organization_id && <ClientContractsTab entityId={client.entity_id} clientId={client.id} organizationId={client.organization_id} />}
               </TabsContent>
 
               {/* DEALS */}
