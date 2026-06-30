@@ -1150,6 +1150,12 @@ const Deals = () => {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
+      const businessUserIdKanban = await resolveCurrentBusinessUserId();
+      if (!businessUserIdKanban) {
+        toast({ title: 'Erro ao mover pedido', description: 'Identidade do utilizador nao resolvida.', variant: 'destructive' });
+        return;
+      }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdKanban, p_source: 'web' });
 
       await (supabase.from("deals") as any)
         .update({ stage_id: newStageId })
@@ -1333,6 +1339,8 @@ const Deals = () => {
         toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" });
         return;
       }
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
 
       const { error } = await supabase.from("deals").insert({
         title: `${deal.title} (cópia)`,
@@ -1520,6 +1528,7 @@ const Deals = () => {
       };
 
       if (editingId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
         const { error, count } = await (supabase.from("deals") as any)
           .update(dealData, { count: "exact" })
           .eq("id", editingId)
@@ -1628,6 +1637,7 @@ const Deals = () => {
           created_by: businessUserId,
           assigned_to: businessUserId,
         };
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
         const { data: newDeal, error } = await (supabase.from("deals") as any).insert(insertData).select("id").single();
 
         if (error) throw error;
