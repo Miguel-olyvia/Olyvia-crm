@@ -53,6 +53,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductAttribute {
   id: string;
@@ -269,24 +270,27 @@ export default function ProductAttributes() {
       let attributeId = editingAttribute?.id;
 
       if (editingAttribute) {
-        const { error } = await supabase
-          .from("product_attributes")
-          .update(attributeData)
-          .eq("id", editingAttribute.id)
-          .eq("organization_id", activeCompany.id);
-
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("product_attributes")
+            .update(attributeData)
+            .eq("id", editingAttribute.id)
+            .eq("organization_id", activeCompany.id);
+          if (error) throw error;
+        });
       } else {
         attributeData.code = formData.code;
         attributeData.created_by = businessUserId;
-        
-        const { data: inserted, error } = await supabase
-          .from("product_attributes")
-          .insert(attributeData)
-          .select('id')
-          .single();
 
-        if (error) throw error;
+        const inserted = await withAuditContext(supabase, businessUserId, async () => {
+          const { data, error } = await supabase
+            .from("product_attributes")
+            .insert(attributeData)
+            .select('id')
+            .single();
+          if (error) throw error;
+          return data;
+        });
         attributeId = inserted.id;
       }
 
@@ -316,13 +320,17 @@ export default function ProductAttributes() {
     }
 
     try {
-      const { error } = await supabase
-        .from("product_attributes")
-        .delete()
-        .eq("id", id)
-        .eq("organization_id", activeCompany.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("product_attributes")
+          .delete()
+          .eq("id", id)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
 
       toast({
         title: t('productAttributes.toast.success'),
@@ -503,16 +511,21 @@ export default function ProductAttributes() {
         created_by: businessUserId,
       };
 
-      const { data: inserted, error } = await supabase
-        .from("product_attributes")
-        .insert(newAttribute)
-        .select("id")
-        .single();
+      // Wrap the entire duplicate operation (main attribute insert + all clones) in a
+      // single audit context so every write records the acting user.
+      const newAttrId = await withAuditContext(supabase, businessUserId, async () => {
+        const { data: inserted, error } = await supabase
+          .from("product_attributes")
+          .insert(newAttribute)
+          .select("id")
+          .single();
+        if (error) throw error;
+        return inserted.id;
+      });
 
-      if (error) throw error;
-
-      // Duplicate all related details (best-effort, in parallel)
-      const newAttrId = inserted.id;
+      // Duplicate all related details (best-effort, in parallel).
+      // Each clone function runs inside its own withAuditContext so the audit
+      // trigger sees the acting user even when clones settle independently.
 
       // 1) Option groups + their values
       const cloneOptionGroups = async () => {
@@ -528,23 +541,27 @@ export default function ProductAttributes() {
         if (!groups || groups.length === 0) return;
 
         for (const g of groups) {
-          const { data: newGroup, error: gErr } = await (supabase as any)
-            .from("attribute_option_groups")
-            .insert({
-              attribute_id: newAttrId,
-              organization_id: g.organization_id,
-              name: g.name,
-              description: g.description,
-              is_active: g.is_active,
-              sort_order: g.sort_order,
-              created_by: businessUserId,
-            })
-            .select("id")
-            .single();
-          if (gErr || !newGroup) {
+          const newGroup = await withAuditContext(supabase, businessUserId, async () => {
+            const { data, error: gErr } = await (supabase as any)
+              .from("attribute_option_groups")
+              .insert({
+                attribute_id: newAttrId,
+                organization_id: g.organization_id,
+                name: g.name,
+                description: g.description,
+                is_active: g.is_active,
+                sort_order: g.sort_order,
+                created_by: businessUserId,
+              })
+              .select("id")
+              .single();
+            if (gErr || !data) throw gErr ?? new Error("insert group returned no data");
+            return data;
+          }).catch((gErr: unknown) => {
             console.error("[duplicate] insert group failed", gErr);
-            continue;
-          }
+            return null;
+          });
+          if (!newGroup) continue;
 
           const { data: values, error: valuesReadErr } = await (supabase as any)
             .from("attribute_option_group_values")
@@ -570,12 +587,14 @@ export default function ProductAttributes() {
           const chunkSize = 100;
           for (let i = 0; i < rows.length; i += chunkSize) {
             const chunk = rows.slice(i, i + chunkSize);
-            const { error: insErr } = await (supabase as any)
-              .from("attribute_option_group_values")
-              .insert(chunk);
-            if (insErr) {
-              console.error("[duplicate] insert values chunk failed", insErr, chunk[0]);
-            }
+            await withAuditContext(supabase, businessUserId, async () => {
+              const { error: insErr } = await (supabase as any)
+                .from("attribute_option_group_values")
+                .insert(chunk);
+              if (insErr) {
+                console.error("[duplicate] insert values chunk failed", insErr, chunk[0]);
+              }
+            });
           }
         }
       };
@@ -588,9 +607,11 @@ export default function ProductAttributes() {
           .eq("attribute_id", attr.id)
           .is("product_id", null);
         if (prices && prices.length > 0) {
-          await supabase.from("product_attribute_value_prices").insert(
-            prices.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-          );
+          await withAuditContext(supabase, businessUserId, async () => {
+            await supabase.from("product_attribute_value_prices").insert(
+              prices.map((p: any) => ({ ...p, attribute_id: newAttrId })),
+            );
+          });
         }
       };
 
@@ -602,9 +623,11 @@ export default function ProductAttributes() {
           .eq("attribute_id", attr.id)
           .is("product_id", null);
         if (ranges && ranges.length > 0) {
-          await supabase.from("product_attribute_price_ranges").insert(
-            ranges.map((r: any) => ({ ...r, attribute_id: newAttrId })),
-          );
+          await withAuditContext(supabase, businessUserId, async () => {
+            await supabase.from("product_attribute_price_ranges").insert(
+              ranges.map((r: any) => ({ ...r, attribute_id: newAttrId })),
+            );
+          });
         }
       };
 
@@ -615,13 +638,15 @@ export default function ProductAttributes() {
           .select("organization_id")
           .eq("attribute_id", attr.id);
         if (orgs && orgs.length > 0) {
-          await supabase.from("product_attribute_organizations").insert(
-            orgs.map((o: any) => ({
-              attribute_id: newAttrId,
-              organization_id: o.organization_id,
-              created_by: businessUserId,
-            })),
-          );
+          await withAuditContext(supabase, businessUserId, async () => {
+            await supabase.from("product_attribute_organizations").insert(
+              orgs.map((o: any) => ({
+                attribute_id: newAttrId,
+                organization_id: o.organization_id,
+                created_by: businessUserId,
+              })),
+            );
+          });
         }
       };
 
@@ -632,9 +657,11 @@ export default function ProductAttributes() {
           .select("category_id, base_group_id, additional_values, excluded_values")
           .eq("attribute_id", attr.id);
         if (paletteCfgs && paletteCfgs.length > 0) {
-          await (supabase as any).from("category_attribute_palettes").insert(
-            paletteCfgs.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-          );
+          await withAuditContext(supabase, businessUserId, async () => {
+            await (supabase as any).from("category_attribute_palettes").insert(
+              paletteCfgs.map((p: any) => ({ ...p, attribute_id: newAttrId })),
+            );
+          });
         }
       };
 
