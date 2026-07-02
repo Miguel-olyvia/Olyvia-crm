@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -28,6 +29,7 @@ import {
   resolveLeadDialogFieldDefinitions,
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
+import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validations";
 
 interface Lead {
   id: string;
@@ -60,6 +62,8 @@ interface LeadEditDialogProps {
   companyId: string;
   companyUsers: { id: string; name: string }[];
   onLeadUpdated: (payload?: LeadEditDialogUpdate) => void;
+  /** anew_users.id (preferred) or auth user id — used for audit context */
+  userId: string;
 }
 
 const NOTES_FIELD_KEYS = ["notas", "notes", "observacoes", "observações"];
@@ -111,6 +115,7 @@ export function AnewLeadEditDialog({
   companyId,
   companyUsers,
   onLeadUpdated,
+  userId,
 }: LeadEditDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -123,6 +128,7 @@ export function AnewLeadEditDialog({
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Load field definitions and populate form when dialog opens
   useEffect(() => {
@@ -165,6 +171,7 @@ export function AnewLeadEditDialog({
     setSource(lead.source || "");
     setNotes(lead.notes || "");
     setAssignedTo(lead.assigned_to);
+    setFieldErrors({});
   };
 
   const handleFieldChange = (key: string, value: any) => {
@@ -175,6 +182,59 @@ export function AnewLeadEditDialog({
     const aliases = GENERAL_FIELD_ALIASES[generalKey] || [generalKey];
     const existingAlias = aliases.find((alias) => Object.prototype.hasOwnProperty.call(fieldValues, alias)) || aliases[0];
     handleFieldChange(existingAlias, value);
+    if (fieldErrors[generalKey]) {
+      setFieldErrors(prev => {
+        const next = { ...prev };
+        delete next[generalKey];
+        return next;
+      });
+    }
+  };
+
+  /**
+   * Validates the general fields (name/email/phone/company) and notes with
+   * Zod before saving. Dynamic campaign fields keep their existing
+   * DynamicFormField-level behavior — this only blocks/flags data that would
+   * previously have been saved without any format check (e.g. malformed
+   * email, phone, or overly long text).
+   */
+  const validateForm = (): boolean => {
+    const generalValues = {
+      first_name: getGeneralFieldValue(fieldValues, "first_name"),
+      last_name: getGeneralFieldValue(fieldValues, "last_name"),
+      email: getGeneralFieldValue(fieldValues, "email"),
+      phone: getGeneralFieldValue(fieldValues, "phone"),
+      company_name: getGeneralFieldValue(fieldValues, "company_name"),
+    };
+
+    const generalResult = leadEditGeneralFieldsSchema.safeParse(generalValues);
+    const notesResult = leadEditNotesSchema.safeParse({ notes });
+
+    const nextErrors: Record<string, string> = {};
+    if (!generalResult.success) {
+      for (const issue of generalResult.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+    }
+    if (!notesResult.success) {
+      const issue = notesResult.error.issues[0];
+      if (issue) nextErrors.notes = issue.message;
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({
+        title: "Dados inválidos",
+        description: firstMessage,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    return true;
   };
 
   const resolveWorkflowStageId = async (statusValue: string) => {
@@ -192,7 +252,8 @@ export function AnewLeadEditDialog({
 
   const handleSave = async () => {
     if (!lead) return;
-    
+    if (!validateForm()) return;
+
     setSaving(true);
     try {
       // Preserve _meta if it exists
@@ -203,44 +264,47 @@ export function AnewLeadEditDialog({
       };
 
       const statusChanged = status !== lead.status;
-      const updatePayload: Record<string, any> = {
-        field_values: updatedFieldValues,
-        status,
-        source: source || null,
-        notes: notes || null,
-        assigned_to: assignedTo,
-        updated_at: new Date().toISOString(),
-      };
 
       let workflowStageId = lead.workflow_stage_id || null;
       if (statusChanged) {
         workflowStageId = await resolveWorkflowStageId(status);
-        if (workflowStageId) {
-          updatePayload.workflow_stage_id = workflowStageId;
-        }
       }
 
-      const { error } = await supabase
-        .from("anew_leads")
-        .update(updatePayload as any)
-        .eq("id", lead.id);
-
-      if (error) throw error;
-
-      // Sync entity display_name with updated field values
+      // Derive the same entity display-name fields the FE used to write
+      // directly to anew_entities; the RPC now performs that update too.
+      let displayName: string | undefined;
+      let entityFirstName: string | undefined;
+      let entityLastName: string | undefined;
       if (lead.entity_id) {
         const firstName = getGeneralFieldValue(updatedFieldValues, "first_name");
         const lastName = getGeneralFieldValue(updatedFieldValues, "last_name");
         const companyName = getGeneralFieldValue(updatedFieldValues, "company_name");
         const newDisplayName = companyName || [firstName, lastName].filter(Boolean).join(" ") || undefined;
-        
+
         if (newDisplayName) {
-          const entityUpdate: Record<string, any> = { display_name: newDisplayName.trim() };
-          if (firstName) entityUpdate.first_name = firstName;
-          if (lastName) entityUpdate.last_name = lastName;
-          await supabase.from("anew_entities").update(entityUpdate as any).eq("id", lead.entity_id);
+          displayName = newDisplayName.trim();
+          if (firstName) entityFirstName = firstName;
+          if (lastName) entityLastName = lastName;
         }
       }
+
+      await withAuditContext(supabase, userId, async () => {
+        const { error } = await supabase.rpc("rpc_update_lead", {
+          p_lead_id: lead.id,
+          p_field_values: updatedFieldValues,
+          p_status: status,
+          p_source: source || null,
+          p_notes: notes || null,
+          p_assigned_to: assignedTo,
+          p_status_changed: statusChanged,
+          p_workflow_stage_id: statusChanged ? workflowStageId : null,
+          p_display_name: displayName ?? null,
+          p_first_name: entityFirstName ?? null,
+          p_last_name: entityLastName ?? null,
+        });
+
+        if (error) throw error;
+      });
 
       if (statusChanged && workflowStageId) {
         const { error: workflowError } = await supabase.functions.invoke("execute-workflow", {
@@ -365,7 +429,11 @@ export function AnewLeadEditDialog({
                     <Input
                       value={getGeneralFieldValue(fieldValues, field.key)}
                       onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
+                      aria-invalid={!!fieldErrors[field.key]}
                     />
+                    {fieldErrors[field.key] && (
+                      <p className="text-xs text-destructive">{fieldErrors[field.key]}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -396,10 +464,23 @@ export function AnewLeadEditDialog({
                 <Label>Notas</Label>
                 <Textarea
                   value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
+                  onChange={(e) => {
+                    setNotes(e.target.value);
+                    if (fieldErrors.notes) {
+                      setFieldErrors(prev => {
+                        const next = { ...prev };
+                        delete next.notes;
+                        return next;
+                      });
+                    }
+                  }}
                   placeholder="Adicionar notas sobre esta lead..."
                   rows={3}
+                  aria-invalid={!!fieldErrors.notes}
                 />
+                {fieldErrors.notes && (
+                  <p className="text-xs text-destructive">{fieldErrors.notes}</p>
+                )}
               </div>
             )}
           </div>

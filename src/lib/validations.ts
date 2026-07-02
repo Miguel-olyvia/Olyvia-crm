@@ -1,20 +1,30 @@
 import { z } from "zod";
 
+// Shared optional fields present on the contact edit dialog, regardless of
+// person/company variant (vat, address, notes, etc.). Extracted so both
+// contactSchema variants validate them consistently.
+export const contactEditExtraFieldsSchema = z.object({
+  email: z.string().trim().email("Invalid email format").max(255, "Email must be less than 255 characters").optional().or(z.literal("")),
+  phone: z.string().trim().max(20, "Phone must be less than 20 characters").optional().or(z.literal("")),
+  vat: z.string().trim().max(50, "VAT must be less than 50 characters").optional().or(z.literal("")),
+  position: z.string().trim().max(100, "Position must be less than 100 characters").optional().or(z.literal("")),
+  status: z.enum(["active", "inactive"]).optional(),
+  notes: z.string().trim().max(2000, "Notes must be less than 2000 characters").optional().or(z.literal("")),
+  address: z.string().trim().max(255, "Address must be less than 255 characters").optional().or(z.literal("")),
+  city: z.string().trim().max(100, "City must be less than 100 characters").optional().or(z.literal("")),
+  postal_code: z.string().trim().max(20, "Postal code must be less than 20 characters").optional().or(z.literal("")),
+});
+
 // Contact validation schema
 export const contactSchema = z.object({
   first_name: z.string().trim().min(1, "First name is required").max(100, "First name must be less than 100 characters"),
   last_name: z.string().trim().min(1, "Last name is required").max(100, "Last name must be less than 100 characters"),
-});
+}).merge(contactEditExtraFieldsSchema);
 
 // Contact schema for companies (last_name optional)
 export const contactCompanySchema = contactSchema.extend({
   last_name: z.string().trim().max(100, "Last name must be less than 100 characters").optional().or(z.literal("")),
-  email: z.string().trim().email("Invalid email format").max(255, "Email must be less than 255 characters").optional().or(z.literal("")),
-  phone: z.string().trim().max(20, "Phone must be less than 20 characters").optional().or(z.literal("")),
-  position: z.string().trim().max(100, "Position must be less than 100 characters").optional().or(z.literal("")),
-  status: z.enum(["active", "inactive"]).optional(),
   source: z.string().trim().max(100).optional().or(z.literal("")),
-  notes: z.string().trim().max(2000, "Notes must be less than 2000 characters").optional().or(z.literal("")),
 });
 
 // Company validation schema
@@ -82,6 +92,20 @@ export const quoteSchema = z.object({
   modelo_base: z.string().trim().min(1, "Model is required"),
   desconto_global_percent: z.number().min(0, "Discount must be at least 0").max(100, "Discount must be at most 100"),
   validade_dias: z.number().int("Validity must be a whole number").min(1, "Validity must be at least 1 day").max(365, "Validity must be at most 365 days").optional(),
+});
+
+// Lead edit dialog validation schema (general fields; dynamic campaign fields
+// are not statically typed and are validated separately per field type).
+export const leadEditGeneralFieldsSchema = z.object({
+  first_name: z.string().trim().max(100, "First name must be less than 100 characters").optional().or(z.literal("")),
+  last_name: z.string().trim().max(100, "Last name must be less than 100 characters").optional().or(z.literal("")),
+  email: z.string().trim().email("Invalid email format").max(255, "Email must be less than 255 characters").optional().or(z.literal("")),
+  phone: z.string().trim().max(20, "Phone must be less than 20 characters").optional().or(z.literal("")),
+  company_name: z.string().trim().max(200, "Company name must be less than 200 characters").optional().or(z.literal("")),
+});
+
+export const leadEditNotesSchema = z.object({
+  notes: z.string().trim().max(2000, "Notes must be less than 2000 characters").optional().or(z.literal("")),
 });
 
 // Quote line validation schema

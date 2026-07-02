@@ -63,6 +63,7 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ClientRecord {
   id: string;
@@ -785,7 +786,13 @@ const AnewClients = () => {
   const handleDeleteConfirm = async () => {
     if (!clientToDelete) return;
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: clientToDelete.id });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: clientToDelete.id })
+      );
       if (error) throw error;
       await resolveClientNotifications([clientToDelete.id]);
       toast({ title: "Cliente movido para lixo" });
@@ -807,8 +814,14 @@ const AnewClients = () => {
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
       const ids = Array.from(selectedIds);
-      const { error } = await (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids).eq("organization_id", activeCompany?.id);
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids).eq("organization_id", activeCompany?.id)
+      );
       if (error) throw error;
       // Sync entity roles for status changes to/from inactive
       const targetClients = clients.filter(c => selectedIds.has(c.id));
@@ -835,9 +848,15 @@ const AnewClients = () => {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
       const ids = Array.from(selectedIds);
       for (const id of ids) {
-        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: id });
+        const { error } = await withAuditContext(supabase, anewUser.id, () =>
+          (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: id })
+        );
         if (error) throw error;
       }
       await resolveClientNotifications(ids);
@@ -1000,13 +1019,17 @@ const AnewClients = () => {
       .eq("entity_id", entityId).eq("organization_id", organizationId).is("deleted_at", null).maybeSingle();
     if (existingClient) {
       // Always reactivate when reusing: never leave an inactive client behind.
-      await (supabase as any).from("anew_clients").update({ status: status || "active", deleted_at: null, organization_id: organizationId, source_type: "manual", updated_at: new Date().toISOString() }).eq("id", existingClient.id);
+      await withAuditContext(supabase, internalUserId, () =>
+        (supabase as any).from("anew_clients").update({ status: status || "active", deleted_at: null, organization_id: organizationId, source_type: "manual", updated_at: new Date().toISOString() }).eq("id", existingClient.id)
+      );
     } else {
-      await (supabase as any).from("anew_clients").insert({
-        entity_id: entityId, root_organization_id: resolvedRootOrgId || organizationId,
-        organization_id: organizationId, status, client_type: entityType,
-        source_type: "manual", created_by: internalUserId,
-      });
+      await withAuditContext(supabase, internalUserId, () =>
+        (supabase as any).from("anew_clients").insert({
+          entity_id: entityId, root_organization_id: resolvedRootOrgId || organizationId,
+          organization_id: organizationId, status, client_type: entityType,
+          source_type: "manual", created_by: internalUserId,
+        })
+      );
     }
     const { data: existingRole } = await supabase.from("anew_entity_roles").select("id")
       .eq("entity_id", entityId).eq("role", "client").eq("organization_id", organizationId).maybeSingle();
@@ -2014,10 +2037,26 @@ const AnewClients = () => {
                         <Input value={formData.first_name} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} className={fieldErrors.first_name ? "border-destructive" : ""} />
                         {fieldErrors.first_name && <p className="text-xs text-destructive">{fieldErrors.first_name}</p>}
                       </div>
-                      <div className="space-y-2"><Label>{t('clients.form.lastName')}</Label><Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.phone')}</Label><PhoneInput phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({ ...formData, phone: v })} onCountryCodeChange={(v) => setFormData({ ...formData, phone_country_code: v })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.vatNumber')}</Label><Input value={formData.vat} onChange={(e) => setFormData({ ...formData, vat: e.target.value })} /></div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.lastName')}</Label>
+                        <Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} className={fieldErrors.last_name ? "border-destructive" : ""} />
+                        {fieldErrors.last_name && <p className="text-xs text-destructive">{fieldErrors.last_name}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.email')}</Label>
+                        <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} />
+                        {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.phone')}</Label>
+                        <PhoneInput phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({ ...formData, phone: v })} onCountryCodeChange={(v) => setFormData({ ...formData, phone_country_code: v })} />
+                        {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.vatNumber')}</Label>
+                        <Input value={formData.vat} onChange={(e) => setFormData({ ...formData, vat: e.target.value })} className={fieldErrors.vat ? "border-destructive" : ""} />
+                        {fieldErrors.vat && <p className="text-xs text-destructive">{fieldErrors.vat}</p>}
+                      </div>
                       <div className="space-y-2">
                         <Label>{t('clients.form.status')}</Label>
                         <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v })}>
@@ -2029,9 +2068,21 @@ const AnewClients = () => {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2 sm:col-span-2"><Label>{t('clients.form.companyName')}</Label><Input value={companyFormData.name} onChange={(e) => setCompanyFormData({ ...companyFormData, name: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({ ...companyFormData, email: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.phone')}</Label><PhoneInput phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({ ...companyFormData, phone: v })} onCountryCodeChange={(v) => setCompanyFormData({ ...companyFormData, phone_country_code: v })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.vatNumber')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({ ...companyFormData, vat: e.target.value })} /></div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.email')}</Label>
+                        <Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({ ...companyFormData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} />
+                        {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.phone')}</Label>
+                        <PhoneInput phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({ ...companyFormData, phone: v })} onCountryCodeChange={(v) => setCompanyFormData({ ...companyFormData, phone_country_code: v })} />
+                        {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.vatNumber')}</Label>
+                        <Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({ ...companyFormData, vat: e.target.value })} className={fieldErrors.vat ? "border-destructive" : ""} />
+                        {fieldErrors.vat && <p className="text-xs text-destructive">{fieldErrors.vat}</p>}
+                      </div>
                       <div className="space-y-2">
                         <Label>{t('clients.form.status')}</Label>
                         <Select value={companyFormData.status} onValueChange={(v) => setCompanyFormData({ ...companyFormData, status: v })}>

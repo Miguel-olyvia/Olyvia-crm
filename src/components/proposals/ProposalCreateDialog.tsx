@@ -352,11 +352,76 @@ export function ProposalCreateDialog({
         return;
       }
 
+      // Pre-compute inline quotes payload up-front — needed for the RPC call either way
+      // (create or update). Preserves the exact same skip logic: quotes whose lines are
+      // all qt <= 0 are silently skipped (this dialog, unlike Proposals.tsx, does not warn
+      // the user about skipped quotes — kept as-is).
+      const inlineQuotesPayload: any[] = [];
+      for (const iq of inlineQuotes) {
+        const validLines = (iq.lines || []).filter(l => l.qt > 0);
+        if (validLines.length === 0) continue;
+
+        const linesToInsert = validLines.map(l => {
+          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
+          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
+          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
+          const precoSemIvaBase = unitPrice * l.qt;
+          const lineDiscount = l.discount_percent || 0;
+          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const ivaValor = precoSemIva * (l.iva_percent / 100);
+          const totalComIva = precoSemIva + ivaValor;
+          const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
+          return {
+            catalog_item_id: l.catalog_item_id || null,
+            product_id: l.product_id || null, service_id: l.service_id || null,
+            selected_attributes: l.selected_attributes || {},
+            descricao_snapshot: l.descricao_snapshot, qt: l.qt,
+            custo_material_unit: l.custo_material_unit, custo_mao_obra_unit: l.custo_mao_obra_unit,
+            margem_percent: l.margem_percent, iva_percent: l.iva_percent, int_percent: l.int_percent,
+            discount_percent: lineDiscount, total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva, total_com_desconto: totalComDesconto,
+            ordem: l.ordem, section_name: l.section_name || "Geral",
+            unidade: l.unidade || null, item_description: l.item_description || null,
+            cost_price: l.cost_price || 0,
+          };
+        });
+
+        inlineQuotesPayload.push({
+          title: iq.title || null, obra_notas: iq.obra_notas || null,
+          modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
+          desconto_global_percent: iq.desconto_global_percent,
+          validade_dias: iq.validade_dias, iva_rate: iq.iva_rate,
+          client_notes: iq.client_notes || null, conditions: iq.conditions || null,
+          lines: linesToInsert,
+        });
+      }
+
+      const selectedQuoteIds = selectedQuotes.map(q => q.id);
+      const proposalItemsPayload = proposalItems.map((item, index) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        vat_rate: item.vat_rate,
+        sort_order: index,
+      }));
+
+      // Same cascade used for the inline-quote entity below — passed explicitly to the RPC
+      // because it is NOT the same cascade as proposals.entity_id.
+      const quoteEntityId = presetEntityId || selectedDeal?.entity_id || selectedContact?.entity_id || null;
+
       let savedProposalId: string | null = null;
+      let savedProposal: any = null;
       if (editingId) {
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { error } = await supabase.from("proposals").update(proposalData).eq("id", editingId);
+        const { data, error } = await supabase.rpc('rpc_update_proposal', {
+          p_id: editingId,
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = editingId;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
           try {
@@ -367,95 +432,21 @@ export function ProposalCreateDialog({
         }
         toast({ title: t('proposals.toast.updateSuccess') });
       } else {
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { data, error } = await supabase.from("proposals").insert({ ...proposalData, created_by: businessUserId }).select("id").single();
+        const { data, error } = await supabase.rpc('rpc_create_proposal', {
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = data.id;
         toast({ title: t('proposals.toast.createSuccess') });
       }
 
       if (savedProposalId) {
-        await resolveSendProposalAlerts(proposalData.entity_id, activeCompany.id);
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-        const selectedQuoteIds = selectedQuotes.map(q => q.id);
-        if (selectedQuoteIds.length > 0) {
-          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).not("id", "in", `(${selectedQuoteIds.join(",")})`);
-          await supabase.from("quotes").update({ proposal_id: savedProposalId }).in("id", selectedQuoteIds);
-        } else {
-          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId);
-        }
-
-        for (const iq of inlineQuotes) {
-          const validLines = (iq.lines || []).filter(l => l.qt > 0);
-          if (validLines.length === 0) continue;
-
-          const dealOrgId = selectedDeal ? (selectedDeal as any).organization_id : activeCompany?.id;
-          const quoteEntityId = presetEntityId || selectedDeal?.entity_id || selectedContact?.entity_id || null;
-          const quoteData = {
-            deal_id: formData.deal_id || null,
-            entity_id: quoteEntityId,
-            organization_id: dealOrgId || activeCompany?.id || null,
-            root_organization_id: (activeCompany as any)?.parent_id || activeCompany?.id || null,
-            title: iq.title || null, obra_notas: iq.obra_notas || null,
-            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-            desconto_global_percent: iq.desconto_global_percent, estado: "finalizado",
-            validade_dias: iq.validade_dias, iva_rate: iq.iva_rate,
-            client_notes: iq.client_notes || null, conditions: iq.conditions || null,
-            proposal_id: savedProposalId, created_by: businessUserId,
-          };
-
-          const linesToInsert = validLines.map(l => {
-            const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-            const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-            const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-            const precoSemIvaBase = unitPrice * l.qt;
-            const lineDiscount = l.discount_percent || 0;
-            const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
-            const ivaValor = precoSemIva * (l.iva_percent / 100);
-            const totalComIva = precoSemIva + ivaValor;
-            const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
-            return {
-              quote_id: "" /* set below */, catalog_item_id: l.catalog_item_id || null,
-              product_id: l.product_id || null, service_id: l.service_id || null,
-              selected_attributes: l.selected_attributes || {}, categoria: "",
-              descricao_snapshot: l.descricao_snapshot, qt: l.qt,
-              custo_material_unit: l.custo_material_unit, custo_mao_obra_unit: l.custo_mao_obra_unit,
-              margem_percent: l.margem_percent, iva_percent: l.iva_percent, int_percent: l.int_percent,
-              discount_percent: lineDiscount, total_sem_iva: precoSemIva,
-              total_com_iva: totalComIva, total_com_desconto: totalComDesconto,
-              ordem: l.ordem, section_name: l.section_name || "Geral",
-              unidade: l.unidade || null, item_description: l.item_description || null,
-              cost_price: l.cost_price || 0,
-            };
-          });
-
-          const totalSemIva = linesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
-          const grandTotal = linesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
-          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-          const { data: newQuote, error: qError } = await (supabase.from("quotes") as any)
-            .insert({ ...quoteData, subtotal: totalSemIva, total: grandTotal })
-            .select("id").single();
-          if (qError) throw qError;
-
-          const finalLines = linesToInsert.map(l => ({ ...l, quote_id: newQuote.id }));
-          const { error: linesError } = await supabase.from("quote_lines").insert(finalLines);
-          if (linesError) throw linesError;
-        }
-
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId);
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        if (proposalItems.length > 0) {
-          await supabase.from("proposal_items").insert(
-            proposalItems.map((item, index) => ({
-              proposal_id: savedProposalId, description: item.description,
-              quantity: item.quantity, unit_price: item.unit_price,
-              vat_rate: item.vat_rate, sort_order: index,
-            }))
-          );
-        }
+        await resolveSendProposalAlerts(savedProposal?.entity_id ?? proposalData.entity_id, activeCompany.id);
       }
 
       onOpenChange(false);
@@ -710,11 +701,13 @@ export function ProposalCreateDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="value">{t('proposals.form.value')} *</Label>
-              <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required />
+              <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required className={fieldErrors.value ? "border-destructive" : ""} />
+              {fieldErrors.value && <p className="text-sm text-destructive">{fieldErrors.value}</p>}
             </div>
             <div className="space-y-2">
               <Label htmlFor="valid_until">{t('proposals.form.validUntil')}</Label>
-              <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} />
+              <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} className={fieldErrors.valid_until ? "border-destructive" : ""} />
+              {fieldErrors.valid_until && <p className="text-sm text-destructive">{fieldErrors.valid_until}</p>}
             </div>
             <div className="col-span-2 space-y-2">
               <Label htmlFor="stage_id">{t('proposals.form.status')} *</Label>

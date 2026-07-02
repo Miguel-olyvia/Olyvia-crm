@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,29 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
 import { differenceInDays } from "date-fns";
 import { calculateHealthScore } from "@/hooks/useContactHealthScore";
+
+/**
+ * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
+ * ["rpc_update_client"]["Args"]`) has been regenerated from the current
+ * database schema and now reflects the SQL function's real nullability for
+ * these params (see supabase/migrations/20260805010000_clients_audit_bypass_
+ * and_rpcs.sql). This local type mirrors the generated one for readability
+ * at the call site below; it does not change what the compiler enforces.
+ */
+type RpcUpdateClientArgs = {
+  p_assigned_to: string | null;
+  p_client_id: string;
+  p_display_name: string;
+  p_email: string | null;
+  p_entity_id: string | null;
+  p_norm_first: string;
+  p_norm_last: string;
+  p_notes: string | null;
+  p_phone: string | null;
+  p_phone_country: string | null;
+  p_status: string;
+  p_vat: string | null;
+};
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
 import { ClientSummaryBar } from "@/components/clients/detail/ClientSummaryBar";
@@ -142,6 +166,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     assigned_to: "" as string | null,
   });
   const [orgUsers, setOrgUsers] = useState<{ id: string; name: string }[]>([]);
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
 
   const [dealFormData, setDealFormData] = useState({ title: "", description: "", value: "", stage_id: "", expected_close_date: "" });
   const [dealLineItems, setDealLineItems] = useState<CatalogLineItem[]>([]);
@@ -210,6 +235,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
     setSelectedNewListIds(new Set());
     setShowAddListForm(false);
+    setEditFormErrors({});
 
     return () => { isCancelled = true; };
   }, [open, client]);
@@ -595,9 +621,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
     const validation = schema.safeParse(editFormData);
     if (!validation.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of validation.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setEditFormErrors(nextErrors);
       toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    setEditFormErrors({});
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -606,49 +639,25 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const entityId = client.entity_id;
 
       if (entityId) {
-        const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
-        const displayName = composeDisplayName(normalized.first, normalized.last);
-        await (supabase as any).from("anew_entities").update({ display_name: displayName, first_name: normalized.first, last_name: normalized.last, updated_at: new Date().toISOString() }).eq("id", entityId);
-        if (editFormData.email) {
-          const { data: existingEmail } = await (supabase as any).from("anew_entity_emails").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingEmail) await (supabase as any).from("anew_entity_emails").update({ email: editFormData.email }).eq("id", existingEmail.id);
-          else await (supabase as any).from("anew_entity_emails").insert({ entity_id: entityId, email: editFormData.email, is_primary: true, email_type: "personal", created_by: businessUserId });
-        }
-        if (editFormData.phone) {
-          const { data: existingPhone } = await (supabase as any).from("anew_entity_phones").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingPhone) await (supabase as any).from("anew_entity_phones").update({ phone_number: editFormData.phone, country_code: editFormData.phone_country_code }).eq("id", existingPhone.id);
-          else await (supabase as any).from("anew_entity_phones").insert({ entity_id: entityId, phone_number: editFormData.phone, country_code: editFormData.phone_country_code, is_primary: true, phone_type: "mobile", created_by: businessUserId });
-        }
-        await (supabase as any).from("anew_clients").update({ status: editFormData.status, notes: editFormData.notes || null, assigned_to: editFormData.assigned_to || null, updated_at: new Date().toISOString() }).eq("id", client.id);
-
-        // Save VAT/NIF via fiscal_entities + anew_entity_fiscal_entities
-        if (editFormData.vat) {
-          const { data: existingFiscalLink } = await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .select("id, fiscal_entity_id")
-            .eq("entity_id", entityId)
-            .eq("is_primary", true)
-            .maybeSingle();
-
-          if (existingFiscalLink) {
-            // Update existing fiscal entity NIF
-            await (supabase as any).from("fiscal_entities").update({ nif: editFormData.vat, updated_at: new Date().toISOString() }).eq("id", existingFiscalLink.fiscal_entity_id);
-          } else {
-            // Create new fiscal entity and link
-            const { data: newFiscal } = await (supabase as any).from("fiscal_entities").insert({ nif: editFormData.vat, country_code: "PT", created_by: businessUserId }).select("id").single();
-            if (newFiscal) {
-              await (supabase as any).from("anew_entity_fiscal_entities").insert({ entity_id: entityId, fiscal_entity_id: newFiscal.id, is_primary: true, created_by: businessUserId });
-            }
-          }
-        } else {
-          // If VAT was cleared, close the fiscal link
-          await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", entityId)
-            .eq("is_primary", true)
-            .is("valid_to", null);
-        }
+        await withAuditContext(supabase, businessUserId, async () => {
+          const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
+          const displayName = composeDisplayName(normalized.first, normalized.last);
+          const { error: rpcError } = await supabase.rpc("rpc_update_client", {
+            p_client_id: client.id,
+            p_entity_id: entityId,
+            p_display_name: displayName,
+            p_norm_first: normalized.first,
+            p_norm_last: normalized.last,
+            p_email: editFormData.email || null,
+            p_phone: editFormData.phone || null,
+            p_phone_country: editFormData.phone_country_code || null,
+            p_vat: editFormData.vat || null,
+            p_status: editFormData.status,
+            p_notes: editFormData.notes || null,
+            p_assigned_to: editFormData.assigned_to || null,
+          } satisfies RpcUpdateClientArgs);
+          if (rpcError) throw rpcError;
+        });
       }
 
       toast({ title: "Cliente actualizado" });
@@ -1115,11 +1124,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <TabsContent value="edit" className="space-y-4 mt-4">
                 <form onSubmit={handleUpdateClient} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required /></div>
-                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} /></div>
-                    <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
-                    <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} /></div>
-                    <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" /></div>
+                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
+                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
+                    <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>
+                    <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />{editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}</div>
                     <div className="space-y-2">
                       <Label>Estado</Label>
                       <Select value={editFormData.status} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>

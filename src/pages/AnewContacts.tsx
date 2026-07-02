@@ -79,6 +79,7 @@ import { parseContactsCsv } from "@/lib/contacts/csv";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { matchesContactAttentionFilters, needsCompleteContactDataset } from "@/lib/contacts/filterDataset";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
+import { withAuditContext } from "@/utils/auditContext";
 
 // --- Types ---
 interface ContactRecord {
@@ -1160,8 +1161,15 @@ const AnewContacts = () => {
   const handleDeleteConfirm = async () => {
     if (!contactToDelete) return;
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id });
-      if (error) throw error;
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      await supabase.rpc('set_audit_context', { p_user_id: internalUserId, p_source: 'web_app' });
+      try {
+        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id });
+        if (error) throw error;
+      } finally {
+        await supabase.rpc('clear_audit_context').catch(() => {});
+      }
       toast({ title: t('contacts.toast.movedToTrash'), description: t('contacts.toast.restoreHint') });
       setDeleteDialogOpen(false); setContactToDelete(null); setContacts([]); setHasMore(true); loadContacts(0, true);
     } catch (error: any) { toast({ title: t('contacts.toast.deleteError'), description: error.message, variant: "destructive" }); }
@@ -1171,7 +1179,11 @@ const AnewContacts = () => {
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0) return;
     try {
-      const { error } = await supabase.from("anew_contacts").update({ status: bulkNewStatus }).in("id", Array.from(selectedIds));
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      const { error } = await withAuditContext(supabase, internalUserId, () =>
+        supabase.from("anew_contacts").update({ status: bulkNewStatus }).in("id", Array.from(selectedIds))
+      );
       if (error) throw error;
       toast({ title: t('contacts.toast.statusUpdated'), description: t('contacts.toast.statusUpdatedDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkStatusDialogOpen(false); setContacts([]); setHasMore(true); loadContacts(0, true);
@@ -1180,9 +1192,16 @@ const AnewContacts = () => {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     try {
-      for (const id of Array.from(selectedIds)) {
-        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: id });
-        if (error) throw error;
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      await supabase.rpc('set_audit_context', { p_user_id: internalUserId, p_source: 'web_app' });
+      try {
+        for (const id of Array.from(selectedIds)) {
+          const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: id });
+          if (error) throw error;
+        }
+      } finally {
+        await supabase.rpc('clear_audit_context').catch(() => {});
       }
       toast({ title: t('contacts.toast.bulkMovedToTrash'), description: t('contacts.toast.bulkRestoreHint', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setContacts([]); setHasMore(true); loadContacts(0, true);
@@ -1379,24 +1398,26 @@ const AnewContacts = () => {
       // No duplicate — proceed with creation.
       // M1 — single transactional RPC: guarantees the contact never persists
       // without its role. Any RPC error is treated as a total creation failure.
-      const { error: createRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: contactEntityId,
-          organizationId,
-          rootOrganizationId: resolvedRootOrgId || organizationId,
-          displayName: contactDisplayName,
-          entityType: contactEntityType,
-          firstName: contactFirstName,
-          lastName: contactLastName,
-          email: contactEmail || null,
-          phone: contactPhone || null,
-          phoneCountryCode: contactPhoneCode || null,
-          vat: contactVat || null,
-          status: roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const { error: createRpcError } = await withAuditContext(supabase, internalUserId, () =>
+        supabase.rpc('create_contact_with_role', {
+          p_payload: {
+            entityId: contactEntityId,
+            organizationId,
+            rootOrganizationId: resolvedRootOrgId || organizationId,
+            displayName: contactDisplayName,
+            entityType: contactEntityType,
+            firstName: contactFirstName,
+            lastName: contactLastName,
+            email: contactEmail || null,
+            phone: contactPhone || null,
+            phoneCountryCode: contactPhoneCode || null,
+            vat: contactVat || null,
+            status: roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        })
+      );
       if (createRpcError) throw createRpcError;
       if (addressData.postal_code || addressData.street || addressData.city) {
         // Use shared sanitizer-aware helper to prevent placeholders ("N/A", "0000-000")
@@ -1508,24 +1529,26 @@ const AnewContacts = () => {
       // M1 — single transactional RPC creates a brand-new entity (entityId
       // omitted) + contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
-      const { error: createAnywayRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: null,
-          organizationId: pendingContactData.organizationId,
-          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
-          displayName: pendingContactData.displayName,
-          entityType: pendingContactData.entityType,
-          firstName: pendingContactData.firstName,
-          lastName: pendingContactData.lastName,
-          email: pendingContactData.email || null,
-          phone: pendingContactData.phone || null,
-          phoneCountryCode: pendingContactData.phoneCountryCode || null,
-          vat: pendingContactData.vat || null,
-          status: pendingContactData.roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const { error: createAnywayRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
+        supabase.rpc('create_contact_with_role', {
+          p_payload: {
+            entityId: null,
+            organizationId: pendingContactData.organizationId,
+            rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+            displayName: pendingContactData.displayName,
+            entityType: pendingContactData.entityType,
+            firstName: pendingContactData.firstName,
+            lastName: pendingContactData.lastName,
+            email: pendingContactData.email || null,
+            phone: pendingContactData.phone || null,
+            phoneCountryCode: pendingContactData.phoneCountryCode || null,
+            vat: pendingContactData.vat || null,
+            status: pendingContactData.roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        })
+      );
       if (createAnywayRpcError) throw createAnywayRpcError;
       toast({ title: t('contacts.toast.createSuccess') });
       setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
@@ -1543,24 +1566,26 @@ const AnewContacts = () => {
       // M1 — single transactional RPC reusing the shared entity_id: creates
       // the contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
-      const { error: shareRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: match.entityId,
-          organizationId: pendingContactData.organizationId,
-          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
-          displayName: pendingContactData.displayName,
-          entityType: pendingContactData.entityType,
-          firstName: pendingContactData.firstName,
-          lastName: pendingContactData.lastName,
-          email: pendingContactData.email || null,
-          phone: pendingContactData.phone || null,
-          phoneCountryCode: pendingContactData.phoneCountryCode || null,
-          vat: pendingContactData.vat || null,
-          status: pendingContactData.roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const { error: shareRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
+        supabase.rpc('create_contact_with_role', {
+          p_payload: {
+            entityId: match.entityId,
+            organizationId: pendingContactData.organizationId,
+            rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+            displayName: pendingContactData.displayName,
+            entityType: pendingContactData.entityType,
+            firstName: pendingContactData.firstName,
+            lastName: pendingContactData.lastName,
+            email: pendingContactData.email || null,
+            phone: pendingContactData.phone || null,
+            phoneCountryCode: pendingContactData.phoneCountryCode || null,
+            vat: pendingContactData.vat || null,
+            status: pendingContactData.roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        })
+      );
       if (shareRpcError) throw shareRpcError;
       toast({ title: "Contacto criado a partir de entidade do grupo" });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
@@ -1632,9 +1657,14 @@ const AnewContacts = () => {
       if (contactsToImport.length === 0) { toast({ title: t('contacts.import.invalid'), variant: "destructive" }); return; }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
+      const importUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!importUserId) throw new Error("Utilizador não identificado");
+      const { error: setCtxErr } = await supabase.rpc('set_audit_context', { p_user_id: importUserId, p_source: 'csv_import' });
+      if (setCtxErr) throw setCtxErr;
       let importedCount = 0;
       let skippedCount = 0;
       const orgId = activeCompany?.id || '';
+      try {
       for (const c of contactsToImport) {
         const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null });
         if (entityId) {
@@ -1675,6 +1705,9 @@ const AnewContacts = () => {
           continue;
         }
         importedCount++;
+      }
+      } finally {
+        await supabase.rpc('clear_audit_context').catch(() => {});
       }
       const importDesc = skippedCount > 0
         ? `${importedCount} importados, ${skippedCount} ignorados por duplicacao ou erro`
@@ -2369,17 +2402,17 @@ const AnewContacts = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>{t('contacts.form.firstName')}</Label><Input value={formData.first_name} onChange={(e) => setFormData({...formData, first_name: e.target.value})} required className={fieldErrors.first_name?"border-destructive":""} />{fieldErrors.first_name && <p className="text-sm text-destructive">{fieldErrors.first_name}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.lastName')}</Label><Input value={formData.last_name} onChange={(e) => setFormData({...formData, last_name: e.target.value})} required className={fieldErrors.last_name?"border-destructive":""} />{fieldErrors.last_name && <p className="text-sm text-destructive">{fieldErrors.last_name}</p>}</div>
-                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} /></div>
-                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({...formData, phone: v})} onCountryCodeChange={(v) => setFormData({...formData, phone_country_code: v})} /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={formData.vat} onChange={(e) => setFormData({...formData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} /></div>
+                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className={fieldErrors.email?"border-destructive":""} />{fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}</div>
+                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({...formData, phone: v})} onCountryCodeChange={(v) => setFormData({...formData, phone_country_code: v})} />{fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}</div>
+                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={formData.vat} onChange={(e) => setFormData({...formData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} className={fieldErrors.vat?"border-destructive":""} />{fieldErrors.vat && <p className="text-sm text-destructive">{fieldErrors.vat}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.status')}</Label><Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">{t('contacts.status.active')}</SelectItem><SelectItem value="inactive">{t('contacts.status.inactive')}</SelectItem></SelectContent></Select></div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2 col-span-2"><Label>{t('contacts.form.companyName')}</Label><Input value={companyFormData.name} onChange={(e) => setCompanyFormData({...companyFormData, name: e.target.value})} required /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({...companyFormData, email: e.target.value})} /></div>
-                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({...companyFormData, phone: v})} onCountryCodeChange={(v) => setCompanyFormData({...companyFormData, phone_country_code: v})} /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({...companyFormData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} /></div>
+                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({...companyFormData, email: e.target.value})} className={fieldErrors.email?"border-destructive":""} />{fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}</div>
+                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({...companyFormData, phone: v})} onCountryCodeChange={(v) => setCompanyFormData({...companyFormData, phone_country_code: v})} />{fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}</div>
+                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({...companyFormData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} className={fieldErrors.vat?"border-destructive":""} />{fieldErrors.vat && <p className="text-sm text-destructive">{fieldErrors.vat}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.website')}</Label><Input value={companyFormData.website} onChange={(e) => setCompanyFormData({...companyFormData, website: e.target.value})} /></div>
                       <div className="space-y-2"><Label>{t('contacts.form.industry')}</Label><Input value={companyFormData.industry} onChange={(e) => setCompanyFormData({...companyFormData, industry: e.target.value})} /></div>
                       <div className="space-y-2"><Label>{t('contacts.form.status')}</Label><Select value={companyFormData.status} onValueChange={(v) => setCompanyFormData({...companyFormData, status: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">{t('contacts.status.active')}</SelectItem><SelectItem value="inactive">{t('contacts.status.inactive')}</SelectItem></SelectContent></Select></div>

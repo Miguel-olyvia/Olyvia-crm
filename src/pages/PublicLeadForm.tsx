@@ -20,6 +20,8 @@ import { Progress } from "@/components/ui/progress";
 import * as LucideIcons from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { sanitizeCSSValue, sanitizeCustomCss } from "@/lib/forms/sanitizeCssValue";
+import { validateStepFieldFormats } from "@/lib/forms/publicFormValidation";
 
 // Animation variants for step transitions
 const stepVariants = {
@@ -1035,19 +1037,33 @@ export default function PublicLeadForm() {
         const value = formValues[field.field_key];
         if (!value || (Array.isArray(value) && value.length === 0)) {
           toast.error(`O campo "${field.field_label}" é obrigatório`);
-          
+
           setTimeout(() => scrollToAndFocusField(field.field_key), 100);
-          
+
           return false;
         }
       }
     }
-    
+
+    // Format/bounds validation (email shape, phone digits, min/max length,
+    // min/max value, custom pattern). Only checks fields that already have a
+    // non-empty value — required-ness was already enforced above — so this
+    // never blocks data that passed validation before this check existed.
+    const formatError = validateStepFieldFormats(
+      step.fields.filter(field => !(hasSchedulingStep && field.field_type === 'ref_service')),
+      formValues
+    );
+    if (formatError) {
+      toast.error(formatError.message);
+      setTimeout(() => scrollToAndFocusField(formatError.fieldKey), 100);
+      return false;
+    }
+
     if (locationRejected) {
       toast.error("A localização selecionada não está disponível.");
       return false;
     }
-    
+
     return true;
   };
 
@@ -1750,10 +1766,10 @@ export default function PublicLeadForm() {
 
   // Generate dynamic styles - unified background color
   // In iframe context, force white background for consistency
-  const bgColor = isInIframe ? "#ffffff" : (branding?.background_color || "#ffffff");
-  const stepBorderWidth = branding?.step_border_width || '1px';
-  const stepBorderColor = branding?.step_border_color || '#e5e7eb';
-  const stepShadow = branding?.step_shadow || '0 1px 3px 0 rgb(0 0 0 / 0.1)';
+  const bgColor = isInIframe ? "#ffffff" : sanitizeCSSValue(branding?.background_color || "#ffffff", 'color');
+  const stepBorderWidth = sanitizeCSSValue(branding?.step_border_width || '1px', 'size');
+  const stepBorderColor = sanitizeCSSValue(branding?.step_border_color || '#e5e7eb', 'color');
+  const stepShadow = sanitizeCSSValue(branding?.step_shadow || '0 1px 3px 0 rgb(0 0 0 / 0.1)', 'shadow');
   const hasMainContainerBorder = stepBorderWidth !== '0px' && stepBorderColor !== 'transparent';
   const mainContainerShadow = hasMainContainerBorder ? stepShadow : 'none';
   const layout = resolveLayout(branding, { isInIframe });
@@ -1816,12 +1832,14 @@ export default function PublicLeadForm() {
     return cn(styleClass, radiusClass, mainContainerClass);
   };
 
-  const primaryColor = branding?.primary_color || "#85D3BE";
-  const radioButtonColor = branding?.radio_button_color || primaryColor;
+  const primaryColor = sanitizeCSSValue(branding?.primary_color || "#85D3BE", 'color');
+  const radioButtonColor = sanitizeCSSValue(branding?.radio_button_color || primaryColor, 'color');
   
+  const buttonTextColor = sanitizeCSSValue(branding?.button_text_color || "#ffffff", 'color');
+
   const buttonStyle: React.CSSProperties = {
     backgroundColor: primaryColor,
-    color: branding?.button_text_color || "#ffffff",
+    color: buttonTextColor,
   };
 
   const headingStyle: React.CSSProperties = {
@@ -1934,56 +1952,60 @@ export default function PublicLeadForm() {
   };
 
   // Granular styling variables
-  const inputBorderRadius = branding?.input_border_radius || '12px';
-  const inputBorderWidth = branding?.input_border_width || '1px';
-  const inputBorderColor = branding?.input_border_color || '#e5e7eb';
-  const inputFocusBorderColor = branding?.input_focus_border_color || primaryColor;
-  const inputBgColor = branding?.input_background_color || branding?.background_color || '#ffffff';
-  const inputPadding = layout.inputs.padding;
-  const inputFontSize = branding?.input_font_size || '15px';
-  
-  const cardBorderRadius = branding?.card_border_radius || '16px';
-  const cardBorderWidth = branding?.card_border_width || '2px';
-  const cardBorderColor = branding?.card_border_color || '#e5e7eb';
-  const cardIconSize = branding?.card_icon_size || '56px';
-  const cardIconBorderRadius = branding?.card_icon_border_radius || '14px';
-  const cardPadding = layout.options.cardPadding;
-  const cardMinHeight = branding?.card_min_height || '140px';
-  
-  const radioBorderRadius = branding?.radio_border_radius || '12px';
-  const radioBorderWidth = branding?.radio_border_width || '2px';
-  const radioCircleSize = branding?.radio_circle_size || '20px';
-  const radioInnerSize = branding?.radio_inner_size || '10px';
-  const radioPadding = layout.options.radioPadding;
-  
-  const checkboxBorderRadius = branding?.checkbox_border_radius || '12px';
-  const checkboxBorderWidth = branding?.checkbox_border_width || '2px';
-  const checkboxSize = branding?.checkbox_size || '20px';
-  const checkboxPadding = layout.options.checkboxPadding;
-  
-  const buttonOptionBorderRadius = branding?.button_option_border_radius || '12px';
-  const buttonOptionBorderWidth = branding?.button_option_border_width || '2px';
-  const buttonOptionPadding = layout.options.buttonPadding;
-  
-  const navButtonBorderRadius = branding?.nav_button_border_radius || '12px';
-  const navButtonPadding = layout.buttons.navPadding;
-  const navButtonFontSize = branding?.nav_button_font_size || '15px';
-  
-  const stepBorderRadius = branding?.step_border_radius || '16px';
-  const stepPadding = layout.step.padding;
-  
-  const infoBlockBorderRadius = branding?.info_block_border_radius || '12px';
-  const infoBlockPadding = branding?.info_block_padding || '16px 20px';
+  // NOTE: all `branding?.*` values below are configurable by whoever manages
+  // the campaign and are interpolated into a raw <style> block rendered on
+  // this public, unauthenticated page. Every one of them must be sanitized
+  // via `sanitizeCSSValue` to prevent CSS injection.
+  const inputBorderRadius = sanitizeCSSValue(branding?.input_border_radius || '12px', 'size');
+  const inputBorderWidth = sanitizeCSSValue(branding?.input_border_width || '1px', 'size');
+  const inputBorderColor = sanitizeCSSValue(branding?.input_border_color || '#e5e7eb', 'color');
+  const inputFocusBorderColor = sanitizeCSSValue(branding?.input_focus_border_color || primaryColor, 'color');
+  const inputBgColor = sanitizeCSSValue(branding?.input_background_color || branding?.background_color || '#ffffff', 'color');
+  const inputPadding = sanitizeCSSValue(layout.inputs.padding, 'padding');
+  const inputFontSize = sanitizeCSSValue(branding?.input_font_size || '15px', 'size');
+
+  const cardBorderRadius = sanitizeCSSValue(branding?.card_border_radius || '16px', 'size');
+  const cardBorderWidth = sanitizeCSSValue(branding?.card_border_width || '2px', 'size');
+  const cardBorderColor = sanitizeCSSValue(branding?.card_border_color || '#e5e7eb', 'color');
+  const cardIconSize = sanitizeCSSValue(branding?.card_icon_size || '56px', 'size');
+  const cardIconBorderRadius = sanitizeCSSValue(branding?.card_icon_border_radius || '14px', 'size');
+  const cardPadding = sanitizeCSSValue(layout.options.cardPadding, 'padding');
+  const cardMinHeight = sanitizeCSSValue(branding?.card_min_height || '140px', 'size');
+
+  const radioBorderRadius = sanitizeCSSValue(branding?.radio_border_radius || '12px', 'size');
+  const radioBorderWidth = sanitizeCSSValue(branding?.radio_border_width || '2px', 'size');
+  const radioCircleSize = sanitizeCSSValue(branding?.radio_circle_size || '20px', 'size');
+  const radioInnerSize = sanitizeCSSValue(branding?.radio_inner_size || '10px', 'size');
+  const radioPadding = sanitizeCSSValue(layout.options.radioPadding, 'padding');
+
+  const checkboxBorderRadius = sanitizeCSSValue(branding?.checkbox_border_radius || '12px', 'size');
+  const checkboxBorderWidth = sanitizeCSSValue(branding?.checkbox_border_width || '2px', 'size');
+  const checkboxSize = sanitizeCSSValue(branding?.checkbox_size || '20px', 'size');
+  const checkboxPadding = sanitizeCSSValue(layout.options.checkboxPadding, 'padding');
+
+  const buttonOptionBorderRadius = sanitizeCSSValue(branding?.button_option_border_radius || '12px', 'size');
+  const buttonOptionBorderWidth = sanitizeCSSValue(branding?.button_option_border_width || '2px', 'size');
+  const buttonOptionPadding = sanitizeCSSValue(layout.options.buttonPadding, 'padding');
+
+  const navButtonBorderRadius = sanitizeCSSValue(branding?.nav_button_border_radius || '12px', 'size');
+  const navButtonPadding = sanitizeCSSValue(layout.buttons.navPadding, 'padding');
+  const navButtonFontSize = sanitizeCSSValue(branding?.nav_button_font_size || '15px', 'size');
+
+  const stepBorderRadius = sanitizeCSSValue(branding?.step_border_radius || '16px', 'size');
+  const stepPadding = sanitizeCSSValue(layout.step.padding, 'padding');
+
+  const infoBlockBorderRadius = sanitizeCSSValue(branding?.info_block_border_radius || '12px', 'size');
+  const infoBlockPadding = sanitizeCSSValue(branding?.info_block_padding || '16px 20px', 'padding');
   const infoBlockBgOpacity = branding?.info_block_background_opacity || '15';
-  
-  const progressBarHeight = branding?.progress_bar_height || '4px';
-  const progressBarBorderRadius = branding?.progress_bar_border_radius || '2px';
-  
-  const selectBorderRadius = branding?.select_border_radius || '10px';
-  const selectBorderWidth = branding?.select_border_width || '1px';
-  
-  const successIconSize = branding?.success_icon_size || '80px';
-  const successBorderRadius = branding?.success_border_radius || '16px';
+
+  const progressBarHeight = sanitizeCSSValue(branding?.progress_bar_height || '4px', 'size');
+  const progressBarBorderRadius = sanitizeCSSValue(branding?.progress_bar_border_radius || '2px', 'size');
+
+  const selectBorderRadius = sanitizeCSSValue(branding?.select_border_radius || '10px', 'size');
+  const selectBorderWidth = sanitizeCSSValue(branding?.select_border_width || '1px', 'size');
+
+  const successIconSize = sanitizeCSSValue(branding?.success_icon_size || '80px', 'size');
+  const successBorderRadius = sanitizeCSSValue(branding?.success_border_radius || '16px', 'size');
 
   return (
     <div ref={formContainerRef} className={`${isInIframe ? 'min-h-fit' : 'min-h-screen'} ${hasCustomPadding ? '' : (useFlushEmbed ? 'p-0' : 'py-4 sm:py-8 px-3 sm:px-4')}`} style={containerStyle}>
@@ -2046,15 +2068,15 @@ export default function PublicLeadForm() {
         /* Select dropdown styling - applied globally since SelectContent uses Portal */
         [data-radix-select-content] [data-highlighted] {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         [data-radix-select-content] [data-state="checked"] {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         [data-radix-select-content] [role="option"]:focus {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         .form-card .option-card {
           border-radius: ${cardBorderRadius} !important;
@@ -2120,7 +2142,7 @@ export default function PublicLeadForm() {
           width: ${successIconSize} !important;
           height: ${successIconSize} !important;
         }
-        ${branding?.custom_css || ''}
+        ${sanitizeCustomCss(branding?.custom_css)}
         ${useFlushEmbed ? `
           .form-card.form-card {
             border-radius: 0 !important;
