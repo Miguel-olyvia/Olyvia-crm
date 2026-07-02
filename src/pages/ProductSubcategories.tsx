@@ -51,7 +51,6 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductSubcategory {
   id: string;
@@ -382,6 +381,10 @@ export default function ProductSubcategories() {
     onSuccess: loadData,
     softDelete: false,
     organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_product_category",
+    bulkDeleteRpc: "rpc_bulk_delete_product_category",
+    bulkOrgRpc: "rpc_bulk_org_product_category",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   // Debounce search term
@@ -484,38 +487,30 @@ export default function ProductSubcategories() {
       const path = parentCategory ? `${parentCategory.name.toLowerCase()}/${slug}` : slug;
 
       if (editingSubcategory) {
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error } = await supabase
-            .from("product_categories")
-            .update({
-              name: formData.name,
-              description: formData.description || null,
-              sort_order: formData.sort_order,
-              parent_id: formData.parent_id,
-              organization_id: companyId,
-            })
-            .eq("id", editingSubcategory.id);
-          if (error) throw error;
+        const { error } = await supabase.rpc("rpc_update_product_subcategory", {
+          p_id: editingSubcategory.id,
+          p_name: formData.name,
+          p_description: formData.description || null,
+          p_sort_order: formData.sort_order,
+          p_parent_id: formData.parent_id,
+          p_organization_id: companyId,
         });
+        if (error) throw error;
 
         toast({
           title: t('productSubcategories.toast.updateSuccess'),
         });
       } else {
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error } = await supabase.from("product_categories").insert({
-            name: formData.name,
-            slug,
-            path,
-            description: formData.description || null,
-            parent_id: formData.parent_id,
-            organization_id: companyId,
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-          });
-          if (error) throw error;
+        const { error } = await supabase.rpc("rpc_create_product_subcategory", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_path: path,
+          p_description: formData.description || null,
+          p_parent_id: formData.parent_id,
+          p_organization_id: companyId,
+          p_sort_order: formData.sort_order,
         });
+        if (error) throw error;
 
         toast({
           title: t('productSubcategories.toast.createSuccess'),
@@ -546,40 +541,25 @@ export default function ProductSubcategories() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        // Clear references in soft-deleted products so they don't block the DELETE.
-        // Scoped to the subcategory's org to avoid cross-tenant mutations.
-        // throwOnError() ensures a silent UPDATE failure (e.g. RLS rejection) is surfaced
-        // before the DELETE proceeds, preventing orphaned FK references (AUDIT-CAT-05).
-        await supabase
-          .from("products")
-          .update({ subcategory_id: null })
-          .eq("subcategory_id", subcategoryToDelete)
-          .eq("organization_id", sub.organization_id)
-          .not("deleted_at", "is", null)
-          .throwOnError();
-
-        const { error } = await supabase
-          .from("product_categories")
-          .delete()
-          .eq("id", subcategoryToDelete)
-          .eq("organization_id", sub.organization_id);
-
-        if (error) {
-          // Foreign key constraint: subcategory is still in use by active products.
-          if (error.code === "23503") {
-            toast({
-              title: t('productSubcategories.toast.cannotDelete'),
-              description: t('productSubcategories.toast.inUseByProducts'),
-              variant: "destructive",
-            });
-            setDeleteDialogOpen(false);
-            setSubcategoryToDelete(null);
-            return;
-          }
-          throw error;
-        }
+      const { error } = await supabase.rpc("rpc_delete_product_subcategory", {
+        p_id: subcategoryToDelete,
+        p_organization_id: sub.organization_id,
       });
+
+      if (error) {
+        // Foreign key constraint: subcategory is still in use by active products.
+        if (error.code === "23503") {
+          toast({
+            title: t('productSubcategories.toast.cannotDelete'),
+            description: t('productSubcategories.toast.inUseByProducts'),
+            variant: "destructive",
+          });
+          setDeleteDialogOpen(false);
+          setSubcategoryToDelete(null);
+          return;
+        }
+        throw error;
+      }
 
       toast({
         title: t('productSubcategories.toast.deleteSuccess'),

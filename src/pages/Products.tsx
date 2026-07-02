@@ -39,6 +39,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -72,7 +73,6 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 
 interface Product {
   id: string;
@@ -558,6 +558,10 @@ export default function Products() {
     onSuccess: loadData,
     softDelete: false,
     organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_product",
+    bulkDeleteRpc: "rpc_bulk_delete_product",
+    bulkOrgRpc: "rpc_bulk_org_product",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   // Trigger reload when filters change or when descendantIds resolve after a company switch.
@@ -632,184 +636,114 @@ export default function Products() {
 
       await withAuditContext(supabase, businessUserId, async () => {
 
-      const productData: TablesUpdate<"products"> = {
-        sku: formData.sku,
-        name: formData.name,
-        status: formData.status as TablesUpdate<"products">["status"],
-        is_active: true,
-        is_sellable: formData.product_type === "sale" || formData.product_type === "both",
-        is_purchasable: formData.product_type === "purchase" || formData.product_type === "both",
-        category_id: formData.category_id || null,
-        subcategory_id: formData.subcategory_id || null,
-        organization_id: primaryOrgId,
-        uom_id: priceFormData.uom_id || null,
-      };
+      const isSellable = formData.product_type === "sale" || formData.product_type === "both";
+      const isPurchasable = formData.product_type === "purchase" || formData.product_type === "both";
 
-      if (formData.description) productData.description = formData.description;
-      if (formData.barcode) productData.barcode = formData.barcode;
-      if (formData.brand_id) productData.brand_id = formData.brand_id;
-
-      let productId: string;
-
-      if (editingProduct) {
-        // Update existing product
-        const { error } = await supabase
-          .from("products")
-          .update(productData)
-          .eq("id", editingProduct.id)
-          .eq("organization_id", activeCompany?.id);
-
-        if (error) throw error;
-        productId = editingProduct.id;
-
-        // Update organization associations - delete old ones and insert new
-        await supabase
-          .from("product_organizations")
-          .delete()
-          .eq("product_id", editingProduct.id)
-          .eq("organization_id", activeCompany?.id);
-
-        toast({
-          title: t('products.toast.updateSuccess'),
-        });
-      } else {
-        // Create new product — created_by must be anew_users.id (fail-closed)
-        const insertData: TablesInsert<"products"> = {
-          ...productData,
-          created_by: businessUserId,
-          sku: formData.sku,
-          name: formData.name,
-        };
-        const { data: newProduct, error } = await supabase
-          .from("products")
-          .insert(insertData)
-          .select("id")
-          .single();
-
-        if (error) throw error;
-        productId = newProduct.id;
-
-        toast({
-          title: t('products.toast.createSuccess'),
-        });
-      }
-
-      // Insert organization associations - ALWAYS include primaryOrgId
+      // Build the unique org set exactly like the FE did before: {primaryOrgId} ∪ selection.
       const uniqueOrgIds = new Set<string>();
-      
-      // Always add the primary organization if it exists
       if (primaryOrgId) {
         uniqueOrgIds.add(primaryOrgId);
       }
-      
-      // Add all org IDs from selection
       getAllOrgIds(organizationSelection).forEach(id => uniqueOrgIds.add(id));
-      
-      // Create associations for all unique organizations
-      if (uniqueOrgIds.size > 0) {
-        const orgAssociations = Array.from(uniqueOrgIds).map((orgId) => ({
-          product_id: productId,
-          organization_id: orgId,
-          created_by: businessUserId,
-        }));
+      const allOrgIds = Array.from(uniqueOrgIds);
 
-        const { error: assocError } = await supabase
-          .from("product_organizations")
-          .insert(orgAssociations);
-
-        if (assocError) throw assocError;
-      }
-
-      // Save prices
+      // Reduce prices to only the entries the FE would have written (value > 0).
       const priceTypes: Array<{ type: 'purchase' | 'retail' | 'wholesale' | 'distributor', value: number }> = [
         { type: 'purchase', value: priceFormData.purchase },
         { type: 'retail', value: priceFormData.retail },
         { type: 'wholesale', value: priceFormData.wholesale },
         { type: 'distributor', value: priceFormData.distributor },
       ];
+      const pricesPayload = priceTypes
+        .filter(({ value }) => value && value > 0)
+        .map(({ type, value }) => ({
+          price_type: type,
+          price: value,
+          currency: priceFormData.currency,
+          vat_rate: priceFormData.vat_rate,
+        }));
 
-      for (const { type, value } of priceTypes) {
-        if (value && value > 0) {
-          // Check if price exists
-          const { data: existingPrice } = await supabase
-            .from('product_prices')
-            .select('id')
-            .eq('product_id', productId)
-            .eq('price_type', type)
-            .maybeSingle();
-
-          const priceData = {
-            product_id: productId,
-            price_type: type as 'purchase' | 'retail' | 'wholesale' | 'distributor',
-            price: value,
-            currency: priceFormData.currency as 'EUR' | 'USD' | 'GBP',
-            vat_rate: priceFormData.vat_rate,
-            created_by: businessUserId
-          };
-
-          if (existingPrice) {
-            await supabase.from('product_prices').update(priceData).eq('id', existingPrice.id);
-          } else {
-            await supabase.from('product_prices').insert(priceData);
-          }
-        }
-      }
-
-      // Delete removed attributes
-      const currentAttributeIds = attributeFormData.map(av => av.attribute_id);
-      const { data: existingAttrs } = await supabase
-        .from('product_attribute_values')
-        .select('id, attribute_id')
-        .eq('product_id', productId);
-      
-      if (existingAttrs) {
-        const toDelete = existingAttrs.filter(ea => !currentAttributeIds.includes(ea.attribute_id));
-        for (const del of toDelete) {
-          await supabase.from('product_attribute_values').delete().eq('id', del.id);
-        }
-      }
-
-      // Save attributes
-      for (const av of attributeFormData) {
-        const valueData: TablesInsert<"product_attribute_values"> = {
-          product_id: productId,
-          attribute_id: av.attribute_id
+      // Reduce attribute values into the column already resolved by value_type,
+      // matching the FE's switch exactly.
+      const attributeValuesPayload = attributeFormData.map((av) => {
+        const row: { attribute_id: string; value_text?: string | null; value_number?: number | null; value_bool?: boolean } = {
+          attribute_id: av.attribute_id,
         };
-
         switch (av.attribute?.value_type) {
           case 'text':
           case 'string':
           case 'list':
-            valueData.value_text = av.value_text || null;
+            row.value_text = av.value_text || null;
             break;
           case 'number':
-            valueData.value_number = av.value_number || null;
+            row.value_number = av.value_number || null;
             break;
           case 'boolean':
-            valueData.value_bool = av.value_bool || false;
+            row.value_bool = av.value_bool || false;
             break;
         }
+        return row;
+      });
 
-        // Check if attribute value exists
-        const { data: existingAttr } = await supabase
-          .from('product_attribute_values')
-          .select('id')
-          .eq('product_id', productId)
-          .eq('attribute_id', av.attribute_id)
-          .maybeSingle();
-
-        if (existingAttr) {
-          await supabase.from('product_attribute_values').update(valueData).eq('id', existingAttr.id);
-        } else {
-          await supabase.from('product_attribute_values').insert(valueData);
+      if (editingProduct) {
+        if (!activeCompany?.id) {
+          throw new Error(t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.");
         }
-      }
+        const updateProductArgs: Database['public']['Functions']['rpc_update_product']['Args'] = {
+          p_id: editingProduct.id,
+          p_active_org_id: activeCompany.id,
+          p_sku: formData.sku,
+          p_name: formData.name,
+          p_status: formData.status,
+          p_is_sellable: isSellable,
+          p_is_purchasable: isPurchasable,
+          p_category_id: formData.category_id || null,
+          p_subcategory_id: formData.subcategory_id || null,
+          p_primary_org_id: primaryOrgId,
+          p_uom_id: priceFormData.uom_id || null,
+          p_description: formData.description || null,
+          p_barcode: formData.barcode || null,
+          p_brand_id: formData.brand_id || null,
+          p_supplier_id: selectedSupplierId || null,
+          p_all_org_ids: allOrgIds,
+          p_prices: pricesPayload,
+          p_attribute_ids: attributeFormData.map(av => av.attribute_id),
+          p_attribute_values: attributeValuesPayload,
+        };
+        const { error } = await supabase.rpc('rpc_update_product', updateProductArgs);
 
-      // Save supplier on the product directly
-      await supabase
-        .from("products")
-        .update({ supplier_id: selectedSupplierId || null })
-        .eq("id", productId);
+        if (error) throw error;
+
+        toast({
+          title: t('products.toast.updateSuccess'),
+        });
+      } else {
+        const createProductArgs: Database['public']['Functions']['rpc_create_product']['Args'] = {
+          p_sku: formData.sku,
+          p_name: formData.name,
+          p_status: formData.status,
+          p_is_sellable: isSellable,
+          p_is_purchasable: isPurchasable,
+          p_category_id: formData.category_id || null,
+          p_subcategory_id: formData.subcategory_id || null,
+          p_primary_org_id: primaryOrgId,
+          p_uom_id: priceFormData.uom_id || null,
+          p_description: formData.description || null,
+          p_barcode: formData.barcode || null,
+          p_brand_id: formData.brand_id || null,
+          p_supplier_id: selectedSupplierId || null,
+          p_all_org_ids: allOrgIds,
+          p_prices: pricesPayload,
+          p_attribute_values: attributeValuesPayload,
+        };
+        const { error } = await supabase.rpc('rpc_create_product', createProductArgs);
+
+        if (error) throw error;
+
+        toast({
+          title: t('products.toast.createSuccess'),
+        });
+      }
 
       }); // end withAuditContext
 

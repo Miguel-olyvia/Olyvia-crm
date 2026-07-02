@@ -229,6 +229,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const [needItems, setNeedItems] = useState<Record<string, DealNeedItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [savingNeed, setSavingNeed] = useState(false);
   const [editingNeed, setEditingNeed] = useState<DealNeed | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [expandedNeeds, setExpandedNeeds] = useState<Set<string>>(new Set());
@@ -578,6 +579,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       toast({ title: "Erro", description: "O título é obrigatório.", variant: "destructive" });
       return;
     }
+    setSavingNeed(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
@@ -610,32 +612,29 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         measurements: editingNeed?.measurements || {},
       };
 
-      let needId: string;
-      if (editingNeed) {
-        const { error } = await supabase.from("deal_needs").update(needData).eq("id", editingNeed.id);
-        if (error) throw error;
-        needId = editingNeed.id;
-        await supabase.from("deal_need_items").delete().eq("deal_need_id", needId);
-      } else {
-        const { data: newNeed, error } = await supabase.from("deal_needs")
-          .insert({ ...needData, sort_order: needs.length }).select("id").single();
-        if (error) throw error;
-        needId = newNeed.id;
-      }
+      const itemsPayload = linkedItems.map((li, idx) => ({
+        item_type: li.item_type, product_id: li.product_id, service_id: li.service_id,
+        quantity: li.quantity, unit_price: li.unit_price || 0, notes: li.notes, sort_order: idx,
+      }));
 
-      if (linkedItems.length > 0) {
-        const itemsToInsert = linkedItems.map((li, idx) => ({
-          deal_need_id: needId, product_id: li.product_id, service_id: li.service_id,
-          item_type: li.item_type, quantity: li.quantity, notes: li.notes, sort_order: idx,
-        }));
-        await supabase.from("deal_need_items").insert(itemsToInsert);
-      }
+      // p_update_need_columns=true: this dialog edits the deal_needs fields themselves
+      // (title, priority, custom fields, etc.), unlike the items-only path in Deals.tsx.
+      const { error } = await supabase.rpc("rpc_update_deal_needs", {
+        p_deal_id: dealId,
+        p_need_id: editingNeed?.id || null,
+        p_need_data: { ...needData, sort_order: editingNeed ? undefined : needs.length },
+        p_items: itemsPayload,
+        p_update_need_columns: true,
+      });
+      if (error) throw error;
 
       toast({ title: editingNeed ? "Necessidade atualizada" : "Necessidade adicionada" });
       setDialogOpen(false);
       loadData();
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingNeed(false);
     }
   };
 
@@ -1432,8 +1431,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} size="sm">Cancelar</Button>
-                <Button onClick={handleSubmit} disabled={!formTitle.trim()} size="sm" className="min-w-[100px]">
-                  {editingNeed ? "Guardar" : "Adicionar"}
+                <Button onClick={handleSubmit} disabled={!formTitle.trim() || savingNeed} size="sm" className="min-w-[100px]">
+                  {savingNeed ? "A guardar..." : (editingNeed ? "Guardar" : "Adicionar")}
                 </Button>
               </div>
             </div>

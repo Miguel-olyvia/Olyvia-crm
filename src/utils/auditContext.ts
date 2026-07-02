@@ -17,9 +17,10 @@ import { SupabaseClient } from "@supabase/supabase-js";
 export async function withAuditContext<T>(
   supabase: SupabaseClient,
   userId: string,
-  fn: () => Promise<T>
+  fn: () => PromiseLike<T>,
+  source: string = 'web_app'
 ): Promise<T> {
-  const { error: setCtxError } = await supabase.rpc('set_audit_context', { p_user_id: userId, p_source: 'web_app' });
+  const { error: setCtxError } = await supabase.rpc('set_audit_context', { p_user_id: userId, p_source: source });
   // set_audit_context failure must throw: mutations must NOT proceed without audit context.
   // This is the opposite contract to clear_audit_context (which is suppressed in finally).
   if (setCtxError) throw setCtxError;

@@ -488,6 +488,9 @@ const Proposals = () => {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("");
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkStatusChanging, setIsBulkStatusChanging] = useState(false);
+  const [duplicatingProposalId, setDuplicatingProposalId] = useState<string | null>(null);
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => loadData() });
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
@@ -998,6 +1001,7 @@ const Proposals = () => {
   };
 
   const handleBulkDelete = async () => {
+    setIsBulkDeleting(true);
     try {
       const businessUserIdBulkDel = await resolveCurrentBusinessUserId();
       if (!businessUserIdBulkDel) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
@@ -1012,12 +1016,15 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
   const handleBulkStatusChange = async () => {
     if (!bulkNewStatus) return;
     if (!activeCompany?.id) return;
+    setIsBulkStatusChanging(true);
     try {
       const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
       if (!businessUserIdBulkSt) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
@@ -1036,10 +1043,13 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkStatusChanging(false);
     }
   };
 
   const handleDuplicate = async (proposalId: string) => {
+    setDuplicatingProposalId(proposalId);
     try {
       const { data, error } = await supabase.rpc('duplicate_proposal', {
         source_proposal_id: proposalId,
@@ -1050,6 +1060,8 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: t('proposals.toast.duplicateError'), description: error.message, variant: "destructive" });
+    } finally {
+      setDuplicatingProposalId(null);
     }
   };
 
@@ -1238,10 +1250,94 @@ const Proposals = () => {
         return;
       }
 
+      // Pre-compute inline quotes payload up-front — needed for the RPC call either way
+      // (create or update). Preserves the exact same skip logic: quotes whose lines are
+      // all qt <= 0 are dropped and reported to the user via skippedQuotes/toast below.
+      const inlineQuotesPayload: any[] = [];
+      for (const iq of inlineQuotes) {
+        const validLines = (iq.lines || []).filter(l => l.qt > 0);
+        if (validLines.length === 0) {
+          const reason = (iq.lines || []).length === 0
+            ? "sem linhas"
+            : "todas as linhas com quantidade 0";
+          console.warn('[Proposals.submit] skipping inline quote', { title: iq.title, reason, totalLines: (iq.lines || []).length });
+          skippedQuotes.push({ title: iq.title || "(sem título)", reason });
+          continue;
+        }
+
+        const linesToInsert = validLines.map(l => {
+          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
+          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
+          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
+          const precoSemIvaBase = unitPrice * l.qt;
+          const lineDiscount = l.discount_percent || 0;
+          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const ivaValor = precoSemIva * (l.iva_percent / 100);
+          const totalComIva = precoSemIva + ivaValor;
+          const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
+
+          return {
+            catalog_item_id: l.catalog_item_id || null,
+            product_id: l.product_id || null,
+            service_id: l.service_id || null,
+            selected_attributes: l.selected_attributes || {},
+            descricao_snapshot: l.descricao_snapshot,
+            qt: l.qt,
+            custo_material_unit: l.custo_material_unit,
+            custo_mao_obra_unit: l.custo_mao_obra_unit,
+            margem_percent: l.margem_percent,
+            iva_percent: l.iva_percent,
+            int_percent: l.int_percent,
+            discount_percent: lineDiscount,
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+            ordem: l.ordem,
+            section_name: l.section_name || "Geral",
+            unidade: l.unidade || null,
+            item_description: l.item_description || null,
+            cost_price: l.cost_price || 0,
+          };
+        });
+
+        inlineQuotesPayload.push({
+          title: iq.title || null,
+          obra_notas: iq.obra_notas || null,
+          modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
+          desconto_global_percent: iq.desconto_global_percent,
+          validade_dias: iq.validade_dias,
+          iva_rate: iq.iva_rate,
+          client_notes: iq.client_notes || null,
+          conditions: iq.conditions || null,
+          lines: linesToInsert,
+        });
+      }
+
+      const selectedQuoteIds = selectedQuotes.map(q => q.id);
+      const proposalItemsPayload = proposalItems.map((item, index) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        vat_rate: item.vat_rate,
+        sort_order: index,
+      }));
+
+      // Same cascade used for the inline-quote entity below — passed explicitly to the RPC
+      // because it is NOT the same cascade as proposals.entity_id.
+      const quoteEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || null;
+
+      let savedProposal: any = null;
       if (editingId) {
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { error } = await supabase.from("proposals").update(proposalData).eq("id", editingId);
+        const { data, error } = await supabase.rpc('rpc_update_proposal', {
+          p_id: editingId,
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = editingId;
 
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
@@ -1262,152 +1358,22 @@ const Proposals = () => {
         }
         toast({ title: t('proposals.toast.updateSuccess') });
       } else {
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { data, error } = await supabase.from("proposals").insert({
-          ...proposalData,
-          created_by: businessUserId,
-        }).select("id").single();
+        const { data, error } = await supabase.rpc('rpc_create_proposal', {
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = data.id;
         toast({ title: t('proposals.toast.createSuccess') });
       }
 
       if (savedProposalId) {
-        const proposalEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || proposalData.entity_id || null;
+        const proposalEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || savedProposal?.entity_id || proposalData.entity_id || null;
         await resolveSendProposalAlerts(proposalEntityId, activeCompany.id);
-
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const selectedQuoteIds = selectedQuotes.map(q => q.id);
-        if (selectedQuoteIds.length > 0) {
-          const { error: unlinkError } = await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id).not("id", "in", `(${selectedQuoteIds.join(",")})`);
-          if (unlinkError) console.error("Error unlinking quotes:", unlinkError);
-          const { error: linkError } = await supabase.from("quotes").update({ proposal_id: savedProposalId }).in("id", selectedQuoteIds).eq("organization_id", activeCompany?.id);
-          if (linkError) console.error("Error linking quotes:", linkError);
-        } else {
-          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id);
-        }
-
-        // Save inline quotes
-
-        for (const iq of inlineQuotes) {
-          // Pre-compute valid lines and skip the quote entirely if there is nothing to persist.
-          const validLines = (iq.lines || []).filter(l => l.qt > 0);
-          if (validLines.length === 0) {
-            const reason = (iq.lines || []).length === 0
-              ? "sem linhas"
-              : "todas as linhas com quantidade 0";
-            console.warn('[Proposals.submit] skipping inline quote', { title: iq.title, reason, totalLines: (iq.lines || []).length });
-            skippedQuotes.push({ title: iq.title || "(sem título)", reason });
-            continue;
-          }
-
-          const dealOrgId = selectedDeal ? (selectedDeal as any).organization_id : activeCompany?.id;
-          const quoteEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || null;
-          const quoteData = {
-            deal_id: formData.deal_id || null,
-            entity_id: quoteEntityId,
-            organization_id: dealOrgId || activeCompany?.id || null,
-            root_organization_id: (activeCompany as any)?.parent_id || activeCompany?.id || null,
-            title: iq.title || null,
-            obra_notas: iq.obra_notas || null,
-            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-            desconto_global_percent: iq.desconto_global_percent,
-            estado: "finalizado",
-            validade_dias: iq.validade_dias,
-            iva_rate: iq.iva_rate,
-            client_notes: iq.client_notes || null,
-            conditions: iq.conditions || null,
-            proposal_id: savedProposalId,
-            created_by: businessUserId,
-          };
-
-          const linesToInsert = validLines.map(l => {
-            const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-            const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-            const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-            const precoSemIvaBase = unitPrice * l.qt;
-            const lineDiscount = l.discount_percent || 0;
-            const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
-            const ivaValor = precoSemIva * (l.iva_percent / 100);
-            const totalComIva = precoSemIva + ivaValor;
-            const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
-
-            return {
-              quote_id: "" /* set below */,
-              catalog_item_id: l.catalog_item_id || null,
-              product_id: l.product_id || null,
-              service_id: l.service_id || null,
-              selected_attributes: l.selected_attributes || {},
-              categoria: "",
-              descricao_snapshot: l.descricao_snapshot,
-              qt: l.qt,
-              custo_material_unit: l.custo_material_unit,
-              custo_mao_obra_unit: l.custo_mao_obra_unit,
-              margem_percent: l.margem_percent,
-              iva_percent: l.iva_percent,
-              int_percent: l.int_percent,
-              discount_percent: lineDiscount,
-              total_sem_iva: precoSemIva,
-              total_com_iva: totalComIva,
-              total_com_desconto: totalComDesconto,
-              ordem: l.ordem,
-              section_name: l.section_name || "Geral",
-              unidade: l.unidade || null,
-              item_description: l.item_description || null,
-              cost_price: l.cost_price || 0,
-            };
-          });
-
-          // Validate FK references: drop product_id/service_id/catalog_item_id that don't exist
-          const candidateProductIds = [...new Set(linesToInsert.map(l => l.product_id).filter(Boolean) as string[])];
-          const candidateServiceIds = [...new Set(linesToInsert.map(l => l.service_id).filter(Boolean) as string[])];
-          const candidateCatalogIds = [...new Set(linesToInsert.map(l => l.catalog_item_id).filter(Boolean) as string[])];
-
-          const [existingProductsRes, existingServicesRes, existingCatalogRes] = await Promise.all([
-            candidateProductIds.length > 0 ? supabase.from("products").select("id").in("id", candidateProductIds) : Promise.resolve({ data: [] as any[] }),
-            candidateServiceIds.length > 0 ? supabase.from("services").select("id").in("id", candidateServiceIds) : Promise.resolve({ data: [] as any[] }),
-            candidateCatalogIds.length > 0 ? supabase.from("catalog_items").select("id").in("id", candidateCatalogIds) : Promise.resolve({ data: [] as any[] }),
-          ]);
-          const validProductIds = new Set((existingProductsRes.data || []).map((r: any) => r.id));
-          const validServiceIds = new Set((existingServicesRes.data || []).map((r: any) => r.id));
-          const validCatalogIds = new Set((existingCatalogRes.data || []).map((r: any) => r.id));
-
-          const sanitizedLines = linesToInsert.map(l => ({
-            ...l,
-            product_id: l.product_id && validProductIds.has(l.product_id) ? l.product_id : null,
-            service_id: l.service_id && validServiceIds.has(l.service_id) ? l.service_id : null,
-            catalog_item_id: l.catalog_item_id && validCatalogIds.has(l.catalog_item_id) ? l.catalog_item_id : null,
-          }));
-
-          const totalSemIva = sanitizedLines.reduce((s, l) => s + l.total_sem_iva, 0);
-          const grandTotal = sanitizedLines.reduce((s, l) => s + l.total_com_desconto, 0);
-          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-          const { data: newQuote, error: qError } = await (supabase.from("quotes") as any)
-            .insert({ ...quoteData, subtotal: totalSemIva, total: grandTotal })
-            .select("id")
-            .single();
-
-          if (qError) throw qError;
-
-          const finalLines = sanitizedLines.map(l => ({ ...l, quote_id: newQuote.id }));
-          const { error: linesError } = await supabase.from("quote_lines").insert(finalLines);
-          if (linesError) throw linesError;
-        }
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId).eq("organization_id", activeCompany?.id);
-        if (proposalItems.length > 0) {
-          await supabase.from("proposal_items").insert(
-            proposalItems.map((item, index) => ({
-              proposal_id: savedProposalId,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              vat_rate: item.vat_rate,
-              sort_order: index,
-            }))
-          );
-        }
       }
 
       // If any inline quote was skipped, warn the user explicitly and keep the dialog open
@@ -1807,7 +1773,7 @@ const Proposals = () => {
             onClick={() => { const link = pipelineLinks[proposal.id]; if (link?.contract_id) navigate(`/contracts?open=${link.contract_id}`); }}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} title="Duplicar">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
             <Copy className="w-3.5 h-3.5" />
           </Button>
         </>
@@ -1951,7 +1917,7 @@ const Proposals = () => {
         <DropdownMenuItem onClick={() => { setVisualEditorProposalId(proposal.id); setPortalPreviewOpen(true); }}>
           <Eye className="w-3.5 h-3.5 mr-2" /> Preview Portal
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)}>
+        <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id}>
           <Copy className="w-3.5 h-3.5 mr-2" /> Duplicar
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setSendHistoryProposalId(proposal.id); setSendHistoryProposalTitle(proposal.title); setSendHistoryOpen(true); }}>
@@ -3132,8 +3098,8 @@ const Proposals = () => {
             <AlertDialogDescription>{`Tem a certeza que deseja eliminar ${selectedIds.length} propostas?`}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('common.delete')}</AlertDialogAction>
+            <AlertDialogCancel disabled={isBulkDeleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete} disabled={isBulkDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('common.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -3158,8 +3124,8 @@ const Proposals = () => {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus}>{t('common.save')}</Button>
+            <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)} disabled={isBulkStatusChanging}>{t('common.cancel')}</Button>
+            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus || isBulkStatusChanging}>{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
@@ -115,7 +116,6 @@ import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
   getLeadScopeUserIds,
-  identityContactIsPrimary,
   mapWithConcurrency,
   normalizeLeadScope,
   reconcileRefreshedLead,
@@ -1195,6 +1195,7 @@ export default function AnewLeads() {
         .single();
       const createdBy = userData?.id || null;
 
+      const auditUserId = createdBy || user.id;
       let imported = 0;
       let skipped = 0;
       for (const line of lines.slice(1)) {
@@ -1203,37 +1204,43 @@ export default function AnewLeads() {
         if (!name) { skipped++; continue; }
         const status = statusIdx !== -1 && cols[statusIdx] ? cols[statusIdx] : "new";
 
-        const { data: entityId, error: entityError } = await supabase.rpc(
-          "create_lead_entity_for_org",
-          { p_organization_id: activeCompanyId, p_display_name: name },
-        );
-        if (entityError || !entityId) { skipped++; continue; }
+        try {
+          await withAuditContext(supabase, auditUserId, async () => {
+            const { data: entityId, error: entityError } = await supabase.rpc(
+              "create_lead_entity_for_org",
+              { p_organization_id: activeCompanyId, p_display_name: name },
+            );
+            if (entityError || !entityId) { skipped++; return; }
 
-        const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
-          .insert({
-            organization_id: activeCompanyId,
-            root_organization_id: rootOrgId || activeCompanyId,
-            entity_id: entityId,
-            status,
-            source: "import",
-            field_values: {},
-            created_by: createdBy,
-          })
-          .select("id")
-          .single();
-        if (leadError || !newLead) { skipped++; continue; }
+            const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
+              .insert({
+                organization_id: activeCompanyId,
+                root_organization_id: rootOrgId || activeCompanyId,
+                entity_id: entityId,
+                status,
+                source: "csv_import",
+                field_values: {},
+                created_by: createdBy,
+              })
+              .select("id")
+              .single();
+            if (leadError || !newLead) { skipped++; return; }
 
-        await (supabase.from("anew_entity_roles") as any).upsert({
-          organization_id: activeCompanyId,
-          entity_id: entityId,
-          role: "lead",
-          status: "active",
-          source_type: "lead",
-          source_id: newLead.id,
-          created_by: createdBy,
-        });
+            await (supabase.from("anew_entity_roles") as any).upsert({
+              organization_id: activeCompanyId,
+              entity_id: entityId,
+              role: "lead",
+              status: "active",
+              source_type: "lead",
+              source_id: newLead.id,
+              created_by: createdBy,
+            });
 
-        imported++;
+            imported++;
+          });
+        } catch {
+          skipped++;
+        }
       }
       toast({
         title: "Importação concluída",
@@ -1935,32 +1942,38 @@ export default function AnewLeads() {
 
   // Associate lead with contact (uses converted_to_contact_id → anew_contacts).
   const handleAssociateContact = async (leadId: string, contactId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ converted_to_contact_id: contactId } as any)
-      .eq("id", leadId);
-
-    if (error) {
-      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
-    } else {
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await supabase
+          .from("anew_leads")
+          .update({ converted_to_contact_id: contactId } as any)
+          .eq("id", leadId);
+        if (error) throw error;
+      });
       toast({ title: contactId ? t('leads.toast.contactAssociated') : t('leads.toast.contactRemoved') });
       refreshSingleLead(leadId);
+    } catch (error: any) {
+      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
     }
   };
 
   // Associate lead with client (uses converted_to_client_id → anew_clients).
   // Legacy column client_id references the deprecated `clients` table and must not be used.
   const handleAssociateClient = async (leadId: string, clientId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ converted_to_client_id: clientId } as any)
-      .eq("id", leadId);
-
-    if (error) {
-      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
-    } else {
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await supabase
+          .from("anew_leads")
+          .update({ converted_to_client_id: clientId } as any)
+          .eq("id", leadId);
+        if (error) throw error;
+      });
       toast({ title: clientId ? t('leads.toast.clientAssociated') : t('leads.toast.clientRemoved') });
       refreshSingleLead(leadId);
+    } catch (error: any) {
+      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -2320,113 +2333,45 @@ export default function AnewLeads() {
       }
     }
 
-    // Check if a contact already exists for this entity in this organization (anew_contacts first)
-    let newContact: any = null;
-    if (lead.entity_id) {
-      const { data: existingAnewContact } = await supabase
-        .from("anew_contacts")
-        .select("*")
-        .eq("entity_id", lead.entity_id)
-        .eq("organization_id", lead.organization_id)
-        .maybeSingle();
-      if (existingAnewContact) {
-        newContact = existingAnewContact;
-        // Reactivate and clear previous client conversion metadata
-        const updateFields: Record<string, any> = {};
-        if (existingAnewContact.status !== 'active') updateFields.status = 'active';
-        if (existingAnewContact.converted_to_client_id) {
-          updateFields.converted_to_client_id = null;
-          updateFields.converted_at = null;
-        }
-        if (Object.keys(updateFields).length > 0) {
-          await supabase.from("anew_contacts").update(updateFields as any).eq("id", existingAnewContact.id);
-        }
-      }
-    }
-
-    if (!newContact) {
-      // Determine root_organization_id
-      let rootOrgId = lead.organization_id;
-      const { data: hierarchyData } = await supabase
+    // Determine root_organization_id (still resolved client-side; passed into the RPC)
+    let rootOrgId = lead.organization_id;
+    const { data: hierarchyData } = await supabase
+      .from("anew_hierarchy")
+      .select("parent_org_id")
+      .eq("child_org_id", lead.organization_id)
+      .limit(1)
+      .maybeSingle();
+    if (hierarchyData?.parent_org_id) {
+      const { data: parentH } = await supabase
         .from("anew_hierarchy")
         .select("parent_org_id")
-        .eq("child_org_id", lead.organization_id)
-        .limit(1)
+        .eq("child_org_id", hierarchyData.parent_org_id)
         .maybeSingle();
-      if (hierarchyData?.parent_org_id) {
-        const { data: parentH } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id")
-          .eq("child_org_id", hierarchyData.parent_org_id)
-          .maybeSingle();
-        rootOrgId = parentH?.parent_org_id || hierarchyData.parent_org_id;
-      }
+      rootOrgId = parentH?.parent_org_id || hierarchyData.parent_org_id;
+    }
 
-      // Create in anew_contacts (primary destination)
-      const { data: createdContact, error: contactError } = await supabase
-        .from("anew_contacts")
-        .insert([{
-          organization_id: lead.organization_id,
-          root_organization_id: rootOrgId,
-          entity_id: lead.entity_id || null,
-          position: contactData.position || contactData.job_title || null,
-          notes: contactData.notes || null,
-          source_type: 'lead',
-          source_lead_id: lead.id,
-          created_by: convertedByUserId,
-          assigned_to: lead.assigned_to,
-          status: 'active',
-        }])
-        .select()
-        .single();
+    const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
 
-      if (contactError) {
-        toast({ title: t('leads.toast.createContactError'), description: contactError.message, variant: "destructive" });
+    let newContact: any = null;
+    try {
+      const { data, error: convertError } = await withAuditContext(supabase, convertedByUserId, async () =>
+        await supabase.rpc("rpc_convert_lead_to_contact", {
+          p_lead_id: lead.id,
+          p_contact_data: contactData,
+          p_root_organization_id: rootOrgId,
+          p_campaign_id: newCampaignId,
+        })
+      );
+
+      if (convertError) {
+        toast({ title: t('leads.toast.updateLeadError'), description: convertError.message, variant: "destructive" });
         return;
       }
-      newContact = createdContact;
+      newContact = data;
+    } catch (error: any) {
+      toast({ title: t('leads.toast.updateLeadError'), description: error?.message || String(error), variant: "destructive" });
+      return;
     }
-
-    // Entity role management: create contact role and inactivate lead role
-    if (lead.entity_id && lead.organization_id) {
-      const { data: existingContactRole } = await supabase
-        .from("anew_entity_roles")
-        .select("id")
-        .eq("entity_id", lead.entity_id)
-        .eq("role", "contact")
-        .eq("organization_id", lead.organization_id)
-        .maybeSingle();
-      if (!existingContactRole) {
-        await supabase.from("anew_entity_roles").insert({
-          entity_id: lead.entity_id,
-          role: "contact",
-          status: "active",
-          organization_id: lead.organization_id,
-          source_type: "lead",
-          source_id: lead.id,
-          created_by: convertedByUserId,
-        });
-      } else {
-        await supabase.from("anew_entity_roles").update({ status: "active" }).eq("id", existingContactRole.id);
-      }
-      // Inactivate lead role
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('organization_id', lead.organization_id)
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'lead');
-      // Deactivate client role ONLY in the lead's own organization (not cross-org)
-      // This allows the converted contact to appear in the contacts list for this org
-      // without affecting client roles the entity may have in other organizations
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('organization_id', lead.organization_id)
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'client');
-    }
-
 
     // Sync primary address from lead.field_values (safe orchestrator)
     if (lead.entity_id && lead.field_values) {
@@ -2442,35 +2387,6 @@ export default function AnewLeads() {
       } catch (e) {
         console.error("[address-sync/convert] failed", e);
       }
-    }
-
-    // Update lead status
-    const updateData: Record<string, any> = {
-      status: "converted",
-      converted_to_contact_id: newContact.id,
-      converted_at: new Date().toISOString(),
-      converted_by: convertedByUserId
-    };
-    if (selectedCampaignId && !lead.campaign_id) {
-      updateData.campaign_id = selectedCampaignId;
-    }
-
-    const { error: leadError } = await supabase
-      .from("anew_leads")
-      .update(updateData as any)
-      .eq("id", lead.id);
-
-    if (leadError) {
-      toast({ title: t('leads.toast.updateLeadError'), description: leadError.message, variant: "destructive" });
-      return;
-    }
-
-    // Update entity first_name/last_name
-    if (lead.entity_id && (firstName || lastName)) {
-      const entityNameUpdate: Record<string, any> = {};
-      if (firstName) entityNameUpdate.first_name = firstName;
-      if (lastName) entityNameUpdate.last_name = lastName;
-      await supabase.from("anew_entities").update(entityNameUpdate as any).eq("id", lead.entity_id);
     }
 
     // Entity status stays 'active' — role transition handled by sync_contact_entity_role trigger
@@ -2561,7 +2477,10 @@ export default function AnewLeads() {
       sourceContactId = contactRows?.[0]?.id || null;
     }
 
-    let clientId: string | null = null;
+    // Detect whether a client facet already existed for this entity/root-org,
+    // purely to preserve the "reused vs newly created" toast copy below —
+    // the actual reuse-or-create decision itself now happens inside the RPC.
+    let clientAlreadyExisted = false;
     if (lead.entity_id) {
       const { data: existingClients, error: existingClientError } = await supabase
         .from("anew_clients")
@@ -2572,116 +2491,43 @@ export default function AnewLeads() {
         .limit(1);
 
       if (existingClientError) throw existingClientError;
-      clientId = existingClients?.[0]?.id || null;
+      clientAlreadyExisted = !!existingClients?.[0]?.id;
     }
 
-    if (!clientId) {
-      const { data: newClient, error: clientError } = await supabase
-        .from("anew_clients")
-        .insert([{
-          organization_id: lead.organization_id,
-          root_organization_id: rootOrgId,
-          entity_id: lead.entity_id || null,
-          client_type: clientType,
-          source_type: sourceContactId ? 'contact' : 'lead',
-          source_id: sourceContactId || lead.id,
-          status: 'active',
-          created_by: convertedByUserId,
-          assigned_to: lead.assigned_to,
-        }])
-        .select("id")
-        .single();
+    const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
 
-      if (clientError) {
-        toast({ title: t('leads.toast.createClientError'), description: clientError.message, variant: "destructive" });
+    const clientDataForRpc = {
+      ...clientData,
+      first_name: firstName,
+      last_name: lastName,
+      company_name: companyName,
+    };
+
+    let client: any = null;
+    try {
+      const { data, error: convertError } = await withAuditContext(supabase, convertedByUserId, async () =>
+        await supabase.rpc("rpc_convert_lead_to_client", {
+          p_lead_id: lead.id,
+          p_client_data: clientDataForRpc,
+          p_root_organization_id: rootOrgId,
+          p_source_contact_id: sourceContactId,
+          p_campaign_id: newCampaignId,
+        })
+      );
+
+      if (convertError) {
+        toast({ title: t('leads.toast.updateLeadError'), description: convertError.message, variant: "destructive" });
         return;
       }
-
-      clientId = newClient.id;
-    }
-
-    const nowIso = new Date().toISOString();
-    const updateData: Record<string, any> = {
-      status: "converted",
-      converted_to_client_id: clientId,
-      converted_to_contact_id: sourceContactId,
-      converted_at: nowIso,
-      converted_by: convertedByUserId,
-    };
-    if (selectedCampaignId && !lead.campaign_id) {
-      updateData.campaign_id = selectedCampaignId;
-    }
-
-    const { error: leadError } = await supabase
-      .from("anew_leads")
-      .update(updateData as any)
-      .eq("id", lead.id);
-
-    if (leadError) {
-      toast({ title: t('leads.toast.updateLeadError'), description: leadError.message, variant: "destructive" });
+      client = data;
+    } catch (error: any) {
+      toast({ title: t('leads.toast.updateLeadError'), description: error?.message || String(error), variant: "destructive" });
       return;
     }
 
-    if (sourceContactId && clientId) {
-      const contactUpdateQuery: any = supabase
-        .from("anew_contacts")
-        .update({ converted_to_client_id: clientId, converted_at: nowIso, status: "inactive" })
-        .eq("entity_id", lead.entity_id)
-        .eq("organization_id", lead.organization_id);
-      await contactUpdateQuery;
-    }
+    const clientId = client?.id ?? null;
 
-    if (lead.entity_id) {
-      const entityNameUpdate: Record<string, any> = {};
-      if (firstName) entityNameUpdate.first_name = firstName;
-      if (lastName) entityNameUpdate.last_name = lastName;
-      if (companyName && clientType === 'company') entityNameUpdate.display_name = companyName;
-      if (Object.keys(entityNameUpdate).length > 0) {
-        await supabase.from("anew_entities").update(entityNameUpdate as any).eq("id", lead.entity_id);
-      }
-
-      const { data: existingClientRoleRows, error: clientRoleLookupError } = await supabase
-        .from("anew_entity_roles")
-        .select("id")
-        .eq("entity_id", lead.entity_id)
-        .eq("role", "client")
-        .eq("organization_id", lead.organization_id)
-        .order("created_at", { ascending: true })
-        .limit(1);
-      if (clientRoleLookupError) throw clientRoleLookupError;
-
-      const existingClientRoleId = existingClientRoleRows?.[0]?.id;
-      if (!existingClientRoleId) {
-        await supabase.from("anew_entity_roles").insert({
-          entity_id: lead.entity_id,
-          role: "client",
-          status: "active",
-          organization_id: lead.organization_id,
-          source_type: sourceContactId ? "contact" : "lead",
-          source_id: sourceContactId || lead.id,
-          created_by: convertedByUserId,
-        });
-      } else {
-        await supabase.from("anew_entity_roles").update({ status: "active" }).eq("id", existingClientRoleId);
-      }
-
-      // Deactivate lead and contact roles ONLY in the lead's own organization
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'lead')
-        .eq('organization_id', lead.organization_id);
-
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'contact')
-        .eq('organization_id', lead.organization_id);
-    }
-
-    toast({ title: t('leads.toast.convertedToClient'), description: clientId ? 'Cliente sincronizado sem duplicar registos.' : t('leads.toast.newClientCreated') });
+    toast({ title: t('leads.toast.convertedToClient'), description: clientAlreadyExisted ? 'Cliente sincronizado sem duplicar registos.' : t('leads.toast.newClientCreated') });
     setShowDetails(false);
     loadLeads();
     loadStatusCounts();
@@ -3216,103 +3062,31 @@ export default function AnewLeads() {
           return;
         }
 
-        // ─── Critical sequential writes (each may trigger rollback on failure) ───
-
-        // Email handling — dedupe by ilike; for reused entity, snapshot+deactivate primary first.
-        if (emailValue) {
-          const existing = await assertNoSupabaseError<{ id: string } | null>(
-            supabase
-              .from("anew_entity_emails")
-              .select("id")
-              .eq("entity_id", entityId)
-              .ilike("email", emailValue)
-              .maybeSingle(),
-            "lookup existing email",
-          );
-          if (!existing) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_emails") as any)
-                .insert({
-                  entity_id: entityId, email: emailValue, email_type: 'personal',
-                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
-                })
-                .select("id")
-                .single(),
-              "insert email",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_emails", id: inserted.id });
-          }
-        }
-
-        // Phone handling — dedupe by 7-digit suffix; same snapshot semantics for reused entity.
-        if (phoneValue) {
-          const digits = String(phoneValue).replace(/\D/g, "");
-          const suffix = digits.length >= 7 ? digits.slice(-7) : digits;
-          let exists = false;
-          if (suffix.length >= 7) {
-            const rows = await assertNoSupabaseError<Array<{ id: string; phone_number: string | null }>>(
-              supabase
-                .from("anew_entity_phones")
-                .select("id, phone_number")
-                .eq("entity_id", entityId),
-              "lookup existing phone",
-            );
-            exists = (rows || []).some((r: any) => {
-              const d = String(r.phone_number || "").replace(/\D/g, "");
-              return d.length >= 7 && d.slice(-7) === suffix;
-            });
-          }
-          if (!exists) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_phones") as any)
-                .insert({
-                  entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
-                })
-                .select("id")
-                .single(),
-              "insert phone",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_phones", id: inserted.id });
-          }
-        }
-
-        // --- Lead INSERT ---
+        // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
         const assignedTo = newLeadValues._assigned_to || null;
         const { _assigned_to, ...cleanFieldValues } = newLeadValues;
+        const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
+          ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
+          : "manual";
+        const resolvedSourceId = (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null;
 
-        const newLead = await assertNoSupabaseError<{ id: string }>(
-          (supabase.from("anew_leads") as any)
-            .insert({
-              campaign_id: createLeadCampaignId || null,
-              organization_id: activeCompanyId,
-              root_organization_id: resolvedRootOrgId,
-              field_values: cleanFieldValues,
-              status: "new",
-              source: (createLeadSourceId && createLeadSourceId !== "none")
-                ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
-                : "manual",
-              source_id: (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null,
-              created_by: createdByResolved,
-              entity_id: entityId,
-              assigned_to: assignedTo,
-            })
-            .select("id")
-            .single(),
-          "insert lead",
+        const newLead = await assertNoSupabaseError(
+          supabase.rpc("rpc_create_lead_manual", {
+            p_organization_id: activeCompanyId,
+            p_root_organization_id: resolvedRootOrgId,
+            p_entity_id: entityId,
+            p_entity_created_here: entityCreatedHere,
+            p_field_values: cleanFieldValues,
+            p_email: emailValue || null,
+            p_phone: phoneValue || null,
+            p_source: resolvedSourceName,
+            p_source_id: resolvedSourceId,
+            p_campaign_id: createLeadCampaignId || null,
+            p_assigned_to: assignedTo,
+          }),
+          "create lead (manual)",
         );
         if (newLead?.id) createdIds.push({ table: "anew_leads", id: newLead.id });
-
-        // --- Role upsert = COMMIT POINT ---
-        if (activeCompanyId && newLead) {
-          await assertNoSupabaseError(
-            (supabase.from("anew_entity_roles") as any).upsert({
-              organization_id: activeCompanyId, entity_id: entityId, role: 'lead',
-              status: 'active', source_type: 'lead', source_id: newLead.id, created_by: createdByResolved,
-            }, { onConflict: 'organization_id,entity_id,role' }),
-            "upsert role",
-          );
-        }
         dbCommitted = true;
 
         // Capture for post-commit
@@ -3320,9 +3094,7 @@ export default function AnewLeads() {
         newLeadIdForPostCommit = newLead?.id || null;
         cleanFieldValuesForPostCommit = cleanFieldValues;
         assignedToForPostCommit = assignedTo;
-        selectedLeadSourceNameForPostCommit = (createLeadSourceId && createLeadSourceId !== "none")
-          ? (leadSources.find((s) => s.id === createLeadSourceId)?.name || "manual")
-          : "manual";
+        selectedLeadSourceNameForPostCommit = resolvedSourceName;
         coherenceWarningForPostCommit = coherenceWarning;
         entityReusedForPostCommit = entityWasResolved;
 
@@ -3552,83 +3324,30 @@ export default function AnewLeads() {
           }
         }
 
-        // Sequential email — only for reused entity do we snapshot the existing primary.
-        if (emailValue) {
-          const existing = await assertNoSupabaseError<{ id: string } | null>(
-            supabase
-              .from("anew_entity_emails")
-              .select("id")
-              .eq("entity_id", entityId)
-              .ilike("email", emailValue)
-              .maybeSingle(),
-            "lookup existing email (create-anyway)",
-          );
-          if (!existing) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_emails") as any).insert({
-                entity_id: entityId, email: emailValue, email_type: 'personal',
-                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
-              }).select("id").single(),
-              "insert email (create-anyway)",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_emails", id: inserted.id });
-          }
-        }
-
-        if (phoneValue) {
-          const digits = String(phoneValue).replace(/\D/g, "");
-          const suffix = digits.length >= 7 ? digits.slice(-7) : digits;
-          let exists = false;
-          if (suffix.length >= 7) {
-            const rows = await assertNoSupabaseError<Array<{ id: string; phone_number: string | null }>>(
-              supabase.from("anew_entity_phones").select("id, phone_number").eq("entity_id", entityId),
-              "lookup existing phone (create-anyway)",
-            );
-            exists = (rows || []).some((r: any) => {
-              const d = String(r.phone_number || "").replace(/\D/g, "");
-              return d.length >= 7 && d.slice(-7) === suffix;
-            });
-          }
-          if (!exists) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_phones") as any).insert({
-                entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
-              }).select("id").single(),
-              "insert phone (create-anyway)",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_phones", id: inserted.id });
-          }
-        }
-
+        // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
         const { _assigned_to, ...cleanFieldValues } = fieldValues;
-        const newLead = await assertNoSupabaseError<{ id: string }>(
-          (supabase.from("anew_leads") as any).insert({
-            campaign_id: createLeadCampaignId || null,
-            organization_id: activeCompanyId,
-            root_organization_id: resolvedRootOrgId,
-            field_values: cleanFieldValues,
-            status: "new",
-            source: (createLeadSourceId && createLeadSourceId !== "none") ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual") : "manual",
-            source_id: (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null,
-            created_by: createdBy,
-            entity_id: entityId,
-            assigned_to: assignedTo,
-          }).select("id").single(),
-          "insert lead (create-anyway)",
+        const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
+          ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
+          : "manual";
+        const resolvedSourceId = (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null;
+
+        const newLead = await assertNoSupabaseError(
+          supabase.rpc("rpc_create_lead_duplicate_override", {
+            p_organization_id: activeCompanyId,
+            p_root_organization_id: resolvedRootOrgId,
+            p_entity_id: entityId,
+            p_entity_created_here: entityCreatedHere,
+            p_field_values: cleanFieldValues,
+            p_email: emailValue || null,
+            p_phone: phoneValue || null,
+            p_source: resolvedSourceName,
+            p_source_id: resolvedSourceId,
+            p_campaign_id: createLeadCampaignId || null,
+            p_assigned_to: assignedTo,
+          }),
+          "create lead (create-anyway)",
         );
         if (newLead?.id) createdIds.push({ table: "anew_leads", id: newLead.id });
-
-        // Role upsert = commit point
-        if (activeCompanyId && newLead) {
-          await assertNoSupabaseError(
-            (supabase.from("anew_entity_roles") as any).upsert({
-              organization_id: activeCompanyId, entity_id: entityId, role: 'lead',
-              status: 'active', source_type: 'lead', source_id: newLead.id, created_by: createdBy,
-            }, { onConflict: 'organization_id,entity_id,role' }),
-            "upsert role (create-anyway)",
-          );
-        }
         dbCommitted = true;
 
         entityIdForPostCommit = entityId;
@@ -3868,16 +3587,25 @@ export default function AnewLeads() {
   }, [createLeadCampaignId, availableForms]);
 
   const handleDeleteLead = useCallback(async (id: string) => {
-    const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    let rpcError: any = null;
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+        rpcError = error;
+      });
+    } catch (error: any) {
+      rpcError = error;
+    }
 
-    if (error) {
-      toast({ title: t('leads.toast.deleteError'), description: error.message, variant: "destructive" });
+    if (rpcError) {
+      toast({ title: t('leads.toast.deleteError'), description: rpcError.message, variant: "destructive" });
     } else {
       toast({ title: t('leads.toast.deleteSuccess') });
       setLeads(prev => prev.filter(l => l.id !== id));
       loadStatusCounts();
     }
-  }, [toast, t, loadStatusCounts]);
+  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId]);
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
@@ -3899,10 +3627,17 @@ export default function AnewLeads() {
     if (selectedLeadIds.length === 0) return;
 
     setIsBulkDeleting(true);
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     let firstError: any = null;
-    for (const id of selectedLeadIds) {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
-      if (error && !firstError) firstError = error;
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        for (const id of selectedLeadIds) {
+          const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+          if (error && !firstError) firstError = error;
+        }
+      });
+    } catch (error: any) {
+      firstError = error;
     }
 
     if (firstError) {
@@ -3918,104 +3653,119 @@ export default function AnewLeads() {
 
   const handleBulkStatusChange = async (newStatus: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     // Find matching workflow stage
     const matchingStage = workflowStages.find(s => s.name === newStatus);
     const updatePayload: any = { status: newStatus };
     if (matchingStage?.id) {
       updatePayload.workflow_stage_id = matchingStage.id;
     }
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updatePayload)
-      .in("id", selectedLeadIds);
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updatePayload).in("id", selectedLeadIds)
+      );
 
-    if (error) {
-      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Status atualizado para ${selectedLeadIds.length} lead(s)` });
-      // Execute workflow for each lead BEFORE reloading
-      if (matchingStage?.id && activeCompanyId) {
-        const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
-          const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-              body: {
-                source_entity: 'lead',
-                entity_id: leadId,
-                new_stage_id: matchingStage.id,
-                organization_id: activeCompanyId,
-                triggered_by: scopeAuthUserId,
-              }
-            });
-          if (workflowError) {
-            throw workflowError;
-          }
-          return leadId;
-        });
-        const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
-        if (failedWorkflows.length > 0) {
-          console.error("Bulk workflow execution failures:", failedWorkflows);
-          toast({
-            title: "Status atualizado com automações incompletas",
-            description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos.`,
-            variant: "destructive",
+      if (error) {
+        toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: `Status atualizado para ${selectedLeadIds.length} lead(s)` });
+        // Execute workflow for each lead BEFORE reloading
+        if (matchingStage?.id && activeCompanyId) {
+          const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
+            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+                body: {
+                  source_entity: 'lead',
+                  entity_id: leadId,
+                  new_stage_id: matchingStage.id,
+                  organization_id: activeCompanyId,
+                  triggered_by: scopeAuthUserId,
+                }
+              });
+            if (workflowError) {
+              throw workflowError;
+            }
+            return leadId;
           });
+          const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
+          if (failedWorkflows.length > 0) {
+            console.error("Bulk workflow execution failures:", failedWorkflows);
+            toast({
+              title: "Status atualizado com automações incompletas",
+              description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos.`,
+              variant: "destructive",
+            });
+          }
         }
+        setSelectedLeadIds([]);
+        // Reload AFTER workflow completes
+        loadLeads();
+        loadStatusCounts();
       }
-      setSelectedLeadIds([]);
-      // Reload AFTER workflow completes
-      loadLeads();
-      loadStatusCounts();
+    } catch (error: any) {
+      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const handleBulkContactResultChange = async (resultId: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
-    const updateData = resultId === "clear" 
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updateData = resultId === "clear"
       ? { last_contact_result: null }
       : { last_contact_result: resultId, last_contact_at: new Date().toISOString() };
-    
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updateData)
-      .in("id", selectedLeadIds);
 
-    if (error) {
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      );
+
+      if (error) {
+        toast({ title: "Erro ao atualizar resultado", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: `Resultado atualizado para ${selectedLeadIds.length} lead(s)` });
+        setSelectedLeadIds([]);
+        loadLeads();
+        loadStatusCounts();
+      }
+    } catch (error: any) {
       toast({ title: "Erro ao atualizar resultado", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Resultado atualizado para ${selectedLeadIds.length} lead(s)` });
-      setSelectedLeadIds([]);
-      loadLeads();
-      loadStatusCounts();
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const handleBulkAssigneeChange = async (userId: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
-    const updateData = userId === "clear" 
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updateData = userId === "clear"
       ? { assigned_to: null }
       : { assigned_to: userId };
-    
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updateData)
-      .in("id", selectedLeadIds);
 
-    if (error) {
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      );
+
+      if (error) {
+        toast({ title: "Erro ao atualizar atribuído", description: error.message, variant: "destructive" });
+      } else {
+        toast({ title: `Atribuição atualizada para ${selectedLeadIds.length} lead(s)` });
+        setSelectedLeadIds([]);
+        loadLeads();
+        loadStatusCounts();
+      }
+    } catch (error: any) {
       toast({ title: "Erro ao atualizar atribuído", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Atribuição atualizada para ${selectedLeadIds.length} lead(s)` });
-      setSelectedLeadIds([]);
-      loadLeads();
-      loadStatusCounts();
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const toggleLeadSelection = useCallback((leadId: string, e?: React.MouseEvent) => {
@@ -6393,6 +6143,7 @@ export default function AnewLeads() {
           companyId={activeCompanyId || ""}
           companyUsers={companyUsers}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          userId={scopeAnewUserId || scopeAuthUserId || ""}
         />
 
         {/* Visit Reassign Dialog */}

@@ -46,6 +46,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveOrganizationEntityId } from "@/utils/orgEntity";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Organization {
   id: string;
@@ -399,7 +400,11 @@ export default function OrganizationDetail() {
 
   const handleRemoveMember = (memberId: string) => { setDeleteType('member'); setDeleteItemId(memberId); setDeleteDialogOpen(true); };
   const confirmRemoveMember = async (memberId: string) => {
-    const { error } = await (supabase as any).from("anew_memberships").delete().eq("id", memberId);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_memberships").delete().eq("id", memberId)
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.deleted")); fetchMembers();
   };
@@ -412,7 +417,9 @@ export default function OrganizationDetail() {
     const insertData = hierarchyForm.type === "parent"
       ? { parent_org_id: hierarchyForm.organization_id, child_org_id: id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId }
       : { parent_org_id: id, child_org_id: hierarchyForm.organization_id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId };
-    const { error } = await (supabase as any).from("anew_hierarchy").insert(insertData);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").insert(insertData)
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.created"));
     setIsAddHierarchyOpen(false);
@@ -434,19 +441,21 @@ export default function OrganizationDetail() {
       nif: hasFiscalData ? newOrgFormData.nif : null,
     });
 
-    const { error: createError } = await (supabase as any)
-      .from("anew_organizations")
-      .insert({
-        id: newOrgId,
-        name: newOrgName,
-        type: finalType || "departamento",
-        description: newOrgFormData.description || null,
-        status: newOrgFormData.status || "active",
-        sector: newOrgFormData.sector || null,
-        is_fiscal: newOrgFormData.isFiscal,
-        entity_id: entityId,
-        created_by: businessUserId,
-      });
+    const { error: createError } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any)
+        .from("anew_organizations")
+        .insert({
+          id: newOrgId,
+          name: newOrgName,
+          type: finalType || "departamento",
+          description: newOrgFormData.description || null,
+          status: newOrgFormData.status || "active",
+          sector: newOrgFormData.sector || null,
+          is_fiscal: newOrgFormData.isFiscal,
+          entity_id: entityId,
+          created_by: businessUserId,
+        })
+    );
 
     if (createError) { toast.error(createError.message); return; }
 
@@ -457,14 +466,18 @@ export default function OrganizationDetail() {
     const insertData = hierarchyForm.type === "parent"
       ? { parent_org_id: newOrgId, child_org_id: id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId }
       : { parent_org_id: id, child_org_id: newOrgId, relationship_type: "parent_of", is_primary: true, created_by: businessUserId };
-    const { error: hierarchyError } = await (supabase as any).from("anew_hierarchy").insert(insertData);
+    const { error: hierarchyError } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").insert(insertData)
+    );
     if (hierarchyError) { toast.error(hierarchyError.message); return; }
 
     if (userData.user?.id) {
-      const { error: bootstrapError } = await (supabase as any).rpc("bootstrap_org_creator", {
-        p_organization_id: newOrgId,
-        p_organization_name: newOrgName,
-      });
+      const { error: bootstrapError } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("bootstrap_org_creator", {
+          p_organization_id: newOrgId,
+          p_organization_name: newOrgName,
+        })
+      );
       if (bootstrapError) {
         console.error("Bootstrap error, falling back:", bootstrapError);
         await assignCreatorAsOrgAdmin(newOrgId, newOrgName, userData.user.id);
@@ -473,12 +486,14 @@ export default function OrganizationDetail() {
 
     for (const addr of newOrgFormData.addresses) {
       if (addr.street && addr.number && addr.city && addr.postal_code) {
-        await (supabase as any).rpc('assign_address_to_org', {
-          p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
-          p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-          p_city: addr.city, p_district: addr.district || null, p_country: addr.country || 'PT',
-          p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-        });
+        await withAuditContext(supabase, businessUserId, () =>
+          (supabase as any).rpc('assign_address_to_org', {
+            p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
+            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
+            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || 'PT',
+            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
+          })
+        );
       }
     }
 
@@ -503,9 +518,13 @@ export default function OrganizationDetail() {
   };
   const handleSaveChildEdit = async () => {
     if (!editingChild || !editChildForm.name) { toast.error(t("common.required")); return; }
-    const { error } = await (supabase as any).from("anew_organizations")
-      .update({ name: editChildForm.name, type: editChildForm.type, description: editChildForm.description || null })
-      .eq("id", editingChild.id);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_organizations")
+        .update({ name: editChildForm.name, type: editChildForm.type, description: editChildForm.description || null })
+        .eq("id", editingChild.id)
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.saved"));
     setIsEditChildOpen(false); setEditingChild(null); setEditChildForm({ name: "", type: "", description: "" });

@@ -12,6 +12,7 @@ import { TrendingUp, TrendingDown, DollarSign, AlertTriangle, Percent } from "lu
 import { calculateMargin, formatMarginBadge } from "@/utils/productsExportImport";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductPricesDialogProps {
   open: boolean;
@@ -135,40 +136,42 @@ export default function ProductPricesDialog({
         { type: 'promotional', value: finalPromotionalPrice }
       ];
 
-      for (const { type, value } of priceTypes) {
-        if (value && value > 0) {
-          const priceData: any = {
-            product_id: productId,
-            price_type: type,
-            price: value,
-            currency: prices.currency,
-            vat_rate: prices.vat_rate,
-            created_by: businessUserId
-          };
+      await withAuditContext(supabase, businessUserId, async () => {
+        for (const { type, value } of priceTypes) {
+          if (value && value > 0) {
+            const priceData: any = {
+              product_id: productId,
+              price_type: type,
+              price: value,
+              currency: prices.currency,
+              vat_rate: prices.vat_rate,
+              created_by: businessUserId
+            };
 
-          if (type === 'promotional') {
-            if (prices.promo_from) priceData.valid_from = prices.promo_from;
-            if (prices.promo_to) priceData.valid_to = prices.promo_to;
-          }
+            if (type === 'promotional') {
+              if (prices.promo_from) priceData.valid_from = prices.promo_from;
+              if (prices.promo_to) priceData.valid_to = prices.promo_to;
+            }
 
-          if (existingPriceIds[type]) {
-            // Update existing price
-            const { error } = await supabase
-              .from('product_prices')
-              .update(priceData)
-              .eq('id', existingPriceIds[type]);
-            
-            if (error) throw error;
-          } else {
-            // Insert new price
-            const { error } = await supabase
-              .from('product_prices')
-              .insert(priceData);
-            
-            if (error) throw error;
+            if (existingPriceIds[type]) {
+              // Update existing price
+              const { error } = await supabase
+                .from('product_prices')
+                .update(priceData)
+                .eq('id', existingPriceIds[type]);
+
+              if (error) throw error;
+            } else {
+              // Insert new price
+              const { error } = await supabase
+                .from('product_prices')
+                .insert(priceData);
+
+              if (error) throw error;
+            }
           }
         }
-      }
+      });
 
       toast({
         title: t('productPrices.toast.updateSuccess')

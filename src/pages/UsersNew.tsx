@@ -40,6 +40,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -1015,54 +1016,23 @@ export default function UsersNew() {
         filteredCustomAttributes.social_linkedin = formSocialLinks.linkedin || null;
         filteredCustomAttributes.social_angellist = formSocialLinks.angellist || null;
 
-        console.log("[UserEdit] Updating anew_users for", selectedUser.id);
-        const { error: updateError } = await supabase
-          .from("anew_users")
-          .update({
-            name: formData.name,
-            email: primaryEmail,
-            phone: primaryPhoneFormatted,
-            status: formData.status,
-            description: formData.description || null,
-            position: formData.position || null,
-            location: formData.location || null,
-            template_id: formTemplateId || null,
-            custom_attributes: filteredCustomAttributes,
-          })
-          .eq("id", selectedUser.id);
+        const existingMembershipIds = (selectedUser.memberships || []).map(m => m.id);
 
-        if (updateError) {
-          console.error("[UserEdit] anew_users update failed:", updateError);
-          throw updateError;
-        }
+        const validAddressesForRpc = isAddressVisible() ? prepareValidAddresses(formAddresses) : null;
 
-        // Backfill: users created before the entity migration may have no entity_id.
-        // Create one now so the rest of the save can proceed normally.
-        let effectiveEntityId: string = selectedUser.entity_id ?? "";
-        if (!effectiveEntityId) {
-          const { data: newEntity, error: entityCreateError } = await (supabase as any)
-            .from("anew_entities")
-            .insert({ type: "person", display_name: formData.name, created_by: createdBy })
-            .select("id")
-            .single();
-          if (entityCreateError) {
-            console.error("[UserEdit] Failed to create entity for user:", entityCreateError);
-            throw new Error("Não foi possível criar o registo de identidade do utilizador.");
-          }
-          effectiveEntityId = newEntity.id;
-          await supabase.from("anew_users").update({ entity_id: effectiveEntityId }).eq("id", selectedUser.id);
-        }
-
-        await (supabase as any)
-          .from("anew_entities")
-          .update({ display_name: formData.name, updated_at: new Date().toISOString() })
-          .eq("id", effectiveEntityId);
-
-        // Use canonical entity_id, NOT anew_users.id, for entity-keyed tables.
-        // Atomic upsert via RPC (rolls back if any sub-step fails).
-        console.log("[UserEdit] Upserting identity for entity", effectiveEntityId);
-        const { error: identityError } = await (supabase as any).rpc("upsert_entity_identity", {
-          p_entity_id: effectiveEntityId,
+        console.log("[UserEdit] Calling rpc_update_user for", selectedUser.id);
+        const { error: rpcError } = await supabase.rpc("rpc_update_user", {
+          p_user_id: selectedUser.id,
+          p_entity_id: selectedUser.entity_id ?? null,
+          p_name: formData.name,
+          p_email: primaryEmail,
+          p_phone: primaryPhoneFormatted,
+          p_status: formData.status,
+          p_description: formData.description || null,
+          p_position: formData.position || null,
+          p_location: formData.location || null,
+          p_template_id: formTemplateId || null,
+          p_custom_attributes: filteredCustomAttributes,
           p_emails: formEmails.map((e) => ({
             email: e.email,
             email_type: e.email_type,
@@ -1074,77 +1044,27 @@ export default function UsersNew() {
             phone_type: p.phone_type,
             is_primary: p.is_primary,
           })),
-          p_addresses: null, // addresses handled separately further down
-          p_created_by: createdBy,
+          p_memberships: formMemberships.map((m) => ({
+            id: m.id ?? null,
+            organization_id: m.organization_id,
+            relationship_type: m.relationship_type,
+            role_id: m.role_id,
+          })),
+          p_existing_membership_ids: existingMembershipIds,
+          p_pending_scopes: pendingScopeChanges,
+          p_addresses: validAddressesForRpc,
+          p_fiscal: formFiscalData.nif
+            ? {
+                nif: formFiscalData.nif,
+                commercial_name: formFiscalData.commercial_name || null,
+                country_code: formFiscalData.country_code,
+              }
+            : null,
         });
-        if (identityError) {
-          console.error("[UserEdit] upsert_entity_identity failed:", identityError);
-          throw identityError;
-        }
 
-        const existingMembershipIds = (selectedUser.memberships || []).map(m => m.id);
-        const formMembershipIds = formMemberships.filter(m => m.id).map(m => m.id);
-        const toDelete = existingMembershipIds.filter(id => !formMembershipIds.includes(id));
-
-        if (toDelete.length > 0) {
-          await supabase
-            .from("anew_membership_permission_scopes")
-            .delete()
-            .in("membership_id", toDelete);
-
-          await supabase
-            .from("anew_memberships")
-            .delete()
-            .in("id", toDelete);
-        }
-
-        for (const m of formMemberships) {
-          if (!m.organization_id) continue;
-
-          if (m.id && existingMembershipIds.includes(m.id)) {
-            await supabase
-              .from("anew_memberships")
-              .update({
-                organization_id: m.organization_id,
-                relationship_type: m.relationship_type,
-                role_id: m.role_id,
-                status: "active",
-              })
-              .eq("id", m.id);
-          } else {
-            await supabase
-              .from("anew_memberships")
-              .insert({
-                user_id: selectedUser.id,
-                organization_id: m.organization_id,
-                relationship_type: m.relationship_type,
-                role_id: m.role_id,
-                status: "active",
-                created_by: createdBy,
-              });
-          }
-        }
-
-        if (Object.keys(pendingScopeChanges).length > 0) {
-          for (const [membershipId, scopes] of Object.entries(pendingScopeChanges)) {
-            await supabase
-              .from("anew_membership_permission_scopes")
-              .delete()
-              .eq("membership_id", membershipId);
-
-            const scopesToInsert = scopes.filter(s => s.scope_level !== "OWNED");
-            if (scopesToInsert.length > 0) {
-              await supabase
-                .from("anew_membership_permission_scopes")
-                .insert(
-                  scopesToInsert.map(s => ({
-                    membership_id: membershipId,
-                    permission_code: s.permission_code,
-                    scope_level: s.scope_level,
-                  }))
-                );
-            }
-          }
+        if (rpcError) {
+          console.error("[UserEdit] rpc_update_user failed:", rpcError);
+          throw rpcError;
         }
 
         if (formData.password && formData.password.trim().length >= 6 && selectedUser.auth_user_id) {
@@ -1158,93 +1078,6 @@ export default function UsersNew() {
             throw new Error(detailedError || "Erro ao atualizar password");
           }
           console.log("[UserEdit] Password updated successfully");
-        }
-
-        if (isAddressVisible()) {
-          const validAddresses = prepareValidAddresses(formAddresses);
-
-          await supabase
-            .from("anew_entity_addresses")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", effectiveEntityId)
-            .is("valid_to", null);
-
-          for (const addr of validAddresses) {
-            const { data: newAddress, error: addressError } = await (supabase as any)
-              .from("anew_addresses")
-              .insert({
-                address_key: addr.address_key,
-                street: addr.street,
-                number: addr.number,
-                floor: addr.floor || null,
-                unit: addr.unit || null,
-                postal_code: addr.postal_code,
-                city: addr.city,
-                district: addr.district || null,
-                country: addr.country || "PT",
-                extra: addr.extra || null,
-                created_by: createdBy,
-              })
-              .select("id")
-              .single();
-
-            if (addressError) throw addressError;
-
-            const { error: linkError } = await (supabase as any).from("anew_entity_addresses").insert({
-              entity_id: effectiveEntityId,
-              address_id: newAddress.id,
-              address_type: addr.address_type || "home",
-              is_primary: addr.is_primary,
-              valid_from: new Date().toISOString(),
-              created_by: createdBy,
-            });
-
-            if (linkError) throw linkError;
-          }
-        }
-
-        if (formFiscalData.nif) {
-          await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", effectiveEntityId)
-            .is("valid_to", null);
-
-          const { data: existingFiscal } = await supabase
-            .from("fiscal_entities")
-            .select("id")
-            .eq("nif", formFiscalData.nif)
-            .eq("country_code", formFiscalData.country_code)
-            .limit(1)
-            .single();
-
-          let fiscalEntityId = existingFiscal?.id;
-
-          if (!fiscalEntityId) {
-            const { data: newFiscal, error: fiscalError } = await supabase
-              .from("fiscal_entities")
-              .insert({
-                nif: formFiscalData.nif,
-                commercial_name: formFiscalData.commercial_name || null,
-                country_code: formFiscalData.country_code,
-                created_by: createdBy,
-              })
-              .select("id")
-              .single();
-
-            if (fiscalError) throw fiscalError;
-            fiscalEntityId = newFiscal?.id;
-          }
-
-          if (fiscalEntityId) {
-            await (supabase as any).from("anew_entity_fiscal_entities").insert({
-              entity_id: effectiveEntityId,
-              fiscal_entity_id: fiscalEntityId,
-              is_primary: true,
-              valid_from: new Date().toISOString(),
-              created_by: createdBy,
-            });
-          }
         }
 
         toast.success(t("users.updated"));
@@ -1309,24 +1142,26 @@ export default function UsersNew() {
           ? `${primaryPhoneForUpdate.country_code} ${primaryPhoneForUpdate.phone_number}`
           : null;
 
-        await supabase
-          .from("anew_users")
-          .update({
-            phone: primaryPhoneFormattedForUpdate,
-            description: formData.description || null,
-            position: formData.position || null,
-            location: formData.location || null,
-            template_id: formTemplateId || null,
-            custom_attributes: Object.keys(formCustomAttributes).length > 0
-              ? {
-                  ...formCustomAttributes,
-                  social_facebook: formSocialLinks.facebook || null,
-                  social_linkedin: formSocialLinks.linkedin || null,
-                  social_angellist: formSocialLinks.angellist || null,
-                }
-              : null,
-          })
-          .eq("id", finalUserId);
+        await withAuditContext(supabase, createdBy, () =>
+          supabase
+            .from("anew_users")
+            .update({
+              phone: primaryPhoneFormattedForUpdate,
+              description: formData.description || null,
+              position: formData.position || null,
+              location: formData.location || null,
+              template_id: formTemplateId || null,
+              custom_attributes: Object.keys(formCustomAttributes).length > 0
+                ? {
+                    ...formCustomAttributes,
+                    social_facebook: formSocialLinks.facebook || null,
+                    social_linkedin: formSocialLinks.linkedin || null,
+                    social_angellist: formSocialLinks.angellist || null,
+                  }
+                : null,
+            })
+            .eq("id", finalUserId)
+        );
 
         toast.success(t("users.created"));
       }
@@ -1355,36 +1190,44 @@ export default function UsersNew() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteUserId) return;
 
     const user = users.find((u) => u.id === deleteUserId);
 
-    const deleteFlow = user?.auth_user_id
-      ? supabase.functions.invoke("delete-user", {
-          body: { userId: user.auth_user_id },
-        }).then((response) => {
-          if (response.error) throw response.error;
-        })
-      : Promise.resolve();
+    try {
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
+      const deletedBy = await resolveBusinessUserId(authUser?.id);
 
-    deleteFlow
-      .then(() =>
-        supabase
+      if (!deletedBy) {
+        throw new Error("Não foi possível resolver o utilizador de negócio do operador.");
+      }
+
+      if (user?.auth_user_id) {
+        const deleteInvoke = await supabase.functions.invoke("delete-user", {
+          body: { userId: user.auth_user_id },
+        });
+        if (deleteInvoke.error) throw deleteInvoke.error;
+      }
+
+      await withAuditContext(supabase, deletedBy, async () => {
+        const { error } = await supabase
           .from("anew_users")
           .delete()
-          .eq("id", deleteUserId)
-      )
-      .then(({ error }) => {
+          .eq("id", deleteUserId);
         if (error) throw error;
-        toast.success(t("users.deleted"));
-        setDeleteUserId(null);
-        fetchData();
-      })
-      .catch((error: any) => {
-        console.error("Error deleting:", error);
-        toast.error(error.message || t("common.error"));
       });
+
+      toast.success(t("users.deleted"));
+      setDeleteUserId(null);
+      fetchData();
+    } catch (error: any) {
+      console.error("Error deleting:", error);
+      toast.error(error.message || t("common.error"));
+    }
   };
 
   if (companyLoading) {

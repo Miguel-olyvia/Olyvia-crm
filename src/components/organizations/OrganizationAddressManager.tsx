@@ -17,6 +17,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { useCountries } from '@/hooks/useCountries';
 import { useAdministrativeDivisions } from '@/hooks/useAdministrativeDivisions';
 import { resolveBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { withAuditContext } from '@/utils/auditContext';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -246,10 +247,14 @@ export function OrganizationAddressManager({ orgId }: Props) {
 
     if (addr.link_id) {
       // Soft delete - set valid_to
-      const { error } = await (supabase as any)
-        .from("anew_org_addresses")
-        .update({ valid_to: new Date().toISOString() })
-        .eq("id", addr.link_id);
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any)
+          .from("anew_org_addresses")
+          .update({ valid_to: new Date().toISOString() })
+          .eq("id", addr.link_id)
+      );
 
       if (error) {
         toast.error(error.message);
@@ -349,22 +354,24 @@ export function OrganizationAddressManager({ orgId }: Props) {
       }
 
       // Call RPC to assign/update address
-      const { error } = await (supabase as any).rpc('assign_address_to_org', {
-        p_org_id: orgId,
-        p_street: addr.street,
-        p_number: addr.number,
-        p_floor: addr.floor || null,
-        p_unit: addr.unit || null,
-        p_postal_code: addr.postal_code,
-        p_city: addr.city,
-        p_district: addr.district || null,
-        p_country: addr.country,
-        p_extra: addr.extra || null,
-        p_is_fiscal: addr.isFiscal,
-        p_created_by: businessUserId,
-        p_existing_address_id: addr.id || null,
-        p_existing_link_id: addr.link_id || null,
-      });
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc('assign_address_to_org', {
+          p_org_id: orgId,
+          p_street: addr.street,
+          p_number: addr.number,
+          p_floor: addr.floor || null,
+          p_unit: addr.unit || null,
+          p_postal_code: addr.postal_code,
+          p_city: addr.city,
+          p_district: addr.district || null,
+          p_country: addr.country,
+          p_extra: addr.extra || null,
+          p_is_fiscal: addr.isFiscal,
+          p_created_by: businessUserId,
+          p_existing_address_id: addr.id || null,
+          p_existing_link_id: addr.link_id || null,
+        })
+      );
 
       if (error) throw error;
 

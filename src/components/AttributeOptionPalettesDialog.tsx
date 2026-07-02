@@ -392,8 +392,6 @@ export default function AttributeOptionPalettesDialog({
 
       toast({ title: hasHexColor ? "Paleta duplicada com sucesso" : "Grupo duplicado com sucesso" });
       setSelectedGroupId(newGroup.id);
-      setDuplicatingGroupId(null);
-      setDuplicateName("");
       loadData();
     } catch (error: any) {
       toast({
@@ -401,6 +399,9 @@ export default function AttributeOptionPalettesDialog({
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setDuplicatingGroupId(null);
+      setDuplicateName("");
     }
   };
 

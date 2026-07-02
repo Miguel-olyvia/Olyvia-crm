@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
-import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, FolderTree, Pencil, Trash2, Tag } from "lucide-react";
 import CategoryAttributePricesDialog from "@/components/CategoryAttributePricesDialog";
@@ -36,7 +35,6 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductCategory {
   id: string;
@@ -217,6 +215,10 @@ export default function ProductCategories() {
     onSuccess: () => loadData(true),
     softDelete: false,
     organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_product_category",
+    bulkDeleteRpc: "rpc_bulk_delete_product_category",
+    bulkOrgRpc: "rpc_bulk_org_product_category",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   // Debounce search term
@@ -328,96 +330,34 @@ export default function ProductCategories() {
         return;
       }
 
-      let categoryId: string;
-
-      const primaryOrgId = uniqueCompanyIds[0] || null;
-
       if (editingCategory) {
-        const updatePayload: TablesUpdate<"product_categories"> = {
-          name: formData.name,
-          description: formData.description || null,
-          sort_order: formData.sort_order,
-          organization_id: primaryOrgId,
-        };
-
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error } = await supabase
-            .from("product_categories")
-            .update(updatePayload)
-            .eq("id", editingCategory.id);
-          if (error) throw error;
-
-          // Delete existing associations inside the same audit context so any
-          // audit trigger on product_category_organizations also gets the actor.
-          await supabase
-            .from("product_category_organizations")
-            .delete()
-            .eq("category_id", editingCategory.id);
+        const { error } = await supabase.rpc("rpc_update_product_category", {
+          p_id: editingCategory.id,
+          p_name: formData.name,
+          p_description: formData.description || null,
+          p_sort_order: formData.sort_order,
+          p_org_ids: uniqueCompanyIds,
         });
-
-        categoryId = editingCategory.id;
+        if (error) throw error;
 
         toast({
           title: t('productCategories.toast.updateSuccess'),
         });
       } else {
-        const insertPayload: TablesInsert<"product_categories"> = {
-          name: formData.name,
-          slug,
-          path,
-          description: formData.description || null,
-          parent_id: formData.parent_id || null,
-          sort_order: formData.sort_order,
-          is_active: true,
-          created_by: businessUserId,
-          organization_id: primaryOrgId,
-        };
-
-        const newCategory = await withAuditContext(supabase, businessUserId, async () => {
-          const { data, error } = await supabase
-            .from("product_categories")
-            .insert(insertPayload)
-            .select("id")
-            .single();
-          if (error) throw error;
-          return data;
+        const { error } = await supabase.rpc("rpc_create_product_category", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_path: path,
+          p_description: formData.description || null,
+          p_parent_id: formData.parent_id || null,
+          p_sort_order: formData.sort_order,
+          p_org_ids: uniqueCompanyIds,
         });
-
-        if (!newCategory) throw new Error("Insert retornou sem dados — possível rejeição silenciosa por RLS");
-        categoryId = newCategory.id;
+        if (error) throw error;
 
         toast({
           title: t('productCategories.toast.createSuccess'),
         });
-      }
-
-      // Insert company associations (within audit context so junction inserts are attributed).
-      const companyAssociations = uniqueCompanyIds.map((companyId) => ({
-        category_id: categoryId,
-        organization_id: companyId,
-        created_by: businessUserId,
-      }));
-
-      const { error: assocError } = await withAuditContext(supabase, businessUserId, async () => {
-        const result = await supabase
-          .from("product_category_organizations")
-          .insert(companyAssociations);
-        return result;
-      });
-
-      if (assocError) {
-        // If this was a new category, rollback so it doesn't become orphaned/invisible.
-        // Wrapped in withAuditContext so the compensating DELETE is attributed (AUDIT-CAT-01).
-        if (!editingCategory) {
-          await withAuditContext(supabase, businessUserId, async () => {
-            await supabase
-              .from("product_categories")
-              .delete()
-              .eq("id", categoryId);
-          });
-        }
-
-        throw assocError;
       }
 
       handleCloseDialog(false);
@@ -443,14 +383,11 @@ export default function ProductCategories() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("product_categories")
-          .delete()
-          .eq("id", id)
-          .eq("organization_id", activeCompany.id);
-        if (error) throw error;
+      const { error } = await supabase.rpc("rpc_delete_product_category", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
       });
+      if (error) throw error;
 
       toast({
         title: t('productCategories.toast.success'),

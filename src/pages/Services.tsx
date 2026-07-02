@@ -305,37 +305,12 @@ export default function Services() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      // Resolve root org
-      let rootOrgId = primaryCompanyId;
-      try {
-        let currentId = primaryCompanyId;
-        for (let i = 0; i < 10; i++) {
-          const { data: parentLink } = await supabase
-            .from("anew_hierarchy")
-            .select("parent_org_id")
-            .eq("child_org_id", currentId)
-            .maybeSingle();
-          if (!parentLink) break;
-          currentId = parentLink.parent_org_id;
-        }
-        rootOrgId = currentId;
-      } catch (e) { /* use primaryCompanyId */ }
-
-      const serviceData: any = {
-        sku: formData.sku,
-        name: formData.name,
-        slug: formData.name.toLowerCase().replace(/\s+/g, "-"),
-        is_active: formData.status === "active",
-        organization_id: primaryCompanyId,
-        service_type: formData.service_type,
-      };
-
-      if (formData.description) serviceData.long_desc = formData.description;
-      if (formData.category_id) serviceData.service_category_id = formData.category_id;
-      if (formData.subcategory_id) serviceData.service_subcategory_id = formData.subcategory_id;
-      
-
-      let serviceId: string;
+      const slug = formData.name.toLowerCase().replace(/\s+/g, "-");
+      const longDesc = formData.description ? formData.description : null;
+      const categoryId = formData.category_id ? formData.category_id : null;
+      const subcategoryId = formData.subcategory_id ? formData.subcategory_id : null;
+      const isActive = formData.status === "active";
+      const allOrgIds = getAllOrgIds(organizationSelection);
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
@@ -345,97 +320,54 @@ export default function Services() {
 
       await withAuditContext(supabase, businessUserId, async () => {
         if (editingService) {
-          const { error } = await supabase
-            .from("services")
-            .update(serviceData)
-            .eq("id", editingService.id);
+          const { error } = await supabase.rpc("rpc_update_service", {
+            p_id: editingService.id,
+            p_sku: formData.sku,
+            p_name: formData.name,
+            p_slug: slug,
+            p_long_desc: longDesc,
+            p_service_type: formData.service_type,
+            p_is_active: isActive,
+            p_organization_id: primaryCompanyId,
+            p_category_id: categoryId,
+            p_subcategory_id: subcategoryId,
+            p_org_ids: allOrgIds.length > 0 ? allOrgIds : null,
+            p_touch_orgs: true,
+            p_touch_prices: true,
+            p_purchase: priceData.purchase || 0,
+            p_retail: priceData.retail || 0,
+            p_currency: priceData.currency,
+            p_vat_rate: priceData.vat_rate,
+          });
 
           if (error) throw error;
-          serviceId = editingService.id;
-
-          // Update company associations - delete old ones and insert new
-          await supabase
-            .from("service_organizations")
-            .delete()
-            .eq("service_id", editingService.id);
 
           toast({
             title: t("services.toast.updateSuccess"),
           });
         } else {
-          serviceData.created_by = businessUserId;
-          const { data: newService, error } = await supabase
-            .from("services")
-            .insert(serviceData)
-            .select("id")
-            .single();
+          const { error } = await supabase.rpc("rpc_create_service", {
+            p_sku: formData.sku,
+            p_name: formData.name,
+            p_slug: slug,
+            p_long_desc: longDesc,
+            p_service_type: formData.service_type,
+            p_is_active: isActive,
+            p_organization_id: primaryCompanyId,
+            p_category_id: categoryId,
+            p_subcategory_id: subcategoryId,
+            p_org_ids: allOrgIds.length > 0 ? allOrgIds : null,
+            p_purchase: priceData.purchase || 0,
+            p_retail: priceData.retail || 0,
+            p_currency: priceData.currency,
+            p_vat_rate: priceData.vat_rate,
+          });
 
           if (error) throw error;
-          serviceId = newService.id;
 
           toast({
             title: t("services.toast.createSuccess"),
           });
-        }
-
-        const allOrgIds = getAllOrgIds(organizationSelection);
-
-        if (allOrgIds.length > 0) {
-          const orgAssociations = allOrgIds.map((orgId) => ({
-            service_id: serviceId,
-            organization_id: orgId,
-            created_by: businessUserId,
-          }));
-
-          const { error: assocError } = await supabase
-            .from("service_organizations")
-            .insert(orgAssociations);
-
-          if (assocError) {
-            console.error("Error inserting service org associations:", assocError);
-          }
-        }
-
-        // Save prices (always save both purchase and retail)
-        const priceTypes = [
-          { type: "purchase", value: priceData.purchase },
-          { type: "retail", value: priceData.retail },
-        ];
-
-        for (const { type, value } of priceTypes) {
-          // Check if price exists
-          const { data: existingPrice, error: existingPriceError } = await supabase
-            .from("service_prices")
-            .select("id")
-            .eq("service_id", serviceId)
-            .eq("price_type", type)
-            .maybeSingle();
-
-          if (existingPriceError) throw existingPriceError;
-
-          const priceRecord = {
-            service_id: serviceId,
-            price_type: type,
-            price: value || 0,
-            currency: priceData.currency,
-            vat_rate: priceData.vat_rate,
-            created_by: businessUserId,
-          };
-
-          if (existingPrice) {
-            const { error: updatePriceError } = await supabase
-              .from("service_prices")
-              .update(priceRecord)
-              .eq("id", existingPrice.id);
-
-            if (updatePriceError) throw updatePriceError;
-          } else {
-            const { error: insertPriceError } = await supabase
-              .from("service_prices")
-              .insert(priceRecord);
-
-            if (insertPriceError) throw insertPriceError;
-          }
         }
       });
 
@@ -463,7 +395,7 @@ export default function Services() {
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
       await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase.from("services").delete().eq("id", serviceToDelete.id);
+        const { error } = await supabase.rpc("rpc_delete_service", { p_id: serviceToDelete.id });
         if (error) throw error;
       });
 
@@ -659,17 +591,37 @@ export default function Services() {
     }
 
     try {
-      const updateData: any = {};
-      updateData[field] = editingValue.trim();
+      const currentService = services.find((s) => s.id === serviceId);
+      if (!currentService) throw new Error("Serviço não encontrado.");
+
+      const updatedValue = editingValue.trim();
+      const nextSku = field === "sku" ? updatedValue : currentService.sku;
+      const nextName = field === "name" ? updatedValue : currentService.name;
+      const nextSlug = nextName.toLowerCase().replace(/\s+/g, "-");
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
       await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("services")
-          .update(updateData)
-          .eq("id", serviceId);
+        const { error } = await supabase.rpc("rpc_update_service", {
+          p_id: serviceId,
+          p_sku: nextSku,
+          p_name: nextName,
+          p_slug: nextSlug,
+          p_long_desc: currentService.long_desc || null,
+          p_service_type: currentService.service_type,
+          p_is_active: currentService.is_active,
+          p_organization_id: currentService.organization_id || null,
+          p_category_id: currentService.service_category_id || null,
+          p_subcategory_id: currentService.service_subcategory_id || null,
+          p_org_ids: null,
+          p_touch_orgs: false,
+          p_touch_prices: false,
+          p_purchase: null,
+          p_retail: null,
+          p_currency: null,
+          p_vat_rate: null,
+        });
 
         if (error) throw error;
       });
@@ -799,6 +751,11 @@ export default function Services() {
     tableName: "services",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_service",
+    bulkDeleteRpc: "rpc_bulk_delete_service",
+    bulkOrgRpc: "rpc_bulk_org_service",
+    bulkOrgRpcNewOrgParam: "p_new_org_id",
   });
 
   const toggleSelectAll = () => {

@@ -45,7 +45,6 @@ import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { withAuditContext } from "@/utils/auditContext";
 
 interface Brand {
   id: string;
@@ -70,6 +69,8 @@ export default function Brands() {
   const [open, setOpen] = useState(false);
   const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -154,6 +155,10 @@ export default function Brands() {
     onSuccess: loadData,
     softDelete: false,
     organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_brand",
+    bulkDeleteRpc: "rpc_bulk_delete_brand",
+    bulkOrgRpc: "rpc_bulk_org_brand",
+    bulkOrgRpcNewOrgParam: "p_new_org_id",
   });
 
   useEffect(() => {
@@ -175,6 +180,7 @@ export default function Brands() {
       return;
     }
 
+    setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('brands.toast.notAuthenticated'));
@@ -197,85 +203,36 @@ export default function Brands() {
         return;
       }
 
-      const brandPayload = {
-        name: formData.name,
-        slug,
-        is_active: true,
-        organization_id: activeCompany?.id ?? null,
-        ...(formData.description ? { description: formData.description } : {}),
-        ...(formData.website ? { website: formData.website } : {}),
-        ...(formData.logo_url ? { logo_url: formData.logo_url } : {}),
-      };
-
-      let brandId: string;
-
       if (editingBrand) {
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error } = await supabase
-            .from("brands")
-            .update(brandPayload)
-            .eq("id", editingBrand.id)
-            .eq("organization_id", activeCompany.id);
-          if (error) throw error;
+        const { error } = await supabase.rpc("rpc_update_brand", {
+          p_id: editingBrand.id,
+          p_organization_id: activeCompany.id,
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description,
+          p_website: formData.website,
+          p_logo_url: formData.logo_url,
+          p_org_ids: allCompanyIds,
         });
-        brandId = editingBrand.id;
+        if (error) throw error;
 
         toast({
           title: t('brands.toast.updateSuccess'),
         });
       } else {
-        const insertPayload = { ...brandPayload, created_by: businessUserId };
-        const newBrand = await withAuditContext(supabase, businessUserId, async () => {
-          const { data, error } = await supabase
-            .from("brands")
-            .insert(insertPayload)
-            .select("id")
-            .single();
-          if (error) throw error;
-          return data;
+        const { error } = await supabase.rpc("rpc_create_brand", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description,
+          p_website: formData.website,
+          p_logo_url: formData.logo_url,
+          p_organization_id: activeCompany?.id ?? null,
+          p_org_ids: allCompanyIds,
         });
-        brandId = newBrand.id;
+        if (error) throw error;
 
         toast({
           title: t('brands.toast.createSuccess'),
-        });
-      }
-
-      // Upsert company associations first, then remove stale ones.
-      // Insert-before-delete prevents the brand from becoming org-orphaned
-      // if the delete succeeds but the subsequent insert fails.
-      // Both junction table operations share the same audit context window.
-      if (allCompanyIds.length > 0) {
-        const companyAssociations = allCompanyIds.map((companyId) => ({
-          brand_id: brandId,
-          organization_id: companyId,
-          created_by: businessUserId,
-        }));
-
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error: assocError } = await supabase
-            .from("brand_organizations")
-            .upsert(companyAssociations, { onConflict: "brand_id,organization_id", ignoreDuplicates: true });
-          if (assocError) throw assocError;
-
-          // Only delete associations NOT in the new set (safe because inserts already succeeded above)
-          if (editingBrand) {
-            const { error: delError } = await supabase
-              .from("brand_organizations")
-              .delete()
-              .eq("brand_id", brandId)
-              .not("organization_id", "in", `(${allCompanyIds.join(",")})`);
-            if (delError) throw delError;
-          }
-        });
-      } else if (editingBrand) {
-        // No target companies — remove all associations
-        await withAuditContext(supabase, businessUserId, async () => {
-          const { error: delError } = await supabase
-            .from("brand_organizations")
-            .delete()
-            .eq("brand_id", brandId);
-          if (delError) throw delError;
         });
       }
 
@@ -287,6 +244,8 @@ export default function Brands() {
         description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -298,18 +257,13 @@ export default function Brands() {
       return;
     }
 
+    setDeleting(true);
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
-
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("brands")
-          .delete()
-          .eq("id", deleteBrandId)
-          .eq("organization_id", activeCompany.id);
-        if (error) throw error;
+      const { error } = await supabase.rpc("rpc_delete_brand", {
+        p_id: deleteBrandId,
+        p_organization_id: activeCompany.id,
       });
+      if (error) throw error;
 
       toast({
         title: t('brands.toast.success'),
@@ -324,6 +278,7 @@ export default function Brands() {
         variant: "destructive",
       });
     } finally {
+      setDeleting(false);
       setDeleteBrandId(null);
     }
   };
@@ -514,10 +469,10 @@ export default function Brands() {
                 />
 
                 <div className="flex justify-end gap-2 pt-4">
-                  <Button type="button" variant="outline" onClick={handleCancel}>
+                  <Button type="button" variant="outline" onClick={handleCancel} disabled={submitting}>
                     {t('brands.form.cancel')}
                   </Button>
-                  <Button type="submit">{editingBrand ? t('brands.form.update') : t('brands.form.create')}</Button>
+                  <Button type="submit" disabled={submitting}>{editingBrand ? t('brands.form.update') : t('brands.form.create')}</Button>
                 </div>
               </form>
             </ScrollArea>
@@ -693,8 +648,8 @@ export default function Brands() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel') || 'Cancelar'}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>{t('common.delete') || 'Eliminar'}</AlertDialogAction>
+            <AlertDialogCancel disabled={deleting}>{t('common.cancel') || 'Cancelar'}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting}>{t('common.delete') || 'Eliminar'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -701,32 +701,45 @@ const ClientContracts = () => {
         }
       }
 
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-      const { data: inserted, error } = await (supabase as any).from("client_contracts").insert({
-        client_id: clientId, entity_id: resolvedEntityId || null, organization_id: activeCompany.id,
-        root_organization_id: rootOrgId, proposal_id: data.proposal_id, contract_template_id: data.template_id || null,
-        total_value: totalValue, currency: "EUR", start_date: data.start_date || null, end_date: data.end_date || null,
-        notes: data.notes || null, payment_terms: data.payment_terms || null,
-        contract_body_html: contractBodyHtml,
-        prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
-        status: "draft", created_by: businessUserId,
-      }).select("*").single();
-      if (error) throw error;
-
       // Bake prompt answers + signatário no markup, mas DEIXA os tokens {{…}} intactos.
       // A substituição final (proposta_numero, cliente_nome, etc.) acontece em runtime
-      // (contractDocument.ts) para reflectir sempre o estado actual da BD.
-      if (contractBodyHtml && inserted) {
-        const variableData = await gatherContractData(inserted, activeCompany.id);
+      // (contractDocument.ts) para reflectir sempre o estado actual da BD. Este baking
+      // só depende de entity_id, client_id e contract_template_id (não de contract_number,
+      // que só existe após o INSERT), pelo que pode ser calculado antes da RPC exatamente
+      // como acontecia antes com o registo já inserido.
+      let finalBodyHtml: string | null = null;
+      if (contractBodyHtml) {
+        const variableData = await gatherContractData(
+          { entity_id: resolvedEntityId || null, client_id: clientId, contract_template_id: data.template_id || null },
+          activeCompany.id,
+        );
         const withPrompts = applyPromptValues(contractBodyHtml, data.prompt_values);
-        const finalHtml = injectSignatoryIntoSignatureBlock(
+        finalBodyHtml = injectSignatoryIntoSignatureBlock(
           withPrompts,
           (variableData as any).signatario_nome,
           (variableData as any).signatario_cargo,
         );
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        await (supabase as any).from("client_contracts").update({ contract_body_html: finalHtml }).eq("id", inserted.id);
       }
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+        p_client_id: clientId,
+        p_entity_id: resolvedEntityId || null,
+        p_organization_id: activeCompany.id,
+        p_root_organization_id: rootOrgId,
+        p_proposal_id: data.proposal_id,
+        p_contract_template_id: data.template_id || null,
+        p_total_value: totalValue,
+        p_currency: "EUR",
+        p_start_date: data.start_date || null,
+        p_end_date: data.end_date || null,
+        p_notes: data.notes || null,
+        p_payment_terms: data.payment_terms || null,
+        p_contract_body_html: contractBodyHtml,
+        p_final_body_html: finalBodyHtml,
+        p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
+      });
+      if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato criado com sucesso"); handleCloseDialog(); },
     onError: (error) => { toast.error("Erro ao criar contrato: " + error.message); },
@@ -734,25 +747,19 @@ const ClientContracts = () => {
 
   const updateMutation = useMutation({
     mutationFn: async (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; id: string; prompt_values?: Record<string, string> }) => {
-      const currentContract = contracts.find(c => c.id === data.id) as any;
-      const existingPromptValues = currentContract?.prompt_values && typeof currentContract.prompt_values === "object"
-        ? currentContract.prompt_values
-        : {};
-      const mergedPromptValues = data.prompt_values && Object.keys(data.prompt_values).length > 0
-        ? { ...existingPromptValues, ...data.prompt_values }
-        : existingPromptValues;
-
-      const updatePayload: any = {
-        contract_template_id: data.template_id || null, start_date: data.start_date || null, end_date: data.end_date || null,
-        notes: data.notes || null, payment_terms: data.payment_terms || null,
-        prompt_values: Object.keys(mergedPromptValues).length > 0 ? mergedPromptValues : null,
-      };
-
       const businessUserId = await resolveCurrentBusinessUserId();
       if (businessUserId) {
         await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       }
-      const { error } = await supabase.from("client_contracts").update(updatePayload).eq("id", data.id);
+      const { error } = await supabase.rpc('rpc_update_client_contract' as any, {
+        p_id: data.id,
+        p_contract_template_id: data.template_id || null,
+        p_start_date: data.start_date || null,
+        p_end_date: data.end_date || null,
+        p_notes: data.notes || null,
+        p_payment_terms: data.payment_terms || null,
+        p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
+      });
       if (error) throw error;
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato atualizado"); handleCloseDialog(); },
@@ -761,6 +768,10 @@ const ClientContracts = () => {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "contract", p_id: id });
       if (error) throw error;
     },
@@ -831,16 +842,14 @@ const ClientContracts = () => {
       toast.error("Acesso negado");
       return;
     }
-    const { data: { user: authUser } } = await supabase.auth.getUser();
     const businessUserId = await resolveCurrentBusinessUserId();
     if (businessUserId) {
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     }
-    const { error } = await (supabase as any).from("client_contracts").update({
-      status: newStatus,
-      status_changed_by: businessUserId || authUser?.id || null,
-      status_changed_at: new Date().toISOString(),
-    }).eq("id", contractId);
+    const { error } = await supabase.rpc('rpc_update_client_contract_status' as any, {
+      p_id: contractId,
+      p_status: newStatus,
+    });
     if (error) { toast.error("Erro ao mudar estado"); return; }
     queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
     toast.success(`Estado alterado para ${getTranslatedStatus(newStatus)}`);

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
@@ -291,7 +292,15 @@ const Suppliers = () => {
     if (!supplierToDelete) return;
 
     try {
-      const { error } = await supabase.from("suppliers").delete().eq("id", supplierToDelete.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("suppliers").delete().eq("id", supplierToDelete.id)
+      );
 
       if (error) throw error;
 
@@ -320,6 +329,12 @@ const Suppliers = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
       const supplierData: any = {
         name: formData.name,
         contact_person: formData.contact_person || null,
@@ -337,10 +352,12 @@ const Suppliers = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from("suppliers")
-          .update(supplierData)
-          .eq("id", editingId);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("suppliers")
+            .update(supplierData)
+            .eq("id", editingId)
+        );
 
         if (error) throw error;
 
@@ -348,15 +365,12 @@ const Suppliers = () => {
           title: t("suppliers.toast.updateSuccess"),
         });
       } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-          return;
-        }
-        const { error } = await supabase.from("suppliers").insert({
-          ...supplierData,
-          created_by: businessUserId,
-        });
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.from("suppliers").insert({
+            ...supplierData,
+            created_by: businessUserId,
+          })
+        );
 
         if (error) throw error;
 
@@ -427,10 +441,18 @@ const Suppliers = () => {
     if (selectedIds.size === 0) return;
 
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .update({ is_active: bulkNewStatus })
-        .in("id", Array.from(selectedIds));
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("suppliers")
+          .update({ is_active: bulkNewStatus })
+          .in("id", Array.from(selectedIds))
+      );
 
       if (error) throw error;
 
@@ -456,10 +478,18 @@ const Suppliers = () => {
     if (selectedIds.size === 0) return;
 
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .delete()
-        .in("id", Array.from(selectedIds));
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("suppliers")
+          .delete()
+          .in("id", Array.from(selectedIds))
+      );
 
       if (error) throw error;
 
@@ -485,10 +515,18 @@ const Suppliers = () => {
   const handleBulkCompanyUpdate = async () => {
     if (!bulkCompanyId || selectedIds.size === 0) return;
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .update({ organization_id: bulkCompanyId })
-        .in("id", Array.from(selectedIds));
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("suppliers")
+          .update({ organization_id: bulkCompanyId })
+          .in("id", Array.from(selectedIds))
+      );
 
       if (error) throw error;
 
@@ -579,7 +617,7 @@ const Suppliers = () => {
 
       for (const line of dataLines) {
         const values = line.split(';').map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-        
+
         if (values.length < 1 || !values[0]) continue;
 
         suppliersToInsert.push({
@@ -604,19 +642,32 @@ const Suppliers = () => {
         throw new Error(t("suppliers.toast.noValidSuppliers"));
       }
 
-      const { error } = await supabase.from("suppliers").insert(suppliersToInsert);
-      
-      if (error) throw error;
-
-      toast({
-        title: t("suppliers.toast.importSuccess"),
-        description: t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length)),
+      // Set audit context once for all writes in this import.
+      // source='csv_import' must be set manually — withAuditContext hardcodes 'web_app'.
+      const { error: setCtxError } = await supabase.rpc('set_audit_context', {
+        p_user_id: businessUserId,
+        p_source: 'csv_import',
       });
+      if (setCtxError) throw setCtxError;
 
-      setImportDialogOpen(false);
-      setSuppliers([]);
-      setHasMore(true);
-      loadSuppliers(0, true);
+      try {
+        const { error } = await supabase.from("suppliers").insert(suppliersToInsert);
+
+        if (error) throw error;
+
+        toast({
+          title: t("suppliers.toast.importSuccess"),
+          description: t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length)),
+        });
+
+        setImportDialogOpen(false);
+        setSuppliers([]);
+        setHasMore(true);
+        loadSuppliers(0, true);
+      } finally {
+        // Clear audit context — swallow errors so they never mask the original failure.
+        try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
+      }
     } catch (error: any) {
       toast({
         title: t("suppliers.toast.importError"),
@@ -624,7 +675,7 @@ const Suppliers = () => {
         variant: "destructive",
       });
     }
-    
+
     e.target.value = '';
   };
 

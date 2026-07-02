@@ -182,6 +182,9 @@ export default function ProductAttributes() {
     onSuccess: loadData,
     softDelete: false,
     organizationId: activeCompany?.id,
+    bulkDeleteRpc: "rpc_bulk_delete_product_attribute",
+    bulkOrgRpc: "rpc_bulk_org_product_attribute",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   const { clearSelection } = bulkActions;

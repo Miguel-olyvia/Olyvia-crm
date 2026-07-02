@@ -349,11 +349,10 @@ const Bundles = () => {
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase
-          .from("bundles")
-          .update({ deleted_at: new Date().toISOString() })
-          .eq("id", deleteId)
-          .eq("organization_id", activeCompany.id)
+        supabase.rpc("rpc_delete_bundle", {
+          p_id: deleteId,
+          p_organization_id: activeCompany.id,
+        })
       );
 
       if (error) throw error;
@@ -392,14 +391,12 @@ const Bundles = () => {
       const isActive = bulkActions.bulkNewStatus === "active";
 
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase
-          .from("bundles")
-          .update({
-            status: bulkActions.bulkNewStatus,
-            is_active: isActive
-          })
-          .in("id", selectedIds)
-          .eq("organization_id", activeCompany.id)
+        supabase.rpc("rpc_bulk_status_bundle", {
+          p_ids: selectedIds,
+          p_organization_id: activeCompany.id,
+          p_status: bulkActions.bulkNewStatus,
+          p_is_active: isActive,
+        })
       );
 
       if (error) throw error;
@@ -438,11 +435,10 @@ const Bundles = () => {
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase
-          .from("bundles")
-          .update({ deleted_at: new Date().toISOString() })
-          .in("id", selectedIds)
-          .eq("organization_id", activeCompany.id)
+        supabase.rpc("rpc_bulk_delete_bundle", {
+          p_ids: selectedIds,
+          p_organization_id: activeCompany.id,
+        })
       );
 
       if (error) throw error;
@@ -548,7 +544,8 @@ const Bundles = () => {
       // Insert new bundles
       if (result.bundlesToInsert.length > 0) {
         const { error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase.from("bundles").insert(result.bundlesToInsert)
+          supabase.from("bundles").insert(result.bundlesToInsert),
+          'csv_import'
         );
         if (error) throw error;
       }
@@ -558,7 +555,8 @@ const Bundles = () => {
       for (const bundle of result.bundlesToUpdate) {
         const { id, ...updateData } = bundle;
         const { error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase.from("bundles").update(updateData).eq("id", id)
+          supabase.from("bundles").update(updateData).eq("id", id),
+          'csv_import'
         );
         if (error) throw error;
       }

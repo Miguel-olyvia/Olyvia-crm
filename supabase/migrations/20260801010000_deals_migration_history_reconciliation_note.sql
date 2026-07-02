@@ -1,0 +1,91 @@
+-- Deals / Pedidos Proposta — migration-history reconciliation note (operational precondition)
+-- 2026-08-01 | Module: Deals
+-- Forward-only migration. Do not fold into the baseline. Do not edit an already-applied migration.
+--
+-- Why this migration exists
+-- -------------------------
+-- The deals audit-bypass work (rpc_create_deal / rpc_update_deal / rpc_update_deal_needs,
+-- plus the fn_deal_org_in_scope() / fn_apply_deal_need() helpers) lives, correctly and
+-- immutably, in 20260730010000_deals_audit_bypass_and_rpcs.sql. The SQL there was approved
+-- in review: 5 functions, all CREATE OR REPLACE, SECURITY DEFINER with search_path fixed to
+-- public,pg_temp, REVOKE ALL FROM PUBLIC/anon then GRANT EXECUTE only to authenticated on the
+-- three public RPCs (fn_apply_deal_need is never granted to the client), exactly one
+-- fn_manual_audit_log() call per RPC. Frontend parity (src/pages/Deals.tsx,
+-- src/components/deals/DealNeedsSection.tsx) was confirmed. NONE of that is changed here.
+--
+-- This migration exists ONLY to record — in a tracked, forward-only place — the migration
+-- HISTORY problem that blocks `supabase db push --linked`, and the operational precondition
+-- that must be satisfied (with explicit human approval) BEFORE the deals migration can be
+-- applied. It mirrors the precedent set by
+-- 20260729010000_scheduling_audit_watched_columns_note.sql (a documentation-only file that
+-- records a reconciliation outcome rather than being edited into an already-applied file).
+--
+-- The orphan: remote version 20260727010000 with no local file
+-- ------------------------------------------------------------
+-- History of the 20260727010000 timestamp:
+--   · It was ORIGINALLY the timestamp of BOTH the deals audit-bypass migration AND the leads
+--     creation follow-up migration — a duplicate migration-version collision.
+--   · The collision was resolved LOCALLY by renaming the two files apart:
+--       - deals audit-bypass  → 20260730010000_deals_audit_bypass_and_rpcs.sql
+--       - leads follow-up      → 20260728010000_leads_creation_followup_rpcs.sql
+--   · An EARLIER attempt to apply this work registered a row at version 20260727010000 in the
+--     remote supabase_migrations.schema_migrations table. After the local rename there is NO
+--     local file named 20260727010000_*.sql, so that remote row is now an ORPHAN.
+--
+-- Evidence gathered in this session (Management API HTTPS only; no direct Postgres / pooler /
+-- Docker access, and CLI 2.78.1 has no `db query` subcommand — a pg_proc confirmation was NOT
+-- possible here):
+--   1. `supabase migration list --linked` shows a REMOTE-only version 20260727010000 with no
+--      matching LOCAL entry.
+--   2. `supabase db push --linked --dry-run` fails immediately with:
+--        "Remote migration versions not found in local migrations directory ...
+--         supabase migration repair --status reverted 20260727010000"
+--      i.e. the CLI refuses to push while the orphan is unreconciled.
+--
+-- MANDATORY preconditions before applying the deals migration (require human approval)
+-- -----------------------------------------------------------------------------------
+-- Applying 20260730010000_deals_audit_bypass_and_rpcs.sql "blind" over an unreconciled orphan
+-- is NOT safe. Before any `supabase db push --linked`, a human operator MUST:
+--
+--   (a) Confirm what actually happened to remote version 20260727010000 — was the earlier
+--       attempt fully applied and then manually reverted, or was the row merely registered?
+--       Then reconcile the history with EXPLICIT human approval (this is an operation on the
+--       migration history, not on application data):
+--
+--         supabase migration repair --status reverted 20260727010000
+--
+--       (Use the status confirmed by step (a). "reverted" is what the CLI's own dry-run error
+--       suggests; do not run this without confirming the true remote state first.)
+--
+--   (b) Confirm the live state of the five deals functions BEFORE the push, per the explicit
+--       review requirement, using a connection that can actually reach Postgres (a correct
+--       transaction-pooler connection string, or an environment with Docker for
+--       `supabase db dump` / a direct pg_proc query):
+--
+--         SELECT proname, prosecdef, proconfig
+--         FROM pg_proc
+--         WHERE proname IN (
+--           'fn_deal_org_in_scope', 'fn_apply_deal_need',
+--           'rpc_create_deal', 'rpc_update_deal', 'rpc_update_deal_needs'
+--         );
+--
+--       Expect: functions either ABSENT (safe to apply) or matching the approved definitions;
+--       prosecdef = true and proconfig containing search_path=public,pg_temp on all five.
+--
+-- Only after (a) and (b) succeed with human sign-off should the deals migration be pushed.
+--
+-- Behavioral effect: NONE.
+-- ------------------------
+-- This file contains ZERO executable SQL. It does NOT create, alter, or drop any schema, RLS
+-- policy, function, trigger, grant, or data. SQL comments never persist into pg_proc, so there
+-- is nothing in the live database for this file to change; it only records the reconciliation
+-- precondition in version control. The no-op DO block below exists solely so the file is a
+-- syntactically valid, applied-once migration with no side effects.
+DO $$
+BEGIN
+  -- Documentation-only migration for the Deals module. No schema, RLS, function, trigger,
+  -- grant, or data change is performed here. See the header for the required, human-approved
+  -- migration-history reconciliation (repair) and pg_proc confirmation preconditions.
+  NULL;
+END
+$$;

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
-import type { TablesInsert, TablesUpdate } from "@/integrations/supabase/types";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, FolderTree, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -15,7 +14,6 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -198,46 +196,35 @@ export default function ServiceCategories() {
 
       const slug = formData.slug || generateSlug(formData.name);
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        if (editingCategory) {
-          const updatePayload: TablesUpdate<"service_categories"> = {
-            name: formData.name,
-            description: formData.description || null,
-            organization_id: formData.organization_id,
-            sort_order: formData.sort_order,
-          };
-          const { error } = await supabase
-            .from("service_categories")
-            .update(updatePayload)
-            .eq("id", editingCategory.id);
+      if (editingCategory) {
+        const { error } = await supabase.rpc("rpc_update_service_category", {
+          p_id: editingCategory.id,
+          p_name: formData.name,
+          p_description: formData.description || null,
+          p_organization_id: formData.organization_id,
+          p_sort_order: formData.sort_order,
+        });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          toast({
-            title: t('serviceCategories.toast.updateSuccess'),
-          });
-        } else {
-          const insertPayload: TablesInsert<"service_categories"> = {
-            name: formData.name,
-            slug,
-            description: formData.description || null,
-            parent_id: formData.parent_id || null,
-            organization_id: formData.organization_id,
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-          };
-          const { error } = await supabase
-            .from("service_categories")
-            .insert(insertPayload);
+        toast({
+          title: t('serviceCategories.toast.updateSuccess'),
+        });
+      } else {
+        const { error } = await supabase.rpc("rpc_create_service_category", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description || null,
+          p_organization_id: formData.organization_id,
+          p_sort_order: formData.sort_order,
+        });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          toast({
-            title: t('serviceCategories.toast.createSuccess'),
-          });
-        }
-      });
+        toast({
+          title: t('serviceCategories.toast.createSuccess'),
+        });
+      }
 
       handleCloseDialog(false);
       await loadCategories();
@@ -262,14 +249,11 @@ export default function ServiceCategories() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Sessão inválida.");
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("service_categories")
-          .delete()
-          .eq("id", categoryToDelete.id);
-
-        if (error) throw error;
+      const { error } = await supabase.rpc("rpc_delete_service_category", {
+        p_id: categoryToDelete.id,
       });
+
+      if (error) throw error;
 
       toast({
         title: t('serviceCategories.toast.success'),

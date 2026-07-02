@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Pencil, Trash2, Package, Download, Upload } from "lucide-react";
@@ -151,15 +152,17 @@ const Stocks = () => {
       if (!businessUserId) throw new Error("Business user not resolved");
 
       if (editingStock) {
-        const { error } = await supabase
-          .from("stocks")
-          .update({
-            ...formData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingStock.id);
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("stocks")
+            .update({
+              ...formData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingStock.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        });
 
         toast({
           title: t('stocks.toast.updateSuccess'),
@@ -167,16 +170,18 @@ const Stocks = () => {
         });
       } else {
         if (!activeCompany?.id) throw new Error("No active company selected");
-        
-        const { error } = await supabase.from("stocks").insert([
-          {
-            ...formData,
-            organization_id: activeCompany.id,
-            created_by: businessUserId,
-          },
-        ]);
 
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("stocks").insert([
+            {
+              ...formData,
+              organization_id: activeCompany.id,
+              created_by: businessUserId,
+            },
+          ]);
+
+          if (error) throw error;
+        });
 
         toast({
           title: t('stocks.toast.createSuccess'),
@@ -200,9 +205,13 @@ const Stocks = () => {
     if (!confirm(t('stocks.delete.confirm'))) return;
 
     try {
-      const { error } = await supabase.from("stocks").delete().eq("id", id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase.from("stocks").delete().eq("id", id);
+        if (error) throw error;
+      });
 
       toast({
         title: t('stocks.toast.deleteSuccess'),
@@ -331,9 +340,15 @@ const Stocks = () => {
         throw new Error(t('stocks.toast.noValidStocks'));
       }
 
-      const { error } = await supabase.from("stocks").insert(stocksToInsert);
-      
-      if (error) throw error;
+      await withAuditContext(
+        supabase,
+        businessUserId,
+        async () => {
+          const { error } = await supabase.from("stocks").insert(stocksToInsert);
+          if (error) throw error;
+        },
+        "csv_import"
+      );
 
       toast({
         title: t('stocks.toast.importSuccess'),

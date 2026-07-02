@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -105,31 +106,35 @@ const Warehouses = () => {
       };
 
       if (editingWarehouse) {
-        const { error } = await supabase
-          .from("warehouses")
-          .update({
-            ...warehouseData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingWarehouse.id);
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("warehouses")
+            .update({
+              ...warehouseData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingWarehouse.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        });
 
         toast({
           title: t("warehouses.toast.updateSuccess"),
         });
       } else {
         if (!activeCompany?.id) throw new Error("No active company selected");
-        
-        const { error } = await supabase.from("warehouses").insert([
-          {
-            ...warehouseData,
-            organization_id: activeCompany.id,
-            created_by: businessUserId,
-          },
-        ]);
 
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("warehouses").insert([
+            {
+              ...warehouseData,
+              organization_id: activeCompany.id,
+              created_by: businessUserId,
+            },
+          ]);
+
+          if (error) throw error;
+        });
 
         toast({
           title: t("warehouses.toast.createSuccess"),
@@ -152,9 +157,13 @@ const Warehouses = () => {
     if (!confirm(t("warehouses.delete.confirm"))) return;
 
     try {
-      const { error } = await supabase.from("warehouses").delete().eq("id", id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase.from("warehouses").delete().eq("id", id);
+        if (error) throw error;
+      });
 
       toast({
         title: t("warehouses.toast.deleteSuccess"),
@@ -220,9 +229,15 @@ const Warehouses = () => {
         throw new Error(t("warehouses.toast.noValidWarehouses"));
       }
 
-      const { error } = await supabase.from("warehouses").insert(warehousesToInsert);
-
-      if (error) throw error;
+      await withAuditContext(
+        supabase,
+        businessUserId,
+        async () => {
+          const { error } = await supabase.from("warehouses").insert(warehousesToInsert);
+          if (error) throw error;
+        },
+        "csv_import"
+      );
 
       toast({
         title: t("warehouses.toast.importSuccess").replace("{count}", String(warehousesToInsert.length)),

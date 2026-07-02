@@ -19,6 +19,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
@@ -1863,207 +1864,86 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         template_id: formData.pdf_template_id || null,
       };
 
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      // Build the fully-computed lines/fees/totals payloads exactly as before —
+      // the RPC persists them verbatim (business math stays in JS, single-transaction
+      // persistence + single audit row happens server-side).
+      const linesToInsert = lines
+        .filter((line) => line.qt > 0)
+        .map((line) => {
+          const custoUnit =
+            line.custo_material_unit + line.custo_mao_obra_unit;
+          const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
+          const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+          const precoSemIvaBase = unitPrice * line.qt;
+          const lineDiscount = line.discount_percent || 0;
+          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const ivaValor = precoSemIva * (line.iva_percent / 100);
+          const totalComIva = precoSemIva + ivaValor;
+          const totalComDesconto =
+            totalComIva * (1 - formData.desconto_global_percent / 100);
 
-      if (quoteId) {
-        const { error } = await supabase
-          .from("quotes")
-          .update(quoteData)
-          .eq("id", quoteId);
+          return {
+            catalog_item_id: line.catalog_item_id || null,
+            product_id: line.product_id || null,
+            service_id: line.service_id || null,
+            bundle_id: line.bundle_id || null,
+            selected_attributes: line.selected_attributes || {},
+            categoria: line.categoria,
+            descricao_snapshot: line.descricao_snapshot,
+            qt: line.qt,
+            custo_material_unit: line.custo_material_unit,
+            custo_mao_obra_unit: line.custo_mao_obra_unit,
+            margem_percent: line.margem_percent,
+            iva_percent: line.iva_percent,
+            int_percent: line.int_percent,
+            discount_percent: lineDiscount,
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+            ordem: line.ordem,
+            section_name: line.section_name || "Geral",
+            unidade: line.unidade || null,
+            item_description: line.item_description || null,
+            cost_price: line.cost_price || 0,
+          };
+        });
 
-        if (error) throw error;
+      const feesToInsert = (totals.fees && totals.fees.length > 0)
+        ? totals.fees.map(fee => ({
+            fee_type_id: fee.id,
+            base_amount: fee.baseAmount,
+            calculated_value: fee.calculatedValue,
+            vat_rate: fee.vatRate,
+            vat_amount: fee.vatAmount,
+          }))
+        : [];
 
-        await supabase.from("quote_lines").delete().eq("quote_id", quoteId);
-      } else {
-        const { data, error } = await supabase
-          .from("quotes")
-          .insert({
-            ...quoteData,
-            created_by: businessUserId,
-          })
-          .select()
-          .single();
+      const totalsPayload = {
+        subtotal: totals.totalSemIva,
+        total_fees: totals.totalFeesWithVat,
+        total: totals.grandTotal,
+      };
 
-        if (error) throw error;
-        savedQuoteId = data.id;
-      }
+      // Inline quotes (additional quotes created within the builder) — same shape
+      // handleSave() used to build per-iteration, now batched into one RPC argument.
+      const inlineQuotesPayload = inlineQuotes
+        .filter((iq) => iq.lines.length > 0 && iq.lines.filter(l => l.qt > 0).length > 0)
+        .map((iq) => {
+          const iqData = {
+            deal_id: formData.deal_id || null,
+            organization_id: dealOrgId || activeCompany?.id || null,
+            root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
+            title: iq.title || null,
+            obra_notas: iq.obra_notas || null,
+            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
+            desconto_global_percent: iq.desconto_global_percent,
+            estado: "rascunho",
+            validade_dias: iq.validade_dias,
+            iva_rate: iq.iva_rate,
+            client_notes: iq.client_notes || null,
+            conditions: iq.conditions || null,
+          };
 
-      if (lines.length > 0) {
-        const linesToInsert = lines
-          .filter((line) => line.qt > 0)
-          .map((line) => {
-            const custoUnit =
-              line.custo_material_unit + line.custo_mao_obra_unit;
-            const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-            const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-            const precoSemIvaBase = unitPrice * line.qt;
-            const lineDiscount = line.discount_percent || 0;
-            const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
-            const ivaValor = precoSemIva * (line.iva_percent / 100);
-            const totalComIva = precoSemIva + ivaValor;
-            const totalComDesconto =
-              totalComIva * (1 - formData.desconto_global_percent / 100);
-
-            return {
-              quote_id: savedQuoteId,
-              catalog_item_id: line.catalog_item_id || null,
-              product_id: line.product_id || null,
-              service_id: line.service_id || null,
-              bundle_id: line.bundle_id || null,
-              selected_attributes: line.selected_attributes || {},
-              categoria: line.categoria,
-              descricao_snapshot: line.descricao_snapshot,
-              qt: line.qt,
-              custo_material_unit: line.custo_material_unit,
-              custo_mao_obra_unit: line.custo_mao_obra_unit,
-              margem_percent: line.margem_percent,
-              iva_percent: line.iva_percent,
-              int_percent: line.int_percent,
-              discount_percent: lineDiscount,
-              total_sem_iva: precoSemIva,
-              total_com_iva: totalComIva,
-              total_com_desconto: totalComDesconto,
-              ordem: line.ordem,
-              section_name: line.section_name || "Geral",
-              unidade: line.unidade || null,
-              item_description: line.item_description || null,
-              cost_price: line.cost_price || 0,
-            };
-          });
-
-        const { error: linesError } = await supabase
-          .from("quote_lines")
-          .insert(linesToInsert);
-
-        if (linesError) throw linesError;
-      }
-
-      // SET LOCAL GUC resets after each await — re-establish audit context before fee writes.
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-      // Sempre limpar fees existentes em modo edição (mesmo quando o utilizador
-      // remove todas as taxas — caso contrário ficariam órfãs em quote_fees).
-      if (quoteId) {
-        const { error: delFeesError } = await supabase
-          .from("quote_fees")
-          .delete()
-          .eq("quote_id", savedQuoteId);
-        if (delFeesError) throw delFeesError;
-      }
-
-      // Re-establish audit context before quote_fees INSERT (SET LOCAL reset after previous await).
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-      if (totals.fees && totals.fees.length > 0) {
-        const feesToInsert = totals.fees.map(fee => ({
-          quote_id: savedQuoteId,
-          fee_type_id: fee.id,
-          base_amount: fee.baseAmount,
-          calculated_value: fee.calculatedValue,
-          vat_rate: fee.vatRate,
-          vat_amount: fee.vatAmount,
-        }));
-
-        const { error: feesError } = await supabase
-          .from("quote_fees")
-          .insert(feesToInsert);
-
-        if (feesError) throw feesError;
-      }
-
-
-      // Re-establish audit context before quotes totals UPDATE.
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-
-      const { error: updateError } = await supabase
-        .from("quotes")
-        .update({
-          subtotal: totals.totalSemIva,
-          total_fees: totals.totalFeesWithVat,
-          total: totals.grandTotal,
-        })
-        .eq("id", savedQuoteId);
-
-      if (updateError) throw updateError;
-
-      // Sync proposal value when this quote is linked to a proposal.
-      // Must sum ALL quotes linked to the proposal, not just this one —
-      // otherwise saving any single quote overwrites the proposal total.
-      if (savedQuoteId && formData.proposal_id) {
-        try {
-          const { data: linkedQuotes, error: linkedQuotesError } = await supabase
-            .from("quotes")
-            .select("total")
-            .eq("proposal_id", formData.proposal_id)
-            .is("deleted_at", null);
-          if (linkedQuotesError) throw linkedQuotesError;
-          const proposalValue = (linkedQuotes || []).reduce((sum, q) => sum + (Number(q.total) || 0), 0);
-          // Re-establish audit context before proposals UPDATE.
-          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-          await (supabase.from("proposals") as any)
-            .update({ value: proposalValue })
-            .eq("id", formData.proposal_id);
-        } catch (propErr) {
-          console.error("Proposal value sync error:", propErr);
-        }
-      }
-
-      if (savedQuoteId && formData.deal_id) {
-        try {
-          // Re-establish audit context before pipeline_links UPDATE/INSERT.
-          await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-          const { data: existingLink } = await (supabase.from("pipeline_links") as any)
-            .select("id")
-            .eq("deal_id", formData.deal_id)
-            .eq("status", "active")
-            .maybeSingle();
-          if (existingLink) {
-            await (supabase.from("pipeline_links") as any)
-              .update({ quote_id: savedQuoteId, updated_at: new Date().toISOString() })
-              .eq("id", existingLink.id);
-          } else {
-            await (supabase.from("pipeline_links") as any).insert({
-              deal_id: formData.deal_id,
-              quote_id: savedQuoteId,
-              organization_id: dealOrgId || activeCompany?.id,
-              root_organization_id: resolvedRootOrgId || activeCompany?.id,
-              status: "active",
-            });
-          }
-        } catch (linkErr) {
-          console.error("Pipeline link creation error:", linkErr);
-        }
-      }
-
-      // Save inline quotes (additional quotes created within the builder)
-      for (const iq of inlineQuotes) {
-        if (iq.lines.length === 0) continue;
-        
-        const iqData = {
-          deal_id: formData.deal_id || null,
-          organization_id: dealOrgId || activeCompany?.id || null,
-          root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
-          title: iq.title || null,
-          obra_notas: iq.obra_notas || null,
-          modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-          desconto_global_percent: iq.desconto_global_percent,
-          estado: "rascunho",
-          validade_dias: iq.validade_dias,
-          iva_rate: iq.iva_rate,
-          client_notes: iq.client_notes || null,
-          conditions: iq.conditions || null,
-          created_by: businessUserId,
-        };
-
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { data: newIQ, error: iqError } = await (supabase.from("quotes") as any)
-          .insert(iqData)
-          .select("id")
-          .single();
-
-        if (iqError) throw iqError;
-
-        if (iq.lines.filter(l => l.qt > 0).length > 0) {
           const iqLinesToInsert = iq.lines
             .filter(l => l.qt > 0)
             .map(l => {
@@ -2078,7 +1958,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
 
               return {
-                quote_id: newIQ.id,
                 catalog_item_id: l.catalog_item_id || null,
                 product_id: l.product_id || null,
                 service_id: l.service_id || null,
@@ -2104,16 +1983,34 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               };
             });
 
-          const { error: iqLinesError } = await supabase.from("quote_lines").insert(iqLinesToInsert);
-          if (iqLinesError) throw iqLinesError;
-
           const iqTotalSemIva = iqLinesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
           const iqGrandTotal = iqLinesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
-          await (supabase.from("quotes") as any)
-            .update({ subtotal: iqTotalSemIva, total: iqGrandTotal })
-            .eq("id", newIQ.id);
-        }
-      }
+
+          return {
+            data: iqData,
+            lines: iqLinesToInsert,
+            totals: { subtotal: iqTotalSemIva, total: iqGrandTotal },
+          };
+        });
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+
+      const { data: savedQuote, error: saveError } = await supabase.rpc('rpc_save_quote', {
+        // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
+        // updates an existing one) but the generated RPC Args type widens it
+        // to `string` since the SQL parameter has no default value.
+        p_quote_id: (quoteId || null) as unknown as string,
+        p_quote_data: quoteData,
+        p_lines: linesToInsert,
+        p_fees: feesToInsert,
+        p_totals: totalsPayload,
+        p_inline_quotes: inlineQuotesPayload,
+      });
+
+      if (saveError) throw saveError;
+
+      const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
+      savedQuoteId = savedQuoteRow?.id || savedQuoteId;
 
       // Clear inline quotes after saving
       setInlineQuotes([]);

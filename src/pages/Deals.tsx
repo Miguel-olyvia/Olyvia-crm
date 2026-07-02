@@ -4,6 +4,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { searchEntityIds } from "@/lib/clientSearch";
 import Layout from "@/components/Layout";
@@ -217,6 +218,8 @@ const Deals = () => {
       loadData();
     },
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkDeleteRpc: "rpc_bulk_delete_deal",
   });
 
   // Custom bulk stage change for deals (uses stage_id instead of status)
@@ -226,11 +229,19 @@ const Deals = () => {
 
     try {
       const dealIds = Array.from(selectedIds);
-      
-      const { error } = await supabase.rpc("bulk_update_deal_stage", {
-        p_deal_ids: dealIds,
-        p_stage_id: bulkNewStatus,
-      });
+
+      const bulkBusinessUserId = await resolveCurrentBusinessUserId();
+      if (!bulkBusinessUserId) {
+        toast({ title: t('common.error'), description: "Não foi possível identificar o utilizador.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, bulkBusinessUserId, () =>
+        supabase.rpc("bulk_update_deal_stage", {
+          p_deal_ids: dealIds,
+          p_stage_id: bulkNewStatus,
+        }) as Promise<{ error: any }>
+      );
 
       if (error) throw error;
 
@@ -1155,12 +1166,12 @@ const Deals = () => {
         toast({ title: 'Erro ao mover pedido', description: 'Identidade do utilizador nao resolvida.', variant: 'destructive' });
         return;
       }
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdKanban, p_source: 'web' });
-
-      await (supabase.from("deals") as any)
-        .update({ stage_id: newStageId })
-        .eq("id", dealId)
-        .eq("organization_id", activeCompany.id);
+      await withAuditContext(supabase, businessUserIdKanban, () =>
+        (supabase.from("deals") as any)
+          .update({ stage_id: newStageId })
+          .eq("id", dealId)
+          .eq("organization_id", activeCompany.id) as Promise<{ error: any }>
+      );
 
       // Execute workflow for stage change
       try {
@@ -1310,7 +1321,15 @@ const Deals = () => {
     if (!deletingId) return;
 
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "deal", p_id: deletingId });
+      const deleteBusinessUserId = await resolveCurrentBusinessUserId();
+      if (!deleteBusinessUserId) {
+        toast({ title: t('deals.toast.deleteError'), description: "Não foi possível identificar o utilizador.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, deleteBusinessUserId, () =>
+        (supabase as any).rpc("soft_delete_business_entity", { p_kind: "deal", p_id: deletingId })
+      );
 
       if (error) throw error;
 
@@ -1340,22 +1359,22 @@ const Deals = () => {
         return;
       }
 
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
-
-      const { error } = await supabase.from("deals").insert({
-        title: `${deal.title} (cópia)`,
-        value: deal.value,
-        probability: deal.probability,
-        description: deal.description,
-        stage_id: stages[0]?.id || deal.deal_stages?.id,
-        lead_id: deal.lead_id,
-        client_id: deal.client_id,
-        entity_id: deal.entity_id,
-        organization_id: deal.organization_id,
-        expected_close_date: deal.expected_close_date,
-        created_by: businessUserId,
-        assigned_to: deal.assigned_to,
-      } as any);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("deals").insert({
+          title: `${deal.title} (cópia)`,
+          value: deal.value,
+          probability: deal.probability,
+          description: deal.description,
+          stage_id: stages[0]?.id || deal.deal_stages?.id,
+          lead_id: deal.lead_id,
+          client_id: deal.client_id,
+          entity_id: deal.entity_id,
+          organization_id: deal.organization_id,
+          expected_close_date: deal.expected_close_date,
+          created_by: businessUserId,
+          assigned_to: deal.assigned_to,
+        } as any) as Promise<{ error: any }>
+      );
 
       if (error) throw error;
 
@@ -1527,15 +1546,30 @@ const Deals = () => {
         lost_reason: isDisqualifiedStage ? (formData.lost_reason || null) : null,
       };
 
+      // Line items are passed as-is; the RPC decides create/reuse-need semantics
+      // and, on the edit path, uses p_update_need_columns=false so it never
+      // overwrites a deal_needs row that DealNeedsSection.tsx may have edited
+      // independently — it only rewrites deal_need_items.
+      const itemsPayload = dealLineItems.map((item, idx) => ({
+        item_type: item.type,
+        product_id: item.product_id || null,
+        service_id: item.service_id || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price || 0,
+        notes: item.name,
+        sort_order: idx,
+      }));
+
       if (editingId) {
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
-        const { error, count } = await (supabase.from("deals") as any)
-          .update(dealData, { count: "exact" })
-          .eq("id", editingId)
-          .eq("organization_id", activeCompany.id);
+        const { data: updatedDeal, error } = await supabase.rpc("rpc_update_deal", {
+          p_deal_id: editingId,
+          p_deal_data: dealData,
+          p_organization_id: activeCompany.id,
+          p_items: itemsPayload,
+        });
 
         if (error) throw error;
-        if (count === 0) throw new Error("Deal not found or access denied.");
+        if (!updatedDeal) throw new Error("Deal not found or access denied.");
 
         if (originalStageId && formData.stage_id !== originalStageId) {
           try {
@@ -1552,51 +1586,6 @@ const Deals = () => {
           } catch (wfError) {
             console.error("Workflow execution error:", wfError);
           }
-        }
-
-        try {
-          const { data: existingNeed } = await (supabase as any)
-            .from("deal_needs")
-            .select("id")
-            .eq("deal_id", editingId)
-            .limit(1)
-            .maybeSingle();
-
-          if (dealLineItems.length > 0) {
-            let needId = existingNeed?.id;
-            
-            if (needId) {
-              await (supabase as any).from("deal_need_items").delete().eq("deal_need_id", needId);
-            } else {
-              const { data: newNeed } = await (supabase as any).from("deal_needs").insert({
-                deal_id: editingId,
-                title: formData.title || "Itens do pedido",
-                status: "pending",
-                created_by: businessUserId,
-                sort_order: 0,
-              }).select("id").single();
-              needId = newNeed?.id;
-            }
-
-            if (needId) {
-              const needItems = dealLineItems.map((item, idx) => ({
-                deal_need_id: needId,
-                item_type: item.type,
-                product_id: item.product_id || null,
-                service_id: item.service_id || null,
-                quantity: item.quantity,
-                unit_price: item.unit_price || 0,
-                notes: item.name,
-                sort_order: idx,
-              }));
-              await (supabase as any).from("deal_need_items").insert(needItems);
-            }
-          } else if (existingNeed?.id) {
-            await (supabase as any).from("deal_need_items").delete().eq("deal_need_id", existingNeed.id);
-            await (supabase as any).from("deal_needs").delete().eq("id", existingNeed.id);
-          }
-        } catch (itemErr) {
-          console.error("Error syncing deal items on update:", itemErr);
         }
 
         toast({ title: t('deals.toast.updateSuccess') });
@@ -1632,29 +1621,11 @@ const Deals = () => {
           return;
         }
 
-        const insertData = {
-          ...dealData,
-          created_by: businessUserId,
-          assigned_to: businessUserId,
-        };
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'web' });
-        const { data: newDeal, error } = await (supabase.from("deals") as any).insert(insertData).select("id").single();
-
-        if (error) throw error;
-
+        // Resolve the 'proposta' lead_workflow_stages id (FE-owned resolution, as before);
+        // the RPC applies it to the lead only when the lead is not already converted —
+        // identical to the previous isAlreadyConverted check.
+        let leadWorkflowStageId: string | null = null;
         if (formData.lead_id) {
-          // Check current lead state before updating — don't overwrite already-converted leads
-          const { data: currentLead } = await (supabase.from("anew_leads") as any)
-            .select("status, converted_to_contact_id, client_id")
-            .eq("id", formData.lead_id)
-            .single();
-
-          const isAlreadyConverted = currentLead && (
-            currentLead.status === "converted" ||
-            currentLead.converted_to_contact_id != null ||
-            currentLead.client_id != null
-          );
-
           const { data: propostaStage } = await supabase
             .from("lead_workflow_stages")
             .select("id")
@@ -1663,83 +1634,24 @@ const Deals = () => {
             .order("organization_id", { ascending: false, nullsFirst: false })
             .limit(1)
             .maybeSingle();
-
-          if (!isAlreadyConverted) {
-            const leadUpdate: Record<string, any> = { status: "qualified" };
-            if (propostaStage?.id) {
-              leadUpdate.workflow_stage_id = propostaStage.id;
-            }
-
-            await (supabase.from("anew_leads") as any)
-              .update(leadUpdate)
-              .eq("id", formData.lead_id);
-          }
+          leadWorkflowStageId = propostaStage?.id || null;
 
           // NOTE: We intentionally do NOT call execute-workflow for the lead here.
-          // The deal was already created above, so the workflow's auto "create_deal_from_lead"
-          // action would race and create a duplicate. The lead stage is already updated.
+          // The deal is created by the RPC below, so the workflow's auto "create_deal_from_lead"
+          // action would race and create a duplicate. The lead stage transition happens inside the RPC.
         }
 
-        if (newDeal?.id) {
-          try {
-            const linkData: Record<string, any> = {
-              deal_id: newDeal.id,
-              organization_id: activeCompany?.id || dealData.organization_id,
-              root_organization_id: resolvedRootOrgId || activeCompany?.id || dealData.organization_id,
-              status: "active",
-            };
-            if (formData.lead_id) {
-              const { data: existingLink } = await (supabase.from("pipeline_links") as any)
-                .select("id")
-                .eq("lead_id", formData.lead_id)
-                .eq("status", "active")
-                .maybeSingle();
-              if (existingLink) {
-                await (supabase.from("pipeline_links") as any)
-                  .update({ deal_id: newDeal.id, updated_at: new Date().toISOString() })
-                  .eq("id", existingLink.id);
-              } else {
-                linkData.lead_id = formData.lead_id;
-                await (supabase.from("pipeline_links") as any).insert(linkData);
-              }
-            } else {
-              await (supabase.from("pipeline_links") as any).insert(linkData);
-            }
-          } catch (linkErr) {
-            console.error("Pipeline link creation error:", linkErr);
-          }
-        }
+        const { data: newDeal, error } = await supabase.rpc("rpc_create_deal", {
+          p_deal_data: dealData,
+          p_organization_id: activeCompany.id,
+          p_root_organization_id: resolvedRootOrgId || activeCompany.id,
+          p_lead_workflow_stage_id: leadWorkflowStageId,
+          p_items: itemsPayload,
+        });
 
-        // Insert deal line items BEFORE workflow so quote creation can copy them
-        if (newDeal?.id && dealLineItems.length > 0) {
-          try {
-            const { data: dealNeed } = await (supabase as any).from("deal_needs").insert({
-              deal_id: newDeal.id,
-              title: formData.title || "Itens do pedido",
-              status: "pending",
-              created_by: businessUserId,
-              sort_order: 0,
-            }).select("id").single();
+        if (error) throw error;
 
-            if (dealNeed?.id) {
-              const needItems = dealLineItems.map((item, idx) => ({
-                deal_need_id: dealNeed.id,
-                item_type: item.type,
-                product_id: item.product_id || null,
-                service_id: item.service_id || null,
-                quantity: item.quantity,
-                unit_price: item.unit_price || 0,
-                notes: item.name,
-                sort_order: idx,
-              }));
-              await (supabase as any).from("deal_need_items").insert(needItems);
-            }
-          } catch (itemErr) {
-            console.error("Error saving deal items:", itemErr);
-          }
-        }
-
-        // Execute workflow AFTER items are saved so auto-created quotes get the line items
+        // Execute workflow AFTER the RPC persists items so auto-created quotes get the line items
         if (newDeal?.id && formData.stage_id) {
           try {
             await supabase.functions.invoke('execute-workflow', {

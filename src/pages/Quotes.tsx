@@ -915,7 +915,12 @@ export default function Quotes() {
     selectedIds, toggleSelectOne, toggleSelectAll, clearSelection,
     bulkStatusDialogOpen, setBulkStatusDialogOpen, bulkDeleteDialogOpen, setBulkDeleteDialogOpen,
     bulkNewStatus, setBulkNewStatus, processing, setProcessing, handleBulkDelete
-  } = useBulkActions({ tableName: "quotes", onSuccess: fetchQuotes });
+  } = useBulkActions({
+    tableName: "quotes",
+    onSuccess: fetchQuotes,
+    organizationId: activeCompany?.id,
+    bulkDeleteRpc: "rpc_bulk_delete_quote",
+  });
 
   const getClientAddress = (quote: Quote) => {
     if (quote.clients?.client_addresses?.length) {
@@ -1072,7 +1077,7 @@ export default function Quotes() {
   };
 
   const handleBulkStatusChange = async () => {
-    if (selectedIds.size === 0 || !bulkNewStatus) return;
+    if (selectedIds.size === 0 || !bulkNewStatus || !activeCompany?.id) return;
     setProcessing(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -1082,11 +1087,12 @@ export default function Quotes() {
       }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const idsArr = Array.from(selectedIds);
-      for (let i = 0; i < idsArr.length; i += 30) {
-        const chunk = idsArr.slice(i, i + 30);
-        const { error } = await supabase.from("quotes").update({ estado: bulkNewStatus }).in("id", chunk);
-        if (error) throw error;
-      }
+      const { error } = await supabase.rpc("rpc_bulk_status_quote", {
+        p_ids: idsArr,
+        p_organization_id: activeCompany.id,
+        p_estado: bulkNewStatus,
+      });
+      if (error) throw error;
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.size} ${t('quotes.records')} ${t('common.updated')}.` });
       clearSelection(); setBulkStatusDialogOpen(false); fetchQuotes();
     } catch (error: any) {

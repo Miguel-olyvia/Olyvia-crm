@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -250,46 +249,38 @@ export default function ServiceSubcategories() {
       const slug = `${parentSlug}-${baseSlug}`;
       const path = `${parentCategory.name.toLowerCase()}/${baseSlug}`;
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        if (editingSubcategory) {
-          const { error } = await supabase
-            .from("service_categories")
-            .update({
-              name: formData.name,
-              slug,
-              path,
-              description: formData.description || null,
-              sort_order: formData.sort_order,
-              parent_id: formData.parent_id,
-              organization_id: parentCategory.organization_id,
-            })
-            .eq("id", editingSubcategory.id);
+      if (editingSubcategory) {
+        const { error } = await supabase.rpc("rpc_update_service_subcategory", {
+          p_id: editingSubcategory.id,
+          p_name: formData.name,
+          p_slug: slug,
+          p_path: path,
+          p_description: formData.description || null,
+          p_parent_id: formData.parent_id,
+          p_sort_order: formData.sort_order,
+        });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          toast({
-            title: t('serviceSubcategories.toast.updateSuccess'),
-          });
-        } else {
-          const { error } = await supabase.from("service_categories").insert({
-            name: formData.name,
-            slug,
-            path,
-            description: formData.description || null,
-            parent_id: formData.parent_id,
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-            organization_id: parentCategory.organization_id,
-          });
+        toast({
+          title: t('serviceSubcategories.toast.updateSuccess'),
+        });
+      } else {
+        const { error } = await supabase.rpc("rpc_create_service_subcategory", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_path: path,
+          p_description: formData.description || null,
+          p_parent_id: formData.parent_id,
+          p_sort_order: formData.sort_order,
+        });
 
-          if (error) throw error;
+        if (error) throw error;
 
-          toast({
-            title: t('serviceSubcategories.toast.createSuccess'),
-          });
-        }
-      });
+        toast({
+          title: t('serviceSubcategories.toast.createSuccess'),
+        });
+      }
 
       handleCloseDialog();
       await loadData();
@@ -306,59 +297,27 @@ export default function ServiceSubcategories() {
     if (!subcategoryToDelete) return;
 
     try {
-      // Resolve org from local state before entering withAuditContext — mirrors the
-      // defense-in-depth pattern used in ProductSubcategories.handleDelete.
-      // This adds an application-layer org scope to both mutations even when RLS is
-      // correctly configured, preventing cross-org DELETE on any RLS misconfiguration
-      // (SVC-DELETE-NO-ORG-SCOPE).
-      const sub = subcategories.find(s => s.id === subcategoryToDelete);
-      const resolvedOrgId = sub?.organization_id ?? null;
-
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Sessão inválida.");
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        // Limpar referências em serviços soft-deleted (não bloqueiam de forma legítima).
-        // throwOnError() ensures a silent UPDATE failure (e.g. RLS rejection) is surfaced
-        // before the DELETE proceeds, preventing orphaned FK references (AUDIT-CAT-04).
-        // Scoped to the subcategory's org for defense-in-depth.
-        const servicesUpdate = supabase
-          .from("services")
-          .update({ service_subcategory_id: null })
-          .eq("service_subcategory_id", subcategoryToDelete)
-          .not("deleted_at", "is", null);
-
-        // Add org scope when we have a resolved org; omit when null (system admin / global row).
-        const scopedServicesUpdate = resolvedOrgId
-          ? servicesUpdate.eq("organization_id", resolvedOrgId)
-          : servicesUpdate;
-
-        await scopedServicesUpdate.throwOnError();
-
-        const deleteQuery = supabase
-          .from("service_categories")
-          .delete()
-          .eq("id", subcategoryToDelete);
-
-        const { error } = await (resolvedOrgId
-          ? deleteQuery.eq("organization_id", resolvedOrgId)
-          : deleteQuery);
-
-        if (error) {
-          // Check if it's a foreign key constraint error
-          if (error.code === "23503") {
-            toast({
-              title: t('serviceSubcategories.toast.cannotDelete'),
-              description: t('serviceSubcategories.toast.inUseError'),
-              variant: "destructive",
-            });
-            setDeleteDialogOpen(false);
-            setSubcategoryToDelete(null);
-            return;
-          }
-          throw error;
-        }
+      const { error } = await supabase.rpc("rpc_delete_service_category", {
+        p_id: subcategoryToDelete,
       });
+
+      if (error) {
+        // Check if it's a foreign key constraint error
+        if (error.code === "23503") {
+          toast({
+            title: t('serviceSubcategories.toast.cannotDelete'),
+            description: t('serviceSubcategories.toast.inUseError'),
+            variant: "destructive",
+          });
+          setDeleteDialogOpen(false);
+          setSubcategoryToDelete(null);
+          return;
+        }
+        throw error;
+      }
 
       toast({
         title: t('serviceSubcategories.toast.deleteSuccess'),

@@ -22,6 +22,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 interface RoleTemplate {
   id: string;
@@ -399,30 +400,19 @@ export default function Roles() {
   const createMutation = useMutation({
     mutationFn: async (data: { code: string; name: string; description: string; can_sign_contracts: boolean; permissions: string[] }) => {
       // Canonical business user id for created_by (never auth_user_id).
-      const { resolveCurrentBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
       const createdBy = await resolveCurrentBusinessUserId();
+      if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
 
-      const { data: role, error: roleError } = await supabase
-        .from("anew_roles")
-        .insert({ 
-          code: data.code, 
-          name: data.name, 
-          description: data.description || null,
-          can_sign_contracts: data.can_sign_contracts,
-          organization_id: activeCompany?.id || null, // Associate with active company
-          created_by: createdBy,
-        } as any)
-        .select()
-        .single();
+      const { data: role, error: roleError } = await supabase.rpc("rpc_create_role", {
+        p_code: data.code,
+        p_name: data.name,
+        p_description: data.description || null,
+        p_can_sign_contracts: data.can_sign_contracts,
+        p_organization_id: activeCompany?.id || null,
+        p_permissions: data.permissions,
+      });
       if (roleError) throw roleError;
-
-      if (data.permissions.length > 0) {
-        const { error: permError } = await supabase
-          .from("anew_role_permissions")
-          .insert(data.permissions.map(p => ({ role_id: role.id, permission_code: p, created_by: createdBy })));
-        if (permError) throw permError;
-      }
-      return role;
+      return role as Role;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
@@ -447,25 +437,18 @@ export default function Roles() {
         throw new Error("Roles de sistema não são editáveis");
       }
 
-      const { error: roleError } = await supabase
-        .from("anew_roles")
-        .update({ code: data.code, name: data.name, description: data.description || null, can_sign_contracts: data.can_sign_contracts } as any)
-        .eq("id", data.id);
-      if (roleError) throw roleError;
-
-      const { resolveCurrentBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
       const createdBy = await resolveCurrentBusinessUserId();
       if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
 
-      // Delete existing permissions and re-add
-      await supabase.from("anew_role_permissions").delete().eq("role_id", data.id);
-
-      if (data.permissions.length > 0) {
-        const { error: permError } = await supabase
-          .from("anew_role_permissions")
-          .insert(data.permissions.map(p => ({ role_id: data.id, permission_code: p, created_by: createdBy })));
-        if (permError) throw permError;
-      }
+      const { error: roleError } = await supabase.rpc("rpc_update_role", {
+        p_id: data.id,
+        p_code: data.code,
+        p_name: data.name,
+        p_description: data.description || null,
+        p_can_sign_contracts: data.can_sign_contracts,
+        p_permissions: data.permissions,
+      });
+      if (roleError) throw roleError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
@@ -481,7 +464,10 @@ export default function Roles() {
   // Delete role mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("anew_roles").delete().eq("id", id);
+      const createdBy = await resolveCurrentBusinessUserId();
+      if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await supabase.rpc("rpc_delete_role", { p_id: id });
       if (error) throw error;
     },
     onSuccess: () => {

@@ -20550,6 +20550,38 @@ export type Database = {
         Args: { p_contact_id: string }
         Returns: boolean
       }
+      rpc_bulk_delete_product: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_delete_product_attribute: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_org_product: {
+        Args: {
+          p_ids: string[]
+          p_new_organization_id: string
+          p_organization_id: string
+        }
+        Returns: number
+      }
+      rpc_bulk_org_product_attribute: {
+        Args: {
+          p_ids: string[]
+          p_new_organization_id: string
+          p_organization_id: string
+        }
+        Returns: number
+      }
+      rpc_bulk_status_product: {
+        Args: {
+          p_ids: string[]
+          p_is_active: boolean
+          p_organization_id: string
+        }
+        Returns: number
+      }
       search_proposal_entities:
         | {
             Args: { p_limit?: number; p_search: string }
@@ -20593,7 +20625,9 @@ export type Database = {
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
       soft_delete_business_entity: {
-        Args: { p_id: string; p_kind: string }
+        Args:
+          | { p_id: string; p_kind: string }
+          | { p_actor_id?: string; p_id: string; p_kind: string }
         Returns: boolean
       }
       soft_delete_entity_facet: {

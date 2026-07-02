@@ -14,9 +14,8 @@ import { OrganizationsHelpDialog } from "@/components/organizations/Organization
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { assignCreatorAsOrgAdmin, assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
-import { upsertOrgFiscalEntity, removeOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
-import { ensureOrgEntity, resolveOrganizationEntityId } from "@/utils/orgEntity";
+import { assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
+import { upsertOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { OrganizationMembersDialog } from "@/components/organizations/OrganizationMembersDialog";
@@ -28,6 +27,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Organization {
   id: string;
@@ -297,9 +297,11 @@ export default function Organizations() {
       if (selectedTemplateId) {
         const { data: userData } = await supabase.auth.getUser();
         const businessUserId = await resolveBusinessUserId(userData.user?.id);
-        const { data: rootOrgId, error } = await (supabase as any).rpc('create_orgs_from_template', {
-          p_template_id: selectedTemplateId, p_root_name: formData.name, p_created_by: businessUserId
-        });
+        const { data: rootOrgId, error } = await withAuditContext(supabase, businessUserId, () =>
+          (supabase as any).rpc('create_orgs_from_template', {
+            p_template_id: selectedTemplateId, p_root_name: formData.name, p_created_by: businessUserId
+          })
+        );
         if (error) throw error;
         if (userData.user?.id && rootOrgId) {
           await assignCreatorAsAdminToHierarchy(rootOrgId, formData.name, userData.user.id);
@@ -314,23 +316,24 @@ export default function Organizations() {
       const typeToUse = formData.type === "other" ? formData.customType : formData.type;
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const newOrgId = crypto.randomUUID();
       const newOrgName = formData.name;
       const hasFiscalData = formData.isFiscal && !!formData.nif?.trim();
       const isInitialOrganizationCreation = organizations.length === 0 && !hasPermission("organizations.create");
 
       if (isInitialOrganizationCreation) {
-        const { data: initialOrg, error: initialOrgError } = await (supabase as any).rpc(
-          "create_initial_organization",
-          {
-            p_name: newOrgName,
-            p_type: typeToUse,
-            p_description: formData.description || null,
-            p_status: formData.status,
-            p_sector: formData.sector || null,
-            p_phone: formData.phone?.trim() || null,
-            p_is_fiscal: formData.isFiscal,
-          },
+        const { data: initialOrg, error: initialOrgError } = await withAuditContext(supabase, businessUserId, () =>
+          (supabase as any).rpc(
+            "create_initial_organization",
+            {
+              p_name: newOrgName,
+              p_type: typeToUse,
+              p_description: formData.description || null,
+              p_status: formData.status,
+              p_sector: formData.sector || null,
+              p_phone: formData.phone?.trim() || null,
+              p_is_fiscal: formData.isFiscal,
+            },
+          )
         );
         if (initialOrgError) throw initialOrgError;
 
@@ -343,12 +346,14 @@ export default function Organizations() {
 
         for (const addr of formData.addresses) {
           if (addr.street && addr.number && addr.city && addr.postal_code) {
-            await (supabase as any).rpc("assign_address_to_org", {
-              p_org_id: initialOrgId, p_street: addr.street, p_number: addr.number,
-              p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-              p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-              p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-            });
+            await withAuditContext(supabase, businessUserId, () =>
+              (supabase as any).rpc("assign_address_to_org", {
+                p_org_id: initialOrgId, p_street: addr.street, p_number: addr.number,
+                p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
+                p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
+                p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
+              })
+            );
           }
         }
 
@@ -358,58 +363,31 @@ export default function Organizations() {
         return;
       }
 
-      const entityId = await resolveOrganizationEntityId({
-        orgName: newOrgName,
-        createdBy: businessUserId,
-        nif: hasFiscalData ? formData.nif : null,
-      });
+      const addressesPayload = formData.addresses
+        .filter(addr => addr.street && addr.number && addr.city && addr.postal_code)
+        .map(addr => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
 
-      const { error } = await (supabase as any).from("anew_organizations").insert({
-        id: newOrgId,
-        name: newOrgName,
-        type: typeToUse,
-        description: formData.description || null,
-        status: formData.status,
-        sector: !formData.parentId && formData.sector ? formData.sector : null,
-        phone: formData.phone?.trim() || null,
-        is_fiscal: formData.isFiscal,
-        entity_id: entityId,
-        created_by: businessUserId,
-      });
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_create_organization", {
+          p_name: newOrgName,
+          p_type: typeToUse,
+          p_description: formData.description || null,
+          p_status: formData.status,
+          p_sector: !formData.parentId && formData.sector ? formData.sector : null,
+          p_phone: formData.phone?.trim() || null,
+          p_is_fiscal: formData.isFiscal,
+          p_parent_id: formData.parentId || null,
+          p_nif: hasFiscalData ? formData.nif : null,
+          p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
+        })
+      );
       if (error) throw error;
-
-      if (hasFiscalData) {
-        await upsertOrgFiscalEntity(newOrgId, formData.nif, formData.commercialName || null, "PT", businessUserId);
-      }
-
-      if (formData.parentId) {
-        await (supabase as any).from("anew_hierarchy").insert({
-          parent_org_id: formData.parentId, child_org_id: newOrgId,
-          relationship_type: "parent_child", is_primary: true, created_by: businessUserId,
-        });
-      }
-
-      if (userData.user?.id) {
-        const { error: bootstrapError } = await (supabase as any).rpc("bootstrap_org_creator", {
-          p_organization_id: newOrgId,
-          p_organization_name: newOrgName,
-        });
-        if (bootstrapError) {
-          console.error("Bootstrap error, falling back:", bootstrapError);
-          await assignCreatorAsOrgAdmin(newOrgId, newOrgName, userData.user.id);
-        }
-      }
-
-      for (const addr of formData.addresses) {
-        if (addr.street && addr.number && addr.city && addr.postal_code) {
-          await (supabase as any).rpc("assign_address_to_org", {
-            p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
-            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-          });
-        }
-      }
 
       toast.success(t("common.created"));
       setPanelMode('closed'); resetForm();
@@ -428,52 +406,34 @@ export default function Organizations() {
       const typeToUse = formData.type === "other" ? formData.customType : formData.type;
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      await ensureOrgEntity({
-        orgId: selectedOrg.id,
-        orgName: formData.name,
-        createdBy: businessUserId,
-        nif: formData.isFiscal && formData.nif?.trim() ? formData.nif : null,
-      });
-      const { error } = await (supabase as any).from("anew_organizations").update({
-        name: formData.name, type: typeToUse, description: formData.description || null,
-        status: formData.status, sector: !formData.parentId && formData.sector ? formData.sector : null,
-        phone: formData.phone?.trim() || null,
-        is_fiscal: formData.isFiscal, updated_at: new Date().toISOString(),
-      }).eq("id", selectedOrg.id);
+      const hasFiscalData = formData.isFiscal && !!formData.nif?.trim();
 
-      if (!error) {
-        if (formData.isFiscal && formData.nif) {
-          await upsertOrgFiscalEntity(selectedOrg.id, formData.nif, formData.commercialName || null, "PT", businessUserId);
-        } else {
-          await removeOrgFiscalEntity(selectedOrg.id);
-        }
-      }
+      const addressesPayload = formData.addresses
+        .filter(addr => addr.street && addr.number && addr.city && addr.postal_code)
+        .map(addr => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_update_organization", {
+          p_id: selectedOrg.id,
+          p_name: formData.name,
+          p_type: typeToUse,
+          p_description: formData.description || null,
+          p_status: formData.status,
+          p_sector: !formData.parentId && formData.sector ? formData.sector : null,
+          p_phone: formData.phone?.trim() || null,
+          p_is_fiscal: formData.isFiscal,
+          p_parent_id: formData.parentId || null,
+          p_nif: hasFiscalData ? formData.nif : null,
+          p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
+        })
+      );
       if (error) throw error;
-
-      await (supabase as any).rpc("unlink_organization_node", {
-        p_child_org_id: selectedOrg.id,
-        p_created_by: businessUserId,
-      });
-      if (formData.parentId) {
-        await (supabase as any).rpc("move_organization_node", {
-          p_child_org_id: selectedOrg.id,
-          p_new_parent_org_id: formData.parentId,
-          p_created_by: businessUserId,
-        });
-      }
-
-      await (supabase as any).from("anew_org_addresses").delete().eq("org_id", selectedOrg.id);
-
-      for (const addr of formData.addresses) {
-        if (addr.street && addr.number && addr.city && addr.postal_code) {
-          await (supabase as any).rpc("assign_address_to_org", {
-            p_org_id: selectedOrg.id, p_street: addr.street, p_number: addr.number,
-            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-          });
-        }
-      }
 
       toast.success(t("common.saved"));
       setPanelMode('closed'); resetForm();
@@ -497,9 +457,13 @@ export default function Organizations() {
         return [...childIds, ...grandchildren.flat()];
       };
       const descendantIds = await collectDescendants(orgToDelete.id);
-      const { error } = await (supabase as any).rpc("delete_organization_subtree", {
-        p_root_org_id: orgToDelete.id,
-      });
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_delete_organization", {
+          p_root_org_id: orgToDelete.id,
+        })
+      );
       if (error) throw error;
       toast.success(t("common.deleted"));
       setDeleteDialogOpen(false); setOrgToDelete(null);
@@ -517,6 +481,10 @@ export default function Organizations() {
   const handleConfirmUnlink = async () => {
     if (!orgToUnlink) return;
     try {
+      // 0. Resolve the acting business user once; reused for memberships and the unlink RPC below.
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+
       // 1. Find the current parent org before unlinking
       const { data: hierarchyLink } = await (supabase as any)
         .from("anew_hierarchy")
@@ -562,22 +530,24 @@ export default function Organizations() {
         for (const m of usersToAdd) {
           if (seenUsers.has(m.user_id)) continue;
           seenUsers.add(m.user_id);
-          await supabase.from("anew_memberships").insert({
-            user_id: m.user_id,
-            organization_id: orgToUnlink.id,
-            role_id: m.role_id,
-            status: "active",
-          });
+          await withAuditContext(supabase, businessUserId, () =>
+            supabase.from("anew_memberships").insert({
+              user_id: m.user_id,
+              organization_id: orgToUnlink.id,
+              role_id: m.role_id,
+              status: "active",
+            })
+          );
         }
       }
 
-      // 6. Now safe to delete the hierarchy link
-      const { data: userData } = await supabase.auth.getUser();
-      const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const { error } = await (supabase as any).rpc("unlink_organization_node", {
-        p_child_org_id: orgToUnlink.id,
-        p_created_by: businessUserId,
-      });
+      // 6. Now safe to delete the hierarchy link (actor already resolved above)
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("unlink_organization_node", {
+          p_child_org_id: orgToUnlink.id,
+          p_created_by: businessUserId,
+        })
+      );
       if (error) throw error;
       toast.success(t("organizations.unlinkSuccess") !== "organizations.unlinkSuccess" ? t("organizations.unlinkSuccess") : "Organização desassociada com sucesso");
       setUnlinkedOrgIds(prev => new Set(prev).add(orgToUnlink.id));
@@ -597,11 +567,13 @@ export default function Organizations() {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const { error } = await (supabase as any).rpc("move_organization_node", {
-        p_child_org_id: orgToLink.id,
-        p_new_parent_org_id: linkTargetParentId,
-        p_created_by: businessUserId,
-      });
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("move_organization_node", {
+          p_child_org_id: orgToLink.id,
+          p_new_parent_org_id: linkTargetParentId,
+          p_created_by: businessUserId,
+        })
+      );
       if (error) throw error;
       toast.success("Organização associada com sucesso");
       setLinkDialogOpen(false);

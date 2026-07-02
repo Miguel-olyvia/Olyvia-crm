@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useTranslation } from '@/hooks/useTranslation';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { withAuditContext } from '@/utils/auditContext';
 import type {
   ScheduleBoard,
   ScheduleItem,
@@ -67,25 +68,29 @@ export function useScheduling(companyId?: string) {
       if (!user.user) return null;
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) return null;
-      
-      const { data: newBoard, error } = await supabase
-        .from('schedule_boards')
-        .insert({
-          name: 'Férias e Ausências',
-          name_key: 'scheduling.timeOff.boardName',
-          description: 'Gestão de férias, ausências e folgas',
-          color: '#f59e0b',
-          board_type: 'time_off',
-          is_system_board: true,
-          is_active: true,
-          settings: {},
-          created_by: businessUserId,
-          organization_id: companyId,
-        })
-        .select()
-        .single();
-      
-      if (error) throw error;
+
+      const newBoard = await withAuditContext(supabase, businessUserId, async () => {
+        const { data: newBoard, error } = await supabase
+          .from('schedule_boards')
+          .insert({
+            name: 'Férias e Ausências',
+            name_key: 'scheduling.timeOff.boardName',
+            description: 'Gestão de férias, ausências e folgas',
+            color: '#f59e0b',
+            board_type: 'time_off',
+            is_system_board: true,
+            is_active: true,
+            settings: {},
+            created_by: businessUserId,
+            organization_id: companyId,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        return newBoard;
+      }, 'web_app');
+
       return newBoard as ScheduleBoard;
     } catch (error: any) {
       console.error('Error ensuring time-off board:', error);
@@ -110,13 +115,17 @@ export function useScheduling(companyId?: string) {
         organization_id: companyId,
       };
 
-      const { data, error } = await supabase
-        .from('schedule_boards')
-        .insert(insertData)
-        .select()
-        .single();
+      const data = await withAuditContext(supabase, businessUserId, async () => {
+        const { data, error } = await supabase
+          .from('schedule_boards')
+          .insert(insertData)
+          .select()
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        return data;
+      }, 'web_app');
+
       toast.success(t('scheduling.board.createSuccess'));
       return data as ScheduleBoard;
     } catch (error: any) {
@@ -127,12 +136,18 @@ export function useScheduling(companyId?: string) {
 
   const updateBoard = useCallback(async (id: string, updates: Partial<ScheduleBoard>): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('schedule_boards')
-        .update(updates)
-        .eq('id', id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from('schedule_boards')
+          .update(updates)
+          .eq('id', id);
+
+        if (error) throw error;
+      }, 'web_app');
+
       toast.success(t('scheduling.board.updateSuccess'));
       return true;
     } catch (error: any) {
@@ -143,12 +158,18 @@ export function useScheduling(companyId?: string) {
 
   const deleteBoard = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('schedule_boards')
-        .update({ is_active: false })
-        .eq('id', id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from('schedule_boards')
+          .update({ is_active: false })
+          .eq('id', id);
+
+        if (error) throw error;
+      }, 'web_app');
+
       toast.success(t('scheduling.board.deleteSuccess'));
       return true;
     } catch (error: any) {
@@ -220,13 +241,17 @@ export function useScheduling(companyId?: string) {
         organization_id: companyId,
       };
 
-      const { data, error } = await supabase
-        .from('schedule_resources')
-        .insert(insertData)
-        .select()
-        .single();
+      const data = await withAuditContext(supabase, businessUserId, async () => {
+        const { data, error } = await supabase
+          .from('schedule_resources')
+          .insert(insertData)
+          .select()
+          .single();
 
-      if (error) throw error;
+        if (error) throw error;
+        return data;
+      }, 'web_app');
+
       toast.success(t('scheduling.resource.createSuccess'));
       return data as ScheduleResource;
     } catch (error: any) {
@@ -237,12 +262,18 @@ export function useScheduling(companyId?: string) {
 
   const updateResource = useCallback(async (id: string, updates: Partial<ScheduleResource>): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('schedule_resources')
-        .update(updates as any)
-        .eq('id', id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from('schedule_resources')
+          .update(updates as any)
+          .eq('id', id);
+
+        if (error) throw error;
+      }, 'web_app');
+
       toast.success(t('scheduling.resource.updateSuccess'));
       return true;
     } catch (error: any) {
@@ -253,12 +284,18 @@ export function useScheduling(companyId?: string) {
 
   const deleteResource = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('schedule_resources')
-        .update({ is_active: false })
-        .eq('id', id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from('schedule_resources')
+          .update({ is_active: false })
+          .eq('id', id);
+
+        if (error) throw error;
+      }, 'web_app');
+
       toast.success(t('scheduling.resource.deleteSuccess'));
       return true;
     } catch (error: any) {
@@ -343,155 +380,109 @@ export function useScheduling(companyId?: string) {
     item: Partial<ScheduleItem>,
     assigneeResourceIds?: string[]
   ): Promise<ScheduleItem | null> => {
+    setLoading(true);
     try {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error('Utilizador não autenticado');
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      const insertData = {
-        board_id: item.board_id!,
-        title: item.title || 'Novo Agendamento',
-        description: item.description,
-        status: item.status || 'draft',
-        origin: item.origin || 'manual',
-        start_datetime: item.start_datetime!,
-        end_datetime: item.end_datetime!,
-        all_day: item.all_day ?? false,
-        client_id: item.client_id,
-        contact_id: item.contact_id,
-        deal_id: item.deal_id,
-        employee_id: item.employee_id,
-        user_id: item.user_id,
-        location: item.location,
-        location_lat: item.location_lat,
-        location_lng: item.location_lng,
-        color: item.color,
-        priority: item.priority ?? 0,
-        tags: item.tags,
-        notes: item.notes,
-        metadata: item.metadata || {},
-        time_off_type: item.time_off_type,
-        approval_status: item.approval_status,
-        created_by: businessUserId,
-        organization_id: companyId,
-      };
-
-      const { data, error } = await supabase
-        .from('schedule_items')
-        .insert(insertData)
-        .select()
-        .single();
+      const { data, error } = await supabase.rpc('rpc_create_schedule_item', {
+        p_organization_id: companyId,
+        p_board_id: item.board_id!,
+        p_title: item.title || 'Novo Agendamento',
+        p_description: item.description,
+        p_status: item.status || 'draft',
+        p_origin: item.origin || 'manual',
+        p_start_datetime: item.start_datetime!,
+        p_end_datetime: item.end_datetime!,
+        p_all_day: item.all_day ?? false,
+        p_client_id: item.client_id,
+        p_contact_id: item.contact_id,
+        p_deal_id: item.deal_id,
+        p_employee_id: item.employee_id,
+        p_user_id: item.user_id,
+        p_location: item.location,
+        p_location_lat: item.location_lat,
+        p_location_lng: item.location_lng,
+        p_color: item.color,
+        p_priority: item.priority ?? 0,
+        p_tags: item.tags,
+        p_notes: item.notes,
+        p_metadata: item.metadata || {},
+        p_time_off_type: item.time_off_type,
+        p_approval_status: item.approval_status,
+        p_assignee_resource_ids: assigneeResourceIds && assigneeResourceIds.length > 0
+          ? assigneeResourceIds
+          : null,
+      });
 
       if (error) throw error;
-
-      // Resolve assignees: if none provided, fall back to the creator so the item
-      // appears in their "Os meus" calendar scope.
-      let effectiveResourceIds = assigneeResourceIds ?? [];
-      if (effectiveResourceIds.length === 0 && data) {
-        // Find or create a schedule_resources row for the creator (anew_users.id)
-        let { data: creatorResource } = await supabase
-          .from('schedule_resources')
-          .select('id')
-          .eq('user_id', businessUserId)
-          .eq('is_active', true)
-          .maybeSingle();
-
-        if (!creatorResource) {
-          const { data: anewUser } = await supabase
-            .from('anew_users')
-            .select('name')
-            .eq('id', businessUserId)
-            .maybeSingle();
-
-          const { data: newResource } = await supabase
-            .from('schedule_resources')
-            .insert({
-              name: anewUser?.name || 'Utilizador',
-              resource_type: 'user',
-              user_id: businessUserId,
-              color: '#10b981',
-              is_active: true,
-              metadata: {},
-              created_by: businessUserId,
-              organization_id: companyId,
-            })
-            .select('id')
-            .single();
-          creatorResource = newResource;
-        }
-
-        if (creatorResource?.id) {
-          effectiveResourceIds = [creatorResource.id];
-        }
-      }
-
-      // Add assignees (dedupe just in case)
-      if (effectiveResourceIds.length && data) {
-        const uniqueIds = Array.from(new Set(effectiveResourceIds));
-        const assignees = uniqueIds.map(resourceId => ({
-          item_id: data.id,
-          resource_id: resourceId,
-        }));
-
-        await supabase.from('schedule_item_assignees').insert(assignees);
-      }
 
       toast.success(t('scheduling.item.createSuccess'));
       return data as ScheduleItem;
     } catch (error: any) {
       toast.error(t('scheduling.item.createError') + ': ' + error.message);
       return null;
+    } finally {
+      setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, t]);
 
   const updateItem = useCallback(async (
     id: string,
     updates: Partial<ScheduleItem>
   ): Promise<boolean> => {
+    setLoading(true);
     try {
-      // Only send columns that actually exist in the schedule_items table
+      // Only send columns that actually exist in the schedule_items table.
+      // p_set_<col> flags tell the RPC which columns were actually supplied,
+      // mirroring the previous cleanUpdates whitelist-and-presence semantics.
       const validColumns = [
         'board_id', 'title', 'description', 'location', 'start_datetime', 'end_datetime',
         'status', 'origin', 'contact_id', 'client_id', 'employee_id', 'user_id',
-        'notes', 'metadata', 'organization_id', 'time_off_type',
+        'notes', 'metadata', 'time_off_type',
         'approval_status', 'approved_by', 'approved_at',
-      ];
-      const cleanUpdates: Record<string, any> = {};
+      ] as const;
+
+      const rpcParams: Record<string, any> = { p_id: id };
       for (const key of validColumns) {
-        if (key in updates) {
-          cleanUpdates[key] = (updates as any)[key];
-        }
+        const isSupplied = key in updates;
+        rpcParams[`p_${key}`] = isSupplied ? (updates as any)[key] : null;
+        rpcParams[`p_set_${key}`] = isSupplied;
       }
 
-      const { error } = await supabase
-        .from('schedule_items')
-        .update(cleanUpdates as any)
-        .eq('id', id);
+      const { error } = await supabase.rpc('rpc_update_schedule_item', rpcParams);
 
       if (error) throw error;
+
       return true;
     } catch (error: any) {
       toast.error(t('scheduling.item.updateError') + ': ' + error.message);
       return false;
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const deleteItem = useCallback(async (id: string): Promise<boolean> => {
+    setLoading(true);
     try {
-      const { error } = await supabase
-        .from('schedule_items')
-        .delete()
-        .eq('id', id);
+      const { error } = await supabase.rpc('rpc_delete_schedule_item', {
+        p_id: id,
+      });
 
       if (error) throw error;
+
       toast.success(t('scheduling.item.deleteSuccess'));
       return true;
     } catch (error: any) {
       toast.error(t('scheduling.item.deleteError') + ': ' + error.message);
       return false;
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   // Drag & drop - update dates
   const rescheduleItem = useCallback(async (
@@ -500,15 +491,21 @@ export function useScheduling(companyId?: string) {
     newEnd: Date
   ): Promise<boolean> => {
     try {
-      const { error } = await supabase
-        .from('schedule_items')
-        .update({
-          start_datetime: newStart.toISOString(),
-          end_datetime: newEnd.toISOString(),
-        })
-        .eq('id', id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from('schedule_items')
+          .update({
+            start_datetime: newStart.toISOString(),
+            end_datetime: newEnd.toISOString(),
+          })
+          .eq('id', id);
+
+        if (error) throw error;
+      }, 'web_app');
+
       toast.success(t('scheduling.item.rescheduleSuccess'));
       return true;
     } catch (error: any) {
@@ -523,25 +520,30 @@ export function useScheduling(companyId?: string) {
     resourceIds: string[]
   ): Promise<boolean> => {
     try {
-      // Remove existing
-      await supabase
-        .from('schedule_item_assignees')
-        .delete()
-        .eq('item_id', itemId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      // Add new
-      if (resourceIds.length) {
-        const assignees = resourceIds.map(resourceId => ({
-          item_id: itemId,
-          resource_id: resourceId,
-        }));
-
-        const { error } = await supabase
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Remove existing
+        await supabase
           .from('schedule_item_assignees')
-          .insert(assignees);
+          .delete()
+          .eq('item_id', itemId);
 
-        if (error) throw error;
-      }
+        // Add new
+        if (resourceIds.length) {
+          const assignees = resourceIds.map(resourceId => ({
+            item_id: itemId,
+            resource_id: resourceId,
+          }));
+
+          const { error } = await supabase
+            .from('schedule_item_assignees')
+            .insert(assignees);
+
+          if (error) throw error;
+        }
+      }, 'web_app');
 
       return true;
     } catch (error: any) {
