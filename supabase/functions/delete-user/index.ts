@@ -118,20 +118,47 @@ serve(async (req: Request) => {
       }
     }
 
-    // Delete the user via admin API (cascade handles anew_users FK)
-    const { error: deleteError } = await supabaseClient.auth.admin.deleteUser(userId);
-
-    if (deleteError) {
+    // Set audit context for this transaction's writes. The cascade triggered by
+    // auth.admin.deleteUser() removes the anew_users row (and dependent rows via
+    // FK), so fn_audit_anew_users() needs app.audit_user_id/app.audit_source set
+    // before the delete to attribute the audit log entry to the calling admin
+    // instead of falling back to the service role.
+    // See: supabase/migrations/20260709010000_users_audit_triggers.sql
+    const { error: setAuditCtxError } = await supabaseClient.rpc("set_audit_context", {
+      p_user_id: callerAnew.id,
+      p_source: "web_app",
+    });
+    if (setAuditCtxError) {
+      console.error("Failed to set audit context:", setAuditCtxError);
       return new Response(
-        JSON.stringify({ error: deleteError.message }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: setAuditCtxError.message }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    return new Response(
-      JSON.stringify({ success: true, message: "User deleted successfully" }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    try {
+      // Delete the user via admin API (cascade handles anew_users FK)
+      const { error: deleteError } = await supabaseClient.auth.admin.deleteUser(userId);
+
+      if (deleteError) {
+        return new Response(
+          JSON.stringify({ error: deleteError.message }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, message: "User deleted successfully" }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } finally {
+      // clear_audit_context failure must never mask the delete's outcome. SET
+      // LOCAL also clears automatically at transaction end regardless.
+      const { error: clearCtxError } = await supabaseClient.rpc("clear_audit_context");
+      if (clearCtxError) {
+        console.error("Failed to clear audit context:", clearCtxError);
+      }
+    }
   } catch (error: any) {
     console.error("Error:", error);
     return new Response(

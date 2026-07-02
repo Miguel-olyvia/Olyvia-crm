@@ -325,6 +325,21 @@ serve(async (req: Request) => {
 
     console.log("Creating user:", email, "by admin:", caller.anewUserId);
 
+    // Set audit context for this transaction's writes. anew_users has no
+    // organization_id column — org is resolved by fn_audit_anew_users() via a
+    // JOIN to anew_memberships (see supabase/migrations/20260709010000_users_audit_triggers.sql).
+    const { error: setAuditCtxError } = await supabaseClient.rpc("set_audit_context", {
+      p_user_id: caller.anewUserId,
+      p_source: "web_app",
+    });
+    if (setAuditCtxError) {
+      console.error("Failed to set audit context:", setAuditCtxError);
+      return new Response(JSON.stringify({ error: setAuditCtxError.message }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Create auth user — no email sent
     let authUserId: string;
     let authUserResponse: any = null;
@@ -632,6 +647,13 @@ serve(async (req: Request) => {
         valid_from: new Date().toISOString(),
         created_by: caller.anewUserId,
       })));
+    }
+
+    // clear_audit_context failure must never mask the create's outcome. SET
+    // LOCAL also clears automatically at transaction end regardless.
+    const { error: clearCtxError } = await supabaseClient.rpc("clear_audit_context");
+    if (clearCtxError) {
+      console.error("Failed to clear audit context:", clearCtxError);
     }
 
     return new Response(

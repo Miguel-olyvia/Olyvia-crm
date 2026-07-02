@@ -221,27 +221,47 @@ const handler = async (req: Request): Promise<Response> => {
         );
       }
 
-      // Mark as verified
-      await supabaseClient
-        .from("proposal_verification_codes")
-        .update({ verified_at: new Date().toISOString() })
-        .eq("id", verificationData.id);
-
-      // Check if it's accept or reject action
-      const pendingAction = verificationData.action || "accept";
-      
-      if (pendingAction === "accept") {
-        // Accept the proposal
+      // Mark as verified and apply the action under audit context (public portal, no authenticated user)
+      await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+      try {
         await supabaseClient
-          .from("proposals")
-          .update({
-            status: "accepted",
-            accepted_at: new Date().toISOString(),
-            acceptance_ip: req.headers.get("x-forwarded-for") || "unknown",
-            acceptance_user_agent: req.headers.get("user-agent") || "unknown",
-          })
-          .eq("id", proposal_id);
+          .from("proposal_verification_codes")
+          .update({ verified_at: new Date().toISOString() })
+          .eq("id", verificationData.id);
 
+        // Check if it's accept or reject action
+        const pendingAction = verificationData.action || "accept";
+
+        if (pendingAction === "accept") {
+          // Accept the proposal
+          await supabaseClient
+            .from("proposals")
+            .update({
+              status: "accepted",
+              accepted_at: new Date().toISOString(),
+              acceptance_ip: req.headers.get("x-forwarded-for") || "unknown",
+              acceptance_user_agent: req.headers.get("user-agent") || "unknown",
+            })
+            .eq("id", proposal_id);
+        } else {
+          // Reject the proposal
+          await supabaseClient
+            .from("proposals")
+            .update({
+              status: "rejected",
+              rejected_at: new Date().toISOString(),
+              rejection_reason_code: verificationData.rejection_reason_code,
+              rejection_reason: verificationData.rejection_reason,
+              rejection_notes: verificationData.rejection_notes,
+            })
+            .eq("id", proposal_id);
+        }
+      } finally {
+        await supabaseClient.rpc('clear_audit_context').catch(() => {});
+      }
+
+      const pendingAction = verificationData.action || "accept";
+      if (pendingAction === "accept") {
         return new Response(
           JSON.stringify({ success: true, message: "Proposta aceite com sucesso", action: "accept" }),
           {
@@ -250,18 +270,6 @@ const handler = async (req: Request): Promise<Response> => {
           }
         );
       } else {
-        // Reject the proposal
-        await supabaseClient
-          .from("proposals")
-          .update({
-            status: "rejected",
-            rejected_at: new Date().toISOString(),
-            rejection_reason_code: verificationData.rejection_reason_code,
-            rejection_reason: verificationData.rejection_reason,
-            rejection_notes: verificationData.rejection_notes,
-          })
-          .eq("id", proposal_id);
-
         return new Response(
           JSON.stringify({ success: true, message: "Proposta recusada", action: "reject" }),
           {
@@ -309,18 +317,23 @@ const handler = async (req: Request): Promise<Response> => {
       const code = generateCode();
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-      // Save verification code with action info
-      await supabaseClient.from("proposal_verification_codes").insert({
-        proposal_id,
-        code,
-        method,
-        destination,
-        expires_at: expiresAt.toISOString(),
-        action: action || "accept",
-        rejection_reason_code: rejection_reason_code || null,
-        rejection_reason: rejectionReasonLabel,
-        rejection_notes: rejection_notes || null,
-      });
+      // Save verification code with action info (public portal, no authenticated user)
+      await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+      try {
+        await supabaseClient.from("proposal_verification_codes").insert({
+          proposal_id,
+          code,
+          method,
+          destination,
+          expires_at: expiresAt.toISOString(),
+          action: action || "accept",
+          rejection_reason_code: rejection_reason_code || null,
+          rejection_reason: rejectionReasonLabel,
+          rejection_notes: rejection_notes || null,
+        });
+      } finally {
+        await supabaseClient.rpc('clear_audit_context').catch(() => {});
+      }
 
       // Get organization SMTP
       const smtpConfig = await getOrgSmtpSettings(supabaseClient, proposal.organization_id);

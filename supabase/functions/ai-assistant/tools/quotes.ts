@@ -1494,7 +1494,7 @@ export const deleteQuoteDef: ToolDef = {
 };
 
 const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, businessUserId, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId, authUid } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.quote_id || !UUID_RE.test(String(args.quote_id))) {
     return { success: false, message: "quote_id inválido." };
@@ -1522,6 +1522,7 @@ const deleteQuote: Handler = async (ctx, args): Promise<ToolResult> => {
   const { error: rpcErr } = await supabase.rpc("soft_delete_business_entity", {
     p_kind: "quote",
     p_id: args.quote_id,
+    p_actor_id: authUid,
   });
   if (rpcErr) return { success: false, message: `Falha ao cancelar: ${rpcErr.message}` };
 

@@ -592,6 +592,7 @@ serve(async (req: Request) => {
     }
 
     // Record in proposal_sends / quote_sends / contract_sends for history tracking
+    await supabase.rpc('set_audit_context', { p_user_id: callerAnew!.id, p_source: 'web_app' });
     try {
       const sendRecord = {
         organization_id: organization_id,
@@ -612,6 +613,8 @@ serve(async (req: Request) => {
       }
     } catch (e) {
       console.error("Error recording send history:", e);
+    } finally {
+      await supabase.rpc('clear_audit_context').catch(() => {});
     }
 
     // 5. Resolve SMTP and send email

@@ -360,7 +360,7 @@ const getDealDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const cancelDeal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, organizationId, authUid } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.deal_id || !UUID_RE.test(String(args.deal_id))) {
     return { success: false, message: "deal_id inválido." };
@@ -387,6 +387,7 @@ const cancelDeal: Handler = async (ctx, args): Promise<ToolResult> => {
   const { error: rpcErr } = await supabase.rpc("soft_delete_business_entity", {
     p_kind: "deal",
     p_id: args.deal_id,
+    p_actor_id: authUid,
   });
   if (rpcErr) return { success: false, message: `Falha ao cancelar: ${rpcErr.message}` };
 
