@@ -88,7 +88,7 @@ interface SubRow {
 export default function ServiceSubcategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType, isLoading: contextLoading } = useCompany();
+  const { activeCompany, isLoading: contextLoading } = useCompany();
   const [subcategories, setSubcategories] = useState<ServiceSubcategory[]>([]);
   const [parentCategories, setParentCategories] = useState<ParentCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,8 +105,6 @@ export default function ServiceSubcategories() {
     sort_order: 0,
   });
 
-  const isSystemAdmin = userType === "system_admin";
-
   const loadData = useCallback(async () => {
     try {
       // Load parent categories (those without parent_id) - filtered by user's companies
@@ -117,11 +115,14 @@ export default function ServiceSubcategories() {
         .eq("is_active", true)
         .order("name");
 
-      // Filter by user's companies if not system admin
-      if (!isSystemAdmin && userCompanies.length > 0) {
-        const companyIds = userCompanies.map(c => c.id);
-        parentsQuery = parentsQuery.in("organization_id", companyIds);
+      // ALWAYS filter by activeCompany - this applies to ALL users including admins
+      if (!activeCompany?.id) {
+        setParentCategories([]);
+        setSubcategories([]);
+        setLoading(false);
+        return;
       }
+      parentsQuery = parentsQuery.eq("organization_id", activeCompany.id);
 
       const { data: parents, error: parentsError } = await parentsQuery;
 
@@ -132,7 +133,6 @@ export default function ServiceSubcategories() {
       // Apply the org filter server-side for non-admin users to avoid transferring the
       // full service_categories table and relying on client-side filtering as the only
       // org-scope mechanism (SVC-CLIENT-SIDE-FILTER-UNSCOPED).
-      const companyIds = userCompanies.map((c) => c.id);
       let subsQuery = supabase
         .from("service_categories")
         .select(`
@@ -149,9 +149,8 @@ export default function ServiceSubcategories() {
         .not("parent_id", "is", null)
         .order("path");
 
-      if (!isSystemAdmin && companyIds.length > 0) {
-        subsQuery = subsQuery.in("organization_id", companyIds);
-      }
+      // ALWAYS filter by activeCompany - this applies to ALL users including admins
+      subsQuery = subsQuery.eq("organization_id", activeCompany.id);
 
       const { data: subs, error: subsError } = await subsQuery;
 
@@ -186,7 +185,7 @@ export default function ServiceSubcategories() {
     } finally {
       setLoading(false);
     }
-  }, [isSystemAdmin, userCompanies, t, toast]);
+  }, [activeCompany?.id, t, toast]);
 
   useEffect(() => {
     // Esperar que o contexto carregue antes de buscar dados

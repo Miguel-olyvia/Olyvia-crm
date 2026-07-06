@@ -62,7 +62,7 @@ interface ServiceCategory {
 export default function ServiceCategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType } = useCompany();
+  const { companies: userCompanies, userType, activeCompany } = useCompany();
   const [searchParams] = useSearchParams();
   const businessAreaId = searchParams.get("area");
   const [businessAreaName, setBusinessAreaName] = useState<string>("");
@@ -133,11 +133,13 @@ export default function ServiceCategories() {
         .is("parent_id", null)
         .order("name");
 
-      // Filter by user's companies if not system admin
-      if (!isSystemAdmin && userCompanies.length > 0) {
-        const companyIds = userCompanies.map(c => c.id);
-        query = query.in("organization_id", companyIds);
+      // ALWAYS filter by activeCompany - this applies to ALL users including admins
+      if (!activeCompany?.id) {
+        setCategories([]);
+        setLoading(false);
+        return;
       }
+      query = query.eq("organization_id", activeCompany.id);
 
       const { data, error } = await query;
 
@@ -154,7 +156,7 @@ export default function ServiceCategories() {
     } finally {
       setLoading(false);
     }
-  }, [isSystemAdmin, userCompanies, t, toast]);
+  }, [activeCompany?.id, t, toast]);
 
   useEffect(() => {
     loadCategories();
