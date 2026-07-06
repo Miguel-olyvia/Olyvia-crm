@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useCompany } from "@/contexts/CompanyContext";
 
 interface ProductAttribute {
   id: string;
@@ -50,13 +51,14 @@ interface ProductFormAttributesProps {
 
 export default function ProductFormAttributes({ attributes, onChange, productId, productCategoryId }: ProductFormAttributesProps) {
   const { t } = useTranslation();
+  const { activeCompany } = useCompany();
   const [availableAttributes, setAvailableAttributes] = useState<ProductAttribute[]>([]);
   const [newAttributeId, setNewAttributeId] = useState<string>("");
   const [resolvedOptions, setResolvedOptions] = useState<Record<string, ResolvedOption[]>>({});
 
   useEffect(() => {
     loadAttributes();
-  }, []);
+  }, [activeCompany?.id]);
 
   // Resolve options for all assigned list-type attributes whenever assignments or category change
   useEffect(() => {
@@ -65,9 +67,14 @@ export default function ProductFormAttributes({ attributes, onChange, productId,
   }, [attributes.map(a => a.attribute_id).join(","), productId, productCategoryId, availableAttributes.length]);
 
   const loadAttributes = async () => {
+    if (!activeCompany?.id) {
+      setAvailableAttributes([]);
+      return;
+    }
     const { data } = await supabase
       .from('product_attributes')
       .select('id, code, label, value_type, unit, allowed_values, valorization_type, pricing_dimension')
+      .eq('organization_id', activeCompany.id)
       .order('label');
     setAvailableAttributes(data || []);
   };

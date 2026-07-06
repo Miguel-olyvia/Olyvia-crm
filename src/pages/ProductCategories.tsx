@@ -137,33 +137,63 @@ export default function ProductCategories() {
         .range(from, to);
 
 
-      // Filter by company using product_category_organizations junction table
-      // ALWAYS filter by activeCompany first, then apply additional filters
+      // Filter by company using both the direct organization_id column on
+      // product_categories (source of truth, matches RLS) and the
+      // product_category_organizations junction table (multi-org visibility).
+      // The junction can fall out of sync with organization_id after a bulk
+      // org change, so both are combined here to avoid the list going empty.
       let categoryIdsToFilter: string[] = [];
 
       if (filterCompanyId && filterCompanyId !== "all") {
         // Specific company filter selected
-        const { data: companyCats } = await supabase
-          .from("product_category_organizations")
-          .select("category_id")
-          .eq("organization_id", filterCompanyId);
-        categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
+        const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+          supabase
+            .from("product_category_organizations")
+            .select("category_id")
+            .eq("organization_id", filterCompanyId),
+          supabase
+            .from("product_categories")
+            .select("id")
+            .eq("organization_id", filterCompanyId),
+        ]);
+        categoryIdsToFilter = Array.from(new Set([
+          ...(companyCats?.map((c) => c.category_id) || []),
+          ...(directCats?.map((c) => c.id) || []),
+        ]));
       } else if (filterTenantId && filterTenantId !== "all") {
         // Organization selected - filter by all companies in that org
         if (tenantCompanyIds.length > 0) {
-          const { data: companyCats } = await supabase
-            .from("product_category_organizations")
-            .select("category_id")
-            .in("organization_id", tenantCompanyIds);
-          categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
+          const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+            supabase
+              .from("product_category_organizations")
+              .select("category_id")
+              .in("organization_id", tenantCompanyIds),
+            supabase
+              .from("product_categories")
+              .select("id")
+              .in("organization_id", tenantCompanyIds),
+          ]);
+          categoryIdsToFilter = Array.from(new Set([
+            ...(companyCats?.map((c) => c.category_id) || []),
+            ...(directCats?.map((c) => c.id) || []),
+          ]));
         }
       } else if (activeCompany?.id) {
         // ALWAYS filter by activeCompany - this applies to ALL users including admins
-        const { data: companyCats } = await supabase
-          .from("product_category_organizations")
-          .select("category_id")
-          .eq("organization_id", activeCompany.id);
-        categoryIdsToFilter = companyCats?.map((c) => c.category_id) || [];
+        const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+          supabase
+            .from("product_category_organizations")
+            .select("category_id")
+            .eq("organization_id", activeCompany.id),
+          supabase
+            .from("product_categories")
+            .select("id")
+            .eq("organization_id", activeCompany.id),
+        ]);
+        categoryIdsToFilter = Array.from(new Set([
+          ...(companyCats?.map((c) => c.category_id) || []),
+          ...(directCats?.map((c) => c.id) || []),
+        ]));
       }
 
       // Apply category ID filter
