@@ -1,4 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from "react";
+import * as Sentry from "@sentry/react";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, LogOut } from "lucide-react";
 
@@ -25,6 +26,7 @@ class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("[ErrorBoundary] Caught error:", error);
     console.error("[ErrorBoundary] Component stack:", errorInfo.componentStack);
+    Sentry.captureException(error, { extra: { componentStack: errorInfo.componentStack } });
     this.setState({ errorInfo });
     
     // Store last error for debugging
@@ -39,16 +41,21 @@ class ErrorBoundary extends Component<Props, State> {
       // Ignore storage errors
     }
 
-    // If the error seems auth-related, auto-redirect to login
+    // If the error is a specific, known auth/session failure, auto-redirect to login.
+    // NOTE: keep this list narrow and multi-word/specific. Do NOT match on bare
+    // "auth", "token", or "session" — those are generic English substrings that
+    // appear in unrelated errors (e.g. meeting "sessions", pricing/AI "tokens",
+    // third-party "author"/"authorization" messages) and cause false-positive
+    // redirects that look like an unexplained forced logout. Keep this aligned
+    // with the equivalent classifier in src/utils/friendlyError.ts.
     const errorMsg = error.message?.toLowerCase() || "";
-    const isAuthRelated = 
-      errorMsg.includes("session") ||
-      errorMsg.includes("jwt") ||
+    const isAuthRelated =
       errorMsg.includes("unauthorized") ||
       errorMsg.includes("not authenticated") ||
-      errorMsg.includes("auth") ||
-      errorMsg.includes("token");
-    
+      errorMsg.includes("jwt") ||
+      errorMsg.includes("invalid refresh token") ||
+      errorMsg.includes("session expired");
+
     if (isAuthRelated) {
       console.warn("[ErrorBoundary] Auth-related error detected, redirecting to login");
       setTimeout(() => {
