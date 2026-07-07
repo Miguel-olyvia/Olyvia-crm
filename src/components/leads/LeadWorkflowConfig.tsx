@@ -68,7 +68,6 @@ import { CSS } from "@dnd-kit/utilities";
 import { WorkflowAutomationRules } from "@/components/workflows/WorkflowAutomationRules";
 import { WorkflowFlowchart } from "./WorkflowFlowchart";
 import { LeadStageActionsConfig } from "./LeadStageActionsConfig";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 export interface WorkflowStage {
   id: string;
@@ -344,27 +343,61 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   };
 
   // ─── CRUD ──────────────────────────────────────────────────
+  // All stage writes funnel through rpc_save_lead_workflow_stages, which
+  // takes the full desired stage list for the org in one call, reconciles
+  // creates/updates/soft-deletes against current DB state, and writes
+  // exactly one audited entity_audit_log row per save action.
+  interface StagePayload {
+    id: string | null;
+    name: string;
+    label: string;
+    color: string;
+    is_final: boolean;
+    is_conversion: boolean;
+    is_rejection: boolean;
+    default_status: string | null;
+  }
+
+  const toStagePayload = (s: WorkflowStage): StagePayload => ({
+    id: s.id,
+    name: s.name,
+    label: s.label,
+    color: s.color,
+    is_final: s.is_final,
+    is_conversion: s.is_conversion,
+    is_rejection: s.is_rejection,
+    default_status: s.default_status ?? null,
+  });
+
+  const saveStages = async (payload: StagePayload[]) => {
+    const { data, error } = await (supabase as any).rpc("rpc_save_lead_workflow_stages", {
+      p_organization_id: companyId,
+      p_stages: payload,
+    });
+    return { data, error };
+  };
+
   const handleAddStage = async () => {
     if (!companyId || !newStage.name || !newStage.label) {
       toast({ title: "Preencha nome e label", variant: "destructive" });
       return;
     }
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    const nextOrder = stages.length > 0 ? Math.max(...stages.map(s => s.stage_order)) + 1 : 1;
 
-    const { error } = await (supabase.from("lead_workflow_stages") as any).insert({
-      organization_id: companyId,
-      name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
-      label: newStage.label,
-      color: newStage.color,
-      stage_order: nextOrder,
-      is_final: newStage.is_final,
-      is_conversion: newStage.is_conversion,
-      is_rejection: newStage.is_rejection,
-      default_status: newStage.default_status || null,
-      created_by: businessUserId,
-    });
+    const payload: StagePayload[] = [
+      ...stages.map(toStagePayload),
+      {
+        id: null,
+        name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
+        label: newStage.label,
+        color: newStage.color,
+        is_final: newStage.is_final,
+        is_conversion: newStage.is_conversion,
+        is_rejection: newStage.is_rejection,
+        default_status: newStage.default_status || null,
+      },
+    ];
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao adicionar estágio", description: error.message, variant: "destructive" });
     } else {
@@ -379,17 +412,12 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   const handleUpdateStage = async () => {
     if (!editingStage) return;
-    const { error } = await (supabase
-      .from("lead_workflow_stages") as any)
-      .update({
-        label: editingStage.label,
-        color: editingStage.color,
-        is_final: editingStage.is_final,
-        is_conversion: editingStage.is_conversion,
-        is_rejection: editingStage.is_rejection,
-        default_status: (editingStage as any).default_status || null,
-      })
-      .eq("id", editingStage.id);
+
+    const payload: StagePayload[] = stages.map(s =>
+      s.id === editingStage.id ? toStagePayload(editingStage) : toStagePayload(s)
+    );
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
     } else {
@@ -416,10 +444,12 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       }
     }
 
-    const { error } = await (supabase
-      .from("lead_workflow_stages") as any)
-      .update({ is_active: false })
-      .eq("id", deletingStage.id);
+    // Omit the deleted stage from the payload -> RPC soft-deletes it.
+    const payload: StagePayload[] = stages
+      .filter(s => s.id !== deletingStage.id)
+      .map(toStagePayload);
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" });
     } else {
@@ -434,20 +464,22 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   const handleDuplicateStage = async (stage: WorkflowStage) => {
     if (!companyId) return;
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    const nextOrder = stages.length > 0 ? Math.max(...stages.map(s => s.stage_order)) + 1 : 1;
-    const { error } = await (supabase.from("lead_workflow_stages") as any).insert({
-      organization_id: companyId,
-      name: stage.name + "_copy",
-      label: stage.label + " (cópia)",
-      color: stage.color,
-      stage_order: nextOrder,
-      is_final: stage.is_final,
-      is_conversion: false,
-      is_rejection: false,
-      created_by: businessUserId,
-    });
+
+    const payload: StagePayload[] = [
+      ...stages.map(toStagePayload),
+      {
+        id: null,
+        name: stage.name + "_copy",
+        label: stage.label + " (cópia)",
+        color: stage.color,
+        is_final: stage.is_final,
+        is_conversion: false,
+        is_rejection: false,
+        default_status: null,
+      },
+    ];
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao duplicar", description: error.message, variant: "destructive" });
     } else {
@@ -468,32 +500,36 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
     setStages(reordered);
 
-    for (let i = 0; i < reordered.length; i++) {
-      await (supabase
-        .from("lead_workflow_stages") as any)
-        .update({ stage_order: i + 1 })
-        .eq("id", reordered[i].id);
+    const payload: StagePayload[] = reordered.map(toStagePayload);
+    const { error } = await saveStages(payload);
+    if (error) {
+      toast({ title: "Erro ao reordenar", description: error.message, variant: "destructive" });
+      loadStages();
+      return;
     }
     onStagesUpdated?.();
   };
 
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    for (const stage of templateStages) {
-      await (supabase.from("lead_workflow_stages") as any).insert({
+
+    const payload: StagePayload[] = templateStages
+      .sort((a, b) => a.stage_order - b.stage_order)
+      .map(stage => ({
+        id: null,
         name: stage.name,
         label: stage.label,
         color: stage.color,
-        stage_order: stage.stage_order,
         is_final: stage.is_final,
         is_conversion: stage.is_conversion,
         is_rejection: stage.is_rejection,
-        default_status: stage.default_status,
-        organization_id: companyId,
-        created_by: businessUserId,
-      });
+        default_status: stage.default_status ?? null,
+      }));
+
+    const { error } = await saveStages(payload);
+    if (error) {
+      toast({ title: "Erro ao copiar template", description: error.message, variant: "destructive" });
+      return;
     }
     toast({ title: "Template copiado", description: "Pode agora personalizar os estágios." });
     loadStages();
