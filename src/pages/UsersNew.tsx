@@ -1107,6 +1107,21 @@ export default function UsersNew() {
             is_primary: false,
           }));
 
+        // Full anew_users field set the Edge Function will write in ONE
+        // rpc_finalize_user_profile call (see that migration + create-user/index.ts).
+        // Must mirror the EDIT path's filteredCustomAttributes construction above
+        // so CREATE and EDIT persist custom attributes/social links consistently.
+        const filteredCustomAttributesForEdge: Record<string, any> = {};
+        const socialKeysForEdge = ['social_facebook', 'social_linkedin', 'social_angellist'];
+        Object.keys(formCustomAttributes).forEach(key => {
+          if (socialKeysForEdge.includes(key) || formTemplateAttrKeys.includes(key)) {
+            filteredCustomAttributesForEdge[key] = formCustomAttributes[key];
+          }
+        });
+        filteredCustomAttributesForEdge.social_facebook = formSocialLinks.facebook || null;
+        filteredCustomAttributesForEdge.social_linkedin = formSocialLinks.linkedin || null;
+        filteredCustomAttributesForEdge.social_angellist = formSocialLinks.angellist || null;
+
         const createInvoke = await supabase.functions.invoke("create-user", {
           body: {
             email: primaryEmailForAuth,
@@ -1115,6 +1130,10 @@ export default function UsersNew() {
             tipo: "worker_user",
             phone: primaryPhone ? `${primaryPhone.country_code} ${primaryPhone.phone_number}` : null,
             template_id: formTemplateId || null,
+            description: formData.description || null,
+            position: formData.position || null,
+            location: formData.location || null,
+            custom_attributes: Object.keys(filteredCustomAttributesForEdge).length > 0 ? filteredCustomAttributesForEdge : null,
             memberships: validMembershipsForEdge,
             fiscal: formFiscalData.nif ? { nif: formFiscalData.nif, country_code: formFiscalData.country_code } : null,
             addresses: validAddressesForEdge.length > 0 ? validAddressesForEdge : null,
@@ -1137,31 +1156,12 @@ export default function UsersNew() {
         const finalUserId = createResult?.anew_user_id;
         if (!finalUserId) throw new Error("Failed to resolve created user");
 
-        const primaryPhoneForUpdate = formPhones.find(p => p.is_primary) || formPhones[0];
-        const primaryPhoneFormattedForUpdate = primaryPhoneForUpdate
-          ? `${primaryPhoneForUpdate.country_code} ${primaryPhoneForUpdate.phone_number}`
-          : null;
-
-        await withAuditContext(supabase, createdBy, () =>
-          supabase
-            .from("anew_users")
-            .update({
-              phone: primaryPhoneFormattedForUpdate,
-              description: formData.description || null,
-              position: formData.position || null,
-              location: formData.location || null,
-              template_id: formTemplateId || null,
-              custom_attributes: Object.keys(formCustomAttributes).length > 0
-                ? {
-                    ...formCustomAttributes,
-                    social_facebook: formSocialLinks.facebook || null,
-                    social_linkedin: formSocialLinks.linkedin || null,
-                    social_angellist: formSocialLinks.angellist || null,
-                  }
-                : null,
-            })
-            .eq("id", finalUserId)
-        );
+        // NOTE: the full anew_users field set (phone, description, position,
+        // location, template_id, custom_attributes) is now written ONCE by
+        // the create-user Edge Function via rpc_finalize_user_profile, so
+        // this single "create user" action produces exactly one
+        // entity_audit_log row. Do not add a follow-up .update() here — see
+        // supabase/migrations/20260825010000_rpc_finalize_user_profile.sql.
 
         toast.success(t("users.created"));
       }

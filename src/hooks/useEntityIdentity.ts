@@ -139,60 +139,84 @@ export function useEntityIdentity() {
   return { identityMap, resolveEntities, getIdentity, loading };
 }
 
+/**
+ * Resolve an existing entity by email/phone/vat, scoped to entities already
+ * linked to `organizationId`. Cross-org identity matches are NEVER
+ * auto-resolved here — entities are per-org by design; the only sanctioned
+ * way to reuse an entity across organizations (even within the same group)
+ * is the explicit "Partilhar com esta org" opt-in flow (linkEntityToOrg),
+ * which requires an explicit user action. Mirrors findLocalEntityForOrg's
+ * org-scoping used by the public lead form.
+ */
 export async function resolveEntityByIdentity(params: {
   email?: string | null;
   phone?: string | null;
   vat?: string | null;
+  organizationId: string;
 }): Promise<string | null> {
-  const { email, phone, vat } = params;
+  const { email, phone, vat, organizationId } = params;
+  if (!organizationId) return null;
 
   const normalizedEmail = email?.trim().toLowerCase();
   const normalizedPhone = phone?.trim().replace(/\s+/g, '');
   const normalizedVat = vat?.trim().toUpperCase();
 
-  // Run all lookups in parallel for speed
-  const [emailResult, phoneResult, vatResult] = await Promise.all([
+  const CANDIDATE_LIMIT = 10;
+
+  // Gather candidate entity ids per signal (unscoped) — filtered to this org below.
+  const [emailCandidates, phoneCandidates, vatCandidates] = await Promise.all([
     normalizedEmail
       ? supabase
           .from('anew_entity_emails')
           .select('entity_id')
           .ilike('email', normalizedEmail)
-          .limit(1)
-          .maybeSingle()
-          .then(r => r.data?.entity_id || null)
-      : Promise.resolve(null),
+          .limit(CANDIDATE_LIMIT)
+          .then(r => (r.data || []).map((row: any) => row.entity_id as string))
+      : Promise.resolve([] as string[]),
     normalizedPhone
       ? supabase
           .from('anew_entity_phones')
           .select('entity_id')
           .eq('phone_number', normalizedPhone)
-          .limit(1)
-          .maybeSingle()
-          .then(r => r.data?.entity_id || null)
-      : Promise.resolve(null),
+          .limit(CANDIDATE_LIMIT)
+          .then(r => (r.data || []).map((row: any) => row.entity_id as string))
+      : Promise.resolve([] as string[]),
     normalizedVat
       ? (supabase as any)
           .from('fiscal_entities')
           .select('id')
           .eq('nif', normalizedVat)
-          .limit(1)
-          .maybeSingle()
+          .limit(CANDIDATE_LIMIT)
           .then(async (r: any) => {
-            if (!r.data?.id) return null;
-            const { data: link } = await supabase
+            const fiscalIds = (r.data || []).map((row: any) => row.id);
+            if (fiscalIds.length === 0) return [] as string[];
+            const { data: links } = await supabase
               .from('anew_entity_fiscal_entities')
               .select('entity_id')
-              .eq('fiscal_entity_id', r.data.id)
-              .eq('is_primary', true)
-              .limit(1)
-              .maybeSingle();
-            return link?.entity_id || null;
+              .in('fiscal_entity_id', fiscalIds)
+              .eq('is_primary', true);
+            return (links || []).map((l: any) => l.entity_id as string);
           })
-      : Promise.resolve(null),
+      : Promise.resolve([] as string[]),
   ]);
 
-  // Priority: email > phone > vat
-  return emailResult || phoneResult || vatResult || null;
+  const allCandidateIds = [...new Set([...emailCandidates, ...phoneCandidates, ...vatCandidates])];
+  if (allCandidateIds.length === 0) return null;
+
+  const { data: orgLinks } = await supabase
+    .from('anew_entity_org_links')
+    .select('entity_id')
+    .in('entity_id', allCandidateIds)
+    .eq('organization_id', organizationId);
+  const inOrgIds = new Set((orgLinks || []).map((l: any) => l.entity_id as string));
+
+  // Priority: email > phone > vat, among entities already linked to this org.
+  return (
+    emailCandidates.find(id => inOrgIds.has(id)) ||
+    phoneCandidates.find(id => inOrgIds.has(id)) ||
+    vatCandidates.find(id => inOrgIds.has(id)) ||
+    null
+  );
 }
 
 /**
@@ -206,8 +230,16 @@ export async function resolveEntityByIdentity(params: {
  *  - level: 'partial' → exactly 1 signal matches (warn the user)
  *  - level: 'none'    → nothing matches (BLOCK reuse, force new entity)
  *  - matches: per-field breakdown for UI/debug
+ *  - phoneOnlyMatch: true when phone is the ONLY signal that matched (no
+ *    email, no vat). Phone numbers are shared/reused (households, company
+ *    lines) far more often than email/VAT, so callers must NOT silently
+ *    auto-reuse the candidate entity on this signal alone — treat it like
+ *    'none' (force a new entity / surface for manual review), same policy
+ *    HubSpot uses for phone-based "potential duplicates".
  *
- * Strong signals: email, phone, vat. Name alone never qualifies as "full".
+ * Strong signals: email, vat. Phone alone never qualifies as "full" and,
+ * per phoneOnlyMatch above, must not silently auto-merge either. Name alone
+ * never qualifies as "full".
  */
 export async function validateEntityCoherence(
   entityId: string,
@@ -216,6 +248,7 @@ export async function validateEntityCoherence(
   level: 'full' | 'partial' | 'none';
   matches: { name: boolean; email: boolean; phone: boolean; vat: boolean };
   storedIdentity: { name: string | null; email: string | null; phone: string | null; vat: string | null };
+  phoneOnlyMatch: boolean;
 }> {
   const norm = (v?: string | null) => (v ? v.trim().toLowerCase().replace(/\s+/g, '') : '');
   const normName = (v?: string | null) => (v ? v.trim().toLowerCase().replace(/\s+/g, ' ') : '');
@@ -256,10 +289,13 @@ export async function validateEntityCoherence(
     level = 'none';
   }
 
+  const phoneOnlyMatch = matches.phone && !matches.email && !matches.vat;
+
   return {
     level,
     matches,
     storedIdentity: { name: storedName, email: storedEmail, phone: storedPhone, vat: storedVat },
+    phoneOnlyMatch,
   };
 }
 

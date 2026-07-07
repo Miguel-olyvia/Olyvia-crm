@@ -504,7 +504,7 @@ export default function ServiceFees() {
       </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? t('serviceFees.dialog.editTitle') : t('serviceFees.dialog.newTitle')}

@@ -201,21 +201,27 @@ describe("createEntityWithIdentity — RLS / identity boundary regression", () =
   });
 });
 
-describe("resolveEntityByIdentity — dedup priority regression", () => {
-  it("returns the email match first (priority: email > phone > vat)", async () => {
+describe("resolveEntityByIdentity — dedup priority + org-scoping regression", () => {
+  const ORG = "org-1";
+
+  it("returns the email match first (priority: email > phone > vat) when it's linked to this org", async () => {
     fromMock.mockImplementation(
       buildFrom({
         anew_entity_emails: {
-          result: { data: { entity_id: "ent-email" }, error: null },
+          result: { data: [{ entity_id: "ent-email" }], error: null },
         },
         anew_entity_phones: {
-          result: { data: { entity_id: "ent-phone" }, error: null },
+          result: { data: [{ entity_id: "ent-phone" }], error: null },
         },
         fiscal_entities: {
-          result: { data: { id: "fe-1" }, error: null },
+          result: { data: [{ id: "fe-1" }], error: null },
         },
         anew_entity_fiscal_entities: {
-          result: { data: { entity_id: "ent-vat" }, error: null },
+          result: { data: [{ entity_id: "ent-vat" }], error: null },
+        },
+        anew_entity_org_links: {
+          // All three candidates happen to be linked to this org — priority order still applies.
+          result: { data: [{ entity_id: "ent-email" }, { entity_id: "ent-phone" }, { entity_id: "ent-vat" }], error: null },
         },
       })
     );
@@ -224,6 +230,7 @@ describe("resolveEntityByIdentity — dedup priority regression", () => {
       email: "a@b.com",
       phone: "910000000",
       vat: "PT500000000",
+      organizationId: ORG,
     });
     expect(id).toBe("ent-email");
   });
@@ -231,17 +238,21 @@ describe("resolveEntityByIdentity — dedup priority regression", () => {
   it("falls back to phone when email has no match", async () => {
     fromMock.mockImplementation(
       buildFrom({
-        anew_entity_emails: { result: { data: null, error: null } },
+        anew_entity_emails: { result: { data: [], error: null } },
         anew_entity_phones: {
-          result: { data: { entity_id: "ent-phone" }, error: null },
+          result: { data: [{ entity_id: "ent-phone" }], error: null },
         },
-        fiscal_entities: { result: { data: null, error: null } },
+        fiscal_entities: { result: { data: [], error: null } },
+        anew_entity_org_links: {
+          result: { data: [{ entity_id: "ent-phone" }], error: null },
+        },
       })
     );
 
     const id = await resolveEntityByIdentity({
       email: "missing@x.com",
       phone: "910000000",
+      organizationId: ORG,
     });
     expect(id).toBe("ent-phone");
   });
@@ -249,9 +260,9 @@ describe("resolveEntityByIdentity — dedup priority regression", () => {
   it("returns null when no signal matches (forces a new entity in the dedup pipeline)", async () => {
     fromMock.mockImplementation(
       buildFrom({
-        anew_entity_emails: { result: { data: null, error: null } },
-        anew_entity_phones: { result: { data: null, error: null } },
-        fiscal_entities: { result: { data: null, error: null } },
+        anew_entity_emails: { result: { data: [], error: null } },
+        anew_entity_phones: { result: { data: [], error: null } },
+        fiscal_entities: { result: { data: [], error: null } },
       })
     );
 
@@ -259,6 +270,39 @@ describe("resolveEntityByIdentity — dedup priority regression", () => {
       email: "x@y.com",
       phone: "999",
       vat: "PT1",
+      organizationId: ORG,
+    });
+    expect(id).toBeNull();
+  });
+
+  it("returns null (never auto-reuses) when the matching entity is NOT linked to this org — cross-org identity is never auto-resolved", async () => {
+    fromMock.mockImplementation(
+      buildFrom({
+        anew_entity_emails: {
+          result: { data: [{ entity_id: "ent-other-org" }], error: null },
+        },
+        anew_entity_phones: { result: { data: [], error: null } },
+        fiscal_entities: { result: { data: [], error: null } },
+        // The entity exists (matched by email) but has no link to THIS org.
+        anew_entity_org_links: { result: { data: [], error: null } },
+      })
+    );
+
+    const id = await resolveEntityByIdentity({
+      email: "shared-person@x.com",
+      organizationId: ORG,
+    });
+    expect(id).toBeNull();
+  });
+
+  it("returns null immediately when organizationId is missing, without querying the database", async () => {
+    fromMock.mockImplementation(() => {
+      throw new Error("must not query without organizationId");
+    });
+
+    const id = await resolveEntityByIdentity({
+      email: "a@b.com",
+      organizationId: "" as any,
     });
     expect(id).toBeNull();
   });

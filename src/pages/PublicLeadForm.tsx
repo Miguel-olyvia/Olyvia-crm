@@ -626,6 +626,9 @@ export default function PublicLeadForm() {
   };
   const [formValues, setFormValues] = useState<Record<string, any>>({});
   const [leadId, setLeadId] = useState<string | null>(null);
+  // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
+  // "lead" when only an older lead_id-only response shape is ever received.
+  const [targetType, setTargetType] = useState<"lead" | "contact" | "client">("lead");
   const [isComplete, setIsComplete] = useState(false);
   const [locationRejected, setLocationRejected] = useState(false);
   const [resolvedSourceId, setResolvedSourceId] = useState<string | null>(querySourceId);
@@ -1158,14 +1161,18 @@ export default function PublicLeadForm() {
         }
 
 
-        let resolvedLeadId = data.lead_id;
+        // Prefer the polymorphic target_type/target_id continuation key;
+        // fall back to lead_id/"lead" if an older response shape is ever received.
+        const resolvedTargetType: "lead" | "contact" | "client" = data.target_type || "lead";
+        let resolvedLeadId = data.target_id || data.lead_id;
 
-        if (data.is_complete && hasSchedulingStep && schedulingSlot) {
-          resolvedLeadId = await completeScheduledBooking(data.lead_id);
+        if (data.is_complete && hasSchedulingStep && schedulingSlot && resolvedTargetType === "lead") {
+          resolvedLeadId = await completeScheduledBooking(resolvedLeadId);
         }
-        
+
+        setTargetType(resolvedTargetType);
         setLeadId(resolvedLeadId);
-        
+
         // GTM: Lead created event (first step completed)
         pushGTMEvent('lead_created', {
           lead_id: resolvedLeadId,
@@ -1199,6 +1206,8 @@ export default function PublicLeadForm() {
         }
       } else {
         const updateBody: any = {
+          target_type: targetType,
+          target_id: leadId,
           lead_id: leadId,
           campaign_id: formConfig?.campaign_id || campaignId,
           step_number: currentStep,
@@ -1211,16 +1220,16 @@ export default function PublicLeadForm() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updateBody)
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
           throw new Error(data.error || "Erro ao enviar dados");
         }
 
         let resolvedLeadId = leadId;
 
-        if (data.is_complete && hasSchedulingStep && schedulingSlot && leadId) {
+        if (data.is_complete && hasSchedulingStep && schedulingSlot && leadId && targetType === "lead") {
           resolvedLeadId = await completeScheduledBooking(leadId);
         }
         

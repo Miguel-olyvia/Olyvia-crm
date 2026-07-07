@@ -324,12 +324,14 @@ export async function mergeFieldValuesNonDestructive(params: {
   const { supabase, table, rowId, newFieldValues } = params;
   if (!newFieldValues || Object.keys(newFieldValues).length === 0) return {};
 
+  const column = table === "anew_leads" ? "field_values" : "custom_fields";
+
   const { data: existing } = await supabase
     .from(table)
-    .select("field_values")
+    .select(column)
     .eq("id", rowId)
     .maybeSingle();
-  const current = (existing?.field_values || {}) as Record<string, any>;
+  const current = (existing?.[column] || {}) as Record<string, any>;
 
   const merged: Record<string, any> = { ...current };
   const diff: Record<string, any> = {};
@@ -345,7 +347,7 @@ export async function mergeFieldValuesNonDestructive(params: {
   if (Object.keys(diff).length > 0) {
     await supabase
       .from(table)
-      .update({ field_values: merged })
+      .update({ [column]: merged })
       .eq("id", rowId);
   }
   return diff;
