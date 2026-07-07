@@ -136,28 +136,30 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
       const pricingType = formData.pricing_type as "custom" | "fixed_discount" | "fixed_price" | "percentage_discount";
-      
-      const bundleData = {
-        organization_id: activeCompany.id,
-        sku: formData.sku.trim(),
-        name: formData.name.trim(),
-        description: formData.description.trim() || null,
-        pricing_type: pricingType,
-        fixed_price: formData.pricing_type === 'fixed_price' ? parseFloat(formData.fixed_price) || null : null,
-        discount_percent: formData.pricing_type === 'percentage_discount' ? parseFloat(formData.discount_percent) || null : null,
-        discount_fixed: formData.pricing_type === 'fixed_discount' ? parseFloat(formData.discount_fixed) || null : null,
-        status: formData.status,
-        valid_from: formData.valid_from || null,
-        valid_to: formData.valid_to || null,
-        is_active: formData.status === 'active',
-      };
+
+      const fixedPrice = formData.pricing_type === 'fixed_price' ? parseFloat(formData.fixed_price) || null : null;
+      const discountPercent = formData.pricing_type === 'percentage_discount' ? parseFloat(formData.discount_percent) || null : null;
+      const discountFixed = formData.pricing_type === 'fixed_discount' ? parseFloat(formData.discount_fixed) || null : null;
+      const description = formData.description.trim() || null;
+      const validFrom = formData.valid_from || null;
+      const validTo = formData.valid_to || null;
 
       if (bundleId) {
         const { error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase
-            .from("bundles")
-            .update(bundleData)
-            .eq("id", bundleId)
+          supabase.rpc("rpc_update_bundle", {
+            p_id: bundleId,
+            p_organization_id: activeCompany.id,
+            p_sku: formData.sku.trim(),
+            p_name: formData.name.trim(),
+            p_description: description,
+            p_pricing_type: pricingType,
+            p_fixed_price: fixedPrice,
+            p_discount_percent: discountPercent,
+            p_discount_fixed: discountFixed,
+            p_status: formData.status,
+            p_valid_from: validFrom,
+            p_valid_to: validTo,
+          })
         );
 
         if (error) throw error;
@@ -168,18 +170,27 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
         });
       } else {
         const { data, error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase
-            .from("bundles")
-            .insert([{ ...bundleData, created_by: businessUserId }])
-            .select()
-            .single()
+          supabase.rpc("rpc_create_bundle", {
+            p_organization_id: activeCompany.id,
+            p_sku: formData.sku.trim(),
+            p_name: formData.name.trim(),
+            p_description: description,
+            p_pricing_type: pricingType,
+            p_fixed_price: fixedPrice,
+            p_discount_percent: discountPercent,
+            p_discount_fixed: discountFixed,
+            p_status: formData.status,
+            p_valid_from: validFrom,
+            p_valid_to: validTo,
+          })
         );
 
         if (error) throw error;
-        
+        if (!data) throw new Error("Falha ao criar bundle: resposta vazia");
+
         setBundleId(data.id);
         setActiveTab("components");
-        
+
         toast({
           title: t('bundles.toast.created'),
           description: t('bundles.toast.createdDescription'),

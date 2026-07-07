@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
+import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2 } from "lucide-react";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
 import ProductPricesDialog from "@/components/ProductPricesDialog";
@@ -122,6 +122,8 @@ export default function Products() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<{
     inserted: number;
     updated: number;
@@ -772,7 +774,11 @@ export default function Products() {
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
       // Soft delete - mark as deleted instead of removing
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
+      // .select("id") lets us detect the no-op case: if the row's organization_id
+      // doesn't match activeCompany.id (e.g. mis-scoped via the org combobox bug),
+      // the .eq filters match 0 rows and Supabase returns { data: [], error: null }
+      // — a false success would otherwise be reported with no audit log written.
+      const { data: updatedRows, error } = await withAuditContext(supabase, businessUserId, () =>
         supabase
           .from("products")
           .update({
@@ -782,9 +788,14 @@ export default function Products() {
           })
           .eq("id", id)
           .eq("organization_id", activeCompany.id)
+          .select("id")
       );
 
       if (error) throw error;
+
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error(t('products.toast.deleteNotFound') || "Produto não encontrado ou fora do âmbito.");
+      }
 
       toast({
         title: t('products.toast.success'),
@@ -1370,6 +1381,8 @@ export default function Products() {
     const allWarnings: string[] = [];
     const failedFiles: string[] = [];
 
+    setIsImporting(true);
+    setImportProgress(null);
     try {
     for (const file of Array.from(files)) {
       try {
@@ -1472,116 +1485,111 @@ export default function Products() {
           }
           return chunks;
         };
-        const CHUNK_SIZE = 50;
+        const CHUNK_SIZE = 200;
 
-        // Upsert new products in chunks (handles SKUs hidden by RLS that already exist in DB).
-        // onConflict matches the unique constraint products_sku_organization_id_key.
-        // Returning rows lets us reconcile JS-generated UUIDs with the actual DB ids
-        // (different when an upsert hit an existing row).
-        const upsertedProducts: { id: string; sku: string; organization_id: string | null }[] = [];
-        if (productsToInsert.length > 0) {
-          for (const chunk of chunkArray(productsToInsert, CHUNK_SIZE)) {
-            // Strip JS-generated `id` from payload: when upsert hits an existing row,
-            // including `id` would attempt to change the PK and violate FKs from
-            // dependent tables (product_attribute_price_ranges, etc.) whose CASCADE
-            // only covers DELETE, not PK UPDATE.
-            const sanitizedChunk = chunk.map(({ id, ...rest }: any) => rest);
-            const { data: upserted, error: prodError } = await supabase
-              .from("products")
-              .upsert(sanitizedChunk, { onConflict: "sku,organization_id", ignoreDuplicates: false })
-              .select("id, sku, organization_id");
-            if (prodError) throw prodError;
-            if (upserted) upsertedProducts.push(...upserted);
-          }
-        }
-
-        // Map (sku::orgId) -> real DB id, so we can detect when upsert merged into an existing row.
-        const skuLookup = new Map<string, string>();
-        upsertedProducts.forEach(p => {
-          skuLookup.set(`${p.sku.toLowerCase()}::${p.organization_id ?? ''}`, p.id);
+        // Build the RPC's per-row shape from parseProductsCSV's flat, correlated
+        // arrays. Prices are correlated back to their product purely via the
+        // shared `product_id` key that parseProductsCSV already stamps onto both
+        // the product row (JS-generated uuid for inserts, real id for updates)
+        // and every price row — no extra correlation logic needed.
+        const pricesByProductId = new Map<string, any[]>();
+        [...pricesToInsert, ...pricesToUpdate].forEach((p: any) => {
+          const list = pricesByProductId.get(p.product_id) || [];
+          list.push({
+            price_type: p.price_type,
+            price: p.price,
+            currency: p.currency,
+            vat_rate: p.vat_rate,
+            valid_from: p.valid_from ?? null,
+            valid_to: p.valid_to ?? null,
+          });
+          pricesByProductId.set(p.product_id, list);
         });
 
-        // Reconcile prices/associations: redirect to real id and treat conflicts as updates.
-        const reconciledPricesToInsert: any[] = [];
-        const additionalPricesToUpdate: any[] = [];
-        const conflictedJsIds = new Set<string>();
-        const jsIdToRealId = new Map<string, string>();
-        for (const original of productsToInsert) {
-          const key = `${(original.sku || '').toLowerCase()}::${original.organization_id ?? ''}`;
-          const realId = skuLookup.get(key) || original.id;
-          jsIdToRealId.set(original.id, realId);
-          const isConflict = realId !== original.id;
-          if (isConflict) conflictedJsIds.add(original.id);
-
-          pricesToInsert
-            .filter((p: any) => p.product_id === original.id)
-            .forEach((p: any) => {
-              if (isConflict) additionalPricesToUpdate.push({ ...p, product_id: realId });
-              else reconciledPricesToInsert.push(p);
-            });
-        }
-
-        // Update existing products (matched in JS via existingProducts)
-        for (const product of productsToUpdate) {
-          const { id, ...updateData } = product;
-          const { error } = await supabase.from("products").update(updateData).eq("id", id).eq("organization_id", activeCompany?.id);
-          if (error) throw error;
-        }
-
-        // Insert prices for genuinely new products
-        if (reconciledPricesToInsert.length > 0) {
-          for (const chunk of chunkArray(reconciledPricesToInsert, CHUNK_SIZE)) {
-            const { error: priceError } = await supabase.from("product_prices").insert(chunk);
-            if (priceError) throw priceError;
-          }
-        }
-
-        // Update prices for existing products: delete old then insert the CSV values.
-        // Includes both JS-detected updates AND upsert-detected conflicts.
-        const normalizedPricesToUpdate = [...pricesToUpdate, ...additionalPricesToUpdate].map((price: any) => ({
-          ...price,
-          created_by: businessUserIdForCsv,
+        const insertRows = productsToInsert.map((p: any) => ({
+          mode: 'insert',
+          id: null,
+          sku: p.sku,
+          name: p.name,
+          description: p.description ?? null,
+          barcode: p.barcode ?? null,
+          status: p.status,
+          category_id: p.category_id ?? null,
+          subcategory_id: p.subcategory_id ?? null,
+          brand_id: p.brand_id ?? null,
+          supplier_id: p.supplier_id ?? null,
+          organization_id: p.organization_id ?? null,
+          is_sellable: p.is_sellable,
+          is_purchasable: p.is_purchasable,
+          prices: pricesByProductId.get(p.id) || [],
         }));
-        const updateProductIds = [...new Set(normalizedPricesToUpdate.map((p: any) => p.product_id))];
 
-        for (const productId of updateProductIds) {
-          // product_prices has no organization_id column; scope is enforced via product_id FK
-          const { error: deletePriceError } = await supabase
-            .from("product_prices")
-            .delete()
-            .eq("product_id", productId);
-
-          if (deletePriceError) throw deletePriceError;
-        }
-
-        if (normalizedPricesToUpdate.length > 0) {
-          for (const chunk of chunkArray(normalizedPricesToUpdate, CHUNK_SIZE)) {
-            const { error: priceUpdateError } = await supabase
-              .from("product_prices")
-              .insert(chunk);
-
-            if (priceUpdateError) throw priceUpdateError;
-          }
-        }
-
-        // Remap associations to real DB ids (handles upsert merging into existing rows)
-        // and upsert idempotently so both new and existing products end up linked.
-        const remappedAssociations = companyAssociations.map(a => ({
-          ...a,
-          product_id: jsIdToRealId.get(a.product_id) || a.product_id,
+        const updateRows = productsToUpdate.map((p: any) => ({
+          mode: 'update',
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          description: p.description ?? null,
+          barcode: p.barcode ?? null,
+          status: p.status,
+          category_id: p.category_id ?? null,
+          subcategory_id: p.subcategory_id ?? null,
+          brand_id: p.brand_id ?? null,
+          supplier_id: p.supplier_id ?? null,
+          organization_id: p.organization_id ?? null,
+          is_sellable: p.is_sellable,
+          is_purchasable: p.is_purchasable,
+          prices: pricesByProductId.get(p.id) || [],
         }));
-        if (remappedAssociations.length > 0) {
-          for (const chunk of chunkArray(remappedAssociations, CHUNK_SIZE)) {
-            const { error: assocError } = await supabase
-              .from("product_organizations")
-              .upsert(chunk, { onConflict: "product_id,organization_id", ignoreDuplicates: true });
-            if (assocError) throw assocError;
-          }
+
+        const allRows = [...insertRows, ...updateRows];
+
+        // Single SECURITY DEFINER RPC per chunk: for EACH product it does the
+        // products write + price reconciliation + org association upsert inside
+        // one transaction, emitting exactly one fn_manual_audit_log call per
+        // product (see rpc_bulk_import_products migration). This replaces the
+        // old fragmented per-table bulk upsert/insert calls that could split a
+        // single imported product's own creation across up to 3 audit rows.
+        //
+        // The RPC isolates each row in its own SAVEPOINT server-side: a bad
+        // row is rolled back individually and reported in the returned array
+        // as { status: 'error', sku, error }, while every other valid row in
+        // the same chunk still commits. We surface those per-row failures
+        // through the existing skippedLines/report UI instead of aborting.
+        const chunks = chunkArray(allRows, CHUNK_SIZE);
+        let insertedInFile = 0;
+        let updatedInFile = 0;
+        let failedInFile = 0;
+        for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+          const chunk = chunks[chunkIdx];
+          setImportProgress({ current: chunkIdx + 1, total: chunks.length });
+          const { data: rpcResults, error: rpcError } = await supabase.rpc('rpc_bulk_import_products', {
+            p_org_id: activeCompany?.id,
+            p_products: chunk,
+          });
+          if (rpcError) throw rpcError;
+
+          (rpcResults || []).forEach((result: any) => {
+            if (result.status === 'error') {
+              const failedRow = chunk[result.input_index];
+              failedInFile += 1;
+              allSkipped.push({
+                line: 0,
+                sku: result.sku || failedRow?.sku || '(desconhecido)',
+                reason: result.error || 'Erro desconhecido ao importar linha',
+                file: file.name,
+              });
+            } else if (result.action === 'insert') {
+              insertedInFile += 1;
+            } else if (result.action === 'update') {
+              updatedInFile += 1;
+            }
+          });
         }
 
-        totalNew += stats.newCount;
-        totalUpdated += stats.updateCount;
-        totalSkipped += stats.skippedCount;
+        totalNew += insertedInFile;
+        totalUpdated += updatedInFile;
+        totalSkipped += stats.skippedCount + failedInFile;
         totalPrices += pricesToInsert.length;
       } catch (error: any) {
         failedFiles.push(`${file.name}: ${error.message}`);
@@ -1623,6 +1631,8 @@ export default function Products() {
       // Otherwise re-selecting the same filename does NOT trigger onChange,
       // and edits to the same CSV would appear to be ignored.
       inputEl.value = '';
+      setIsImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -1662,13 +1672,25 @@ export default function Products() {
               </Button>
             </PermissionGate>
             <PermissionGate permission="products.import">
-              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+              <Dialog
+                open={importDialogOpen}
+                onOpenChange={(o) => {
+                  // Block closing the dialog while an import is in-flight —
+                  // writes may still be committing chunk by chunk.
+                  if (isImporting) return;
+                  setImportDialogOpen(o);
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button variant="outline">
                     <Upload className="mr-2 h-4 w-4" /> {t('products.import')}
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent
+                  hideClose={isImporting}
+                  onInteractOutside={(e) => { if (isImporting) e.preventDefault(); }}
+                  onEscapeKeyDown={(e) => { if (isImporting) e.preventDefault(); }}
+                >
                   <DialogHeader>
                     <DialogTitle>{t('products.importDialog.title')}</DialogTitle>
                   </DialogHeader>
@@ -1677,7 +1699,7 @@ export default function Products() {
                       {t('products.importDialog.description')}
                     </p>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                      <Button variant="outline" size="sm" onClick={handleDownloadTemplate} disabled={isImporting}>
                         <Download className="mr-2 h-4 w-4" />
                         {t('products.downloadTemplate') || "Template"}
                       </Button>
@@ -1687,7 +1709,16 @@ export default function Products() {
                       accept=".xlsx,.xls,.csv"
                       multiple
                       onChange={handleImport}
+                      disabled={isImporting}
                     />
+                    {isImporting && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {importProgress
+                          ? `A importar produtos... lote ${importProgress.current}/${importProgress.total}`
+                          : 'A importar produtos...'}
+                      </div>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>

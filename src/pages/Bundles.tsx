@@ -541,25 +541,56 @@ const Bundles = () => {
 
       checkCancelled();
 
-      // Insert new bundles
-      if (result.bundlesToInsert.length > 0) {
+      if (!activeCompany?.id) {
+        throw new Error(t('bundles.form.noCompany') || "Empresa ativa não encontrada");
+      }
+
+      // Merge insert/update rows into one ordered batch for the atomic RPC
+      // (rpc_bulk_import_bundles): one transaction, one audit row per bundle.
+      const bundleRows = [
+        ...result.bundlesToInsert.map((bundle) => ({
+          mode: 'insert' as const,
+          id: null,
+          sku: bundle.sku,
+          name: bundle.name,
+          description: bundle.description,
+          status: bundle.status,
+          pricing_type: bundle.pricing_type,
+          fixed_price: bundle.fixed_price,
+          discount_percent: bundle.discount_percent,
+          discount_fixed: bundle.discount_fixed,
+          valid_from: bundle.valid_from,
+          valid_to: bundle.valid_to,
+          organization_id: bundle.organization_id,
+        })),
+        ...result.bundlesToUpdate.map((bundle) => ({
+          mode: 'update' as const,
+          id: bundle.id,
+          sku: bundle.sku,
+          name: bundle.name,
+          description: bundle.description,
+          status: bundle.status,
+          pricing_type: bundle.pricing_type,
+          fixed_price: bundle.fixed_price,
+          discount_percent: bundle.discount_percent,
+          discount_fixed: bundle.discount_fixed,
+          valid_from: bundle.valid_from,
+          valid_to: bundle.valid_to,
+          organization_id: bundle.organization_id,
+        })),
+      ];
+
+      if (bundleRows.length > 0) {
         const { error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase.from("bundles").insert(result.bundlesToInsert),
+          supabase.rpc('rpc_bulk_import_bundles', {
+            p_org_id: activeCompany.id,
+            p_bundles: bundleRows,
+          }),
           'csv_import'
         );
         if (error) throw error;
       }
       checkCancelled();
-
-      // Update existing bundles
-      for (const bundle of result.bundlesToUpdate) {
-        const { id, ...updateData } = bundle;
-        const { error } = await withAuditContext(supabase, businessUserId, () =>
-          supabase.from("bundles").update(updateData).eq("id", id),
-          'csv_import'
-        );
-        if (error) throw error;
-      }
 
       toast({
         title: t('bundles.toast.importSuccess') || "Importação concluída",

@@ -488,198 +488,28 @@ export default function ProductAttributes() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('productAttributes.toast.notAuthenticated'));
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
 
-      // Find a unique code by appending _copy / _copy_2 / ...
-      let newCode = `${attr.code}_copy`;
-      let suffix = 1;
-      while (true) {
-        const { data: existing } = await supabase
-          .from("product_attributes")
-          .select("id")
-          .eq("code", newCode)
-          .eq("organization_id", activeCompany?.id)
-          .maybeSingle();
-        if (!existing) break;
-        suffix += 1;
-        newCode = `${attr.code}_copy_${suffix}`;
+      if (!attr.organization_id) {
+        throw new Error("Atributo sem organização associada");
       }
 
-      const { id, ...rest } = attr as any;
-      const newAttribute = {
-        ...rest,
-        code: newCode,
-        label: `${attr.label} (cópia)`,
-        created_by: businessUserId,
-      };
-
-      // Wrap the entire duplicate operation (main attribute insert + all clones) in a
-      // single audit context so every write records the acting user.
-      const newAttrId = await withAuditContext(supabase, businessUserId, async () => {
-        const { data: inserted, error } = await supabase
-          .from("product_attributes")
-          .insert(newAttribute)
-          .select("id")
-          .single();
-        if (error) throw error;
-        return inserted.id;
-      });
-
-      // Duplicate all related details (best-effort, in parallel).
-      // Each clone function runs inside its own withAuditContext so the audit
-      // trigger sees the acting user even when clones settle independently.
-
-      // 1) Option groups + their values
-      const cloneOptionGroups = async () => {
-        const { data: groups, error: groupsErr } = await (supabase as any)
-          .from("attribute_option_groups")
-          .select("id, organization_id, name, description, is_active, sort_order")
-          .eq("attribute_id", attr.id);
-
-        if (groupsErr) {
-          console.error("[duplicate] read groups failed", groupsErr);
-          return;
-        }
-        if (!groups || groups.length === 0) return;
-
-        for (const g of groups) {
-          const newGroup = await withAuditContext(supabase, businessUserId, async () => {
-            const { data, error: gErr } = await (supabase as any)
-              .from("attribute_option_groups")
-              .insert({
-                attribute_id: newAttrId,
-                organization_id: g.organization_id,
-                name: g.name,
-                description: g.description,
-                is_active: g.is_active,
-                sort_order: g.sort_order,
-                created_by: businessUserId,
-              })
-              .select("id")
-              .single();
-            if (gErr || !data) throw gErr ?? new Error("insert group returned no data");
-            return data;
-          }).catch((gErr: unknown) => {
-            console.error("[duplicate] insert group failed", gErr);
-            return null;
-          });
-          if (!newGroup) continue;
-
-          const { data: values, error: valuesReadErr } = await (supabase as any)
-            .from("attribute_option_group_values")
-            .select("value_text, display_name, hex_color, sort_order, is_active")
-            .eq("group_id", g.id)
-            .order("sort_order", { ascending: true });
-
-          if (valuesReadErr) {
-            console.error("[duplicate] read values failed", valuesReadErr);
-            continue;
-          }
-          if (!values || values.length === 0) continue;
-
-          // Insert in chunks of 100 to avoid payload limits / silent failures
-          const rows = values.map((v: any) => ({
-            group_id: newGroup.id,
-            value_text: v.value_text,
-            display_name: v.display_name,
-            hex_color: v.hex_color,
-            sort_order: v.sort_order ?? 0,
-            is_active: v.is_active ?? true,
-          }));
-          const chunkSize = 100;
-          for (let i = 0; i < rows.length; i += chunkSize) {
-            const chunk = rows.slice(i, i + chunkSize);
-            await withAuditContext(supabase, businessUserId, async () => {
-              const { error: insErr } = await (supabase as any)
-                .from("attribute_option_group_values")
-                .insert(chunk);
-              if (insErr) {
-                console.error("[duplicate] insert values chunk failed", insErr, chunk[0]);
-              }
-            });
-          }
-        }
-      };
-
-      // 2) Category-level value prices (no product_id)
-      const cloneValuePrices = async () => {
-        const { data: prices } = await supabase
-          .from("product_attribute_value_prices")
-          .select("organization_id, category_id, value_option, price, cost_impact, is_available, sort_order, price_context_id")
-          .eq("attribute_id", attr.id)
-          .is("product_id", null);
-        if (prices && prices.length > 0) {
-          await withAuditContext(supabase, businessUserId, async () => {
-            await supabase.from("product_attribute_value_prices").insert(
-              prices.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-            );
-          });
-        }
-      };
-
-      // 3) Category-level price ranges (no product_id)
-      const clonePriceRanges = async () => {
-        const { data: ranges } = await supabase
-          .from("product_attribute_price_ranges")
-          .select("organization_id, category_id, range_type, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, cost_impact, price_context_id")
-          .eq("attribute_id", attr.id)
-          .is("product_id", null);
-        if (ranges && ranges.length > 0) {
-          await withAuditContext(supabase, businessUserId, async () => {
-            await supabase.from("product_attribute_price_ranges").insert(
-              ranges.map((r: any) => ({ ...r, attribute_id: newAttrId })),
-            );
-          });
-        }
-      };
-
-      // 4) Organization links
-      const cloneOrgLinks = async () => {
-        const { data: orgs } = await supabase
-          .from("product_attribute_organizations")
-          .select("organization_id")
-          .eq("attribute_id", attr.id);
-        if (orgs && orgs.length > 0) {
-          await withAuditContext(supabase, businessUserId, async () => {
-            await supabase.from("product_attribute_organizations").insert(
-              orgs.map((o: any) => ({
-                attribute_id: newAttrId,
-                organization_id: o.organization_id,
-                created_by: businessUserId,
-              })),
-            );
-          });
-        }
-      };
-
-      // 5) Category attribute palette configuration
-      const clonePaletteCfg = async () => {
-        const { data: paletteCfgs } = await (supabase as any)
-          .from("category_attribute_palettes")
-          .select("category_id, base_group_id, additional_values, excluded_values")
-          .eq("attribute_id", attr.id);
-        if (paletteCfgs && paletteCfgs.length > 0) {
-          await withAuditContext(supabase, businessUserId, async () => {
-            await (supabase as any).from("category_attribute_palettes").insert(
-              paletteCfgs.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-            );
-          });
-        }
-      };
-
-      await Promise.allSettled([
-        cloneOptionGroups(),
-        cloneValuePrices(),
-        clonePriceRanges(),
-        cloneOrgLinks(),
-        clonePaletteCfg(),
-      ]);
-
+      // Single RPC does the full deep clone (attribute + option groups/values +
+      // value prices + price ranges + org links + category palette config) inside
+      // one transaction, with audit_bypass + exactly one fn_manual_audit_log call.
+      // Replaces 7 separate raw inserts that previously had no rollback on
+      // partial failure and produced up to 7 audit rows for one user action.
+      const { data: newAttribute, error } = await supabase.rpc(
+        "rpc_duplicate_product_attribute",
+        {
+          p_id: attr.id,
+          p_organization_id: attr.organization_id,
+        },
+      );
+      if (error) throw error;
 
       toast({
         title: t('productAttributes.toast.success'),
-        description: `Atributo duplicado como "${newCode}"`,
+        description: `Atributo duplicado como "${newAttribute?.code ?? attr.code + '_copy'}"`,
       });
 
       loadData();
