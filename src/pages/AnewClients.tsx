@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
@@ -64,6 +64,9 @@ import { useConversionRevert } from "@/hooks/useConversionRevert";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { withAuditContext } from "@/utils/auditContext";
+import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
+import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClientMeetingDialog";
+import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 
 interface ClientRecord {
   id: string;
@@ -79,6 +82,7 @@ interface ClientRecord {
   created_by: string | null;
   updated_at?: string | null;
   last_interaction_at?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 }
 
 interface AnewUserNameRow { id: string; name: string | null }
@@ -124,6 +128,19 @@ const AnewClients = () => {
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
 
+  // Bug 7/9/10 dialogs: proposal creation, VIP toggle, meeting scheduling.
+  const [showProposalDialog, setShowProposalDialog] = useState(false);
+  const [proposalPresetEntityId, setProposalPresetEntityId] = useState<string | undefined>(undefined);
+  const [vipTogglingClientId, setVipTogglingClientId] = useState<string | null>(null);
+  const [showScheduleMeetingDialog, setShowScheduleMeetingDialog] = useState(false);
+  const [meetingTarget, setMeetingTarget] = useState<{ clientId: string; entityId: string; organizationId: string; rootOrganizationId: string; name: string } | null>(null);
+
+  // "Gerir tags": reuses ContactTagsDialog against the generic contact_tags table (entity_id-keyed).
+  const [tagsDialogOpen, setTagsDialogOpen] = useState(false);
+  const [tagsEntityId, setTagsEntityId] = useState("");
+  const [tagsEntityName, setTagsEntityName] = useState("");
+  const [tagsOrganizationId, setTagsOrganizationId] = useState("");
+
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; depth: number }[]>([]);
   const [orgNameMap, setOrgNameMap] = useState<Map<string, string>>(new Map());
   const [isParentOrg, setIsParentOrg] = useState<boolean | null>(null);
@@ -168,7 +185,7 @@ const AnewClients = () => {
   // Duplicate detection state for clients
   const [clientDuplicateDialogOpen, setClientDuplicateDialogOpen] = useState(false);
   const [clientDuplicateMatches, setClientDuplicateMatches] = useState<DuplicateMatch[]>([]);
-  const [pendingClientData, setPendingClientData] = useState<{ entityId: string; displayName: string; email: string; phone: string; status: string; organizationId: string; internalUserId: string; clientType: string; addressData: ClientAddress } | null>(null);
+  const [pendingClientData, setPendingClientData] = useState<{ entityId: string | null; displayName: string; email: string; phone: string; phoneCountryCode: string; vat: string; firstName: string | null; lastName: string | null; entityType: 'person' | 'organization'; status: string; organizationId: string; internalUserId: string; clientType: string; addressData: ClientAddress } | null>(null);
   const [revertableClientIds, setRevertableClientIds] = useState<Set<string>>(new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = useState<"dashboard" | "list" | "value" | "retention">("list");
@@ -454,9 +471,8 @@ const AnewClients = () => {
       const viewScope = getPermissionScope("clients.view");
       const internalUserId: string | null = scopeAnewUserId || null;
 
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at", { count: 'exact' }).is("deleted_at", null);
+      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-      else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
       else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
       // When searching, ignore status filter so inactive/churned/lost clients still appear
       if (!effectiveSearch) {
@@ -556,7 +572,7 @@ const AnewClients = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [getPermissionScope, scopeAnewUserId, companyFilter, scopeOrgIds, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+  }, [getPermissionScope, scopeAnewUserId, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
@@ -632,7 +648,6 @@ const AnewClients = () => {
       while (hasMore) {
         let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at").is("deleted_at", null);
         if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-        else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
         else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
         if (viewScope === "OWNED" && internalUserId) {
           const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
@@ -692,7 +707,7 @@ const AnewClients = () => {
   // Realtime: refresh both paginated list and full analytics on any anew_clients change in scope
   useEffect(() => {
     if (scopeLoading || isParentOrg === null) return;
-    const orgIds = scopeOrgIds.length > 0 ? scopeOrgIds : (activeCompany?.id ? [activeCompany.id] : []);
+    const orgIds = activeCompany?.id ? [activeCompany.id] : [];
     if (orgIds.length === 0) return;
     let timer: number | null = null;
     const orgSet = new Set(orgIds);
@@ -763,6 +778,34 @@ const AnewClients = () => {
   };
 
   const handleDeleteClick = (client: ClientRecord, e: React.MouseEvent) => { e.stopPropagation(); setClientToDelete(client); setDeleteDialogOpen(true); };
+
+  // Bug 9 — "Marcar como VIP": toggles anew_clients.custom_fields->>'vip' via
+  // rpc_toggle_client_vip (atomic, single audit row).
+  const handleToggleVip = async (client: ClientRecord) => {
+    if (vipTogglingClientId) return;
+    setVipTogglingClientId(client.id);
+    try {
+      const { data: current, error: fetchError } = await (supabase as any)
+        .from("anew_clients")
+        .select("custom_fields")
+        .eq("id", client.id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      const currentVip = Boolean(current?.custom_fields?.vip);
+      const { error } = await supabase.rpc("rpc_toggle_client_vip", {
+        p_client_id: client.id,
+        p_organization_id: client.organization_id,
+        p_is_vip: !currentVip,
+      });
+      if (error) throw error;
+      toast({ title: !currentVip ? "Cliente marcado como VIP" : "Cliente deixou de ser VIP" });
+      setClients([]); setHasMore(true); loadClients(0, true);
+    } catch (err: any) {
+      toast({ title: "Erro ao atualizar VIP", description: err.message, variant: "destructive" });
+    } finally {
+      setVipTogglingClientId(null);
+    }
+  };
 
   const deactivateEntityRole = async (entityId: string, orgId: string, rootOrgId?: string) => {
     // Deactivate entity role in both possible org IDs to handle hierarchy mismatches
@@ -914,29 +957,45 @@ const AnewClients = () => {
       const firstName = clientType === "person" ? personNames.first : null;
       const lastName = clientType === "person" ? personNames.last : null;
 
-      let entityId = await resolveEntityByIdentity({ email: email || null, phone: phone || null, vat: vat || null });
-      if (!entityId) {
-        entityId = await createEntityWithIdentity({
-          displayName, type: entityType as 'person' | 'organization',
-          email: email || null, phone: phone || null, phoneCountryCode: phoneCode,
-          vat: vat || null, createdBy: internalUserId, firstName, lastName,
-        });
-      } else {
-        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
+      let entityId = await resolveEntityByIdentity({ email: email || null, phone: phone || null, vat: vat || null, organizationId });
+      if (entityId) {
+        // Phone alone is a weak signal (shared/reused far more than email or
+        // VAT) — never auto-reuse an unrelated entity on phone match alone.
+        const coherence = await validateEntityCoherence(entityId, { name: displayName || null, email: email || null, phone: phone || null, vat: vat || null });
+        if (coherence.level === 'none' || coherence.phoneOnlyMatch) {
+          console.warn('[client-create] Entity match rejected (insufficient coherence)', { rejectedEntityId: entityId, coherence });
+          entityId = null;
+        }
       }
-      if (!entityId) throw new Error('Falha ao criar entidade');
-      try {
-        await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
-      } catch (e) { console.warn('[org-link] non-fatal', e); }
+      // NOTE: entity creation (name/email/phone/vat) is deferred entirely to
+      // rpc_create_client_manual below when entityId is null — the RPC creates
+      // the entity + client atomically with a single, complete audit diff. A
+      // prior version called createEntityWithIdentity() here first, which
+      // wrote the entity outside any transaction the RPC could audit, so the
+      // resulting log only ever showed the anew_clients row (no
+      // name/email/phone). Never reintroduce a separate pre-creation call.
+      const entityResolved = !!entityId;
+      if (entityResolved) {
+        try {
+          await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
+        } catch (e) { console.warn('[org-link] non-fatal', e); }
+        // NOTE: display_name update on the reused entity is deferred until
+        // after the duplicate check (see below) so duplicates surface with
+        // the entity's real existing name, not the freshly typed one.
+      }
 
       const status = clientType === "person" ? formData.status : companyFormData.status;
 
-      // --- DUPLICATE CHECK: look for existing leads, contacts, clients with same entity in same org ---
-      const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = await Promise.all([
-        (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-        supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-        supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-      ]);
+      // --- DUPLICATE CHECK: only meaningful when reusing an existing entity —
+      // a brand-new entity (entityId still null here) cannot already have
+      // leads/contacts/clients tied to it, so skip the query entirely.
+      const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = entityResolved
+        ? await Promise.all([
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+          ])
+        : [{ data: [] }, { data: [] }, { data: [] }];
 
       // Resolve real identity data for matched entities
       const allClientRawMatches = [
@@ -992,15 +1051,26 @@ const AnewClients = () => {
 
       if (allClientMatches.length > 0) {
         setClientDuplicateMatches(allClientMatches);
-        setPendingClientData({ entityId, displayName, email: email || '', phone: phone || '', status, organizationId, internalUserId, clientType, addressData: { ...addressData } });
+        setPendingClientData({
+          entityId, displayName, email: email || '', phone: phone || '', phoneCountryCode: phoneCode || '+351',
+          vat: vat || '', firstName, lastName, entityType: entityType as 'person' | 'organization',
+          status, organizationId, internalUserId, clientType, addressData: { ...addressData },
+        });
         setClientDuplicateDialogOpen(true);
         setSavingClient(false);
         submitLockRef.current = false;
         return;
       }
 
+      // Sem duplicado — agora sim podemos sincronizar o display_name na entidade reutilizada.
+      if (entityResolved) {
+        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
+      }
       // No duplicates — proceed with creation
-      await createClientRecord(entityId, status, organizationId, internalUserId, entityType, addressData);
+      await createClientRecord(entityId, status, organizationId, internalUserId, entityType, addressData, {
+        displayName, firstName, lastName, email: email || null, phone: phone || null,
+        phoneCountryCode: phoneCode || null, vat: vat || null,
+      });
 
       toast({ title: "Cliente criado com sucesso" });
       setOpen(false); setClientType("person");
@@ -1013,45 +1083,53 @@ const AnewClients = () => {
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
-  // Extracted client creation logic for reuse
-  const createClientRecord = async (entityId: string, status: string, organizationId: string, internalUserId: string, entityType: string, addr: ClientAddress) => {
-    const { data: existingClient } = await (supabase as any).from("anew_clients").select("id")
-      .eq("entity_id", entityId).eq("organization_id", organizationId).is("deleted_at", null).maybeSingle();
-    if (existingClient) {
-      // Always reactivate when reusing: never leave an inactive client behind.
-      await withAuditContext(supabase, internalUserId, () =>
-        (supabase as any).from("anew_clients").update({ status: status || "active", deleted_at: null, organization_id: organizationId, source_type: "manual", updated_at: new Date().toISOString() }).eq("id", existingClient.id)
-      );
-    } else {
-      await withAuditContext(supabase, internalUserId, () =>
-        (supabase as any).from("anew_clients").insert({
-          entity_id: entityId, root_organization_id: resolvedRootOrgId || organizationId,
-          organization_id: organizationId, status, client_type: entityType,
-          source_type: "manual", created_by: internalUserId,
-        })
-      );
-    }
-    const { data: existingRole } = await supabase.from("anew_entity_roles").select("id")
-      .eq("entity_id", entityId).eq("role", "client").eq("organization_id", organizationId).maybeSingle();
-    if (!existingRole) {
-      await supabase.from("anew_entity_roles").insert({
-        entity_id: entityId, role: "client", status: "active",
-        organization_id: organizationId, source_type: "manual", created_by: internalUserId,
-      });
-    }
-    if (addr.postal_code && addr.street) {
-      const addressKey = `${addr.street}-${addr.number}-${addr.postal_code}`.toLowerCase().replace(/\s+/g, '-');
-      const { data: newAddress } = await supabase.from("anew_addresses").insert({
-        address_key: addressKey, street: addr.street, number: addr.number,
-        floor: addr.floor_number || null, city: addr.city, postal_code: addr.postal_code,
-        district: addr.district || null, country: "PT", created_by: internalUserId,
-      }).select("id").single();
-      if (newAddress) {
-        await supabase.from("anew_entity_addresses").insert({
-          entity_id: entityId, address_id: newAddress.id, address_type: "work", is_primary: true, created_by: internalUserId,
-        });
-      }
-    }
+  // Extracted client creation logic for reuse.
+  // Delegates the actual writes (anew_entities + anew_clients + anew_entity_roles
+  // + address) to rpc_create_client_manual, which performs them atomically with a
+  // single consolidated entity_audit_log row (audit_bypass + fn_manual_audit_log
+  // pattern). When entityId is null, the RPC also creates the entity itself using
+  // entityFields — never create the entity separately beforehand (see
+  // create_contact_with_role's equivalent branch for the same reasoning).
+  interface ClientEntityFields {
+    displayName: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    phoneCountryCode: string | null;
+    vat: string | null;
+  }
+
+  const createClientRecord = async (
+    entityId: string | null,
+    status: string,
+    organizationId: string,
+    internalUserId: string,
+    entityType: string,
+    addr: ClientAddress,
+    entityFields?: ClientEntityFields,
+  ) => {
+    const { error } = await supabase.rpc("rpc_create_client_manual", {
+      p_entity_id: entityId,
+      p_organization_id: organizationId,
+      p_root_organization_id: resolvedRootOrgId || organizationId,
+      p_status: status || "active",
+      p_client_type: entityType,
+      p_address_street: addr.street || null,
+      p_address_number: addr.number || null,
+      p_address_floor: addr.floor_number || null,
+      p_address_city: addr.city || null,
+      p_address_postal_code: addr.postal_code || null,
+      p_address_district: addr.district || null,
+      p_display_name: entityFields?.displayName ?? null,
+      p_first_name: entityFields?.firstName ?? null,
+      p_last_name: entityFields?.lastName ?? null,
+      p_email: entityFields?.email ?? null,
+      p_phone: entityFields?.phone ?? null,
+      p_phone_country_code: entityFields?.phoneCountryCode ?? null,
+      p_vat: entityFields?.vat ?? null,
+    });
+    if (error) throw error;
   };
 
   // Duplicate client handlers
@@ -1083,7 +1161,7 @@ const AnewClients = () => {
   };
 
   const convertContactMatchToClient = async (match: DuplicateMatch) => {
-    if (!pendingClientData || match.type !== "contact") return;
+    if (!pendingClientData || match.type !== "contact" || !pendingClientData.entityId) return;
     await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
     // createClientRecord already reactivates an existing client (any status, non-deleted) or inserts a new one.
     const { data: clientRow } = await (supabase as any)
@@ -1174,7 +1252,11 @@ const AnewClients = () => {
     setClientDuplicateDialogOpen(false);
     setSavingClient(true);
     try {
-      await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
+      await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData, {
+        displayName: pendingClientData.displayName, firstName: pendingClientData.firstName, lastName: pendingClientData.lastName,
+        email: pendingClientData.email || null, phone: pendingClientData.phone || null,
+        phoneCountryCode: pendingClientData.phoneCountryCode || null, vat: pendingClientData.vat || null,
+      });
       toast({ title: "Cliente criado com sucesso" });
       setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
@@ -1470,7 +1552,7 @@ const AnewClients = () => {
           companyId={companyFilter !== "all" ? companyFilter : undefined}
           activeFilter={statusFilter}
           onFilterChange={setStatusFilter}
-          scopeOrgIds={scopeOrgIds}
+          scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
           activeView={activeView}
           salesRepFilter={salesRepFilter}
           healthScoresMap={analyticsHealthScores}
@@ -1513,7 +1595,7 @@ const AnewClients = () => {
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
             identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
-            scopeOrgIds={scopeOrgIds}
+            scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
@@ -1532,7 +1614,7 @@ const AnewClients = () => {
             tags={analyticsTagMap}
             identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
-            scopeOrgIds={scopeOrgIds}
+            scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
@@ -1753,6 +1835,11 @@ const AnewClients = () => {
                             <div>
                               <div className="font-medium flex items-center gap-1">
                                 {identity?.display_name || "—"}
+                                {Boolean(client.custom_fields?.vip) && (
+                                  <Badge variant="outline" className="text-xs gap-0.5 px-1.5 py-0 h-5 bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400">
+                                    <Star className="w-2.5 h-2.5 fill-current" /> VIP
+                                  </Badge>
+                                )}
                                 {lastContact.warning && <AlertTriangle className="w-3 h-3 text-red-500" />}
                               </div>
                               <div className="text-xs text-muted-foreground">
@@ -1950,17 +2037,39 @@ const AnewClients = () => {
                                   <DropdownMenuItem onClick={() => navigate('/deals')}>
                                     <FileText className="w-3.5 h-3.5 mr-2" />Novo Pedido de Proposta
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
-                                  <DropdownMenuItem><FileText className="w-3.5 h-3.5 mr-2" />Criar contrato</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => {
+                                    setProposalPresetEntityId(client.entity_id);
+                                    setShowProposalDialog(true);
+                                  }}><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => {
+                                    navigate(`/client-contracts?newContract=true&clientId=${client.id}`);
+                                  }}><FileText className="w-3.5 h-3.5 mr-2" />Criar contrato</DropdownMenuItem>
 
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Gestão</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => openClientDetails(client)}>
                                     <Eye className="w-3.5 h-3.5 mr-2" />Ver ficha completa
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
-                                  <DropdownMenuItem><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
-                                  <DropdownMenuItem><Calendar className="w-3.5 h-3.5 mr-2" />Agendar reunião</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => {
+                                    setTagsEntityId(client.entity_id);
+                                    setTagsEntityName(identity?.display_name || "");
+                                    setTagsOrganizationId(client.organization_id || activeCompany?.id || "");
+                                    setTagsDialogOpen(true);
+                                  }}><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={vipTogglingClientId === client.id}
+                                    onClick={() => handleToggleVip(client)}
+                                  ><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => {
+                                    setMeetingTarget({
+                                      clientId: client.id,
+                                      entityId: client.entity_id,
+                                      organizationId: client.organization_id || activeCompany?.id || "",
+                                      rootOrganizationId: client.root_organization_id || resolvedRootOrgId || client.organization_id || activeCompany?.id || "",
+                                      name: identity?.display_name || "",
+                                    });
+                                    setShowScheduleMeetingDialog(true);
+                                  }}><Calendar className="w-3.5 h-3.5 mr-2" />Agendar reunião</DropdownMenuItem>
 
                                   {client.source_type === 'contact' && (
                                     <>
@@ -2281,6 +2390,39 @@ const AnewClients = () => {
           onShareWithOrg={handleClientDuplicateShareWithOrg}
           loading={savingClient}
           strictBlocking={true}
+        />
+
+        {/* Bug 7 — "Criar proposta": reuses the existing proposal creation flow,
+            pre-filled with the clicked client's entity, already wired to
+            rpc_create_proposal (single audit row). */}
+        <ProposalCreateDialog
+          open={showProposalDialog}
+          onOpenChange={(open) => { setShowProposalDialog(open); if (!open) setProposalPresetEntityId(undefined); }}
+          presetEntityId={proposalPresetEntityId}
+        />
+
+        {/* Bug 10 — "Agendar reunião": creates an entity_interactions row via
+            rpc_schedule_client_meeting (single audit row). */}
+        {meetingTarget && (
+          <ScheduleClientMeetingDialog
+            open={showScheduleMeetingDialog}
+            onOpenChange={(open) => { setShowScheduleMeetingDialog(open); if (!open) setMeetingTarget(null); }}
+            entityId={meetingTarget.entityId}
+            organizationId={meetingTarget.organizationId}
+            rootOrganizationId={meetingTarget.rootOrganizationId}
+            entityName={meetingTarget.name}
+            onScheduled={() => { setClients([]); setHasMore(true); loadClients(0, true); }}
+          />
+        )}
+
+        {/* "Gerir tags": reuses ContactTagsDialog (contact_tags table is entity-generic,
+            keyed by entity_id/organization_id — no client-specific table exists). */}
+        <ContactTagsDialog
+          open={tagsDialogOpen}
+          onOpenChange={setTagsDialogOpen}
+          entityId={tagsEntityId}
+          organizationId={tagsOrganizationId}
+          entityName={tagsEntityName}
         />
       </div>
       )}

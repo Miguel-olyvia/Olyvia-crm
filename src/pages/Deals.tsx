@@ -151,7 +151,6 @@ const Deals = () => {
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
-  const [isParentOrg, setIsParentOrg] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [resolvedRootOrgId, setResolvedRootOrgId] = useState<string | null>(null);
 
@@ -171,6 +170,11 @@ const Deals = () => {
   
   // Handle create from lead URL param
   const createFromLeadId = searchParams.get("create_from_lead");
+  // Handle "new deal for an already-resolved entity" URL params (e.g. Contacts'
+  // "Novo Pedido de Proposta" kebab action): ?newDeal=true&entityId=...&entityName=...
+  const newDealParam = searchParams.get("newDeal");
+  const newDealEntityId = searchParams.get("entityId");
+  const newDealEntityName = searchParams.get("entityName");
 
   // Pagination
   const PAGE_SIZE = 200;
@@ -180,7 +184,6 @@ const Deals = () => {
   const [savingDeal, setSavingDeal] = useState(false);
   const currentPageRef = useRef(0);
   const submitLockRef = useRef(false);
-  const cachedChildrenMapRef = useRef<Map<string, string[]> | null>(null);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -303,7 +306,10 @@ const Deals = () => {
     }
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
-  // Resolve root organization id (walk UP hierarchy)
+  // Resolve root organization id (walk UP hierarchy) — used for the
+  // root_organization_id column value on deal create/update (dedup scoping),
+  // not for CRM visibility. No longer computes a descendant scope: deal
+  // listings/dashboards are strictly scoped to the active org.
   useEffect(() => {
     const resolveRootOrg = async () => {
       if (!activeCompany?.id) return;
@@ -314,37 +320,15 @@ const Deals = () => {
           .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
 
         const parentMap = new Map<string, string>();
-        const childrenMap = new Map<string, string[]>();
         (allHierarchy || []).forEach((h: any) => {
           parentMap.set(h.child_org_id, h.parent_org_id);
-          const existing = childrenMap.get(h.parent_org_id) || [];
-          existing.push(h.child_org_id);
-          childrenMap.set(h.parent_org_id, existing);
         });
 
-        // Walk up to find root
         let current = activeCompany.id;
         while (parentMap.has(current)) {
           current = parentMap.get(current)!;
         }
         setResolvedRootOrgId(current);
-
-        // Check if activeCompany has children
-        const scopeIds = new Set<string>([activeCompany.id]);
-        const queue = [activeCompany.id];
-        while (queue.length > 0) {
-          const cur = queue.shift()!;
-          for (const child of (childrenMap.get(cur) || [])) {
-            if (!scopeIds.has(child)) {
-              scopeIds.add(child);
-              queue.push(child);
-            }
-          }
-        }
-        setIsParentOrg(scopeIds.size > 1);
-
-        // Cache childrenMap for reuse in loadData (C9)
-        cachedChildrenMapRef.current = childrenMap;
       } catch (err) {
         console.error("Error resolving root org:", err);
         setResolvedRootOrgId(activeCompany.id);
@@ -358,19 +342,7 @@ const Deals = () => {
     if (!activeCompany?.id) return;
     setStatsLoading(true);
     try {
-      // Build org scope array (same BFS logic as loadData)
-      const childrenLookup = cachedChildrenMapRef.current;
-      const scopeOrgIds = new Set<string>([activeCompany.id]);
-      if (childrenLookup && childrenLookup.size > 0) {
-        const bfsQueue = [activeCompany.id];
-        while (bfsQueue.length > 0) {
-          const cur = bfsQueue.shift()!;
-          for (const child of (childrenLookup.get(cur) || [])) {
-            if (!scopeOrgIds.has(child)) { scopeOrgIds.add(child); bfsQueue.push(child); }
-          }
-        }
-      }
-      const scopeOrgIdsArr = Array.from(scopeOrgIds);
+      const scopeOrgIdsArr = [activeCompany.id];
 
       // KPIs via RPC — sempre correctos independentemente do numero de registos
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_deals_kpi_stats", {
@@ -437,7 +409,7 @@ const Deals = () => {
     } finally {
       setStatsLoading(false);
     }
-  // fetchDealsDashboardStats does not read `stages` — it only reads cachedChildrenMapRef and activeCompany.id.
+  // fetchDealsDashboardStats does not read `stages` — it only reads activeCompany.id.
   // Removing `stages` from deps prevents an extra double-fire (loadData sets stages → stages change → stats fire again).
   }, [activeCompany?.id]);
 
@@ -540,25 +512,10 @@ const Deals = () => {
       // Store resolved business user IDs for scope-based action checks
       setTeamBusinessUserIds(new Set(scopedInternalUserIds));
 
-      // Build organization subtree scope (used both for search pre-resolution and main query)
-      let scopeOrgIdsArr: string[] = [];
-      if (activeCompany?.id) {
-        const childrenLookup = cachedChildrenMapRef.current;
-        const scopeOrgIds = new Set<string>([activeCompany.id]);
-        if (childrenLookup && childrenLookup.size > 0) {
-          const bfsQueue = [activeCompany.id];
-          while (bfsQueue.length > 0) {
-            const cur = bfsQueue.shift()!;
-            for (const child of (childrenLookup.get(cur) || [])) {
-              if (!scopeOrgIds.has(child)) {
-                scopeOrgIds.add(child);
-                bfsQueue.push(child);
-              }
-            }
-          }
-        }
-        scopeOrgIdsArr = Array.from(scopeOrgIds);
-      }
+      // Organization scope is strictly the active org (used both for search
+      // pre-resolution and main query) — no automatic widening to descendant
+      // orgs' deals.
+      const scopeOrgIdsArr: string[] = activeCompany?.id ? [activeCompany.id] : [];
 
       // Server-side search: pre-resolve deal IDs matching title or entity (name/email/phone/NIF)
       let searchDealIds: string[] | null = null;
@@ -764,9 +721,8 @@ const Deals = () => {
       // Update total count
       if (!append) {
         if (isFullScope) {
-          // Use the full org subtree (scopeOrgIdsArr) so the count matches the rows actually loaded.
-          // Using only activeCompany.id here would under-count when the user is a parent-org admin
-          // and child-org deals are included in the main query.
+          // scopeOrgIdsArr is strictly [activeCompany.id] — kept as a variable (not
+          // activeCompany.id inline) purely for consistency with the main query above.
           let countQuery = supabase
             .from("deals")
             .select("id", { count: 'exact', head: true })
@@ -1013,12 +969,54 @@ const Deals = () => {
           setSearchParams(searchParams);
         } catch (err) {
           console.error("Error fetching lead:", err);
+          toast({
+            title: t('common.error'),
+            description: t('deals.toast.leadNotFound') || 'Lead não encontrada',
+            variant: "destructive"
+          });
+          searchParams.delete("create_from_lead");
+          setSearchParams(searchParams);
         }
       };
-      
+
       fetchLeadAndOpenModal();
     }
   }, [createFromLeadId, stages, searchParams, setSearchParams, toast, t]);
+
+  // Handle "new deal for contact/other entity" param (Contacts' "Novo Pedido de
+  // Proposta" kebab action). Mirrors the create_from_lead flow above but the entity
+  // is already resolved by the caller — only entityId/entityName are needed.
+  useEffect(() => {
+    if (newDealParam === "true" && newDealEntityId && stages.length > 0) {
+      setFormData({
+        title: `Pedido - ${newDealEntityName || ""}`,
+        value: "",
+        value_max: "",
+        stage_id: stages[0]?.id || "",
+        lead_id: "",
+        client_id: "",
+        probability: "50",
+        description: "",
+        expected_close_date: "",
+        lost_reason: "",
+      });
+
+      setEntityType('contact');
+      setSelectedEntity({
+        type: 'contact',
+        id: "",
+        name: newDealEntityName || "",
+        entityId: newDealEntityId,
+      });
+
+      setOpen(true);
+
+      searchParams.delete("newDeal");
+      searchParams.delete("entityId");
+      searchParams.delete("entityName");
+      setSearchParams(searchParams);
+    }
+  }, [newDealParam, newDealEntityId, newDealEntityName, stages, searchParams, setSearchParams]);
 
   const loadMoreDeals = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -1166,12 +1164,12 @@ const Deals = () => {
         toast({ title: 'Erro ao mover pedido', description: 'Identidade do utilizador nao resolvida.', variant: 'destructive' });
         return;
       }
-      await withAuditContext(supabase, businessUserIdKanban, () =>
-        (supabase.from("deals") as any)
-          .update({ stage_id: newStageId })
-          .eq("id", dealId)
-          .eq("organization_id", activeCompany.id) as Promise<{ error: any }>
-      );
+      const { error: stageError } = await supabase.rpc("rpc_update_deal_stage", {
+        p_deal_id: dealId,
+        p_new_stage_id: newStageId,
+        p_organization_id: activeCompany.id,
+      });
+      if (stageError) throw stageError;
 
       // Execute workflow for stage change
       try {
@@ -1359,22 +1357,16 @@ const Deals = () => {
         return;
       }
 
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase.from("deals").insert({
-          title: `${deal.title} (cópia)`,
-          value: deal.value,
-          probability: deal.probability,
-          description: deal.description,
-          stage_id: stages[0]?.id || deal.deal_stages?.id,
-          lead_id: deal.lead_id,
-          client_id: deal.client_id,
-          entity_id: deal.entity_id,
-          organization_id: deal.organization_id,
-          expected_close_date: deal.expected_close_date,
-          created_by: businessUserId,
-          assigned_to: deal.assigned_to,
-        } as any) as Promise<{ error: any }>
-      );
+      if (!deal.organization_id) {
+        toast({ title: "Erro ao duplicar", description: "Este pedido não tem uma organização associada.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await supabase.rpc("rpc_duplicate_deal", {
+        p_source_deal_id: deal.id,
+        p_organization_id: deal.organization_id,
+        p_target_stage_id: stages[0]?.id || deal.deal_stages?.id || null,
+      });
 
       if (error) throw error;
 

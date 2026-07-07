@@ -270,53 +270,6 @@ export default function Quotes() {
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const alertSettings = useAlertSettings();
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
-  const [isParentOrg, setIsParentOrg] = useState(false);
-  const [resolvedRootOrgId, setResolvedRootOrgId] = useState<string | null>(null);
-
-  // Resolve root organization id
-  useEffect(() => {
-    const resolveRootOrg = async () => {
-      if (!activeCompany?.id) return;
-      try {
-        const { data: allHierarchy } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id, child_org_id")
-          .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
-
-        const parentMap = new Map<string, string>();
-        const childrenMap = new Map<string, string[]>();
-        (allHierarchy || []).forEach((h: any) => {
-          parentMap.set(h.child_org_id, h.parent_org_id);
-          const existing = childrenMap.get(h.parent_org_id) || [];
-          existing.push(h.child_org_id);
-          childrenMap.set(h.parent_org_id, existing);
-        });
-
-        let current = activeCompany.id;
-        while (parentMap.has(current)) {
-          current = parentMap.get(current)!;
-        }
-        setResolvedRootOrgId(current);
-
-        const scopeIds = new Set<string>([activeCompany.id]);
-        const queue = [activeCompany.id];
-        while (queue.length > 0) {
-          const cur = queue.shift()!;
-          for (const child of (childrenMap.get(cur) || [])) {
-            if (!scopeIds.has(child)) {
-              scopeIds.add(child);
-              queue.push(child);
-            }
-          }
-        }
-        setIsParentOrg(scopeIds.size > 1);
-      } catch (err) {
-        console.error("Error resolving root org:", err);
-        setResolvedRootOrgId(activeCompany.id);
-      }
-    };
-    resolveRootOrg();
-  }, [activeCompany?.id]);
 
   // Fetch dashboard stats via RPC (KPIs sempre correctos) + query separada para visualizacoes
   const fetchDashboardStats = useCallback(async () => {
@@ -326,9 +279,7 @@ export default function Quotes() {
     try {
       // KPIs via RPC — agrega no servidor independentemente do volume de registos
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
-        p_org_id:        activeCompany.id,
-        p_is_parent_org: isParentOrg,
-        p_root_org_id:   isParentOrg ? activeCompany.id : null,
+        p_org_id: activeCompany.id,
       });
       if (kpiError) throw kpiError;
       const kpi = kpiData as any;
@@ -355,17 +306,13 @@ export default function Quotes() {
       });
 
       // Query separada com limite para graficos/visualizacoes no dashboard
-      let vizQuery = supabase
+      const vizQuery = supabase
         .from("quotes")
         .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
         .is("deleted_at", null)
+        .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false })
         .limit(500);
-      if (isParentOrg) {
-        vizQuery = vizQuery.eq("root_organization_id", activeCompany.id);
-      } else {
-        vizQuery = vizQuery.eq("organization_id", activeCompany.id);
-      }
       const { data: vizData, error: vizError } = await vizQuery;
       if (vizError) throw vizError;
       setAllQuotesForDashboard((vizData || []).map((q: any) => ({
@@ -379,7 +326,7 @@ export default function Quotes() {
     } finally {
       setStatsLoading(false);
     }
-  }, [activeCompany?.id, isParentOrg]);
+  }, [activeCompany?.id]);
 
   useEffect(() => {
     if (activeCompany?.id) fetchDashboardStats();
@@ -484,23 +431,14 @@ export default function Quotes() {
           .select(`*, deals!deal_id (id, title, entity_id), proposals!proposal_id (id, title, stage_id)`)
           .is("deleted_at", null);
 
-        if (isParentOrg) {
-          adminQuery = adminQuery.eq("root_organization_id", activeCompany.id);
-        } else {
-          adminQuery = adminQuery.eq("organization_id", activeCompany.id);
-        }
+        adminQuery = adminQuery.eq("organization_id", activeCompany.id);
 
         const { data, error } = await adminQuery.order("created_at", { ascending: false }).range(from, to);
         if (error) throw error;
         quotesData = (data || []) as unknown as Quote[];
 
         if (!append) {
-          let countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null);
-          if (isParentOrg) {
-            countQuery = countQuery.eq("root_organization_id", activeCompany.id);
-          } else {
-            countQuery = countQuery.eq("organization_id", activeCompany.id);
-          }
+          const countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
           const { count } = await countQuery;
           setTotalCount(count || 0);
           setMyQuoteIds(new Set());
@@ -685,7 +623,7 @@ export default function Quotes() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, isParentOrg, fetchDashboardStats]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats]);
 
   // Resolve entity names
   useEffect(() => {
@@ -758,8 +696,7 @@ export default function Quotes() {
             .select(`*, deals!deal_id (id, title, entity_id), proposals!proposal_id (id, title, stage_id)`)
             .is("deleted_at", null)
             .limit(100);
-          if (isParentOrg) q = q.eq("root_organization_id", activeCompany.id);
-          else q = q.eq("organization_id", activeCompany.id);
+          q = q.eq("organization_id", activeCompany.id);
           return q;
         };
 
@@ -804,7 +741,7 @@ export default function Quotes() {
       }
     }, 350);
     return () => clearTimeout(handle);
-  }, [searchTerm, activeCompany?.id, isParentOrg]);
+  }, [searchTerm, activeCompany?.id]);
 
   // Resolve commercial (assigned_to) user names — covers both the paginated
   // `quotes` and the full `allQuotesForDashboard` so the Dashboard view always

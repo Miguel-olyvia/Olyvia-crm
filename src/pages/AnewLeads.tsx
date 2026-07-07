@@ -326,7 +326,7 @@ export default function AnewLeads() {
               campaigns(id, name)
             `)
             .eq("id", openId)
-            .or(`organization_id.eq.${activeCompanyId},root_organization_id.eq.${activeCompanyId}`)
+            .eq("organization_id", activeCompanyId)
             .is("deleted_at", null);
           const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
           if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -460,7 +460,6 @@ export default function AnewLeads() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
-  const [isRootOrg, setIsRootOrg] = useState<boolean | null>(null);
 
   // Conversion dialog state
   const [showConversionDialog, setShowConversionDialog] = useState(false);
@@ -544,9 +543,7 @@ export default function AnewLeads() {
         .neq("status", "converted")
         .gte("callback_scheduled_at", todayStart.toISOString())
         .lte("callback_scheduled_at", todayEnd.toISOString());
-      callbacksQuery = isRootOrg
-        ? callbacksQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
-        : callbacksQuery.eq("organization_id", activeCompanyId);
+      callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId);
 
       const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
       if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -576,36 +573,24 @@ export default function AnewLeads() {
       }
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // toast is stable (useToast ref) and callbacksChecked is intentionally excluded:
     // including it would re-fire the effect after it sets callbacksChecked=true,
     // causing an infinite loop. The one-shot toast pattern is intentional.
-  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
-
-  // Determine if active company is a root org (no parent in hierarchy)
-  useEffect(() => {
-    const checkRoot = async () => {
-      if (!activeCompanyId) return;
-      // Invalidate descendant cache and reset root flag so guards wait for fresh value
-      descendantCacheRef.current = null;
-      setIsRootOrg(null);
-      // Force the consolidated load effect to re-run as a "first mount" for this org
-      initialLoadDoneRef.current = false;
-      const { data } = await supabase
-        .from("anew_hierarchy")
-        .select("id")
-        .eq("child_org_id", activeCompanyId)
-        .limit(1);
-      setIsRootOrg(!data || data.length === 0);
-    };
-    checkRoot();
-  }, [activeCompanyId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompanyId, getPermissionScope, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
   // Single consolidated effect for initial load + filter/search changes
   const initialLoadDoneRef = useRef(false);
-  
+
+  // Force the consolidated load effect below to treat an org switch as a
+  // fresh "first mount" (previously done inside the now-removed isRootOrg
+  // resolution effect).
   useEffect(() => {
-    if (!activeCompanyId || isRootOrg === null || scopeLoading) return;
+    initialLoadDoneRef.current = false;
+  }, [activeCompanyId]);
+
+  useEffect(() => {
+    if (!activeCompanyId || scopeLoading) return;
     
     if (!initialLoadDoneRef.current) {
       // First mount: load everything, defer secondary data
@@ -629,7 +614,6 @@ export default function AnewLeads() {
       loadLeads();
       loadStatusCounts();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     // The secondary loader functions (loadCampaigns, loadLeadSources, loadContactResults,
     // loadForms, loadCompanyUsers, loadComercialUsers, loadWorkflowStages) are intentionally
     // excluded from the dep array. This effect is a one-shot initialiser guarded by
@@ -637,8 +621,9 @@ export default function AnewLeads() {
     // render that touches their closure values. loadCampaigns is useCallback-wrapped but
     // the rest are plain async functions that recreate on every render; they are safe here
     // because initialLoadDoneRef.current prevents re-entry, and the org-change path resets
-    // that ref via the isRootOrg effect above.
-  }, [activeCompanyId, isRootOrg, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+    // that ref via the effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
 
 
@@ -670,7 +655,6 @@ export default function AnewLeads() {
     try {
       const rpcParams: Record<string, any> = {
         p_org_id: activeCompanyId,
-        p_is_root: isRootOrg || false,
         p_scope: normalizeLeadScope(viewScope, onlyMine),
         p_anew_user_id: scopeAnewUserId || null,
         p_auth_user_id: scopeAuthUserId || null,
@@ -711,14 +695,14 @@ export default function AnewLeads() {
     } catch (error) {
       console.error("Error loading status counts:", error);
     }
-  }, [activeCompanyId, isRootOrg, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
 
     return {
       orgId: activeCompanyId,
-      isRoot: isRootOrg,
+      isRoot: false,
       requestedScope: normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
       anewUserId: scopeAnewUserId,
       authUserId: scopeAuthUserId,
@@ -736,7 +720,6 @@ export default function AnewLeads() {
   }, [
     activeCompanyId,
     scopeLoading,
-    isRootOrg,
     getPermissionScope,
     onlyMine,
     scopeAnewUserId,
@@ -1184,9 +1167,7 @@ export default function AnewLeads() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Sessão inválida");
 
-      const rootOrgId = (!isRootOrg && activeCompanyId)
-        ? await resolveRootOrgId(activeCompanyId)
-        : activeCompanyId;
+      const rootOrgId = activeCompanyId ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
 
       const { data: userData } = await supabase
         .from("anew_users")
@@ -1584,11 +1565,7 @@ export default function AnewLeads() {
       .is("converted_to_contact_id", null)
       .is("converted_at", null);
     
-    if (isRootOrg) {
-      query = query.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`);
-    } else {
-      query = query.or(`organization_id.eq.${activeCompanyId}`);
-    }
+    query = query.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(viewScope, onlyMine);
     if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -1680,7 +1657,6 @@ export default function AnewLeads() {
           .rpc("get_lead_page_health", {
             p_org_id: activeCompanyId,
             p_entity_ids: [...new Set(leadEntityIds)],
-            p_is_root: isRootOrg,
             p_scope: requestedScope,
             p_since: thirtyDaysAgo.toISOString(),
           });
@@ -1734,7 +1710,7 @@ export default function AnewLeads() {
     isLoadingRef.current = false;
     setLoading(false);
     setLoadingMore(false);
-  }, [activeCompanyId, isRootOrg, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -1759,9 +1735,7 @@ export default function AnewLeads() {
       .eq("id", leadId)
       .is("deleted_at", null);
 
-    refreshQuery = isRootOrg
-      ? refreshQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
-      : refreshQuery.eq("organization_id", activeCompanyId);
+    refreshQuery = refreshQuery.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
     if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -1849,7 +1823,6 @@ export default function AnewLeads() {
   }, [
     activeCompanyId,
     getPermissionScope,
-    isRootOrg,
     loadStatusCounts,
     onlyMine,
     scopeAnewUserId,
@@ -2566,7 +2539,7 @@ export default function AnewLeads() {
       return;
     }
     const createdByResolved = anewUserId || authUserId;
-    const resolvedRootOrgId = (!isRootOrg && activeCompanyId) ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
+    const resolvedRootOrgId = activeCompanyId ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
 
     // ─── Compensable-state tracking (best-effort frontend rollback) ───
     type CompensableTable = "anew_leads" | "anew_entities" | "anew_entity_emails" | "anew_entity_phones";
@@ -2664,6 +2637,11 @@ export default function AnewLeads() {
         // --- 1. Resolve or create entity (deduplication by email/phone/vat) ---
         let entityId: string | null = null;
         let entityWasResolved = false;
+        // Only a FULL identity match justifies renaming the reused entity below —
+        // a partial match (e.g. matched only on email, name differs) means this
+        // may be a different real-world person sharing an identifier, and must
+        // never have its name silently overwritten.
+        let entityFullMatch = false;
         let coherenceWarning: { storedName: string | null; storedEmail: string | null; storedPhone: string | null; matched: string[] } | null = null;
 
         if (emailValue || phoneValue || vatValue) {
@@ -2671,6 +2649,7 @@ export default function AnewLeads() {
             email: emailValue || null,
             phone: phoneValue || null,
             vat: vatValue || null,
+            organizationId: activeCompanyId!,
           });
           if (candidate) {
             const coherence = await validateEntityCoherence(candidate, {
@@ -2682,6 +2661,16 @@ export default function AnewLeads() {
             if (coherence.level === 'full') {
               entityId = candidate;
               entityWasResolved = true;
+              entityFullMatch = true;
+            } else if (coherence.level === 'partial' && coherence.phoneOnlyMatch) {
+              // Phone is a weak signal (shared/reused far more than email or
+              // VAT) — never auto-merge on phone alone, same policy HubSpot
+              // uses for phone-based "potential duplicates".
+              console.warn('[lead-create] Entity match rejected (phone-only signal, not strong enough to auto-reuse)', {
+                rejectedEntityId: candidate,
+                submitted: { name: displayName, email: emailValue, phone: phoneValue, vat: vatValue },
+                stored: coherence.storedIdentity,
+              });
             } else if (coherence.level === 'partial') {
               entityId = candidate;
               entityWasResolved = true;
@@ -2862,6 +2851,7 @@ export default function AnewLeads() {
                 email: emailValue || null,
                 phone: phoneValue || null,
                 vat: vatValue || null,
+                organizationId: activeCompanyId!,
               });
 
               if (fallbackEntityId) {
@@ -3098,8 +3088,12 @@ export default function AnewLeads() {
         coherenceWarningForPostCommit = coherenceWarning;
         entityReusedForPostCommit = entityWasResolved;
 
-        if (entityWasResolved) {
-          // Build rename payload — only for reused entity (post-commit best-effort).
+        if (entityWasResolved && entityFullMatch) {
+          // Build rename payload — only for a FULLY-matched reused entity
+          // (post-commit best-effort). A partial match must never trigger a
+          // rename: it may be a different real-world person who happens to
+          // share one identifier (email/phone/VAT), and silently overwriting
+          // their existing name would corrupt shared entity data.
           const nameUpdate: Record<string, any> = { display_name: displayName.trim() };
           for (const fd of allFieldDefs) {
             const m = (fd as any).contact_field_mapping;
@@ -3143,10 +3137,34 @@ export default function AnewLeads() {
 
       if (entityRenamePayloadForPostCommit && entityReusedForPostCommit) {
         try {
-          const { error } = await (supabase.from("anew_entities") as any)
-            .update(entityRenamePayloadForPostCommit)
-            .eq("id", entityIdForPostCommit);
-          if (error) console.warn("[post-commit] entity rename failed", error.message);
+          // Fill-in-missing-only, same convention as syncEntityPrimaryAddressFromLead's
+          // allowOverwriteValid:false above — never overwrite a name field the
+          // reused entity already has, even on a full identity match.
+          const { data: currentEntity, error: fetchErr } = await (supabase
+            .from("anew_entities") as any)
+            .select("first_name, last_name, display_name")
+            .eq("id", entityIdForPostCommit)
+            .maybeSingle();
+          if (fetchErr) {
+            console.warn("[post-commit] entity rename: fetch current name failed", fetchErr.message);
+          } else {
+            const safeUpdate: Record<string, any> = {};
+            if (!currentEntity?.first_name && entityRenamePayloadForPostCommit.first_name) {
+              safeUpdate.first_name = entityRenamePayloadForPostCommit.first_name;
+            }
+            if (!currentEntity?.last_name && entityRenamePayloadForPostCommit.last_name) {
+              safeUpdate.last_name = entityRenamePayloadForPostCommit.last_name;
+            }
+            if (!currentEntity?.display_name && entityRenamePayloadForPostCommit.display_name) {
+              safeUpdate.display_name = entityRenamePayloadForPostCommit.display_name;
+            }
+            if (Object.keys(safeUpdate).length > 0) {
+              const { error } = await (supabase.from("anew_entities") as any)
+                .update(safeUpdate)
+                .eq("id", entityIdForPostCommit);
+              if (error) console.warn("[post-commit] entity rename failed", error.message);
+            }
+          }
         } catch (e) {
           console.warn("[post-commit] entity rename threw", e);
         }
@@ -3787,7 +3805,6 @@ export default function AnewLeads() {
         const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
         const { data, error } = await (supabase as any).rpc("get_lead_source_options", {
           p_org_id: activeCompanyId,
-          p_is_root: isRootOrg,
           p_scope: requestedScope,
         });
         if (error || cancelled) return;
@@ -3801,7 +3818,7 @@ export default function AnewLeads() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, onlyMine]);
 
   // Filter (by source) + sort leads — memoized to stabilize reference
   const filteredLeads = useMemo(() => {
@@ -4085,7 +4102,19 @@ export default function AnewLeads() {
   }, [openConversionDialog]);
 
   const handleRowDuplicate = useCallback((lead: any) => {
-    const newValues = { ...(lead.field_values || {}) };
+    // Source field_values often store contact info under aliased keys
+    // (e.g. "nome"/"po_email"/"telefone" from public forms/campaigns/imports)
+    // rather than the canonical first_name/last_name/email/phone the create
+    // dialog's baseFields read directly — normalize onto the canonical keys
+    // so the dialog isn't left blank, same alias resolution already used by
+    // handleRowEmail/handleRowWhatsApp.
+    const info = extractLeadContactInfo(lead.field_values || {});
+    const newValues: Record<string, any> = { ...(lead.field_values || {}) };
+    delete newValues._meta;
+    newValues.first_name = info.firstName || newValues.first_name || "";
+    newValues.last_name = info.lastName || newValues.last_name || "";
+    newValues.email = info.email || newValues.email || "";
+    newValues.phone = info.phone || newValues.phone || "";
     setNewLeadValues(newValues);
     setCreateLeadCampaignId(lead.campaign_id || "");
     setShowCreateLead(true);

@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
+import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { searchEntityIds } from "@/lib/clientSearch";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -1029,10 +1030,9 @@ const Proposals = () => {
       const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
       if (!businessUserIdBulkSt) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkSt, p_source: 'ui' });
-      const stage = workflowStages.find(s => s.id === bulkNewStatus);
       const { error } = await supabase
         .from("proposals")
-        .update({ stage_id: bulkNewStatus, status: stage?.name || 'draft' })
+        .update({ stage_id: bulkNewStatus })
         .in("id", selectedIds)
         .eq("organization_id", activeCompany.id);
       if (error) throw error;
@@ -1064,6 +1064,25 @@ const Proposals = () => {
       setDuplicatingProposalId(null);
     }
   };
+
+  // Recursive top-ancestor walk via the shared resolveRootOrgIdLogic helper (same
+  // as AnewLeads.tsx) — replaces the previous one-hop activeCompany.parent_id,
+  // which under-resolved root_organization_id for orgs more than one level below
+  // the true root. NOTE: QuoteBuilder.tsx/ClientContracts.tsx compute the same
+  // concept via their own inline walk that filters relationship_type to
+  // ('PARENT_OF','parent_of','parent_child') and has no cycle guard — unlike
+  // this unfiltered, cycle-capped version. The three implementations can
+  // disagree on edge cases; unifying them is a tracked follow-up, not done here.
+  const resolveRootOrgId = useCallback(async (orgId: string): Promise<string> => {
+    return resolveRootOrgIdLogic(orgId, async (childOrgId) => {
+      const { data } = await supabase
+        .from("anew_hierarchy")
+        .select("parent_org_id")
+        .eq("child_org_id", childOrgId)
+        .maybeSingle();
+      return data?.parent_org_id ?? null;
+    });
+  }, []);
 
   /**
    * Save proposal as draft (if new) and open the full Quote Builder pre-linked.
@@ -1105,6 +1124,7 @@ const Proposals = () => {
       const templateId = formData.template_id || defaultTemplate?.id || null;
       const probability = selectedDeal?.probability ?? 50;
       const proposalEntityId = !formData.deal_id ? (selectedEntity?.entityId || null) : (selectedDeal?.entity_id || null);
+      const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
         title: formData.title,
@@ -1118,7 +1138,7 @@ const Proposals = () => {
         stage_id: formData.stage_id || null,
         status: stage?.name || 'draft',
         organization_id: activeCompany.id,
-        root_organization_id: (activeCompany as any).parent_id || activeCompany.id,
+        root_organization_id: rootOrgId,
         template_id: templateId,
         assigned_to: formData.assigned_to || null,
       };
@@ -1218,6 +1238,7 @@ const Proposals = () => {
 
       const defaultTemplate = proposalTemplates.find(t => t.is_default);
       const templateId = formData.template_id || defaultTemplate?.id || null;
+      const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
         title: formData.title,
@@ -1231,7 +1252,7 @@ const Proposals = () => {
         stage_id: formData.stage_id || null,
         status: stage?.name || 'draft',
         organization_id: activeCompany.id,
-        root_organization_id: (activeCompany as any).parent_id || activeCompany.id,
+        root_organization_id: rootOrgId,
         template_id: templateId,
         assigned_to: formData.assigned_to || null,
       };

@@ -134,8 +134,10 @@ export async function checkUserPermission(
 }
 
 /**
- * Checks if the caller has an admin role (system_admin or super_admin).
- * Used for maintenance/admin-only endpoints.
+ * Checks if the caller has the global system_admin role.
+ * Used for maintenance/admin-only endpoints that operate across all tenants
+ * with no organization_id filter — super_admin is intentionally excluded
+ * because it is a tenant-scoped role, not a global one.
  */
 export async function requireAdminRole(
   supabaseAdmin: any,
@@ -157,7 +159,7 @@ export async function requireAdminRole(
     .from("anew_roles")
     .select("id")
     .in("id", roleIds)
-    .in("code", ["system_admin", "super_admin"]);
+    .eq("code", "system_admin");
 
   return adminRoles && adminRoles.length > 0;
 }

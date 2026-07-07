@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, selectInBatches } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, selectInBatches, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import Layout from "@/components/Layout";
@@ -249,11 +249,14 @@ const AnewContacts = () => {
     () => getContactScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds),
     [scopeAnewUserId, scopeAuthUserId, teamMemberIds],
   );
+  // Default (no explicit companyFilter selection) is strictly the active org
+  // only — no automatic widening to descendant orgs. Explicitly picking a
+  // different org from the hierarchy dropdown (companyFilter) is still
+  // supported as a deliberate user action, not a silent default merge.
   const effectiveOrgIds = useMemo(() => {
     if (companyFilter !== "all") return [companyFilter];
-    if (scopeOrgIds.length > 0) return scopeOrgIds;
     return activeCompany?.id ? [activeCompany.id] : [];
-  }, [companyFilter, scopeOrgIds, activeCompany?.id]);
+  }, [companyFilter, activeCompany?.id]);
   const currentScopeOptions = useMemo(
     () => ({
       scope: viewScope,
@@ -926,10 +929,10 @@ const AnewContacts = () => {
   // M3: aggregate counts are computed server-side instead of loading up to
   // 10,000 contacts client-side just to derive totals.
   useEffect(() => {
-    if (scopeLoading || !scopeOrgIds.length) return;
+    if (scopeLoading || !activeCompany?.id) return;
     const loadAlertCounts = async () => {
       try {
-        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: scopeOrgIds });
+        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: [activeCompany.id] });
         if (!error && data) {
           setServerAlertCounts(data as any);
         }
@@ -938,7 +941,7 @@ const AnewContacts = () => {
     loadAlertCounts();
     const interval = setInterval(loadAlertCounts, 120000); // 2min instead of 30s
     return () => clearInterval(interval);
-  }, [scopeOrgIds, scopeLoading]);
+  }, [activeCompany?.id, scopeLoading]);
 
   useEffect(() => {
     if (activeView === "list" || scopeLoading || isParentOrg === null) return;
@@ -961,12 +964,11 @@ const AnewContacts = () => {
   useEffect(() => {
     const loadAllTags = async () => {
       if (!activeCompany?.id) return;
-      const orgIds = scopeOrgIds.length > 0 ? scopeOrgIds : [activeCompany.id];
-      const { data } = await supabase.from("contact_tags").select("tag").in("organization_id", orgIds);
+      const { data } = await supabase.from("contact_tags").select("tag").eq("organization_id", activeCompany.id);
       if (data) setAllTags([...new Set(data.map(t => t.tag))].sort());
     };
     loadAllTags();
-  }, [activeCompany?.id, scopeOrgIds]);
+  }, [activeCompany?.id]);
 
   // Load all org members upfront for the commercial filter (independent of loaded contacts)
   useEffect(() => {
@@ -1163,13 +1165,10 @@ const AnewContacts = () => {
     try {
       const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
       if (!internalUserId) throw new Error("Utilizador não identificado");
-      await supabase.rpc('set_audit_context', { p_user_id: internalUserId, p_source: 'web_app' });
-      try {
-        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id });
-        if (error) throw error;
-      } finally {
-        await supabase.rpc('clear_audit_context').catch(() => {});
-      }
+      const { error } = await withAuditContext(supabase, internalUserId, () =>
+        (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id })
+      );
+      if (error) throw error;
       toast({ title: t('contacts.toast.movedToTrash'), description: t('contacts.toast.restoreHint') });
       setDeleteDialogOpen(false); setContactToDelete(null); setContacts([]); setHasMore(true); loadContacts(0, true);
     } catch (error: any) { toast({ title: t('contacts.toast.deleteError'), description: error.message, variant: "destructive" }); }
@@ -1194,15 +1193,12 @@ const AnewContacts = () => {
     try {
       const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
       if (!internalUserId) throw new Error("Utilizador não identificado");
-      await supabase.rpc('set_audit_context', { p_user_id: internalUserId, p_source: 'web_app' });
-      try {
+      await withAuditContext(supabase, internalUserId, async () => {
         for (const id of Array.from(selectedIds)) {
           const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: id });
           if (error) throw error;
         }
-      } finally {
-        await supabase.rpc('clear_audit_context').catch(() => {});
-      }
+      });
       toast({ title: t('contacts.toast.bulkMovedToTrash'), description: t('contacts.toast.bulkRestoreHint', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setContacts([]); setHasMore(true); loadContacts(0, true);
     } catch (error: any) { toast({ title: t('contacts.toast.deleteError'), description: error.message, variant: "destructive" }); }
@@ -1308,27 +1304,41 @@ const AnewContacts = () => {
       const contactVat = contactType === "person" ? formData.vat : companyFormData.vat;
       const contactFirstName = contactType === "person" ? personNames.first : null;
       const contactLastName = contactType === "person" ? personNames.last : null;
-      let contactEntityId = await resolveEntityByIdentity({ email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null });
-      const contactEntityResolved = !!contactEntityId;
-      if (!contactEntityId) {
-        contactEntityId = await createEntityWithIdentity({ displayName: contactDisplayName, type: contactEntityType as 'person'|'organization', email: contactEmail || null, phone: contactPhone || null, phoneCountryCode: contactPhoneCode, vat: contactVat || null, createdBy: internalUserId, firstName: contactFirstName, lastName: contactLastName });
+      let contactEntityId = await resolveEntityByIdentity({ email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null, organizationId });
+      if (contactEntityId) {
+        // Phone alone is a weak signal (shared/reused far more than email or
+        // VAT) — never auto-reuse an unrelated entity on phone match alone.
+        const coherence = await validateEntityCoherence(contactEntityId, { name: contactDisplayName || null, email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null });
+        if (coherence.level === 'none' || coherence.phoneOnlyMatch) {
+          console.warn('[contact-create] Entity match rejected (insufficient coherence)', { rejectedEntityId: contactEntityId, coherence });
+          contactEntityId = null;
+        }
       }
+      const contactEntityResolved = !!contactEntityId;
+      // NOTE: entity creation (name/email/phone/vat) is deferred entirely to
+      // create_contact_with_role below when contactEntityId is null — the RPC
+      // creates the entity + role atomically with a single, complete audit
+      // diff. A prior version called createEntityWithIdentity() here first,
+      // which wrote the entity outside any transaction the RPC could audit,
+      // so the resulting log only ever showed the anew_contacts row (no
+      // name/email/phone). Never reintroduce a separate pre-creation call.
       // NOTE: NÃO atualizar display_name aqui — sobrescreveria o nome da entidade
       // existente ANTES de mostrar o diálogo de duplicados (faria com que os duplicados
       // aparecessem com o nome recém-digitado em vez do nome real).
       // O update é feito mais abaixo, só quando não há duplicado.
 
-      try {
-        await ensureEntityOrgLink({ entityId: contactEntityId!, organizationId, isPrimary: !contactEntityResolved });
-      } catch (e) { console.warn('[org-link] non-fatal', e); }
       const roleStatus = contactType === "person" ? formData.status : companyFormData.status;
 
-      // --- DUPLICATE CHECK: look for existing leads, contacts, clients with same entity in same org ---
-      const [{ data: existingContacts }, { data: existingLeads }, { data: existingClients }] = await Promise.all([
-        supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-        (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-        supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-      ]);
+      // --- DUPLICATE CHECK: only meaningful when reusing an existing entity —
+      // a brand-new entity (contactEntityId still null here) cannot already
+      // have leads/contacts/clients tied to it, so skip the query entirely.
+      const [{ data: existingContacts }, { data: existingLeads }, { data: existingClients }] = contactEntityResolved
+        ? await Promise.all([
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+          ])
+        : [{ data: [] }, { data: [] }, { data: [] }];
 
       // Resolve real identity data for matched entities
       const allContactRawMatches = [
@@ -1666,7 +1676,7 @@ const AnewContacts = () => {
       const orgId = activeCompany?.id || '';
       try {
       for (const c of contactsToImport) {
-        const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null });
+        const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null, organizationId: orgId });
         if (entityId) {
           // Check for existing active records in this org (leads, contacts, clients)
           const [{ data: exContacts }, { data: exLeads }, { data: exClients }] = await Promise.all([
@@ -1707,7 +1717,11 @@ const AnewContacts = () => {
         importedCount++;
       }
       } finally {
-        await supabase.rpc('clear_audit_context').catch(() => {});
+        try {
+          await supabase.rpc('clear_audit_context');
+        } catch {
+          // Swallow: clear_audit_context failure must never mask the original import error.
+        }
       }
       const importDesc = skippedCount > 0
         ? `${importedCount} importados, ${skippedCount} ignorados por duplicacao ou erro`
