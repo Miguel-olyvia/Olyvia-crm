@@ -78,7 +78,7 @@ export function ContractDetailDialog({
   }, [open, contract]);
 
   // Carrega variáveis customizadas em modo "Preencher no contrato" (sem default e sem linked field)
-  const { data: promptCustomVars = [] } = useQuery({
+  const { data: promptCustomVarsRaw } = useQuery({
     queryKey: ["custom-contract-prompt-vars", activeCompany?.id],
     queryFn: async () => {
       if (!activeCompany?.id) return [] as Array<{ variable_key: string; label: string; description: string | null; prompt_type: string | null }>;
@@ -94,6 +94,10 @@ export function ContractDetailDialog({
     },
     enabled: !!activeCompany?.id && open,
   });
+  // Stable reference: a `= []` destructure default creates a new array literal on every
+  // render while `data` stays undefined, which cascaded into an infinite re-render loop
+  // via promptVars/setPromptValues below.
+  const promptCustomVars = useMemo(() => promptCustomVarsRaw ?? [], [promptCustomVarsRaw]);
 
 
   const handleSubmit = (e: React.FormEvent) => {

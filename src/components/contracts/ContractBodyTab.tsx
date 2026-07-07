@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "sonner";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
-import { extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
+import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";

@@ -21,7 +21,7 @@ import { format, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -119,7 +119,9 @@ const ClientContracts = () => {
   } = usePermissionScope();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [presetClientId, setPresetClientId] = useState<string | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientContract | null>(null);
   const { finalizeContract } = usePipelineAutomation();
@@ -528,6 +530,25 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id,
   });
 
+  // Handle "new contract preset to a client" URL params (Clients' "Criar contrato"
+  // kebab action): ?newContract=true&clientId=... Opens the existing create dialog
+  // and pre-restricts the proposal picker to that client's proposals via
+  // ContractDetailDialog's presetClientId prop.
+  useEffect(() => {
+    const newContractParam = searchParams.get("newContract");
+    const newContractClientId = searchParams.get("clientId");
+    if (newContractParam === "true" && newContractClientId) {
+      setPresetClientId(newContractClientId);
+      setEditingContract(null);
+      setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
+      setIsDialogOpen(true);
+
+      searchParams.delete("newContract");
+      searchParams.delete("clientId");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],
     queryFn: async () => {
@@ -779,7 +800,7 @@ const ClientContracts = () => {
     onError: (error) => { toast.error("Erro: " + error.message); },
   });
 
-  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
+  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
@@ -1621,7 +1642,7 @@ const ClientContracts = () => {
           open={isDialogOpen}
           onOpenChange={(open) => { if (!open) handleCloseDialog(); else setIsDialogOpen(true); }}
           contract={editingContract}
-          proposals={proposals}
+          proposals={presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
           templates={templates}
           onSave={handleDialogSave}
           saving={createMutation.isPending || updateMutation.isPending}
