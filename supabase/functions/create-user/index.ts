@@ -7,23 +7,34 @@ const requestSchema = z.object({
   password: z.string(),
   full_name: z.string().optional(),
   name: z.string().optional(),
-  phone: z.string().optional(),
+  phone: z.string().nullable().optional(),
   memberships: z.array(z.unknown()).optional(),
   membership: z.unknown().optional(),
-  template_id: z.string().optional(),
-  custom_attributes: z.record(z.unknown()).optional(),
-  position: z.string().optional(),
-  location: z.string().optional(),
-  description: z.string().optional(),
-  nif: z.string().optional(),
-  nif_country: z.string().optional(),
-  fiscal: z.record(z.unknown()).optional(),
-  addresses: z.array(z.unknown()).optional(),
-  additional_emails: z.array(z.string()).optional(),
+  template_id: z.string().nullable().optional(),
+  custom_attributes: z.record(z.unknown()).nullable().optional(),
+  position: z.string().nullable().optional(),
+  location: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  nif: z.string().nullable().optional(),
+  nif_country: z.string().nullable().optional(),
+  fiscal: z.record(z.unknown()).nullable().optional(),
+  addresses: z.array(z.unknown()).nullable().optional(),
+  additional_emails: z
+    .array(
+      z.object({
+        email: z.string(),
+        email_type: z.string().optional(),
+        is_primary: z.boolean().optional(),
+      }),
+    )
+    .optional(),
   additional_phones: z.array(z.unknown()).optional(),
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 // Unified admin check via anew_memberships + anew_roles
 async function resolveCallerAdmin(supabase: any, authUserId: string) {
@@ -75,10 +86,6 @@ async function resolveCallerAdmin(supabase: any, authUserId: string) {
 
 function isAdmin(roleCodes: string[]) {
   return roleCodes.some((code) => ["system_admin", "super_admin", "org_admin"].includes(code));
-}
-
-function isDuplicateKeyError(error: any) {
-  return error?.code === "23505" || /duplicate key/i.test(error?.message || "");
 }
 
 function normalizeMemberships(memberships: any, membership: any) {
@@ -269,8 +276,13 @@ serve(async (req: Request) => {
     const body = await req.json();
     const parsedBody = requestSchema.safeParse(body);
     if (!parsedBody.success) {
+      const firstIssue = parsedBody.error.issues[0];
+      const issueDetail = firstIssue ? `${firstIssue.path.join(".")}: ${firstIssue.message}` : undefined;
       return new Response(
-        JSON.stringify({ error: "Invalid request", details: parsedBody.error.issues }),
+        JSON.stringify({
+          error: issueDetail ? `Invalid request (${issueDetail})` : "Invalid request",
+          details: parsedBody.error.issues,
+        }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -345,11 +357,25 @@ serve(async (req: Request) => {
     let authUserResponse: any = null;
     let isExistingAuthUser = false;
 
+    // user_metadata.admin_created tells handle_new_user() (the AFTER INSERT
+    // trigger on auth.users that bootstraps self-registered users) to skip
+    // its own anew_users/anew_entities writes for this row. Without this,
+    // that trigger silently pre-creates the row before
+    // rpc_finalize_user_profile_full runs, which then finds an existing row
+    // and takes its UPDATE-diff branch instead of INSERT — producing a
+    // wrong, incomplete audit diff for a brand-new user.
+    //
+    // This must live in user_metadata (raw_user_meta_data), not app_metadata
+    // (raw_app_meta_data): GoTrue's admin.createUser() persists app_metadata
+    // via a separate follow-up UPDATE issued ~20ms after the initial INSERT,
+    // so an AFTER INSERT trigger never sees it. user_metadata, in contrast,
+    // is already present on the row at INSERT time — this same trigger's
+    // existing `NEW.raw_user_meta_data->>'full_name'` read proves that.
     const { data: createdAuthData, error: createError } = await supabaseClient.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
-      user_metadata: { full_name: userName },
+      user_metadata: { full_name: userName, admin_created: true },
     });
 
     if (createError) {
@@ -382,272 +408,52 @@ serve(async (req: Request) => {
       console.log("Auth user created:", authUserId);
     }
 
-    // Reuse auto-created anew_users entry from auth trigger when available
-    const anewUserData: any = {
-      auth_user_id: authUserId,
-      name: userName,
-      email,
-      status: "active",
-      created_by: caller.anewUserId,
-    };
+    // Create memberships payload from frontend data (supports both membership and memberships)
+    const normalizedMemberships = normalizeMemberships(memberships, membership);
 
-    if (phone) anewUserData.phone = phone;
-    if (template_id) anewUserData.template_id = template_id;
-    if (custom_attributes) anewUserData.custom_attributes = custom_attributes;
-    if (position) anewUserData.position = position;
-    if (location) anewUserData.location = location;
-    if (description) anewUserData.description = description;
+    // Establish AND finalize the anew_users row PLUS every optional
+    // related-table write (entity, emails, memberships, fiscal, addresses,
+    // additional phones) in a single RPC call. The Edge Function itself
+    // never writes to any of these tables directly — it only knows how to
+    // create the auth.users row (service-role Admin API, which cannot run
+    // inside a plain SQL transaction/RPC). Everything else happens inside
+    // rpc_finalize_user_profile_full under app.audit_bypass='on', so this
+    // single user action produces exactly one entity_audit_log row,
+    // regardless of how much optional related data was supplied.
+    // See supabase/migrations/20260831010000_rpc_finalize_user_profile_full.sql.
+    const { data: finalizedAnewUser, error: finalizeError } = await supabaseClient.rpc(
+      "rpc_finalize_user_profile_full",
+      {
+        p_auth_user_id: authUserId,
+        p_actor_id: caller.anewUserId,
+        p_name: userName,
+        p_email: email,
+        p_phone: phone || null,
+        p_status: "active",
+        p_description: description || null,
+        p_position: position || null,
+        p_location: location || null,
+        p_template_id: template_id || null,
+        p_custom_attributes: custom_attributes || null,
+        p_memberships: normalizedMemberships,
+        p_fiscal: normalizedFiscal,
+        p_addresses: preparedAddresses,
+        p_additional_emails: preparedAdditionalEmails,
+        p_additional_phones: preparedAdditionalPhones,
+      },
+    ).single();
 
-    let anewUser: { id: string } | null = null;
-
-    const { data: existingAnewUser, error: existingUserError } = await supabaseClient
-      .from("anew_users")
-      .select("id")
-      .eq("auth_user_id", authUserId)
-      .maybeSingle();
-
-    if (existingUserError) {
-      console.error("Error checking existing anew_users:", existingUserError);
-      return new Response(JSON.stringify({ error: existingUserError.message }), {
+    if (finalizeError || !finalizedAnewUser) {
+      console.error("Error finalizing anew_users profile:", finalizeError);
+      return new Response(JSON.stringify({ error: finalizeError?.message || "Failed to finalize user profile" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    if (existingAnewUser) {
-      const { data: updatedAnewUser, error: updateAnewUserError } = await supabaseClient
-        .from("anew_users")
-        .update(anewUserData)
-        .eq("id", existingAnewUser.id)
-        .select("id")
-        .single();
-
-      if (updateAnewUserError) {
-        console.error("Error updating anew_users:", updateAnewUserError);
-        return new Response(JSON.stringify({ error: updateAnewUserError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      anewUser = updatedAnewUser;
-    } else {
-      const { data: insertedAnewUser, error: anewUserError } = await supabaseClient
-        .from("anew_users")
-        .insert(anewUserData)
-        .select("id")
-        .single();
-
-      if (anewUserError) {
-        if (isDuplicateKeyError(anewUserError)) {
-          const { data: racedAnewUser, error: racedAnewUserError } = await supabaseClient
-            .from("anew_users")
-            .select("id")
-            .eq("auth_user_id", authUserId)
-            .maybeSingle();
-
-          if (racedAnewUserError || !racedAnewUser) {
-            console.error("Error resolving raced anew_users insert:", racedAnewUserError || anewUserError);
-            return new Response(JSON.stringify({ error: anewUserError.message }), {
-              status: 400,
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-
-          anewUser = racedAnewUser;
-        } else {
-          console.error("Error creating anew_users:", anewUserError);
-          return new Response(JSON.stringify({ error: anewUserError.message }), {
-            status: 400,
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      } else {
-        anewUser = insertedAnewUser;
-      }
-    }
+    const anewUser: { id: string } = { id: (finalizedAnewUser as any).id };
 
     console.log("anew_users resolved:", anewUser.id);
-
-    // Create anew_entity if not already linked
-    const { data: currentAnewUser } = await supabaseClient
-      .from("anew_users")
-      .select("entity_id")
-      .eq("id", anewUser.id)
-      .single();
-
-    let effectiveEntityId = currentAnewUser?.entity_id || null;
-
-    if (!effectiveEntityId) {
-      // Parse first/last name
-      const nameParts = userName.trim().split(/\s+/);
-      const firstName = nameParts[0] || userName;
-      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : null;
-
-      const { data: newEntity, error: entityError } = await supabaseClient
-        .from("anew_entities")
-        .insert({
-          type: "person",
-          display_name: userName,
-          first_name: firstName,
-          last_name: lastName,
-          status: "active",
-          created_by: caller.anewUserId,
-        })
-        .select("id")
-        .single();
-
-      if (!entityError && newEntity) {
-        // Create primary email for the entity
-        await supabaseClient.from("anew_entity_emails").insert({
-          entity_id: newEntity.id,
-          email,
-          email_type: "work",
-          is_primary: true,
-          is_verified: true,
-          created_by: caller.anewUserId,
-        });
-
-        // Link entity to anew_users
-        await supabaseClient.from("anew_users").update({ entity_id: newEntity.id }).eq("id", anewUser.id);
-        effectiveEntityId = newEntity.id;
-
-        console.log("Entity created and linked:", newEntity.id);
-      } else if (entityError) {
-        console.error("Error creating entity:", entityError);
-      }
-    }
-
-    if (!effectiveEntityId) {
-      return jsonError("entity_resolution_failed", "Could not resolve user entity.", 400);
-    }
-
-    // Create memberships from frontend data (supports both membership and memberships)
-    const normalizedMemberships = normalizeMemberships(memberships, membership);
-
-    if (normalizedMemberships.length > 0) {
-      for (const m of normalizedMemberships) {
-        const membershipRow = {
-          user_id: anewUser.id,
-          organization_id: m.organization_id,
-          role_id: m.role_id,
-          status: "active",
-          relationship_type: m.relationship_type || "member",
-          join_method: "admin_created",
-          created_by: caller.anewUserId,
-        };
-
-        const { data: existingMembership } = await supabaseClient
-          .from("anew_memberships")
-          .select("id")
-          .eq("user_id", membershipRow.user_id)
-          .eq("organization_id", membershipRow.organization_id)
-          .eq("role_id", membershipRow.role_id)
-          .eq("status", "active")
-          .maybeSingle();
-
-        if (existingMembership) {
-          console.log(`Membership already exists for org ${membershipRow.organization_id}, skipping`);
-          continue;
-        }
-
-        const { error: membershipError } = await supabaseClient.from("anew_memberships").insert(membershipRow);
-
-        if (membershipError) {
-          if (isDuplicateKeyError(membershipError)) {
-            console.log(`Membership raced for org ${membershipRow.organization_id}, skipping duplicate`);
-            continue;
-          }
-          console.error("Error creating membership:", membershipError);
-        } else {
-          console.log(`Created membership for org ${membershipRow.organization_id}`);
-        }
-      }
-      console.log(`Processed ${normalizedMemberships.length} memberships`);
-    }
-
-    // Handle NIF/fiscal entity if provided
-    if (normalizedFiscal) {
-      const { data: fiscalEntity, error: fiscalError } = await supabaseClient
-        .from("fiscal_entities")
-        .insert({
-          nif: normalizedFiscal.nif,
-          country_code: normalizedFiscal.country_code,
-          commercial_name: normalizedFiscal.commercial_name || null,
-          created_by: caller.anewUserId,
-        })
-        .select("id")
-        .maybeSingle();
-
-      if (!fiscalError && fiscalEntity) {
-        await supabaseClient.from("anew_entity_fiscal_entities").insert({
-          entity_id: effectiveEntityId,
-          fiscal_entity_id: fiscalEntity.id,
-          is_primary: true,
-          valid_from: new Date().toISOString(),
-          created_by: caller.anewUserId,
-        });
-      }
-    }
-
-    // Handle addresses if provided
-    if (preparedAddresses.length > 0) {
-      for (const addr of preparedAddresses) {
-        const { data: newAddr, error: addrError } = await supabaseClient
-          .from("anew_addresses")
-          .insert({
-            address_key: addr.address_key,
-            street: addr.street,
-            number: addr.number,
-            postal_code: addr.postal_code,
-            city: addr.city,
-            district: addr.district || null,
-            country: addr.country || "PT",
-            floor: addr.floor || null,
-            unit: addr.unit || null,
-            extra: addr.extra || null,
-            created_by: caller.anewUserId,
-          })
-          .select("id")
-          .maybeSingle();
-
-        if (!addrError && newAddr) {
-          await supabaseClient.from("anew_entity_addresses").insert({
-            entity_id: effectiveEntityId,
-            address_id: newAddr.id,
-            address_type: addr.address_type || "home",
-            is_primary: addr.is_primary,
-            valid_from: new Date().toISOString(),
-            created_by: caller.anewUserId,
-          });
-        }
-      }
-    }
-
-    // Handle additional emails
-    if (preparedAdditionalEmails.length > 0) {
-      await supabaseClient.from("anew_entity_emails").insert(preparedAdditionalEmails.map((e: any) => ({
-        entity_id: effectiveEntityId,
-        email: e.email,
-        email_type: e.email_type || "work",
-        is_primary: false,
-        valid_from: new Date().toISOString(),
-        created_by: caller.anewUserId,
-      })));
-    }
-
-    // Handle additional phones
-    if (preparedAdditionalPhones.length > 0) {
-      await supabaseClient.from("anew_entity_phones").insert(preparedAdditionalPhones.map((p: any) => ({
-        entity_id: effectiveEntityId,
-        phone_number: p.phone_number,
-        country_code: p.country_code || "+351",
-        phone_type: p.phone_type || "mobile",
-        is_primary: false,
-        valid_from: new Date().toISOString(),
-        created_by: caller.anewUserId,
-      })));
-    }
 
     // clear_audit_context failure must never mask the create's outcome. SET
     // LOCAL also clears automatically at transaction end regardless.
@@ -666,6 +472,7 @@ serve(async (req: Request) => {
     );
   } catch (error: any) {
     console.error("Error in create-user function:", error);
+    await captureError(error, { function: "create-user" });
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },

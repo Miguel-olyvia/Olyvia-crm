@@ -1,6 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { requireServiceRole } from "../_shared/auth.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 // Notification engine — runs via cron (service_role required)
 // v2: Optimized — batch preloads replace N+1 queries
 
@@ -1218,6 +1221,7 @@ Deno.serve(async (req) => {
     );
   } catch (error: any) {
     console.error("[notifications] Error:", error);
+    await captureError(error, { function: "generate-notifications" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

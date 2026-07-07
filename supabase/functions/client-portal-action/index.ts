@@ -9,6 +9,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -814,6 +817,7 @@ serve(async (req) => {
     }
   } catch (err: any) {
     console.error("Error in client-portal-action:", err);
+    await captureError(err, { function: "client-portal-action" });
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

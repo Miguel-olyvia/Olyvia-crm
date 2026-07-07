@@ -10,6 +10,9 @@ import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp.ts";
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -154,6 +157,7 @@ serve(async (req) => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error in process-scheduled-emails:", safeError);
+    await captureError(error, { function: "process-scheduled-emails" });
     return new Response(
       JSON.stringify({ error: safeError }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

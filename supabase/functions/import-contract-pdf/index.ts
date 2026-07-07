@@ -4,6 +4,9 @@ import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const stripMarkdownCodeFences = (value: string) => value.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
@@ -125,6 +128,7 @@ serve(async (req) => {
     );
   } catch (error: any) {
     console.error("import-contract-pdf error:", error);
+    await captureError(error, { function: "import-contract-pdf" });
 
     const fallbackMessage = error?.message?.includes("AI gateway")
       ? "Não foi possível processar este PDF automaticamente neste momento."

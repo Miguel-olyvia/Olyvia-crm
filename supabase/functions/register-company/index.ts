@@ -3,6 +3,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface RegisterCompanyRequest {
   email: string;
@@ -367,6 +370,7 @@ serve(async (req) => {
 
   } catch (error: unknown) {
     console.error("Unexpected error:", error);
+    await captureError(error, { function: "register-company" });
     const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
     return new Response(
       JSON.stringify({ error: errorMessage }),

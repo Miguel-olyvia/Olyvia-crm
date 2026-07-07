@@ -18,6 +18,9 @@ const verifyCodeRequestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface VerificationRequest {
   proposal_id: string;
@@ -383,6 +386,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
   } catch (error: any) {
     console.error("Error in verification:", error);
+    await captureError(error, { function: "send-verification-code" });
     return new Response(
       JSON.stringify({ error: error.message }),
       {

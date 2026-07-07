@@ -8,6 +8,9 @@ import {
   resolveWorkflowOrganizationFromRecord,
 } from "../_shared/leadsValidation.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   source_entity: z.string(),
@@ -983,6 +986,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ success: true, ...results }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
     console.error("Workflow execution error:", error);
+    await captureError(error, { function: "execute-workflow" });
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });

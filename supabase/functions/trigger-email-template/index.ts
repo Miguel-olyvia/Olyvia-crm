@@ -13,6 +13,9 @@ const requestSchema = z.object({
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -189,6 +192,7 @@ serve(async (req) => {
     );
   } catch (error: any) {
     console.error("Error in trigger-email-template:", error);
+    await captureError(error, { function: "trigger-email-template" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

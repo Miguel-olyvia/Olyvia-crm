@@ -9,6 +9,9 @@ import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const MODEL = "google/gemini-2.5-flash";
 
@@ -742,6 +745,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error("AI assistant error:", e);
+    await captureError(e, { function: "ai-assistant" });
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

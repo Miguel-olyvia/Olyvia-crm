@@ -4,6 +4,9 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   action: z.string(),
@@ -1042,6 +1045,7 @@ serve(async (req) => {
     );
   } catch (error: any) {
     console.error("Pipeline automation error:", error);
+    await captureError(error, { function: "pipeline-automation" });
     return new Response(
       JSON.stringify({ success: false, message: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

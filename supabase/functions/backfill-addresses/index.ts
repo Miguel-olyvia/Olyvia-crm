@@ -10,6 +10,9 @@ import {
 } from "../_shared/addressSanitization.ts";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   mode: z.enum(["preview", "apply"]).optional(),
@@ -306,6 +309,8 @@ Deno.serve(async (req) => {
       errorDetails: errorDetails.slice(0, 50),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err: any) {
+    console.error("Error in backfill-addresses:", err);
+    await captureError(err, { function: "backfill-addresses" });
     return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

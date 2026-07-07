@@ -10,6 +10,9 @@ import {
   type ExportDefinition,
   type ExportModule,
 } from "./exportConfig.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const exportRequestSchema = z.object({
   module: z.string().min(1),
@@ -622,6 +625,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     console.error("Controlled export failed", error instanceof Error ? error.message : error);
+    await captureError(error, { function: "export-data" });
     await updateAudit(admin, auditId, {
       status: "failed",
       error_code: "INTERNAL_ERROR",

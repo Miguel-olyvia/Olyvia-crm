@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   proposal_id: z.string().optional(),
@@ -267,6 +270,7 @@ const handler = async (req: Request): Promise<Response> => {
 
   } catch (error: any) {
     console.error("Error tracking:", error);
+    await captureError(error, { function: "track-proposal-view" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }

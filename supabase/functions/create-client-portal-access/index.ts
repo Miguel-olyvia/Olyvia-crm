@@ -13,6 +13,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 function generateTempPassword(length = 8): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -737,6 +740,7 @@ serve(async (req: Request) => {
   } catch (err: any) {
     const safeError = sanitizeSmtpError(err);
     console.error("create-client-portal-access error:", safeError);
+    await captureError(err, { function: "create-client-portal-access" });
     return new Response(JSON.stringify({ error: safeError }), { status: 500, headers: corsHeaders });
   }
 });

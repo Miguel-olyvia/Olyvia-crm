@@ -1,5 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const querySchema = z.object({
   campaign_id: z.string().uuid(),
@@ -486,6 +489,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error) {
     console.error("Error:", error);
+    await captureError(error, { function: "get-campaign-form" });
     return new Response(
       JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

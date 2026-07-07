@@ -9,6 +9,9 @@ import { requireAdminRole, resolveCallerIdentity, authErrorResponse } from "../_
 const _noInputSchema = z.object({});
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -18,7 +21,9 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // Admin-only: requires system_admin or super_admin role (or service role key).
+  // Admin-only: requires the global system_admin role (or service role key).
+  // super_admin is tenant-scoped and is intentionally excluded — this migrates
+  // data across all tenants.
   try {
     const caller = await resolveCallerIdentity(req, supabase);
     const isAdmin = await requireAdminRole(supabase, caller);
@@ -127,6 +132,8 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
+    console.error("Error in migrate-contract-docs-to-documents:", err);
+    await captureError(err, { function: "migrate-contract-docs-to-documents" });
     return new Response(
       JSON.stringify({ error: err?.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

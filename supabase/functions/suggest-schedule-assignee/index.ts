@@ -13,6 +13,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface AISchedulingRules {
   buffer_before_minutes: number;
@@ -535,6 +538,7 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error("Error:", error);
+    await captureError(error, { function: "suggest-schedule-assignee" });
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

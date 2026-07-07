@@ -8,6 +8,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface SignatureRequest {
   token: string;
@@ -334,6 +337,7 @@ const handler = async (req: Request): Promise<Response> => {
     );
   } catch (error: any) {
     console.error('Error in validate-contract-signature:', error);
+    await captureError(error, { function: "validate-contract-signature" });
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }

@@ -1,5 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -370,6 +373,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     console.error('Error in public-availability:', error);
+    await captureError(error, { function: "public-availability" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

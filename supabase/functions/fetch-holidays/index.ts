@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   countryCode: z.string(),
@@ -142,6 +145,7 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('Error in fetch-holidays:', error);
+    await captureError(error, { function: "fetch-holidays" });
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: errorMessage, holidays: [] }),

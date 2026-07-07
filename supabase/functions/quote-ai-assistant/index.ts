@@ -4,6 +4,9 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   query: z.string(),
@@ -334,6 +337,7 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error("Quote AI Assistant error:", error);
+    await captureError(error, { function: "quote-ai-assistant" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { 

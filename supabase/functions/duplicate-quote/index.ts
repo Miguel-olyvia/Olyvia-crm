@@ -10,6 +10,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface DuplicateRequest {
   quote_id: string;
@@ -224,6 +227,7 @@ serve(async (req) => {
     } catch {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[duplicate-quote] unhandled", err);
+      await captureError(err, { function: "duplicate-quote" });
       return new Response(JSON.stringify({ error: msg }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

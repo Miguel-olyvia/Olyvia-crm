@@ -1,6 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   form_id: z.string(),
@@ -588,6 +591,7 @@ IMPORTANTE:
 
   } catch (error: any) {
     console.error("Chat Widget AI error:", error);
+    await captureError(error, { function: "chat-widget-ai" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { 

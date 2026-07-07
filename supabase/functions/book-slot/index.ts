@@ -1,5 +1,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   form_id: z.string(),
@@ -603,6 +606,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     console.error('Error in book-slot:', error);
+    await captureError(error, { function: "book-slot" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

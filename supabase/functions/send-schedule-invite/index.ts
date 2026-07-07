@@ -6,6 +6,9 @@ import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { z } from "npm:zod";
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 // ... keep existing code (interfaces SmtpConfig, InviteRequest, getSmtpConfig, sendEmailViaSMTP, getUsersFromEntity, generateInviteEmailHtml)
 
@@ -290,6 +293,7 @@ const handler = async (req: Request): Promise<Response> => {
     if (authResp) return authResp;
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending invites:", safeError);
+    await captureError(error, { function: "send-schedule-invite" });
     return new Response(
       JSON.stringify({ error: safeError }),
       {

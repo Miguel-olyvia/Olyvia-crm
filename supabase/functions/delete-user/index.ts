@@ -7,6 +7,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -54,13 +57,37 @@ serve(async (req: Request) => {
       );
     }
 
-    const { data: callerMemberships } = await supabaseClient
+    // anew_memberships has no FK constraints (confirmed via pg_constraint —
+    // contype='f' returns zero rows), so PostgREST cannot auto-resolve an
+    // embedded `role:anew_roles!inner(code)` select: it fails with PGRST200
+    // ("Could not find a relationship..."). That error was previously
+    // swallowed here (only `data` was destructured, never `error`), so
+    // `callerMemberships` was always empty and this admin check rejected
+    // every caller, including real super_admins. Fixed with the same
+    // two-step query create-user's resolveCallerAdmin() already uses.
+    const { data: callerMemberships, error: callerMembershipsError } = await supabaseClient
       .from("anew_memberships")
-      .select("organization_id, role:anew_roles!inner(code)")
+      .select("organization_id, role_id")
       .eq("user_id", callerAnew.id)
       .eq("status", "active");
 
-    const callerRoles = [...new Set((callerMemberships || []).map((m: any) => m.role?.code).filter(Boolean))];
+    if (callerMembershipsError) {
+      console.error("Error fetching caller memberships:", callerMembershipsError);
+    }
+
+    const callerRoleIds = [...new Set((callerMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+    let callerRoles: string[] = [];
+    if (callerRoleIds.length > 0) {
+      const { data: callerRoleRows, error: callerRolesError } = await supabaseClient
+        .from("anew_roles")
+        .select("code")
+        .in("id", callerRoleIds);
+      if (callerRolesError) {
+        console.error("Error fetching caller role codes:", callerRolesError);
+      } else {
+        callerRoles = [...new Set((callerRoleRows || []).map((r: any) => r.code).filter(Boolean))];
+      }
+    }
     const adminRoles = ["system_admin", "super_admin", "org_admin"];
     const callerIsAdmin = callerRoles.some(r => adminRoles.includes(r));
 
@@ -118,49 +145,46 @@ serve(async (req: Request) => {
       }
     }
 
-    // Set audit context for this transaction's writes. The cascade triggered by
-    // auth.admin.deleteUser() removes the anew_users row (and dependent rows via
-    // FK), so fn_audit_anew_users() needs app.audit_user_id/app.audit_source set
-    // before the delete to attribute the audit log entry to the calling admin
-    // instead of falling back to the service role.
-    // See: supabase/migrations/20260709010000_users_audit_triggers.sql
-    const { error: setAuditCtxError } = await supabaseClient.rpc("set_audit_context", {
-      p_user_id: callerAnew.id,
-      p_source: "web_app",
-    });
-    if (setAuditCtxError) {
-      console.error("Failed to set audit context:", setAuditCtxError);
+    // NOTE on audit logging for this function: anew_users has NO foreign key
+    // to auth.users (see anew_users_auth_user_id_unique in
+    // 20260615130000_baseline_new_database.sql — it is a plain nullable uuid
+    // column with a UNIQUE constraint, not a FK), so there is NO cascade from
+    // auth.admin.deleteUser() into anew_users. This function only ever removes
+    // the auth.users row via the GoTrue Admin API — a separate REST call/
+    // transaction that never touches public.anew_users and therefore can
+    // never produce an entity_audit_log row for it. Previously this function
+    // called set_audit_context() (SET LOCAL, transaction-scoped) before
+    // deleteUser(), which had no effect at all: the GUC could not survive
+    // into GoTrue's own transaction, and there was nothing here for
+    // fn_audit_anew_users() to attribute regardless. That call (and the
+    // matching clear_audit_context() in `finally`) has been removed as dead
+    // code — it never fixed anything and only added two extra network calls
+    // that could themselves fail and abort the delete before deleteUser() ran.
+    //
+    // The actual audit row for "delete user" is produced by the caller
+    // (src/pages/UsersNew.tsx handleDelete): after this function succeeds, it
+    // hard-deletes the public.anew_users row itself inside withAuditContext,
+    // which the anew_users_delete RLS policy permits (users.delete permission)
+    // and which trg_audit_anew_users (fn_audit_anew_users, DELETE branch)
+    // audits with exactly one entity_audit_log row. This function's only
+    // responsibility is removing the auth.users identity.
+    const { error: deleteError } = await supabaseClient.auth.admin.deleteUser(userId);
+
+    if (deleteError) {
+      console.error("auth.admin.deleteUser failed:", deleteError);
       return new Response(
-        JSON.stringify({ error: setAuditCtxError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: deleteError.message }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    try {
-      // Delete the user via admin API (cascade handles anew_users FK)
-      const { error: deleteError } = await supabaseClient.auth.admin.deleteUser(userId);
-
-      if (deleteError) {
-        return new Response(
-          JSON.stringify({ error: deleteError.message }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, message: "User deleted successfully" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    } finally {
-      // clear_audit_context failure must never mask the delete's outcome. SET
-      // LOCAL also clears automatically at transaction end regardless.
-      const { error: clearCtxError } = await supabaseClient.rpc("clear_audit_context");
-      if (clearCtxError) {
-        console.error("Failed to clear audit context:", clearCtxError);
-      }
-    }
+    return new Response(
+      JSON.stringify({ success: true, message: "User deleted successfully" }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (error: any) {
     console.error("Error:", error);
+    await captureError(error, { function: "delete-user" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -18,6 +18,9 @@ const importBodySchema = z.discriminatedUnion("action", [
 ]);
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 // Portuguese postal code ranges by district
 const POSTAL_CODE_RANGES = [
@@ -339,6 +342,7 @@ serve(async (req) => {
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error('Error:', error);
+    await captureError(error, { function: "import-postal-codes" });
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: errorMessage }),

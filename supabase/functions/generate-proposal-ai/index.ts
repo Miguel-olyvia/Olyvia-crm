@@ -4,6 +4,9 @@ import { z } from "npm:zod";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   entity_id: z.string(),
@@ -185,6 +188,7 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
     );
   } catch (error: any) {
     console.error("Generate Proposal AI error:", error);
+    await captureError(error, { function: "generate-proposal-ai" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

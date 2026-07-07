@@ -1,6 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   first_name: z.string(),
@@ -572,6 +575,7 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in insert-lead function:', error);
+    await captureError(error, { function: "insert-lead" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

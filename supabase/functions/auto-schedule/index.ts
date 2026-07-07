@@ -1,6 +1,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { corsHeaders as _corsBase } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const getNearestResourcesSchema = z.object({
   postal_code: z.string().min(1),
@@ -426,6 +429,7 @@ Deno.serve(async (req) => {
 
   } catch (error: unknown) {
     console.error('Unexpected error:', error);
+    await captureError(error, { function: "auto-schedule" });
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: errorMessage }),

@@ -3,6 +3,10 @@ import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 // Validate the x-api-key header and that the request body is non-empty JSON text.
 // The body is forwarded as-is to insert-lead; structural validation happens there.
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
+
 const proxyHeaderSchema = z.object({
   "x-api-key": z.string().min(1, "x-api-key header is required"),
 });
@@ -76,6 +80,7 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in api-proxy function:', error);
+    await captureError(error, { function: "api-proxy" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

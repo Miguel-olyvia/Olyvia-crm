@@ -3,6 +3,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, authErrorResponse, AuthError } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   request_id: z.string().uuid(),
@@ -230,6 +233,7 @@ serve(async (req: Request): Promise<Response> => {
       return authErrorResponse(err, corsHeaders);
     }
     console.error("[approve-support-access] unexpected error:", err);
+    await captureError(err, { function: "approve-support-access" });
     const message = err instanceof Error ? err.message : "Internal server error";
     return new Response(
       JSON.stringify({ error: message }),

@@ -36,6 +36,9 @@ import {
   resolveCanonicalFormId,
   resolveRootOrganizationId,
 } from '../_shared/leadsValidation.ts';
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -111,7 +114,12 @@ function validateFieldValues(field_values: Record<string, unknown>): string | nu
  * - tags: string[]
  * 
  * Response includes:
- * - lead_id: for subsequent update-lead calls
+ * - lead_id: for subsequent update-lead calls (kept for backwards compatibility)
+ * - target_type ("lead" | "contact" | "client") + target_id: polymorphic
+ *   continuation key. When the resolved entity already classifies as an
+ *   active contact/client in this org, no anew_leads row is created; the
+ *   step progress accumulates in form_submissions instead, and target_id
+ *   points at that form_submissions row (not the contact/client id).
  * - current_step, total_steps, is_complete: for multi-step tracking
  * - next_step: null if complete, or the next step number
  */
@@ -497,6 +505,12 @@ Deno.serve(async (req) => {
       nif: rawVat,
     });
 
+    // When classifyEntityInOrg resolves the entity to an already-active
+    // contact/client in this org, we short-circuit the whole anew_leads path
+    // below and instead upsert into form_submissions. Populated only when
+    // scopedHit + classification produce targetType "contact"/"client".
+    let contactOrClientTarget: { targetType: 'contact' | 'client'; targetId: string } | null = null;
+
     if (scopedHit?.entityId) {
       entityId = scopedHit.entityId;
       console.log('[create-lead] reusing local entity via', scopedHit.matchField, entityId);
@@ -505,11 +519,35 @@ Deno.serve(async (req) => {
       // client / has an active lead, emit an internal alert for the responsible
       // commercial and merge new field values into the existing record — but
       // NEVER block the visitor: the multi-step form must flow exactly like a
-      // new entity (create-lead -> update-lead -> success). A new
-      // anew_leads row will still be created below, anchored to this entityId.
+      // new entity (create-lead -> update-lead -> success).
+      // For targetType "contact"/"client" we do NOT fall through to the
+      // anew_leads insert below — a real client/contact resubmitting the
+      // public form must not spawn a bogus new Lead in the pipeline; instead
+      // their step progress accumulates in form_submissions.
+      // Classification determines whether this entity is a lead/contact/client
+      // in this org. This result MUST survive even if the merge/alert side
+      // effects below fail — otherwise a transient error would silently fall
+      // through to the anew_leads insert path for an entity that is already
+      // a real contact/client, reproducing the exact bug this branch exists
+      // to prevent. Keep classification outside the side-effects try/catch.
+      let classifySummary: Awaited<ReturnType<typeof classifyEntityInOrg>> | null = null;
       try {
-        const summary = await classifyEntityInOrg({ supabase, entityId, organizationId: organization_id });
-        if (summary.targetType && summary.targetId) {
+        classifySummary = await classifyEntityInOrg({ supabase, entityId, organizationId: organization_id });
+      } catch (classifyErr) {
+        console.error('[create-lead] classifyEntityInOrg failed:', classifyErr);
+      }
+
+      if (classifySummary?.targetType && classifySummary.targetId) {
+        const summary = classifySummary;
+        if (summary.targetType === 'contact' || summary.targetType === 'client') {
+          contactOrClientTarget = { targetType: summary.targetType, targetId: summary.targetId };
+        }
+
+        // Best-effort side effects: merge new field values into the existing
+        // record and notify the responsible commercial. A failure here must
+        // NOT unset contactOrClientTarget (already captured above) and must
+        // NOT block the visitor's form flow.
+        try {
           const targetTable =
             summary.targetType === 'lead' ? 'anew_leads' :
             summary.targetType === 'contact' ? 'anew_contacts' : 'anew_clients';
@@ -526,9 +564,9 @@ Deno.serve(async (req) => {
             fieldValuesDiff: diff,
             displayName: composeDisplayName(leadFirstName, leadLastName) || null,
           });
+        } catch (alertErr) {
+          console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
         }
-      } catch (alertErr) {
-        console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
       }
 
       // Reused entity, but no active contact/client/lead — proceed normally.
@@ -541,6 +579,57 @@ Deno.serve(async (req) => {
           await supabase.from('anew_entities').update(nameUpdate).eq('id', entityId);
         }
       }
+    }
+
+    // --- Contact/client target: skip anew_leads entirely, upsert form_submissions ---
+    if (contactOrClientTarget) {
+      const { data: submission, error: submissionError } = await supabase
+        .from('form_submissions')
+        .upsert(
+          {
+            organization_id,
+            root_organization_id: rootOrgId,
+            entity_id: entityId,
+            form_id: canonicalFormId ?? null,
+            campaign_id: campaign_id ?? null,
+            target_type: contactOrClientTarget.targetType,
+            target_id: contactOrClientTarget.targetId,
+            field_values: fieldValuesWithMeta,
+            status: isComplete ? 'complete' : 'in_progress',
+            is_complete: isComplete,
+            current_step: currentStep,
+            total_steps: totalSteps,
+            created_by: null,
+          },
+          { onConflict: 'organization_id,entity_id,form_id,campaign_id' },
+        )
+        .select('id')
+        .single();
+
+      if (submissionError || !submission) {
+        console.error('Error upserting form_submissions:', submissionError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to record form submission', details: submissionError?.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          target_type: contactOrClientTarget.targetType,
+          target_id: submission.id,
+          current_step: currentStep,
+          total_steps: totalSteps,
+          is_complete: isComplete,
+          next_step: isComplete ? null : currentStep + 1,
+          sanitized: sanitizeReport,
+          message: isComplete
+            ? 'Form submission recorded successfully'
+            : `Step ${currentStep} completed. Continue with update-lead API.`,
+        }),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
 
@@ -802,8 +891,10 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ 
-        success: true, 
+        success: true,
         lead_id: lead.id,
+        target_type: 'lead',
+        target_id: lead.id,
         current_step: currentStep,
         total_steps: totalSteps,
         is_complete: isComplete,
@@ -826,6 +917,7 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in create-lead:', error);
+    await captureError(error, { function: "create-lead" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

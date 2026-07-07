@@ -11,6 +11,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 function handleUpdateError(error: any) {
   const msg = error.message.toLowerCase();
@@ -198,6 +201,7 @@ serve(async (req: Request) => {
     });
   } catch (error: unknown) {
     console.error("Error in update-user-password:", error);
+    await captureError(error, { function: "update-user-password" });
     const message = error instanceof Error ? error.message : "Unknown error";
     return new Response(JSON.stringify({ error: message }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },

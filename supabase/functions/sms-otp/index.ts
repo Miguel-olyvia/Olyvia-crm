@@ -9,6 +9,9 @@ const requestSchema = z.object({
 });
 
 import { corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -314,6 +317,7 @@ serve(async (req) => {
     });
   } catch (err: any) {
     console.error("[sms-otp] Error:", err);
+    await captureError(err, { function: "sms-otp" });
     return new Response(JSON.stringify({ error: err.message || "Internal server error" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

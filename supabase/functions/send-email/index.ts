@@ -5,6 +5,9 @@ import { requireServiceRole } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface EmailAttachment {
   filename: string;
@@ -260,6 +263,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending email:", safeError);
+    await captureError(error, { function: "send-email" });
 
     try {
       const supabaseClient = createClient(

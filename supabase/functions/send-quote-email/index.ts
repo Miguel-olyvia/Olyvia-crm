@@ -4,6 +4,9 @@ import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, s
 import { z } from "npm:zod";
 
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface EmailAttachmentInput {
   filename: string;
@@ -286,6 +289,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending quote email:", safeError);
+    await captureError(error, { function: "send-quote-email" });
     return new Response(
       JSON.stringify({ error: safeError }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
