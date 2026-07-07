@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Plus, Tag } from "lucide-react";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 interface ContactTagsDialogProps {
   open: boolean;
@@ -62,15 +61,14 @@ export function ContactTagsDialog({ open, onOpenChange, entityId, organizationId
     if (!newTag.trim()) return;
     setLoading(true);
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
-      const { error } = await supabase.from("contact_tags").insert({
-        entity_id: entityId,
-        organization_id: organizationId,
-        tag: newTag.trim(),
-        color: newColor,
-        created_by: businessUserId,
-      } as any);
+      const { error } = await supabase.rpc("rpc_manage_contact_tag", {
+        p_action: "add",
+        p_entity_id: entityId,
+        p_organization_id: organizationId,
+        p_tag_id: null,
+        p_tag: newTag.trim(),
+        p_color: newColor,
+      });
       if (error) {
         if (error.code === "23505") {
           toast({ title: "Tag já existe", variant: "destructive" });
@@ -88,9 +86,22 @@ export function ContactTagsDialog({ open, onOpenChange, entityId, organizationId
   };
 
   const removeTag = async (tagId: string) => {
-    await supabase.from("contact_tags").delete().eq("id", tagId);
-    loadTags();
-    onTagsChanged?.();
+    try {
+      const { error } = await supabase.rpc("rpc_manage_contact_tag", {
+        p_action: "remove",
+        p_entity_id: entityId,
+        p_organization_id: organizationId,
+        p_tag_id: tagId,
+        p_tag: null,
+        p_color: null,
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      toast({ title: "Erro ao remover tag", description: err.message, variant: "destructive" });
+    } finally {
+      loadTags();
+      onTagsChanged?.();
+    }
   };
 
   return (
