@@ -89,9 +89,7 @@ export function OrganizationFormSection({
   const { activeCompany, userType } = useCompany();
   const { isSystemAdmin } = usePermissions();
 
-  const [rootOrgs, setRootOrgs] = useState<Organization[]>([]);
   const [dynamicLevels, setDynamicLevels] = useState<DynamicLevel[]>([]);
-  const [loadingRootOrgs, setLoadingRootOrgs] = useState(false);
   const [loadingLevels, setLoadingLevels] = useState(false);
   const [defaultsApplied, setDefaultsApplied] = useState(false);
   const [companyAdminRootOrg, setCompanyAdminRootOrg] = useState<Organization | null>(null);
@@ -99,7 +97,6 @@ export function OrganizationFormSection({
   const [resolvedRootId, setResolvedRootId] = useState("");
 
   const isCompanyAdmin = userType === 'company_admin';
-  const canSelectOrganization = isSystemAdmin && !activeOrganizationOnly;
   const levelSelections = value.levelSelections || [];
   const effectiveTenantId = value.tenantId || resolvedRootId;
 
@@ -260,64 +257,6 @@ export function OrganizationFormSection({
     load();
   }, [isCompanyAdmin, activeCompany?.id]);
 
-  // ─── Load root organizations (dynamic root types, for system admin) ───
-  useEffect(() => {
-    if (!canSelectOrganization) return;
-    const load = async () => {
-      setLoadingRootOrgs(true);
-      try {
-        // Root orgs = orgs that ARE parents in hierarchy but NOT children
-        // Plus include the active company when it is a standalone root without holding
-        const { data: childLinks } = await supabase
-          .from("anew_hierarchy")
-          .select("child_org_id");
-        const childIds = new Set((childLinks || []).map(l => l.child_org_id));
-
-        const { data: parentLinks } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id");
-        const parentIds = new Set((parentLinks || []).map(l => l.parent_org_id));
-
-        const rootCandidateIds = Array.from(parentIds).filter(id => !childIds.has(id));
-
-        let query = supabase
-          .from("anew_organizations")
-          .select("id, name, type")
-          .eq("status", "active")
-          .order("name");
-
-        if (rootCandidateIds.length > 0) {
-          query = query.or(`id.in.(${rootCandidateIds.join(",")}),type.eq.holding`);
-        } else {
-          query = query.eq("type", "holding");
-        }
-
-        const { data } = await query;
-        const rootOrgMap = new Map<string, Organization>();
-
-        (data || []).forEach((org) => rootOrgMap.set(org.id, org));
-
-        if (activeCompany?.id) {
-          const activeRootId = await resolveRootOrg(activeCompany.id);
-          if (activeRootId === activeCompany.id) {
-            rootOrgMap.set(activeCompany.id, {
-              id: activeCompany.id,
-              name: activeCompany.name,
-              type: activeCompany.type || "empresa",
-            });
-          }
-        }
-
-        setRootOrgs(
-          Array.from(rootOrgMap.values()).sort((a, b) => a.name.localeCompare(b.name))
-        );
-      } finally {
-        setLoadingRootOrgs(false);
-      }
-    };
-    load();
-  }, [canSelectOrganization, activeCompany?.id, activeCompany?.name, activeCompany?.type]);
-
   // ─── Load dynamic levels (cascading from root/active company) ───
   useEffect(() => {
     if (activeOrganizationOnly) {
@@ -397,17 +336,6 @@ export function OrganizationFormSection({
   }, [activeOrganizationOnly, effectiveTenantId, visibleOrgIds, isSystemAdmin, JSON.stringify(levelSelections)]);
 
   // ─── Handlers ───
-  const handleTenantChange = (tenantId: string) => {
-    onChange({
-      tenantId,
-      companyId: "",
-      businessUnitId: "",
-      departmentId: "",
-      secondaryCompanyIds: [],
-      selectedCompanyIds: [],
-      levelSelections: [],
-    });
-  };
 
   // Toggle selection in a dynamic level
   const handleLevelToggle = (depth: number, type: string, orgId: string) => {
@@ -477,41 +405,6 @@ export function OrganizationFormSection({
       <h3 className="font-semibold text-lg border-b pb-2">{sectionTitle}</h3>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Root org selector – system admin only */}
-        {canSelectOrganization && (() => {
-          const selectedRootOrg =
-            rootOrgs.find((org) => org.id === effectiveTenantId) ||
-            (activeCompany && effectiveTenantId === activeCompany.id
-              ? {
-                  id: activeCompany.id,
-                  name: activeCompany.name,
-                  type: activeCompany.type || "empresa",
-                }
-              : null);
-
-          const rootLabel = selectedRootOrg
-            ? getTypeLabel(selectedRootOrg.type)
-            : rootOrgs.length > 0
-              ? getTypeLabel(rootOrgs[0].type)
-              : t('clients.form.selectOrganization');
-
-          return (
-            <div className="space-y-2">
-              <Label>{rootLabel}</Label>
-              <Select value={effectiveTenantId} onValueChange={handleTenantChange} disabled={loadingRootOrgs}>
-                <SelectTrigger>
-                  <SelectValue placeholder={loadingRootOrgs ? t('common.loading') : rootLabel} />
-                </SelectTrigger>
-                <SelectContent>
-                  {rootOrgs.map((org) => (
-                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          );
-        })()}
-
         {/* Root org read-only for company admin */}
         {!activeOrganizationOnly && isCompanyAdmin && companyAdminRootOrg && (
           <div className="space-y-2">
@@ -523,7 +416,7 @@ export function OrganizationFormSection({
         )}
       </div>
 
-      {(activeOrganizationOnly || (!canSelectOrganization && !isCompanyAdmin && !companyAdminRootOrg)) && activeCompany && (
+      {(!isCompanyAdmin || !companyAdminRootOrg) && activeCompany && (
         <div className="space-y-2">
           <Label>{getTypeLabel(activeCompany.type || 'empresa')}</Label>
           <div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">

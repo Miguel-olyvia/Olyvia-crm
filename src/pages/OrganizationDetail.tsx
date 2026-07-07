@@ -29,8 +29,6 @@ import { OrganizationDetailFAQ } from "@/components/organizations/OrganizationDe
 import { AnewEntityHistoryDialog } from "@/components/AnewEntityHistoryDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { OrganizationAddressManager } from "@/components/organizations/OrganizationAddressManager";
-import { assignCreatorAsOrgAdmin } from "@/utils/organizationCreation";
-import { upsertOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChildOrganizationsTree } from "@/components/organizations/ChildOrganizationsTree";
@@ -45,7 +43,6 @@ import { useAdministrativeDivisions } from "@/hooks/useAdministrativeDivisions";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { resolveOrganizationEntityId } from "@/utils/orgEntity";
 import { withAuditContext } from "@/utils/auditContext";
 
 interface Organization {
@@ -132,6 +129,7 @@ export default function OrganizationDetail() {
   const [isAddHierarchyOpen, setIsAddHierarchyOpen] = useState(false);
   const [isAddRelationOpen, setIsAddRelationOpen] = useState(false);
   const [isCreateOrgSheetOpen, setIsCreateOrgSheetOpen] = useState(false);
+  const [isCreatingOrgFromSheet, setIsCreatingOrgFromSheet] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
   const [showChangeHistory, setShowChangeHistory] = useState(false);
 
@@ -428,79 +426,54 @@ export default function OrganizationDetail() {
   };
 
   const handleCreateOrgFromSheet = async () => {
+    if (isCreatingOrgFromSheet) return;
     if (!newOrgFormData.name) { toast.error(t("common.required")); return; }
-    const { data: userData } = await supabase.auth.getUser();
-    const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    const finalType = newOrgFormData.type === "other" ? newOrgFormData.customType : newOrgFormData.type;
-    const newOrgId = crypto.randomUUID();
-    const newOrgName = newOrgFormData.name.trim();
-    const hasFiscalData = newOrgFormData.isFiscal && !!newOrgFormData.nif?.trim();
-    const entityId = await resolveOrganizationEntityId({
-      orgName: newOrgName,
-      createdBy: businessUserId,
-      nif: hasFiscalData ? newOrgFormData.nif : null,
-    });
+    setIsCreatingOrgFromSheet(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      if (!businessUserId) { toast.error("Business user not resolved"); return; }
+      const finalType = newOrgFormData.type === "other" ? newOrgFormData.customType : newOrgFormData.type;
+      const newOrgName = newOrgFormData.name.trim();
+      const hasFiscalData = newOrgFormData.isFiscal && !!newOrgFormData.nif?.trim();
 
-    const { error: createError } = await withAuditContext(supabase, businessUserId, () =>
-      (supabase as any)
-        .from("anew_organizations")
-        .insert({
-          id: newOrgId,
-          name: newOrgName,
-          type: finalType || "departamento",
-          description: newOrgFormData.description || null,
-          status: newOrgFormData.status || "active",
-          sector: newOrgFormData.sector || null,
-          is_fiscal: newOrgFormData.isFiscal,
-          entity_id: entityId,
-          created_by: businessUserId,
-        })
-    );
+      const addressesPayload = newOrgFormData.addresses
+        .filter((addr) => addr.street && addr.number && addr.city && addr.postal_code)
+        .map((addr) => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
 
-    if (createError) { toast.error(createError.message); return; }
-
-    if (hasFiscalData) {
-      await upsertOrgFiscalEntity(newOrgId, newOrgFormData.nif, newOrgFormData.commercialName || null, "PT", businessUserId);
-    }
-
-    const insertData = hierarchyForm.type === "parent"
-      ? { parent_org_id: newOrgId, child_org_id: id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId }
-      : { parent_org_id: id, child_org_id: newOrgId, relationship_type: "parent_of", is_primary: true, created_by: businessUserId };
-    const { error: hierarchyError } = await withAuditContext(supabase, businessUserId, () =>
-      (supabase as any).from("anew_hierarchy").insert(insertData)
-    );
-    if (hierarchyError) { toast.error(hierarchyError.message); return; }
-
-    if (userData.user?.id) {
-      const { error: bootstrapError } = await withAuditContext(supabase, businessUserId, () =>
-        (supabase as any).rpc("bootstrap_org_creator", {
-          p_organization_id: newOrgId,
-          p_organization_name: newOrgName,
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_create_organization_with_hierarchy", {
+          p_current_org_id: id,
+          p_hierarchy_type: hierarchyForm.type,
+          p_name: newOrgName,
+          p_type: finalType || "departamento",
+          p_description: newOrgFormData.description || null,
+          p_status: newOrgFormData.status || "active",
+          p_sector: newOrgFormData.sector || null,
+          p_is_fiscal: newOrgFormData.isFiscal,
+          p_nif: hasFiscalData ? newOrgFormData.nif : null,
+          p_commercial_name: hasFiscalData ? (newOrgFormData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
         })
       );
-      if (bootstrapError) {
-        console.error("Bootstrap error, falling back:", bootstrapError);
-        await assignCreatorAsOrgAdmin(newOrgId, newOrgName, userData.user.id);
-      }
-    }
 
-    for (const addr of newOrgFormData.addresses) {
-      if (addr.street && addr.number && addr.city && addr.postal_code) {
-        await withAuditContext(supabase, businessUserId, () =>
-          (supabase as any).rpc('assign_address_to_org', {
-            p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
-            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || 'PT',
-            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-          })
-        );
-      }
-    }
+      if (error) throw error;
 
-    toast.success(t("common.created"));
-    setIsCreateOrgSheetOpen(false); setIsAddHierarchyOpen(false);
-    setNewOrgFormData(emptyFormData); setHierarchyForm({ type: "parent", organization_id: "" });
-    fetchHierarchy(); fetchAllOrganizations();
+      toast.success(t("common.created"));
+      setIsCreateOrgSheetOpen(false); setIsAddHierarchyOpen(false);
+      setNewOrgFormData(emptyFormData); setHierarchyForm({ type: "parent", organization_id: "" });
+      fetchHierarchy(); fetchAllOrganizations();
+    } catch (error: unknown) {
+      console.error("Error creating organization from sheet:", error);
+      toast.error(error instanceof Error ? error.message : t("common.error"));
+    } finally {
+      setIsCreatingOrgFromSheet(false);
+    }
   };
 
   const handleRemoveHierarchy = (hierarchyId: string) => { setDeleteType('hierarchy'); setDeleteItemId(hierarchyId); setDeleteDialogOpen(true); };
@@ -904,6 +877,7 @@ export default function OrganizationDetail() {
                   onSave={handleCreateOrgFromSheet}
                   onCancel={() => { setIsCreateOrgSheetOpen(false); setNewOrgFormData(emptyFormData); }}
                   title={t("organizations.createNew")}
+                  isSaving={isCreatingOrgFromSheet}
                 />
               </div>
             </div>
