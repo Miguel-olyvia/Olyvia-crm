@@ -27,11 +27,12 @@ import { calculateHealthScore } from "@/hooks/useContactHealthScore";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
- * ["rpc_update_client"]["Args"]`) has been regenerated from the current
- * database schema and now reflects the SQL function's real nullability for
- * these params (see supabase/migrations/20260805010000_clients_audit_bypass_
- * and_rpcs.sql). This local type mirrors the generated one for readability
- * at the call site below; it does not change what the compiler enforces.
+ * ["rpc_update_client"]["Args"]`) has not yet been regenerated to include the
+ * 4 additive trailing address params added in
+ * supabase/migrations/20260902010000_contacts_clients_atomic_create_and_fixes.sql
+ * (p_address_street/p_address_city/p_address_postal_code/p_address_number,
+ * all optional). This local type reflects the current SQL function signature;
+ * it does not change what the compiler enforces.
  */
 type RpcUpdateClientArgs = {
   p_assigned_to: string | null;
@@ -46,6 +47,10 @@ type RpcUpdateClientArgs = {
   p_phone_country: string | null;
   p_status: string;
   p_vat: string | null;
+  p_address_street?: string | null;
+  p_address_city?: string | null;
+  p_address_postal_code?: string | null;
+  p_address_number?: string | null;
 };
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
@@ -655,6 +660,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_status: editFormData.status,
             p_notes: editFormData.notes || null,
             p_assigned_to: editFormData.assigned_to || null,
+            // Address fields were captured in editFormData (populated from the
+            // client's primary anew_addresses row) but were previously never sent
+            // to the RPC, silently dropping any address edit. The edit form only
+            // exposes a single combined "address" text input (no separate
+            // street/number split), so — matching rpc_update_contact's own
+            // single p_address convention — it is sent as street with no number.
+            p_address_street: editFormData.address || null,
+            p_address_city: editFormData.city || null,
+            p_address_postal_code: editFormData.postal_code || null,
+            p_address_number: null,
           } satisfies RpcUpdateClientArgs);
           if (rpcError) throw rpcError;
         });
