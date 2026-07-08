@@ -17,6 +17,42 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
+// anew_memberships has no FK constraints (contype='f' returns zero rows in
+// pg_constraint), so PostgREST cannot resolve an embedded
+// `anew_roles!inner(code)` select — it fails with PGRST200 ("Could not find
+// a relationship..."). Resolve role codes with a decoupled two-step lookup
+// instead, same pattern as create-user's resolveCallerAdmin().
+// SECURITY: fails CLOSED — throws on any query error instead of returning
+// false, so callers must treat a lookup failure as "cannot verify" rather
+// than silently proceeding as if the user held no CRM role.
+async function hasNonClientRole(supabase: any, anewUserId: string): Promise<boolean> {
+  const { data: memberships, error: membershipsError } = await supabase
+    .from("anew_memberships")
+    .select("role_id")
+    .eq("user_id", anewUserId)
+    .eq("status", "active");
+
+  if (membershipsError) {
+    console.error("hasNonClientRole: error fetching memberships:", membershipsError);
+    throw new Error("Unable to verify user role, try again");
+  }
+
+  const roleIds = [...new Set((memberships || []).map((m: any) => m.role_id).filter(Boolean))];
+  if (roleIds.length === 0) return false;
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("anew_roles")
+    .select("code")
+    .in("id", roleIds);
+
+  if (rolesError) {
+    console.error("hasNonClientRole: error fetching role codes:", rolesError);
+    throw new Error("Unable to verify user role, try again");
+  }
+
+  return (roles || []).some((r: any) => r.code && r.code !== "client");
+}
+
 function generateTempPassword(length = 8): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   let result = "";
@@ -247,14 +283,16 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (crmAnewUser?.auth_user_id) {
-        const { data: crmRoles } = await supabase
-          .from("anew_memberships")
-          .select("anew_roles!inner(code)")
-          .eq("user_id", crmAnewUser.id)
-          .eq("status", "active");
-        const hasCrmRole = (crmRoles || []).some(
-          (m: any) => m.anew_roles?.code && m.anew_roles.code !== "client"
-        );
+        let hasCrmRole: boolean;
+        try {
+          hasCrmRole = await hasNonClientRole(supabase, crmAnewUser.id);
+        } catch (roleCheckErr) {
+          console.error("Failed to verify CRM role (pre-check), refusing to proceed:", roleCheckErr);
+          return new Response(
+            JSON.stringify({ error: "Unable to verify user role, try again" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
         if (hasCrmRole) {
           return new Response(
             JSON.stringify({ error: "portal_email_is_crm_user" }),
@@ -341,15 +379,16 @@ serve(async (req: Request) => {
       }
 
       // 1a. Block CRM accounts: any active role != 'client' anywhere
-      const { data: existingMemberships } = await supabase
-        .from("anew_memberships")
-        .select("role_id, anew_roles!inner(code)")
-        .eq("user_id", existingAnewUser.id)
-        .eq("status", "active");
-
-      const hasCrmRole = (existingMemberships || []).some(
-        (m: any) => m.anew_roles?.code && m.anew_roles.code !== "client"
-      );
+      let hasCrmRole: boolean;
+      try {
+        hasCrmRole = await hasNonClientRole(supabase, existingAnewUser.id);
+      } catch (roleCheckErr) {
+        console.error("Failed to verify CRM role (existing user), refusing to proceed:", roleCheckErr);
+        return new Response(
+          JSON.stringify({ error: "Unable to verify user role, try again" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       if (hasCrmRole) {
         return new Response(
           JSON.stringify({ error: "portal_email_is_crm_user" }),

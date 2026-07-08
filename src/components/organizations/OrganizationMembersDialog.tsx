@@ -32,6 +32,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { UserCombobox } from "@/components/users/UserCombobox";
 import { MemberEditDialog } from "./MemberEditDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { resolveOrgTenantIds } from "@/lib/orgSubtree";
 
 interface Member {
   id: string;
@@ -182,10 +183,27 @@ export function OrganizationMembersDialog({
   };
 
   const fetchAllUsers = async () => {
+    // Scope candidates to this organization's tenant tree — never show
+    // users from unrelated organizations/tenants in the picker.
+    const tenantOrgIds = await resolveOrgTenantIds(organizationId);
+
+    const { data: membershipRows } = await (supabase as any)
+      .from("anew_memberships")
+      .select("user_id")
+      .in("organization_id", tenantOrgIds)
+      .eq("status", "active");
+
+    const tenantUserIds = [...new Set((membershipRows || []).map((m: any) => m.user_id))];
+    if (tenantUserIds.length === 0) {
+      setAllUsers([]);
+      return;
+    }
+
     const { data } = await (supabase as any)
       .from("anew_users")
       .select("id, name, email")
       .eq("status", "active")
+      .in("id", tenantUserIds)
       .order("name");
 
     if (data) setAllUsers(data);

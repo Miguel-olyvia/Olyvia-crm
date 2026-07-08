@@ -319,6 +319,17 @@ serve(async (req: Request) => {
     const membershipValidationError = validateRawMemberships(memberships, membership);
     if (membershipValidationError) return jsonError("membership_role_required", membershipValidationError);
 
+    // Defense-in-depth: client-side validation can be bypassed by calling this
+    // function directly, so never allow a user to be created with zero
+    // organization memberships. Checked here, before the auth user is created,
+    // so a rejected request never leaves behind an orphaned auth.users row.
+    if (normalizeMemberships(memberships, membership).length === 0) {
+      return jsonError(
+        "membership_required",
+        "At least one valid organization membership is required to create a user.",
+      );
+    }
+
     const preparedAddressResult = prepareAddresses(addresses);
     if (preparedAddressResult.error) return jsonError("address_incomplete", preparedAddressResult.error);
     const preparedAddresses = preparedAddressResult.addresses;

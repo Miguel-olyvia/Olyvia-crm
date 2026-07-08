@@ -239,22 +239,38 @@ export function MemberFormPanel({
     if (data) setTemplateOrganizations(data);
   };
   
+  // If the organization we defaulted a membership to turns out to be invalid/unreachable,
+  // clear that selection instead of silently letting the UI keep an unconfirmed org id.
+  const clearUnreachableDefaultMembership = () => {
+    setNewUserMemberships((prev) =>
+      prev.map((m) =>
+        m.organization_id === organizationId ? { ...m, organization_id: "" } : m
+      )
+    );
+  };
+
   // Fetch current org + all descendant organizations
   const fetchAllowedOrganizations = async () => {
-    // First fetch current org
-    const { data: currentOrg } = await supabase
+    // First fetch current org - must be active and actually resolvable, otherwise it is
+    // not safe to trust as a default selection or as the scope root for the org list.
+    const { data: currentOrg, error: currentOrgError } = await supabase
       .from("anew_organizations")
       .select("id, name, type")
       .eq("id", organizationId)
-      .single();
-    
-    if (!currentOrg) return;
-    
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (currentOrgError || !currentOrg) {
+      setAllowedOrganizations([]);
+      clearUnreachableDefaultMembership();
+      return;
+    }
+
     // Fetch all hierarchy relationships
     const { data: allHierarchy } = await supabase
       .from("anew_hierarchy")
       .select("parent_org_id, child_org_id");
-    
+
     if (!allHierarchy) {
       setAllowedOrganizations([{ ...currentOrg, parent_id: null }]);
       return;
@@ -289,17 +305,20 @@ export function MemberFormPanel({
       .eq("status", "active")
       .order("name");
     
-    if (orgs) {
-      // Add parent_id info for hierarchy display
-      const orgsWithParent = orgs.map(org => {
-        const parentRel = allHierarchy.find(h => h.child_org_id === org.id);
-        return {
-          ...org,
-          parent_id: parentRel?.parent_org_id || null,
-        };
-      });
-      setAllowedOrganizations(orgsWithParent);
+    if (!orgs) {
+      setAllowedOrganizations([{ ...currentOrg, parent_id: null }]);
+      return;
     }
+
+    // Add parent_id info for hierarchy display
+    const orgsWithParent = orgs.map(org => {
+      const parentRel = allHierarchy.find(h => h.child_org_id === org.id);
+      return {
+        ...org,
+        parent_id: parentRel?.parent_org_id || null,
+      };
+    });
+    setAllowedOrganizations(orgsWithParent);
   };
   
   const loadMemberData = async () => {
@@ -461,7 +480,17 @@ export function MemberFormPanel({
       toast.error("É obrigatório selecionar uma role para cada organização.");
       return;
     }
-    
+
+    // clearUnreachableDefaultMembership() (see fetchAllowedOrganizations) may have
+    // blanked the organization_id of the default membership if the org turned out to
+    // be unreachable/inactive. Never let a user be created with zero valid
+    // memberships — that would silently leave them without any organization access.
+    const hasValidMembership = newUserMemberships.some((m) => m.organization_id && m.role_id);
+    if (!hasValidMembership) {
+      toast.error(t("users.membershipRequired"));
+      return;
+    }
+
     setSavingNewUser(true);
     
     try {

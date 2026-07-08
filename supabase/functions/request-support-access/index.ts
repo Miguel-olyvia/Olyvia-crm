@@ -115,47 +115,49 @@ serve(async (req: Request): Promise<Response> => {
     const requestId: string = logEntry.id;
 
     // ── 6. Fetch super_admin(s) for the target org ────────────────────────────
-    const { data: superAdmins, error: adminError } = await supabase
-      .from("anew_memberships")
-      .select("user_id, anew_users!inner(id, email, name)")
-      .eq("organization_id", org_id)
-      .eq("status", "active")
-      .eq("anew_roles!inner(code)", "super_admin");
-
-    // Fallback query if the join syntax above is not supported — use two-step lookup
+    // anew_memberships has no FK constraints, so PostgREST cannot resolve an
+    // embedded `anew_roles!inner(code)` filter/select (PGRST200). Resolve
+    // with a decoupled two-step lookup instead.
     let adminUsers: Array<{ id: string; email: string; name: string }> = [];
 
-    if (adminError || !superAdmins || superAdmins.length === 0) {
-      // Two-step: find role id for super_admin in this org or global, then find memberships
-      const { data: roleRows } = await supabase
-        .from("anew_roles")
-        .select("id")
-        .eq("code", "super_admin");
+    const { data: roleRows, error: roleError } = await supabase
+      .from("anew_roles")
+      .select("id")
+      .eq("code", "super_admin");
 
-      const roleIds = (roleRows || []).map((r: { id: string }) => r.id);
+    if (roleError) {
+      console.error("[request-support-access] error fetching super_admin role id:", roleError);
+    }
 
-      if (roleIds.length > 0) {
-        const { data: memberships } = await supabase
-          .from("anew_memberships")
-          .select("user_id")
-          .eq("organization_id", org_id)
-          .eq("status", "active")
-          .in("role_id", roleIds);
+    const roleIds = (roleRows || []).map((r: { id: string }) => r.id);
 
-        const userIds = (memberships || []).map((m: { user_id: string }) => m.user_id);
+    if (roleIds.length > 0) {
+      const { data: memberships, error: membershipsError } = await supabase
+        .from("anew_memberships")
+        .select("user_id")
+        .eq("organization_id", org_id)
+        .eq("status", "active")
+        .in("role_id", roleIds);
 
-        if (userIds.length > 0) {
-          const { data: users } = await supabase
-            .from("anew_users")
-            .select("id, email, name")
-            .in("id", userIds)
-            .eq("status", "active");
-
-          adminUsers = (users || []) as Array<{ id: string; email: string; name: string }>;
-        }
+      if (membershipsError) {
+        console.error("[request-support-access] error fetching super_admin memberships:", membershipsError);
       }
-    } else {
-      adminUsers = (superAdmins as any[]).map((row) => row.anew_users);
+
+      const userIds = (memberships || []).map((m: { user_id: string }) => m.user_id);
+
+      if (userIds.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from("anew_users")
+          .select("id, email, name")
+          .in("id", userIds)
+          .eq("status", "active");
+
+        if (usersError) {
+          console.error("[request-support-access] error fetching super_admin users:", usersError);
+        }
+
+        adminUsers = (users || []) as Array<{ id: string; email: string; name: string }>;
+      }
     }
 
     // ── 7. Fetch caller name for the email notification ───────────────────────

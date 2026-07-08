@@ -242,17 +242,39 @@ Deno.serve(async (req) => {
 
     const rootOrganizationId = await resolveRootOrganizationId(supabase, organizationId) || organizationId;
 
-    // Find an admin user for created_by via anew_memberships
-    const { data: adminMembership } = await supabase
-      .from('anew_memberships')
-      .select('user_id, anew_roles!inner(code)')
-      .eq('organization_id', rootOrganizationId)
-      .eq('status', 'active')
-      .in('anew_roles.code', ['super_admin', 'admin', 'org_admin'])
-      .limit(1)
-      .maybeSingle();
+    // Find an admin user for created_by via anew_memberships.
+    // anew_memberships has no FK constraints, so PostgREST cannot resolve an
+    // embedded `anew_roles!inner(code)` select/filter (PGRST200). Resolve the
+    // admin role ids first, then match memberships against them.
+    const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
+    const { data: adminRoleRows, error: adminRoleError } = await supabase
+      .from('anew_roles')
+      .select('id')
+      .in('code', adminRoleCodes);
 
-    const createdBy = adminMembership?.user_id || null;
+    if (adminRoleError) {
+      console.error('insert-lead: error fetching admin role ids:', adminRoleError);
+    }
+
+    const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
+
+    let createdBy: string | null = null;
+    if (adminRoleIds.length > 0) {
+      const { data: adminMembership, error: adminMembershipError } = await supabase
+        .from('anew_memberships')
+        .select('user_id')
+        .eq('organization_id', rootOrganizationId)
+        .eq('status', 'active')
+        .in('role_id', adminRoleIds)
+        .limit(1)
+        .maybeSingle();
+
+      if (adminMembershipError) {
+        console.error('insert-lead: error fetching admin membership:', adminMembershipError);
+      }
+
+      createdBy = adminMembership?.user_id || null;
+    }
 
     // Build field_values JSONB from lead data
     // Normalize first/last name to defend against integrations that send the
