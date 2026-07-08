@@ -628,10 +628,15 @@ serve(async (req) => {
           if (cErr) throw cErr;
 
           // Update pipeline_links
-          await upsertPipelineLink("proposal_id", proposal.id, { 
+          await upsertPipelineLink("proposal_id", proposal.id, {
             contract_id: contract!.id,
             organization_id: resolvedOrgId,
           });
+
+          // Write back the contract onto the proposal's own dedicated column
+          // (in addition to pipeline_links) so lookups like "Ver contrato"
+          // don't depend solely on the cross-entity link table.
+          await supabase.from("proposals").update({ client_contract_id: contract!.id }).eq("id", proposal.id);
 
           // Sync lead to "ganho" stage
           const lid = await resolveLeadFromPipeline("proposal", proposal.id);

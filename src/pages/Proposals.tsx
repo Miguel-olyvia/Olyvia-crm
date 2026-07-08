@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -74,6 +75,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { SendProposalDialog } from "@/components/proposals/SendProposalDialog";
 import { ProposalSendHistory } from "@/components/proposals/ProposalSendHistory";
 import { ProposalDetailsDialog } from "@/components/proposals/ProposalDetailsDialog";
+import { ProposalRejectReasonDialog, type ProposalRejectionDecision } from "@/components/proposals/ProposalRejectReasonDialog";
 import { ProposalWorkflowConfig } from "@/components/proposals/ProposalWorkflowConfig";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
@@ -125,6 +127,7 @@ interface Proposal {
   accepted_at?: string | null;
   rejected_at?: string | null;
   rejection_reason?: string | null;
+  sent_at?: string | null;
 }
 
 interface Deal {
@@ -166,6 +169,7 @@ const Proposals = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
+  const [rejectReasonDialogOpen, setRejectReasonDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -501,7 +505,10 @@ const Proposals = () => {
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendProposal, setSendProposal] = useState<any>(null);
-  
+
+  const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string }>({ entityId: "", name: "" });
+
   const [sendHistoryOpen, setSendHistoryOpen] = useState(false);
   const [sendHistoryProposalId, setSendHistoryProposalId] = useState<string | null>(null);
   const [sendHistoryProposalTitle, setSendHistoryProposalTitle] = useState<string>("");
@@ -518,6 +525,7 @@ const Proposals = () => {
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
+  const [dealEntityIds, setDealEntityIds] = useState<Record<string, string>>({}); // deal_id -> entity_id, for proposals without a direct entity_id
   const submitLockRef = useRef(false);
 
   useEffect(() => {
@@ -755,10 +763,12 @@ const Proposals = () => {
           setEntityNames(nameMap);
           setEntityEmails(emailMap);
           setEntityPhones(phoneMap);
+          setDealEntityIds(dealEntityMap);
         } else {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
+          setDealEntityIds({});
         }
       }
 
@@ -1478,6 +1488,31 @@ const Proposals = () => {
   };
 
 
+  const handleMarkAsSent = async (proposal: Proposal) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const sentStage = workflowStages.find(s => s.name === "sent" || s.name === "enviada");
+      if (!sentStage) { toast({ title: "Erro", description: "Estágio 'Enviada' não encontrado", variant: "destructive" }); return; }
+      const oldStageId = proposal.stage_id;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase
+        .from("proposals")
+        .update({ stage_id: sentStage.id, status: "sent", sent_at: new Date().toISOString() })
+        .eq("id", proposal.id);
+      if (error) throw error;
+      await supabase.functions.invoke('execute-workflow', {
+        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      });
+      toast({ title: "Proposta marcada como enviada" });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
+  };
+
   const handleAcceptProposal = async () => {
     if (!selectedProposal) return;
     try {
@@ -1489,7 +1524,8 @@ const Proposals = () => {
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
       if (!businessUserIdAccept) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
-      await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", selectedProposal.id);
+      const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", selectedProposal.id);
+      if (error) throw error;
       await supabase.functions.invoke('execute-workflow', {
         body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
       });
@@ -1501,7 +1537,7 @@ const Proposals = () => {
     }
   };
 
-  const handleRejectProposal = async () => {
+  const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -1512,15 +1548,56 @@ const Proposals = () => {
       const businessUserIdReject = await resolveCurrentBusinessUserId();
       if (!businessUserIdReject) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
-      await supabase.from("proposals").update({ stage_id: rejectedStage.id, status: "rejected", rejected_at: new Date().toISOString() }).eq("id", selectedProposal.id);
+      const { error } = await supabase.from("proposals").update({
+        stage_id: rejectedStage.id,
+        status: "rejected",
+        rejected_at: new Date().toISOString(),
+        rejection_reason_id: reason.reasonId,
+        rejection_reason_code: reason.code,
+        rejection_reason: reason.label,
+        rejection_notes: reason.notes,
+      }).eq("id", selectedProposal.id);
+      if (error) throw error;
       await supabase.functions.invoke('execute-workflow', {
         body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
       });
       toast({ title: "Proposta recusada" });
+      setRejectReasonDialogOpen(false);
       setDetailsOpen(false);
       loadData();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleReopenProposal = async (proposal: Proposal) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const draftStage = workflowStages.find(s => s.name === "draft" || s.name === "rascunho");
+      if (!draftStage) { toast({ title: "Erro", description: "Estágio 'Rascunho' não encontrado", variant: "destructive" }); return; }
+      const oldStageId = proposal.stage_id;
+      const businessUserIdReopen = await resolveCurrentBusinessUserId();
+      if (!businessUserIdReopen) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReopen, p_source: 'ui' });
+      const { error: reopenError } = await supabase.from("proposals").update({
+        stage_id: draftStage.id,
+        status: "draft",
+        accepted_at: null,
+        rejected_at: null,
+        rejection_reason: null,
+        rejection_reason_id: null,
+        rejection_reason_code: null,
+        rejection_notes: null,
+      }).eq("id", proposal.id);
+      if (reopenError) throw reopenError;
+      await supabase.functions.invoke('execute-workflow', {
+        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      });
+      toast({ title: "Proposta reaberta" });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });
     }
   };
 
@@ -1795,6 +1872,9 @@ const Proposals = () => {
             onClick={() => { const link = pipelineLinks[proposal.id]; if (link?.contract_id) navigate(`/contracts?open=${link.contract_id}`); }}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
             <Copy className="w-3.5 h-3.5" />
           </Button>
@@ -1807,7 +1887,7 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Reabrir">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" title="Follow-up">
@@ -1834,6 +1914,9 @@ const Proposals = () => {
     const sn = getStageName(proposal);
     const stage = getProposalStage(proposal);
     const link = pipelineLinks[proposal.id];
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const proposalEntityId = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null) || "";
+    const proposalEntityName = (directEntityId ? entityNames[directEntityId] : entityNames[`deal:${proposal.id}`]) || proposal.title;
 
     return (
       <DropdownMenuContent align="end" className="w-56">
@@ -1858,14 +1941,20 @@ const Proposals = () => {
         >
           <Download className="w-3.5 h-3.5 mr-2" /> Descarregar PDF
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!proposalEntityId}
+          onClick={() => {
+            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName });
+            setCallDialogOpen(true);
+          }}
+        >
           <Phone className="w-3.5 h-3.5 mr-2" /> Registar atividade
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📊 Avançar</DropdownMenuLabel>
         {(sn === "draft" || sn === "rascunho") && (
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleMarkAsSent(proposal)}>
             <Send className="w-3.5 h-3.5 mr-2" /> Marcar como Enviada
           </DropdownMenuItem>
         )}
@@ -1876,7 +1965,10 @@ const Proposals = () => {
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
-          <DropdownMenuItem className="text-red-500">
+          <DropdownMenuItem
+            className="text-red-500"
+            onClick={() => { setSelectedProposal(proposal); setRejectReasonDialogOpen(true); }}
+          >
             <X className="w-3.5 h-3.5 mr-2" /> Rejeitar (com motivo)
           </DropdownMenuItem>
         )}
@@ -1950,11 +2042,21 @@ const Proposals = () => {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
-            <DropdownMenuItem>
-              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir com desconto (v2)
+            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
             </DropdownMenuItem>
             <DropdownMenuItem>
               <Phone className="w-3.5 h-3.5 mr-2" /> Contactar cliente
+            </DropdownMenuItem>
+          </>
+        )}
+
+        {stage?.is_won && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
             </DropdownMenuItem>
           </>
         )}
@@ -3066,7 +3168,14 @@ const Proposals = () => {
         onSendProposal={() => { if (selectedProposal) { setSendProposal(selectedProposal); setSendDialogOpen(true); setDetailsOpen(false); } }}
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
         onAccept={handleAcceptProposal}
-        onReject={handleRejectProposal}
+        onReject={() => setRejectReasonDialogOpen(true)}
+      />
+
+      <ProposalRejectReasonDialog
+        open={rejectReasonDialogOpen}
+        onOpenChange={setRejectReasonDialogOpen}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={handleRejectProposal}
       />
 
       <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
@@ -3109,6 +3218,15 @@ const Proposals = () => {
       <ProposalWorkflowConfig open={showWorkflowConfig} onOpenChange={setShowWorkflowConfig} companyId={activeCompany?.id || null} onStagesUpdated={loadWorkflowStages} />
 
       <SendProposalDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} proposal={sendProposal} onSent={() => loadData()} />
+      <RegisterCallDialog
+        open={callDialogOpen}
+        onOpenChange={setCallDialogOpen}
+        entityId={callTarget.entityId}
+        entityName={callTarget.name}
+        organizationId={activeCompany?.id || ""}
+        contactId=""
+        onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
+      />
       <ProposalSendHistory open={sendHistoryOpen} onOpenChange={setSendHistoryOpen} proposalId={sendHistoryProposalId} proposalTitle={sendHistoryProposalTitle} />
       {(visualEditorProposalId || editingId) && (
         <ProposalPortalPreview open={portalPreviewOpen} onOpenChange={(open) => { setPortalPreviewOpen(open); if (!open) setVisualEditorProposalId(null); }} proposalId={(visualEditorProposalId || editingId)!} />
