@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveOrgTenantIds } from "@/lib/orgSubtree";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -168,7 +169,7 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
     if (templateId) {
       fetchTemplate();
     }
-  }, [templateId]);
+  }, [templateId, activeCompany?.id]);
 
   // Refetch items when organization changes
   useEffect(() => {
@@ -396,9 +397,18 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
 
   const fetchOrganizations = async () => {
     try {
+      if (!activeCompany?.id) {
+        setOrganizations([]);
+        return;
+      }
+
+      // Scope candidates to this organization's tenant tree — never show
+      // organizations from unrelated tenants in the picker.
+      const tenantOrgIds = await resolveOrgTenantIds(activeCompany.id);
       const { data, error } = await (supabase as any)
         .from("anew_organizations")
         .select("id, name")
+        .in("id", tenantOrgIds)
         .order("name");
 
       if (error) throw error;

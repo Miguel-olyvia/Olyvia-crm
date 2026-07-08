@@ -1207,10 +1207,12 @@ export default function Quotes() {
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'perdido', observacoes: reason } as any).eq("id", quoteId);
-    if (!error) {
-      toast({ title: "Orçamento marcado como perdido" });
-      fetchQuotes();
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
     }
+    toast({ title: "Orçamento marcado como perdido" });
+    fetchQuotes();
     setLostReasonDialog(null);
   };
 

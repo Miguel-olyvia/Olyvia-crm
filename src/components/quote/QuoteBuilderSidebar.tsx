@@ -57,6 +57,7 @@ interface QuoteBuilderSidebarProps {
   onDownloadPdf?: () => void;
   downloadingPdf?: boolean;
   inlineQuotes?: InlineQuoteData[];
+  onSaveAsTemplate?: () => void;
 }
 
 function MarginBadge({ margin }: { margin: number }) {
@@ -146,6 +147,7 @@ export function QuoteBuilderSidebar({
   onDownloadPdf,
   downloadingPdf = false,
   inlineQuotes = [],
+  onSaveAsTemplate,
 }: QuoteBuilderSidebarProps) {
   const [dealBudget, setDealBudget] = useState<number | null>(null);
   const [dealEntityName, setDealEntityName] = useState<string>("");
@@ -466,7 +468,7 @@ export function QuoteBuilderSidebar({
           <Download className="w-4 h-4 mr-2" />
           {downloadingPdf ? "A gerar PDF..." : "Download PDF"}
         </Button>
-        <Button variant="outline" className="w-full" size="sm">
+        <Button variant="outline" className="w-full" size="sm" onClick={onSaveAsTemplate} disabled={!onSaveAsTemplate || loading}>
           <ClipboardList className="w-4 h-4 mr-2" />
           Guardar como Template
         </Button>

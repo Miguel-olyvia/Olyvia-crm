@@ -141,13 +141,52 @@ serve(async (req) => {
     };
 
     const auditUserId = caller.isServiceRole ? null : caller.anewUserId;
-    if (auditUserId) {
-      await supabaseAdmin.rpc('set_audit_context', { p_user_id: auditUserId, p_source: 'system' });
+
+    // Fetch source quote_lines / quote_fees up-front so the whole duplicate
+    // (quote + lines + fees) can be inserted atomically in one RPC call — see
+    // rpc_duplicate_quote_insert (20261012010000_fix_duplicate_quote_audit_attribution.sql).
+    // This also fixes audit attribution: set_audit_context() and the INSERTs
+    // now share a single transaction, so its SET LOCAL context is still in
+    // effect when the audit triggers fire.
+    const { data: lines, error: linesErr } = await supabaseAdmin
+      .from("quote_lines")
+      .select("*")
+      .eq("quote_id", quoteId);
+
+    if (linesErr) {
+      console.error("[duplicate-quote] read lines error", linesErr);
     }
+
+    const newLines = (lines || []).map((l: any) => {
+      const { id: _id, created_at: _ca, quote_id: _qid, total_com_desconto: _tcd, ...rest } = l;
+      // Recompute total_com_desconto if discount override changed
+      const recomputed = discountOverride !== null && typeof rest.total_com_iva === "number"
+        ? Number((rest.total_com_iva * (1 - discountOverride / 100)).toFixed(2))
+        : _tcd;
+      return {
+        ...rest,
+        total_com_desconto: recomputed,
+      };
+    });
+
+    const { data: fees } = await supabaseAdmin
+      .from("quote_fees")
+      .select("*")
+      .eq("quote_id", quoteId);
+
+    const newFees = (fees || []).map((f: any) => {
+      const { id: _id, created_at: _ca, quote_id: _qid, ...rest } = f;
+      return rest;
+    });
+
     const { data: inserted, error: insErr } = await supabaseAdmin
-      .from("quotes")
-      .insert(newQuote)
-      .select("id")
+      .rpc("rpc_duplicate_quote_insert", {
+        p_actor_id: auditUserId,
+        p_source: "web_app",
+        p_quote: newQuote,
+        p_lines: newLines,
+        p_fees: newFees,
+      })
       .single();
 
     if (insErr || !inserted) {
@@ -158,64 +197,7 @@ serve(async (req) => {
       });
     }
 
-    const newQuoteId = inserted.id as string;
-
-    // Copy quote_lines
-    const { data: lines, error: linesErr } = await supabaseAdmin
-      .from("quote_lines")
-      .select("*")
-      .eq("quote_id", quoteId);
-
-    if (linesErr) {
-      console.error("[duplicate-quote] read lines error", linesErr);
-    }
-
-    if (lines && lines.length > 0) {
-      const newLines = lines.map((l: any) => {
-        const { id: _id, created_at: _ca, quote_id: _qid, total_com_desconto: _tcd, ...rest } = l;
-        // Recompute total_com_desconto if discount override changed
-        const recomputed = discountOverride !== null && typeof rest.total_com_iva === "number"
-          ? Number((rest.total_com_iva * (1 - discountOverride / 100)).toFixed(2))
-          : _tcd;
-        return {
-          ...rest,
-          quote_id: newQuoteId,
-          total_com_desconto: recomputed,
-        };
-      });
-
-      const { error: insLinesErr } = await supabaseAdmin
-        .from("quote_lines")
-        .insert(newLines);
-
-      if (insLinesErr) {
-        console.error("[duplicate-quote] insert lines error", insLinesErr);
-        // Rollback: delete new quote
-        await supabaseAdmin.from("quotes").delete().eq("id", newQuoteId);
-        return new Response(JSON.stringify({ error: insLinesErr.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // Copy quote_fees
-    const { data: fees } = await supabaseAdmin
-      .from("quote_fees")
-      .select("*")
-      .eq("quote_id", quoteId);
-
-    if (fees && fees.length > 0) {
-      const newFees = fees.map((f: any) => {
-        const { id: _id, created_at: _ca, quote_id: _qid, ...rest } = f;
-        return { ...rest, quote_id: newQuoteId };
-      });
-      const { error: feesErr } = await supabaseAdmin.from("quote_fees").insert(newFees);
-      if (feesErr) {
-        console.error("[duplicate-quote] insert fees error", feesErr);
-        // Non-fatal; keep the duplicated quote, but report
-      }
-    }
+    const newQuoteId = (inserted as { id: string }).id;
 
     return new Response(
       JSON.stringify({ id: newQuoteId, quote_number: newNumber }),

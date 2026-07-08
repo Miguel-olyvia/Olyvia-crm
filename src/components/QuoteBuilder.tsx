@@ -354,6 +354,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [savedQuoteData, setSavedQuoteData] = useState<{ id: string; quote_number: string | null; cliente_id: string | null; deal_id: string | null; organization_id: string | null } | null>(null);
   const [whatsAppCtx, setWhatsAppCtx] = useState<WhatsAppContext | null>(null);
+  const [showSaveAsTemplateDialog, setShowSaveAsTemplateDialog] = useState(false);
+  const [saveAsTemplateName, setSaveAsTemplateName] = useState("");
+  const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
   useEffect(() => {
     if (quoteId || !activeCompany?.id || draftRestoredRef.current || typeof window === "undefined") return;
@@ -652,6 +655,131 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setTemplates(Array.from(new Map((data || []).map((template: any) => [template.id, template])).values()));
     } catch (error: any) {
       console.error("Error fetching templates:", error);
+    }
+  };
+
+  const handleOpenSaveAsTemplateDialog = () => {
+    if (lines.length === 0) {
+      toast({
+        title: "Sem itens para guardar",
+        description: "Adicione pelo menos uma linha ao orçamento antes de guardar como template.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaveAsTemplateName(formData.title || "");
+    setShowSaveAsTemplateDialog(true);
+  };
+
+  const handleConfirmSaveAsTemplate = async () => {
+    const name = saveAsTemplateName.trim();
+    if (!name) {
+      toast({ title: "Nome obrigatório", description: "Indique um nome para o template.", variant: "destructive" });
+      return;
+    }
+
+    // Only product/service/bundle lines can be represented in quote_template_items.
+    // Merge duplicate product/service/bundle references so we never violate the
+    // (template_id, product_id) unique constraint.
+    const mergedItems = new Map<string, { item_type: "product" | "service" | "bundle"; product_id: string | null; service_id: string | null; bundle_id: string | null; default_qt: number; default_attributes: Record<string, any> }>();
+    lines.forEach((line) => {
+      let itemType: "product" | "service" | "bundle" | null = null;
+      if (line.product_id) itemType = "product";
+      else if (line.service_id) itemType = "service";
+      else if (line.bundle_id) itemType = "bundle";
+      if (!itemType) return;
+
+      const key = `${itemType}:${line.product_id || line.service_id || line.bundle_id}`;
+      const existing = mergedItems.get(key);
+      if (existing) {
+        existing.default_qt += line.qt || 0;
+      } else {
+        mergedItems.set(key, {
+          item_type: itemType,
+          product_id: itemType === "product" ? line.product_id! : null,
+          service_id: itemType === "service" ? line.service_id! : null,
+          bundle_id: itemType === "bundle" ? line.bundle_id! : null,
+          default_qt: line.qt || 0,
+          default_attributes: line.selected_attributes || {},
+        });
+      }
+    });
+
+    if (mergedItems.size === 0) {
+      toast({
+        title: "Sem itens de catálogo",
+        description: "O template só pode guardar linhas de produtos, serviços ou bundles do catálogo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAsTemplate(true);
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador. Faça login novamente.", variant: "destructive" });
+        return;
+      }
+
+      const orgId = formData.organization_id || activeCompany?.id || null;
+      const diacriticsPattern = new RegExp("[\\u0300-\\u036f]", "g");
+      const slug = name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(diacriticsPattern, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      const codigo = `${slug}-${Date.now()}`;
+
+      const { data: newTemplate, error: templateError } = await supabase
+        .from("quote_templates")
+        .insert({
+          name,
+          codigo,
+          description: null,
+          organization_id: orgId,
+          active: true,
+          created_by: businessUserId,
+        })
+        .select()
+        .single();
+
+      if (templateError) throw templateError;
+
+      const itemsToInsert = Array.from(mergedItems.values()).map((item, index) => ({
+        template_id: newTemplate.id,
+        product_id: item.product_id,
+        service_id: item.service_id,
+        bundle_id: item.bundle_id,
+        item_type: item.item_type,
+        default_qt: item.default_qt,
+        ordem: index,
+        default_attributes: item.default_attributes,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("quote_template_items")
+        .insert(itemsToInsert);
+
+      if (itemsError) {
+        await supabase.from("quote_templates").delete().eq("id", newTemplate.id);
+        throw itemsError;
+      }
+
+      toast({ title: "Template guardado", description: `"${name}" foi adicionado aos Templates Rápidos.` });
+      setShowSaveAsTemplateDialog(false);
+      setSaveAsTemplateName("");
+      await fetchTemplates();
+    } catch (error: any) {
+      console.error("Error saving quote as template:", error);
+      toast({
+        title: "Erro ao guardar template",
+        description: error?.message || "Não foi possível guardar o template. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAsTemplate(false);
     }
   };
 
@@ -4079,6 +4207,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               onDownloadPdf={handleDownloadPdf}
               downloadingPdf={downloadingPdf}
               inlineQuotes={inlineQuotes}
+              onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
             />
           </div>
         </div>
@@ -4309,6 +4438,38 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                   setNewSectionName("");
                 }
               }}>Criar Secção</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save as Template Dialog */}
+      <Dialog open={showSaveAsTemplateDialog} onOpenChange={setShowSaveAsTemplateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Guardar como Template</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Nome do template</Label>
+              <Input
+                value={saveAsTemplateName}
+                onChange={e => setSaveAsTemplateName(e.target.value)}
+                placeholder="Nome do template..."
+                autoFocus
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !savingAsTemplate) {
+                    e.preventDefault();
+                    handleConfirmSaveAsTemplate();
+                  }
+                }}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowSaveAsTemplateDialog(false)} disabled={savingAsTemplate}>Cancelar</Button>
+              <Button onClick={handleConfirmSaveAsTemplate} disabled={savingAsTemplate}>
+                {savingAsTemplate ? "A guardar..." : "Guardar Template"}
+              </Button>
             </div>
           </div>
         </DialogContent>

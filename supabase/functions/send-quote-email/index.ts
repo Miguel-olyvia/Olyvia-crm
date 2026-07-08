@@ -217,7 +217,51 @@ const handler = async (req: Request): Promise<Response> => {
 
     const emailHtml = generateQuoteEmailHtml(quote, message, senderName || undefined, logoUrl);
 
-    await sendEmailViaSMTP(smtpConfig, { to: toListInput, cc: ccList.length ? ccList : undefined, subject: emailSubject, html: emailHtml, attachments: safeAttachments });
+    try {
+      await sendEmailViaSMTP(smtpConfig, { to: toListInput, cc: ccList.length ? ccList : undefined, subject: emailSubject, html: emailHtml, attachments: safeAttachments });
+    } catch (sendErr) {
+      // ── Audit trail on failed attempt (deliver still failed, but the attempt must not vanish) ──
+      try {
+        const { data: anewUserFailed } = await supabaseClient
+          .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
+        const senderAnewUserIdFailed: string | null = anewUserFailed?.id ?? null;
+        const safeSendError = sanitizeSmtpError(sendErr);
+
+        await supabaseClient.rpc('set_audit_context', {
+          p_user_id: senderAnewUserIdFailed,
+          p_source: 'email',
+        });
+        await supabaseClient.from("quote_sends").insert({
+          quote_id,
+          organization_id: quote.organization_id,
+          sent_by: senderAnewUserIdFailed,
+          recipient_email,
+          recipient_name: recipient_name || null,
+          subject: emailSubject,
+          message: ccList.length ? `${message || ""}${message ? "\n\n" : ""}CC: ${ccList.join(", ")}` : (message || null),
+          status: "failed",
+          sent_at: new Date().toISOString(),
+        });
+
+        await supabaseClient.from("email_logs").insert({
+          organization_id: quote.organization_id,
+          entity_id: quote.entity_id ?? null,
+          sent_by: senderAnewUserIdFailed,
+          body_html: emailHtml,
+          to_email: recipient_email,
+          from_email: smtpConfig.from_email,
+          subject: emailSubject,
+          status: "failed",
+          error_message: safeSendError,
+          smtp_source: resolvedSmtp.source,
+          smtp_id: smtpConfig.id,
+          sent_at: new Date().toISOString(),
+        });
+      } catch (auditErr) {
+        console.error("[send-quote-email] failed to record failed-send audit", auditErr);
+      }
+      throw sendErr;
+    }
 
     // ── Tracking pós-envio (não falhar caller se algo abaixo falhar) ──
     let trackingOk = true;
