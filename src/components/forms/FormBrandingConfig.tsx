@@ -29,6 +29,7 @@ import {
   type LayoutConfig,
   type LayoutDensity,
 } from "@/lib/forms/layoutConfig";
+import { formBrandingConfigSchema } from "@/lib/validations";
 
 const TRANSLATABLE_BRANDING_KEYS = [
   "form_title",
@@ -331,6 +332,13 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
   };
 
   const handleSave = async () => {
+    const validation = formBrandingConfigSchema.safeParse(branding);
+    if (!validation.success) {
+      const issue = validation.error.issues[0];
+      toast.error(issue?.message ?? "Dados de branding inválidos");
+      return;
+    }
+
     setSaving(true);
     try {
       const updatePayload: any = { ...branding };

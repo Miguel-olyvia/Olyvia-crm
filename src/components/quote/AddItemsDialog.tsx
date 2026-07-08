@@ -37,6 +37,7 @@ import { QuoteAIAssistant } from "./QuoteAIAssistant";
 import { BundleSelectionTab, type SelectedBundle, type ExpandedBundleLine } from "./BundleSelectionTab";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
+import { quoteAddItemsSchema } from "@/lib/validations";
 
 interface ProductAttribute {
   id: string;
@@ -1181,11 +1182,16 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
   // Submit selection - enrich attributes with full data before sending
   const handleSubmit = async () => {
-    if (selectedItems.size === 0 && selectedBundles.size === 0) {
-      toast({ title: "Selecione pelo menos um item", variant: "destructive" });
+    const itemsForValidation = [
+      ...Array.from(selectedItems.entries()).map(([id, { quantity }]) => ({ id, quantity })),
+      ...Array.from(selectedBundles.entries()).map(([id, { quantity }]) => ({ id, quantity })),
+    ];
+    const validation = quoteAddItemsSchema.safeParse({ items: itemsForValidation });
+    if (!validation.success) {
+      toast({ title: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
-    
+
     // Validate all dimension attributes are within defined price ranges
     let hasInvalidDimensions = false;
     selectedItems.forEach(({ item, attributes }) => {

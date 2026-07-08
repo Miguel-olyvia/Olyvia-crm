@@ -30,6 +30,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, Legend, AreaChart, Area } from "recharts";
+import { campaignDetailChannelSchema, campaignDetailMarketingListsSchema } from "@/lib/validations";
 
 interface Campaign {
   id: string;
@@ -219,6 +220,8 @@ const CampaignDetail = () => {
     target_audience: "",
     source_id: null as string | null,
   });
+  const [channelFieldErrors, setChannelFieldErrors] = useState<Record<string, string>>({});
+  const [listsFieldError, setListsFieldError] = useState<string | null>(null);
 
   const [leadSources, setLeadSources] = useState<Array<{ id: string; name: string; color: string | null; icon: string | null }>>([]);
 
@@ -722,10 +725,20 @@ const CampaignDetail = () => {
     e.preventDefault();
     if (!id) return;
 
-    if (!channelFormData.name) {
-      toast({ title: "Validation Error", description: "Channel name is required", variant: "destructive" });
+    const validation = campaignDetailChannelSchema.safeParse({
+      name: channelFormData.name,
+      type: channelFormData.type,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setChannelFieldErrors(errors);
+      toast({ title: "Validation Error", description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
+    setChannelFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -785,6 +798,13 @@ const CampaignDetail = () => {
 
   const handleSaveLists = async () => {
     if (!id) return;
+    const validation = campaignDetailMarketingListsSchema.safeParse({ selectedListIds });
+    if (!validation.success) {
+      setListsFieldError(validation.error.errors[0]?.message || null);
+      toast({ title: "Validation Error", description: validation.error.errors[0]?.message, variant: "destructive" });
+      return;
+    }
+    setListsFieldError(null);
     try {
       await supabase.from("campaign_marketing_lists").delete().eq("campaign_id", id);
       if (selectedListIds.length > 0) {
@@ -1518,7 +1538,8 @@ const CampaignDetail = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Channel Name *</Label>
-                <Input value={channelFormData.name} onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })} required />
+                <Input value={channelFormData.name} onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })} required className={channelFieldErrors.name ? "border-destructive" : ""} />
+                {channelFieldErrors.name && <p className="text-sm text-destructive">{channelFieldErrors.name}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Channel Type</Label>
@@ -1530,6 +1551,7 @@ const CampaignDetail = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                {channelFieldErrors.type && <p className="text-sm text-destructive">{channelFieldErrors.type}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Origem (Source)</Label>
@@ -1740,6 +1762,7 @@ const CampaignDetail = () => {
                 ))
               )}
             </div>
+            {listsFieldError && <p className="text-sm text-destructive">{listsFieldError}</p>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setListsDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleSaveLists}>Save</Button>

@@ -9,6 +9,28 @@ import { Plus, Trash2, GripVertical, Eye } from "lucide-react";
 import type { CustomNodeType, CustomField, CustomFieldType, NodeBehaviorType, NodeCategory } from "./types";
 import { BEHAVIOR_LABELS, BEHAVIOR_COLORS } from "./types";
 import { useDynamicNodes } from "./DynamicNodeContext";
+import { useToast } from "@/hooks/use-toast";
+import { z } from "zod";
+
+const customFieldSchema = z.object({
+  id: z.string(),
+  name: z.string().trim().min(1, "O nome do campo é obrigatório").max(100, "O nome do campo deve ter menos de 100 caracteres"),
+  type: z.enum(["text", "number", "dropdown", "toggle", "date", "textarea"]),
+  required: z.boolean(),
+  order: z.number(),
+  options: z.array(z.string()).optional(),
+  defaultValue: z.string().optional(),
+}).superRefine((field, ctx) => {
+  if (field.type === "dropdown" && (!field.options || field.options.length === 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["options"], message: "Adicione pelo menos uma opção para o dropdown" });
+  }
+});
+
+const nodeTypeSchema = z.object({
+  name: z.string().trim().min(1, "O nome do tipo de nó é obrigatório").max(100, "O nome deve ter menos de 100 caracteres"),
+  categoryId: z.string().trim().min(1, "Selecione uma categoria"),
+  fields: z.array(customFieldSchema),
+});
 
 const COMMON_EMOJIS = ["⚡", "📧", "🔔", "📄", "🔀", "⏱️", "📊", "✅", "🛑", "📅", "💬", "🌐", "📱", "💰", "🎯", "🔧", "📝", "👤", "🏷️", "📦", "🔗", "⚙️", "🚀", "💡", "🔒", "📣", "🤖", "📈", "🗂️", "✉️"];
 
@@ -29,6 +51,7 @@ interface Props {
 
 export function CreateNodeTypeModal({ open, onClose, editingNodeType }: Props) {
   const { categories, addCategory, addNodeType, updateNodeType } = useDynamicNodes();
+  const { toast } = useToast();
 
   const empty: CustomNodeType = {
     id: `nt_${Date.now()}`,
@@ -91,7 +114,11 @@ export function CreateNodeTypeModal({ open, onClose, editingNodeType }: Props) {
   };
 
   const handleSave = () => {
-    if (!nt.name.trim()) return;
+    const validation = nodeTypeSchema.safeParse(nt);
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.issues[0].message, variant: "destructive" });
+      return;
+    }
     if (editingNodeType) {
       updateNodeType(editingNodeType.id, nt);
     } else {

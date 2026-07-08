@@ -58,6 +58,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
+import { userFormSchema } from "@/lib/validations";
 
 interface RoleOption {
   id: string;
@@ -207,6 +208,7 @@ export function UserFormEnhanced({
   const [rolesByOrg, setRolesByOrg] = useState<Record<string, RoleOption[]>>({});
   const [scopesDialogOpen, setScopesDialogOpen] = useState(false);
   const [selectedMembershipForScopes, setSelectedMembershipForScopes] = useState<{id: string; orgName: string; roleId: string} | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   // Sync with initialTemplateId when it changes (e.g., when editing a different user)
 
@@ -952,6 +954,46 @@ export function UserFormEnhanced({
     });
   };
 
+  /**
+   * Validates the basic profile fields (name, at least one email, password
+   * format) with Zod before delegating to the parent's onSave. Password is
+   * required on create but optional on edit (blank keeps the current one),
+   * so that rule is enforced here rather than in the shared Zod schema.
+   */
+  const validateForm = (): boolean => {
+    const result = userFormSchema.safeParse({
+      name: formData.name,
+      emails,
+      password: formData.password,
+    });
+
+    const nextErrors: Record<string, string> = {};
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+    }
+    if (!isEdit && !formData.password.trim()) {
+      nextErrors.password = t("users.passwordRequired") || "A password é obrigatória";
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({ title: "Dados inválidos", description: firstMessage, variant: "destructive" });
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveClick = () => {
+    if (!validateForm()) return;
+    onSave();
+  };
+
   return (
     <>
     <Card className="h-full flex flex-col">
@@ -1042,7 +1084,9 @@ export function UserFormEnhanced({
                   setFormData({ ...formData, name: e.target.value })
                 }
                 placeholder={t("users.namePlaceholder")}
+                aria-invalid={!!fieldErrors.name}
               />
+              {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
             </div>
 
             {/* Status - only show in edit mode */}
@@ -1073,6 +1117,7 @@ export function UserFormEnhanced({
               emails={emails}
               onChange={setEmails}
             />
+            {fieldErrors.emails && <p className="text-xs text-destructive">{fieldErrors.emails}</p>}
 
             {/* Description - Optional (not controlled by templates) */}
             <div className="space-y-2">
@@ -1108,6 +1153,7 @@ export function UserFormEnhanced({
                     }
                     placeholder={isEdit ? t("users.leaveEmptyToKeep") : t("users.passwordPlaceholder")}
                     className="pr-10"
+                    aria-invalid={!!fieldErrors.password}
                   />
                   <Button
                     type="button"
@@ -1138,6 +1184,7 @@ export function UserFormEnhanced({
                   Gerar
                 </Button>
               </div>
+              {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
               {isEdit && (
                 <p className="text-xs text-muted-foreground">
                   {t("users.passwordChangeHint")}
@@ -1824,7 +1871,7 @@ export function UserFormEnhanced({
             <Button variant="outline" onClick={onCancel}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={onSave} disabled={saving}>
+            <Button onClick={handleSaveClick} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {isEdit ? t("common.save") : t("common.create")}
             </Button>

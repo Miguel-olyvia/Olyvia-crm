@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,16 @@ interface Service {
   }>;
 }
 
+const serviceSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  category_id: z.string().optional().or(z.literal("")),
+  subcategory_id: z.string().optional().or(z.literal("")),
+  service_type: z.string().trim().min(1, "O tipo de serviço é obrigatório."),
+  status: z.string().trim().min(1, "O estado é obrigatório."),
+});
+
 // Helper functions for organization selection compatibility
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
 const getAllOrgIds = (sel: any): string[] => {
@@ -131,6 +142,7 @@ export default function Services() {
     service_type: "both",
     status: "active",
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [priceData, setPriceData] = useState<ServicePriceFormData>({
     purchase: 0,
@@ -288,6 +300,19 @@ export default function Services() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = serviceSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t("common.error") || "Erro", description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
 
     // Determine the primary company - use selected or active company
     const primaryCompanyId = (organizationSelection?.companyId || organizationSelection?.levelSelections?.[0]?.selectedIds?.[0]) || activeCompany?.id || null;
@@ -557,6 +582,7 @@ export default function Services() {
       service_type: "both",
       status: "active",
     });
+    setFieldErrors({});
     setPriceData({
       purchase: 0,
       retail: 0,
@@ -900,7 +926,9 @@ export default function Services() {
                     onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                     required
                     disabled={!!editingService}
+                    className={fieldErrors.sku ? "border-destructive" : ""}
                   />
+                  {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                 </div>
 
                 {/* Name */}
@@ -911,7 +939,9 @@ export default function Services() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 {/* Description */}
@@ -922,7 +952,9 @@ export default function Services() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 {/* Category + Subcategory */}

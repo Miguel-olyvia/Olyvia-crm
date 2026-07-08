@@ -28,6 +28,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument";
+import { purchaseOrderSchema } from "@/lib/validations";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -86,6 +87,7 @@ const PurchaseOrders = () => {
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
@@ -709,6 +711,22 @@ const PurchaseOrders = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = purchaseOrderSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('purchaseOrders.toast.createError'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
+
     if (orderItems.length === 0) {
       toast({
         title: t('purchaseOrders.toast.addAtLeastOneItem'),
@@ -796,6 +814,7 @@ const PurchaseOrders = () => {
         status: "pending",
         notes: "",
       });
+      setFieldErrors({});
       setOrderItems([]);
       loadData();
     } catch (error: any) {
@@ -1073,6 +1092,7 @@ const PurchaseOrders = () => {
                   status: "pending",
                   notes: "",
                 });
+                setFieldErrors({});
                 setOrderItems([]);
                 setOrganizationSelection({
                   tenantId: "",
@@ -1120,6 +1140,7 @@ const PurchaseOrders = () => {
                           ))}
                         </SelectContent>
                       </Select>
+                      {fieldErrors.supplier_id && <p className="text-xs text-destructive">{fieldErrors.supplier_id}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="order_date">{t('purchaseOrders.form.orderDate')} *</Label>
@@ -1129,7 +1150,9 @@ const PurchaseOrders = () => {
                         value={formData.order_date}
                         onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
                         required
+                        className={fieldErrors.order_date ? "border-destructive" : ""}
                       />
+                      {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="expected_delivery">{t('purchaseOrders.form.expectedDelivery')}</Label>

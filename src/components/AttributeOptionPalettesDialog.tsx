@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { z } from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,6 +87,18 @@ interface Category {
   parent_id: string | null;
   level?: number;
 }
+
+// Validates a new option group / palette before it is persisted.
+const optionGroupSchema = z.object({
+  name: z.string().trim().min(1, "O nome do grupo é obrigatório").max(150, "O nome deve ter menos de 150 caracteres"),
+  description: z.string().trim().max(500, "A descrição deve ter menos de 500 caracteres").optional().or(z.literal("")),
+});
+
+// Validates a new option value being added to a group/palette.
+const optionValueSchema = z.object({
+  value_text: z.string().trim().min(1, "O valor da opção é obrigatório").max(100, "O valor deve ter menos de 100 caracteres"),
+  hex_color: z.string().trim().regex(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, "Cor inválida").optional().or(z.literal("")),
+});
 
 export default function AttributeOptionPalettesDialog({
   open,
@@ -258,8 +271,14 @@ export default function AttributeOptionPalettesDialog({
   };
 
   const handleCreateGroup = async () => {
-    if (!newGroupName.trim() || !activeCompany?.id) return;
-    
+    if (!activeCompany?.id) return;
+
+    const validation = optionGroupSchema.safeParse({ name: newGroupName, description: newGroupDescription });
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+
     try {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) throw new Error("User not authenticated");
@@ -406,8 +425,12 @@ export default function AttributeOptionPalettesDialog({
   };
 
   const handleAddValueToGroup = async (groupId: string) => {
-    if (!newValueText.trim()) return;
-    
+    const validation = optionValueSchema.safeParse({ value_text: newValueText, hex_color: newValueHexColor });
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+
     try {
       const existingValues = groupValues[groupId] || [];
       

@@ -19,6 +19,7 @@ import { DocumentsTab } from "@/components/shared/DocumentsTab";
 import {
   FileText, Calendar, User, Euro, Send, Pencil, Loader2, Clock, Building2, Hash, CreditCard, StickyNote, CheckCircle, AlertTriangle, Paperclip, Edit3,
 } from "lucide-react";
+import { contractDetailFormSchema, contractPromptValuesSchema } from "@/lib/validations";
 
 interface PromptVar { key: string; label: string; description: string | null; promptType: "text" | "textarea" | "number" | "date"; }
 
@@ -102,6 +103,23 @@ export function ContractDetailDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const formValidation = contractDetailFormSchema.safeParse(formData);
+    if (!formValidation.success) {
+      toast.error(formValidation.error.issues[0]?.message || "Dados do contrato inválidos");
+      return;
+    }
+    if (isNew && !formData.proposal_id) {
+      toast.error("Seleccione uma proposta");
+      return;
+    }
+
+    const promptValidation = contractPromptValuesSchema.safeParse(promptValues);
+    if (!promptValidation.success) {
+      toast.error(promptValidation.error.issues[0]?.message || "Valores de contrato inválidos");
+      return;
+    }
+
     const payload: any = contract ? { ...formData, id: contract.id } : { ...formData };
     onSave(payload);
   };

@@ -28,6 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useTranslation } from "@/hooks/useTranslation";
+import { profileFieldsSchema, profilePasswordSchema } from "@/lib/validations";
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -164,6 +165,16 @@ export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps
   };
 
   const handleUpdateProfile = async () => {
+    const validation = profileFieldsSchema.safeParse({ firstName, lastName });
+    if (!validation.success) {
+      toast({
+        title: t("common.error"),
+        description: validation.error.issues[0]?.message || t("profile.updateError"),
+        variant: "destructive",
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       const { error } = await supabase.auth.updateUser({
@@ -191,19 +202,11 @@ export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps
   };
 
   const handleUpdatePassword = async () => {
-    if (newPassword !== confirmPassword) {
+    const validation = profilePasswordSchema.safeParse({ newPassword, confirmPassword });
+    if (!validation.success) {
       toast({
         title: t("common.error"),
-        description: t("profile.passwordMismatch"),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      toast({
-        title: t("common.error"),
-        description: t("profile.passwordTooShort"),
+        description: validation.error.issues[0]?.message || t("profile.passwordTooShort"),
         variant: "destructive",
       });
       return;

@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight, Check, MapPin, CalendarDays, Building2, Brie
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { campaignWizardSetupSchema } from "@/lib/validations";
 
 interface FormData {
   name: string;
@@ -194,18 +195,22 @@ export const CampaignFormWizard = ({
     const errors: Record<string, string> = {};
 
     switch (step) {
-      case 0:
-        if (!formData.name.trim()) {
-          errors.name = t('campaigns.toast.nameRequired') || "Nome é obrigatório";
-        } else if (formData.name.trim().length < 3) {
-          errors.name = t('campaigns.validation.nameMinLength') || "Nome deve ter pelo menos 3 caracteres";
-        } else if (formData.name.trim().length > 100) {
-          errors.name = t('campaigns.validation.nameMaxLength') || "Nome deve ter no máximo 100 caracteres";
-        }
-        if ((formData.selected_source_ids?.length || 0) > 0 && !formData.default_source_id) {
-          errors.sources = t('campaigns.validation.defaultSourceRequired') || "Selecione uma fonte primária";
+      case 0: {
+        const validation = campaignWizardSetupSchema.safeParse({
+          name: formData.name,
+          type: formData.type,
+          selected_source_ids: formData.selected_source_ids,
+          default_source_id: formData.default_source_id,
+        });
+        if (!validation.success) {
+          validation.error.errors.forEach((err) => {
+            const key = err.path[0]?.toString();
+            if (!key) return;
+            errors[key] = err.message;
+          });
         }
         break;
+      }
       case 1:
         break;
       case 2:

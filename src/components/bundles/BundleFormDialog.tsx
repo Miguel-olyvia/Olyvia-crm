@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -44,6 +45,22 @@ interface Bundle {
   valid_to: string | null;
 }
 
+const bundleSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  pricing_type: z.enum(["custom", "fixed_discount", "fixed_price", "percentage_discount"]),
+  status: z.enum(["draft", "active", "discontinued"]),
+  fixed_price: z.number().min(0, "O preço fixo deve ser positivo.").optional().nullable(),
+  discount_percent: z.number().min(0, "O desconto deve ser pelo menos 0.").max(100, "O desconto deve ser no máximo 100.").optional().nullable(),
+  discount_fixed: z.number().min(0, "O desconto fixo deve ser positivo.").optional().nullable(),
+  valid_from: z.string().optional().or(z.literal("")),
+  valid_to: z.string().optional().or(z.literal("")),
+}).refine((data) => !data.valid_from || !data.valid_to || data.valid_to >= data.valid_from, {
+  message: "A data de fim de validade deve ser posterior à data de início.",
+  path: ["valid_to"],
+});
+
 interface BundleFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -59,6 +76,7 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
   const [bundleId, setBundleId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   const [formData, setFormData] = useState({
     sku: "",
@@ -104,19 +122,40 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
       setBundleId(null);
     }
     setActiveTab("details");
+    setFieldErrors({});
   }, [bundle, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.sku || !formData.name) {
+
+    const validation = bundleSchema.safeParse({
+      sku: formData.sku,
+      name: formData.name,
+      description: formData.description,
+      pricing_type: formData.pricing_type,
+      status: formData.status,
+      fixed_price: formData.pricing_type === 'fixed_price' ? (parseFloat(formData.fixed_price) || null) : null,
+      discount_percent: formData.pricing_type === 'percentage_discount' ? (parseFloat(formData.discount_percent) || null) : null,
+      discount_fixed: formData.pricing_type === 'fixed_discount' ? (parseFloat(formData.discount_fixed) || null) : null,
+      valid_from: formData.valid_from,
+      valid_to: formData.valid_to,
+    });
+
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
       toast({
         title: t('common.error'),
-        description: t('bundles.form.requiredFields'),
+        description: firstError.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     if (!activeCompany?.id) {
       toast({
@@ -224,7 +263,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.fixed_price}
               onChange={(e) => setFormData({ ...formData, fixed_price: e.target.value })}
               placeholder="0.00"
+              className={fieldErrors.fixed_price ? "border-destructive" : ""}
             />
+            {fieldErrors.fixed_price && <p className="text-sm text-destructive">{fieldErrors.fixed_price}</p>}
           </div>
         );
       case 'percentage_discount':
@@ -240,7 +281,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.discount_percent}
               onChange={(e) => setFormData({ ...formData, discount_percent: e.target.value })}
               placeholder="10"
+              className={fieldErrors.discount_percent ? "border-destructive" : ""}
             />
+            {fieldErrors.discount_percent && <p className="text-sm text-destructive">{fieldErrors.discount_percent}</p>}
           </div>
         );
       case 'fixed_discount':
@@ -255,7 +298,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.discount_fixed}
               onChange={(e) => setFormData({ ...formData, discount_fixed: e.target.value })}
               placeholder="5.00"
+              className={fieldErrors.discount_fixed ? "border-destructive" : ""}
             />
+            {fieldErrors.discount_fixed && <p className="text-sm text-destructive">{fieldErrors.discount_fixed}</p>}
           </div>
         );
       default:
@@ -308,7 +353,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                         onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                         placeholder="BUNDLE-001"
                         required
+                        className={fieldErrors.sku ? "border-destructive" : ""}
                       />
+                      {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="status">{t('bundles.form.status')}</Label>
@@ -336,7 +383,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder={t('bundles.form.namePlaceholder')}
                       required
+                      className={fieldErrors.name ? "border-destructive" : ""}
                     />
+                    {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                   </div>
 
                   <div className="space-y-2">
@@ -347,7 +396,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       placeholder={t('bundles.form.descriptionPlaceholder')}
                       rows={3}
+                      className={fieldErrors.description ? "border-destructive" : ""}
                     />
+                    {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                   </div>
 
                   <div className="border-t pt-4">
@@ -386,7 +437,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                           type="date"
                           value={formData.valid_from}
                           onChange={(e) => setFormData({ ...formData, valid_from: e.target.value })}
+                          className={fieldErrors.valid_from ? "border-destructive" : ""}
                         />
+                        {fieldErrors.valid_from && <p className="text-sm text-destructive">{fieldErrors.valid_from}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="valid_to">{t('bundles.form.validTo')}</Label>
@@ -395,7 +448,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                           type="date"
                           value={formData.valid_to}
                           onChange={(e) => setFormData({ ...formData, valid_to: e.target.value })}
+                          className={fieldErrors.valid_to ? "border-destructive" : ""}
                         />
+                        {fieldErrors.valid_to && <p className="text-sm text-destructive">{fieldErrors.valid_to}</p>}
                       </div>
                     </div>
                   </div>

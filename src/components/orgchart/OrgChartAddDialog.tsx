@@ -9,6 +9,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Link as LinkIcon } from 'lucide-react';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { z } from 'zod';
+
+const createOrgSchema = z.object({
+  newName: z.string().trim().min(1, "O nome é obrigatório").max(200, "O nome deve ter menos de 200 caracteres"),
+});
+
+const associateOrgSchema = z.object({
+  selectedId: z.string().trim().min(1, "Selecione uma organização"),
+});
 
 interface OrgChartAddDialogProps {
   open: boolean;
@@ -104,7 +113,11 @@ export function OrgChartAddDialog({
   };
 
   const handleCreateNew = async () => {
-    if (!newName.trim()) return;
+    const validation = createOrgSchema.safeParse({ newName });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -139,7 +152,11 @@ export function OrgChartAddDialog({
   };
 
   const handleAssociateExisting = async () => {
-    if (!selectedId) return;
+    const validation = associateOrgSchema.safeParse({ selectedId });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();

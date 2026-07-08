@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { z } from "zod";
 import DOMPurify from "dompurify";
 import { sanitizeRichHtml } from "@/utils/sanitize";
 import { supabase } from "@/integrations/supabase/client";
@@ -147,6 +148,16 @@ const STAGE_TABLES: Record<string, string> = {
   quotes: "quote_workflow_stages",
 };
 
+// Validation schema for the fields the user directly types into the editor
+// (name/subject/body). Applied on save so the template — which is later
+// merged with lead/client data and sent to external recipients — always has
+// the minimum required content.
+const emailTemplateFormSchema = z.object({
+  name: z.string().trim().min(1, "O nome do template é obrigatório").max(200, "O nome deve ter menos de 200 caracteres"),
+  subject: z.string().trim().min(1, "O assunto é obrigatório").max(300, "O assunto deve ter menos de 300 caracteres"),
+  body_html: z.string().trim().min(1, "O corpo do email é obrigatório"),
+});
+
 export interface CustomVarDef { key: string; label: string; example: string }
 
 export interface EmailTemplateData {
@@ -185,6 +196,7 @@ export default function EmailTemplateEditorDialog({ open, onOpenChange, template
     body_html: "", variables: [], custom_variables: [], is_active: true, is_system: false,
   });
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [stages, setStages] = useState<{ key: string; label: string }[]>([]);
   const [showPreview, setShowPreview] = useState(true);
   const [delayUnit, setDelayUnit] = useState<"hours" | "days">("hours");
@@ -447,6 +459,21 @@ export default function EmailTemplateEditorDialog({ open, onOpenChange, template
 
   const handleSave = async (activate?: boolean) => {
     if (!activeCompany?.id) return;
+
+    const validation = emailTemplateFormSchema.safeParse({
+      name: form.name,
+      subject: form.subject,
+      body_html: form.body_html,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
     setSaving(true);
     const payload: any = {
       organization_id: activeCompany.id,
@@ -522,7 +549,8 @@ export default function EmailTemplateEditorDialog({ open, onOpenChange, template
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nome do Template</Label>
-                    <Input value={form.name} onChange={e => updateField("name", e.target.value)} placeholder="Ex: Primeiro Contacto" />
+                    <Input value={form.name} onChange={e => updateField("name", e.target.value)} placeholder="Ex: Primeiro Contacto" className={fieldErrors.name ? "border-destructive" : ""} />
+                    {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Módulo</Label>
@@ -638,7 +666,9 @@ export default function EmailTemplateEditorDialog({ open, onOpenChange, template
                     value={form.subject}
                     onChange={e => updateField("subject", e.target.value)}
                     placeholder="Ex: {{company_name}} — Recebemos o seu pedido"
+                    className={fieldErrors.subject ? "border-destructive" : ""}
                   />
+                  {fieldErrors.subject && <p className="text-xs text-destructive">{fieldErrors.subject}</p>}
                   {form.subject && (
                     <p className="text-xs text-muted-foreground mt-1">
                       <Eye className="h-3 w-3 inline mr-1" />
@@ -650,7 +680,8 @@ export default function EmailTemplateEditorDialog({ open, onOpenChange, template
                 {/* Body editor */}
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Corpo do Email</Label>
-                  <div className="border rounded-lg overflow-hidden bg-background">
+                  {fieldErrors.body_html && <p className="text-xs text-destructive">{fieldErrors.body_html}</p>}
+                  <div className={`border rounded-lg overflow-hidden bg-background ${fieldErrors.body_html ? "border-destructive" : ""}`}>
                     {/* Toolbar */}
                     <div className="flex items-center gap-1 p-2 border-b bg-muted/30 flex-wrap">
                       {[

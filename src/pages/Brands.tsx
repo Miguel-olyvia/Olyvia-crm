@@ -45,6 +45,7 @@ import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { brandFormSchema } from "@/lib/validations";
 
 interface Brand {
   id: string;
@@ -71,6 +72,7 @@ export default function Brands() {
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -179,6 +181,22 @@ export default function Brands() {
       toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
       return;
     }
+
+    const validation = brandFormSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
 
     setSubmitting(true);
     try {
@@ -318,6 +336,7 @@ export default function Brands() {
 
   const resetForm = () => {
     setEditingBrand(null);
+    setFieldErrors({});
     setFormData({
       name: "",
       slug: "",
@@ -411,7 +430,9 @@ export default function Brands() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -422,10 +443,12 @@ export default function Brands() {
                     onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                     placeholder={t('brands.form.slugPlaceholder')}
                     disabled={!!editingBrand}
+                    className={fieldErrors.slug ? "border-destructive" : ""}
                   />
                   <p className="text-xs text-muted-foreground">
                     {t('brands.form.slugHint')}
                   </p>
+                  {fieldErrors.slug && <p className="text-sm text-destructive">{fieldErrors.slug}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -435,7 +458,9 @@ export default function Brands() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -446,7 +471,9 @@ export default function Brands() {
                     value={formData.website}
                     onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                     placeholder={t('brands.form.websitePlaceholder')}
+                    className={fieldErrors.website ? "border-destructive" : ""}
                   />
+                  {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -457,7 +484,9 @@ export default function Brands() {
                     value={formData.logo_url}
                     onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })}
                     placeholder={t('brands.form.logoUrlPlaceholder')}
+                    className={fieldErrors.logo_url ? "border-destructive" : ""}
                   />
+                  {fieldErrors.logo_url && <p className="text-sm text-destructive">{fieldErrors.logo_url}</p>}
                 </div>
 
                 <OrganizationFormSection

@@ -46,6 +46,7 @@ import { CampaignFormPreview } from "@/components/campaigns/CampaignFormPreview"
 import { CampaignRoutingRules } from "@/components/campaigns/CampaignRoutingRules";
 import { CampaignBrandingConfig } from "@/components/campaigns/CampaignBrandingConfig";
 import { CampaignFormBuilder } from "@/components/campaigns/CampaignFormBuilder";
+import { campaignSchema } from "@/lib/validations";
 
 interface LeadSource {
   id: string;
@@ -371,11 +372,23 @@ const Campaigns = () => {
     if (e) e.preventDefault();
     if (submitLockRef.current) return;
 
-    if (!formData.name) {
-      setFieldErrors({ name: t('campaigns.toast.nameRequired') });
+    const validation = campaignSchema.safeParse({
+      name: formData.name,
+      organization_id: formData.organization_id,
+      country_code: formData.country_code,
+      source_id: formData.default_source_id || formData.source_id,
+      form_id: formData.form_id,
+      selected_district_ids: formData.selected_district_ids,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('campaigns.toast.validationError'),
-        description: t('campaigns.toast.nameRequired'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;

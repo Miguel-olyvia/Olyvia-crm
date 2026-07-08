@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -222,6 +223,20 @@ const getTemplateIcon = (iconValue: string) => {
   return found?.icon || FileText;
 };
 
+// ─── Validation ──────────────────────────────────────────────
+
+const dealNeedSchema = z.object({
+  title: z.string().trim().min(1, "O título é obrigatório.").max(200, "O título deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  priority: z.enum(["alta", "media", "baixa"]),
+  status: z.enum(["pendente", "em_analise", "orcamentado", "cancelado"]),
+  estimate_min: z.number().min(0, "O valor mínimo deve ser positivo.").max(999999999, "O valor mínimo é demasiado elevado."),
+  estimate_max: z.number().min(0, "O valor máximo deve ser positivo.").max(999999999, "O valor máximo é demasiado elevado."),
+}).refine((data) => data.estimate_max === 0 || data.estimate_min === 0 || data.estimate_max >= data.estimate_min, {
+  message: "O valor máximo deve ser maior ou igual ao valor mínimo.",
+  path: ["estimate_max"],
+});
+
 // ─── Component ───────────────────────────────────────────────
 
 export function DealNeedsSection({ dealId, organizationId, readOnly = false }: DealNeedsSectionProps) {
@@ -233,6 +248,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const [editingNeed, setEditingNeed] = useState<DealNeed | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [expandedNeeds, setExpandedNeeds] = useState<Set<string>>(new Set());
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   // Company config
@@ -433,6 +449,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     setFormEstimateMin(""); setFormEstimateMax(""); setFormInternalNotes("");
     setFormTemplateId(null); setFormFieldValues({}); setFormMeasurements({});
     setLinkedItems([]); setFormChecklist([]);
+    setFieldErrors({});
     updateTabVisibility(null);
   };
 
@@ -575,10 +592,27 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
   // ─── Submit ─────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!formTitle.trim()) {
-      toast({ title: "Erro", description: "O título é obrigatório.", variant: "destructive" });
+    const validation = dealNeedSchema.safeParse({
+      title: formTitle,
+      description: formDescription,
+      priority: formPriority,
+      status: formStatus,
+      estimate_min: parseFloat(formEstimateMin) || 0,
+      estimate_max: parseFloat(formEstimateMax) || 0,
+    });
+
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
       return;
     }
+    setFieldErrors({});
+
     setSavingNeed(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -1147,7 +1181,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                 <div className="space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Identificação</Label>
-                    <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder='Ex: "Casa de banho", "Website corporativo", "Consultoria fiscal"' className="h-10 text-sm font-medium" />
+                    <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder='Ex: "Casa de banho", "Website corporativo", "Consultoria fiscal"' className={cn("h-10 text-sm font-medium", fieldErrors.title && "border-destructive")} />
+                    {fieldErrors.title && <p className="text-xs text-destructive">{fieldErrors.title}</p>}
                   </div>
                 </div>
 
@@ -1200,15 +1235,17 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                       <Label className="text-xs text-muted-foreground">Mínimo (€)</Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
-                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMin} onChange={e => setFormEstimateMin(e.target.value)} className="pl-7 h-9" />
+                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMin} onChange={e => setFormEstimateMin(e.target.value)} className={cn("pl-7 h-9", fieldErrors.estimate_min && "border-destructive")} />
                       </div>
+                      {fieldErrors.estimate_min && <p className="text-xs text-destructive">{fieldErrors.estimate_min}</p>}
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Máximo (€)</Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
-                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMax} onChange={e => setFormEstimateMax(e.target.value)} className="pl-7 h-9" />
+                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMax} onChange={e => setFormEstimateMax(e.target.value)} className={cn("pl-7 h-9", fieldErrors.estimate_max && "border-destructive")} />
                       </div>
+                      {fieldErrors.estimate_max && <p className="text-xs text-destructive">{fieldErrors.estimate_max}</p>}
                     </div>
                   </div>
                 </div>

@@ -54,6 +54,7 @@ import { BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs"
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { productAttributeSchema, productAttributeEditSchema } from "@/lib/validations";
 
 interface ProductAttribute {
   id: string;
@@ -89,6 +90,7 @@ export default function ProductAttributes() {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<ProductAttribute | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     code: "",
     label: "",
@@ -206,6 +208,23 @@ export default function ProductAttributes() {
       toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
       return;
     }
+
+    const schema = editingAttribute ? productAttributeEditSchema : productAttributeSchema;
+    const validation = schema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -416,6 +435,7 @@ export default function ProductAttributes() {
       selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -582,7 +602,9 @@ export default function ProductAttributes() {
                       placeholder={t('productAttributes.form.codePlaceholder')}
                       required
                       disabled={!!editingAttribute}
+                      className={fieldErrors.code ? "border-destructive" : ""}
                     />
+                    {fieldErrors.code && <p className="text-xs text-destructive">{fieldErrors.code}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="label">{t('productAttributes.form.label')}</Label>
@@ -592,7 +614,9 @@ export default function ProductAttributes() {
                       onChange={(e) => setFormData({ ...formData, label: e.target.value })}
                       placeholder={t('productAttributes.form.labelPlaceholder')}
                       required
+                      className={fieldErrors.label ? "border-destructive" : ""}
                     />
+                    {fieldErrors.label && <p className="text-xs text-destructive">{fieldErrors.label}</p>}
                   </div>
                 </div>
 
@@ -624,7 +648,9 @@ export default function ProductAttributes() {
                         value={formData.unit}
                         onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                         placeholder={t('productAttributes.form.unitPlaceholder')}
+                        className={fieldErrors.unit ? "border-destructive" : ""}
                       />
+                      {fieldErrors.unit && <p className="text-xs text-destructive">{fieldErrors.unit}</p>}
                     </div>
                   )}
                 </div>

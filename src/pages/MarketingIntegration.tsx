@@ -51,6 +51,7 @@ import { HelpButton } from "@/components/HelpButton";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { marketingTokenNameSchema } from "@/lib/validations";
 
 interface CampaignToken {
   id: string;
@@ -93,6 +94,7 @@ export default function MarketingIntegration() {
   const [showTokenDialog, setShowTokenDialog] = useState(false);
   const [newlyGeneratedToken, setNewlyGeneratedToken] = useState<string | null>(null);
   const [visibleTokens, setVisibleTokens] = useState<Set<string>>(new Set());
+  const [tokenNameError, setTokenNameError] = useState<string | null>(null);
   
   // API Tester state
   const [apiEndpoint, setApiEndpoint] = useState<string>("get-campaign-form");
@@ -186,6 +188,15 @@ export default function MarketingIntegration() {
       toast.error("Selecione uma campanha");
       return;
     }
+
+    const validation = marketingTokenNameSchema.safeParse({ newTokenName });
+    if (!validation.success) {
+      const message = validation.error.errors[0]?.message || "Nome de token inválido";
+      setTokenNameError(message);
+      toast.error(message);
+      return;
+    }
+    setTokenNameError(null);
 
     try {
       const campaignName = campaigns.find(c => c.id === selectedCampaign)?.name || "Campanha";
@@ -1869,7 +1880,7 @@ if (!createResult.is_complete) {
                     Gere tokens de API para integrar campanhas específicas no seu site
                   </CardDescription>
                 </div>
-                <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
+                <Dialog open={showTokenDialog} onOpenChange={(open) => { setShowTokenDialog(open); if (!open) setTokenNameError(null); }}>
                   <DialogTrigger asChild>
                     <Button className="flex items-center gap-2">
                       <Plus className="h-4 w-4" />
@@ -1901,15 +1912,17 @@ if (!createResult.is_complete) {
                       </div>
                       <div className="space-y-2">
                         <Label>Nome do Token (opcional)</Label>
-                        <Input 
+                        <Input
                           placeholder="Ex: Website Principal"
                           value={newTokenName}
-                          onChange={(e) => setNewTokenName(e.target.value)}
+                          onChange={(e) => { setNewTokenName(e.target.value); setTokenNameError(null); }}
+                          className={tokenNameError ? "border-destructive" : ""}
                         />
+                        {tokenNameError && <p className="text-sm text-destructive">{tokenNameError}</p>}
                       </div>
                     </div>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowTokenDialog(false)}>
+                      <Button variant="outline" onClick={() => { setShowTokenDialog(false); setTokenNameError(null); }}>
                         Cancelar
                       </Button>
                       <Button onClick={generateToken}>

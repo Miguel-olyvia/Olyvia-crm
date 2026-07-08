@@ -47,6 +47,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useCompany } from "@/contexts/CompanyContext";
+import { serviceFeeSchema } from "@/lib/validations";
 
 interface ServiceFeeType {
   id: string;
@@ -81,6 +82,7 @@ export default function ServiceFees() {
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -227,14 +229,28 @@ export default function ServiceFees() {
       if (!user) throw new Error(t('serviceFees.toast.notAuthenticated'));
 
       // Validation
-      if (!formData.name.trim()) {
+      const amountBeingUsed = formData.calculation_type === "PERCENTAGE" ? formData.percentage : formData.fixed_amount;
+      const feeValidation = serviceFeeSchema.safeParse({
+        name: formData.name,
+        service_id: formData.service_id,
+        amount: amountBeingUsed,
+      });
+      if (!feeValidation.success) {
+        const errors: Record<string, string> = {};
+        feeValidation.error.errors.forEach((err) => {
+          const key = err.path[0]?.toString();
+          if (key === "amount") errors[formData.calculation_type === "PERCENTAGE" ? "percentage" : "fixed_amount"] = err.message;
+          else if (key) errors[key] = err.message;
+        });
+        setFieldErrors(errors);
         toast({
           title: t('serviceFees.toast.nameRequired'),
-          description: t('serviceFees.toast.enterName'),
+          description: feeValidation.error.errors[0]?.message,
           variant: "destructive",
         });
         return;
       }
+      setFieldErrors({});
 
       // Use activeCompany if not set in form (for consistency)
       const companyIdToUse = formData.organization_id || activeCompany?.id;
@@ -536,7 +552,9 @@ export default function ServiceFees() {
                   setFormData({ ...formData, name: e.target.value })
                 }
                 placeholder={t('serviceFees.form.namePlaceholder')}
+                className={fieldErrors.name ? "border-destructive" : ""}
               />
+              {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
@@ -640,7 +658,9 @@ export default function ServiceFees() {
                     setFormData({ ...formData, percentage: e.target.value })
                   }
                   placeholder={t('serviceFees.form.percentagePlaceholder')}
+                  className={fieldErrors.percentage ? "border-destructive" : ""}
                 />
+                {fieldErrors.percentage && <p className="text-sm text-destructive">{fieldErrors.percentage}</p>}
               </div>
             ) : (
               <div className="space-y-2">
@@ -655,7 +675,9 @@ export default function ServiceFees() {
                     setFormData({ ...formData, fixed_amount: e.target.value })
                   }
                   placeholder={t('serviceFees.form.fixedAmountPlaceholder')}
+                  className={fieldErrors.fixed_amount ? "border-destructive" : ""}
                 />
+                {fieldErrors.fixed_amount && <p className="text-sm text-destructive">{fieldErrors.fixed_amount}</p>}
               </div>
             )}
 

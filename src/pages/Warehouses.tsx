@@ -34,6 +34,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExportImport";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { warehouseSchema } from "@/lib/validations";
 
 type WarehouseData = Database["public"]["Tables"]["warehouses"]["Row"];
 
@@ -48,6 +49,7 @@ const Warehouses = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: "",
     code: "",
@@ -93,6 +95,22 @@ const Warehouses = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = warehouseSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t("warehouses.toast.error"),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -194,6 +212,7 @@ const Warehouses = () => {
       is_active: true,
     });
     setEditingWarehouse(null);
+    setFieldErrors({});
   };
 
   const handleExport = () => {
@@ -407,7 +426,9 @@ const Warehouses = () => {
                         setFormData({ ...formData, name: e.target.value })
                       }
                       required
+                      className={fieldErrors.name ? "border-destructive" : ""}
                     />
+                    {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                   </div>
                   <div>
                     <Label htmlFor="code">{t("warehouses.form.code")} *</Label>
@@ -418,7 +439,9 @@ const Warehouses = () => {
                         setFormData({ ...formData, code: e.target.value })
                       }
                       required
+                      className={fieldErrors.code ? "border-destructive" : ""}
                     />
+                    {fieldErrors.code && <p className="text-xs text-destructive">{fieldErrors.code}</p>}
                   </div>
                 </div>
                 <div>
@@ -483,7 +506,9 @@ const Warehouses = () => {
                       onChange={(e) =>
                         setFormData({ ...formData, capacity: e.target.value })
                       }
+                      className={fieldErrors.capacity ? "border-destructive" : ""}
                     />
+                    {fieldErrors.capacity && <p className="text-xs text-destructive">{fieldErrors.capacity}</p>}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -507,7 +532,9 @@ const Warehouses = () => {
                       onChange={(e) =>
                         setFormData({ ...formData, email: e.target.value })
                       }
+                      className={fieldErrors.email ? "border-destructive" : ""}
                     />
+                    {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

@@ -41,6 +41,7 @@ import {
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
+import { leadContactSchema } from "@/lib/validations";
 
 interface Lead {
   id: string;
@@ -802,8 +803,22 @@ export function AnewLeadContactDialog({
   }, [scheduleVisit, assignedTo, visitDate, visitTime, visitDuration, checkAssigneeConflicts]);
 
   const handleRegisterContact = async () => {
-    if (!lead || !contactResult) {
-      toast({ title: "Selecione um resultado do contacto", variant: "destructive" });
+    if (!lead) return;
+
+    const validation = leadContactSchema.safeParse({
+      contactResult,
+      status: newStatus,
+      notes,
+      assignedTo,
+    });
+
+    if (!validation.success) {
+      const firstError = validation.error.errors[0];
+      toast({
+        title: "Erro de validação",
+        description: firstError.message,
+        variant: "destructive",
+      });
       return;
     }
 

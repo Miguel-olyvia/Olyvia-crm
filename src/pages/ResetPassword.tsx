@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff } from "lucide-react";
 import olyviaIcon from "@/assets/olyvia-icon.png";
+import { passwordResetSchema } from "@/lib/validations";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -39,19 +40,11 @@ const ResetPassword = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (password.length < MIN_PASSWORD_LENGTH) {
+    const validation = passwordResetSchema.safeParse({ password, confirmPassword });
+    if (!validation.success) {
       toast({
         title: "Erro",
-        description: `A password deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      toast({
-        title: "Erro",
-        description: "As passwords não coincidem.",
+        description: validation.error.issues[0]?.message || "Dados inválidos.",
         variant: "destructive",
       });
       return;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { z } from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,6 +77,24 @@ interface RangeTier {
 }
 
 const RANGE_SELECT_COLS = "id, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, range_type";
+
+// Validates a fixed/both-pricing option row's price add-on before it is persisted.
+const valueRowPriceSchema = z.object({
+  price: z.number().min(0, "O preço deve ser positivo").max(999999, "O preço é demasiado elevado"),
+});
+
+// Validates a price-range tier before it is persisted. For linear ranges the
+// max must be greater than the min (0 is treated as "open-ended", so it is
+// exempt from the comparison).
+const rangeTierPriceSchema = z.object({
+  min_value: z.number().min(0, "O valor mínimo deve ser positivo"),
+  max_value: z.number().min(0, "O valor máximo deve ser positivo"),
+  price_per_unit: z.number().min(0, "O preço por unidade deve ser positivo").max(999999, "O preço por unidade é demasiado elevado"),
+  range_type: z.string(),
+}).refine(
+  (tier) => tier.range_type !== "linear" || tier.max_value === 0 || tier.max_value > tier.min_value,
+  { message: "O valor máximo deve ser maior que o mínimo", path: ["max_value"] }
+);
 
 const mapRangeRow = (r: any, source: "product" | "category" | "global"): RangeTier => ({
   id: r.id,
@@ -374,6 +393,31 @@ export default function ProductConfigurableOptionsDialog({
   };
 
   const handleSave = async () => {
+    // Validate every dirty row/tier before writing anything — avoids partial
+    // saves where some prices are persisted and others are silently skipped.
+    for (const [attrId, rows] of Object.entries(valueRows)) {
+      for (const row of rows) {
+        if (!row.dirty) continue;
+        const result = valueRowPriceSchema.safeParse({ price: row.price });
+        if (!result.success) {
+          const attrLabel = allAttributes.find(a => a.id === attrId)?.label || attrId;
+          toast({ title: "Erro de validação", description: `${attrLabel} (${row.display_name}): ${result.error.errors[0].message}`, variant: "destructive" });
+          return;
+        }
+      }
+    }
+    for (const [attrId, tiers] of Object.entries(rangeTiers)) {
+      for (const tier of tiers) {
+        if (!tier.dirty) continue;
+        const result = rangeTierPriceSchema.safeParse(tier);
+        if (!result.success) {
+          const attrLabel = allAttributes.find(a => a.id === attrId)?.label || attrId;
+          toast({ title: "Erro de validação", description: `${attrLabel}: ${result.error.errors[0].message}`, variant: "destructive" });
+          return;
+        }
+      }
+    }
+
     setSaving(true);
     try {
       // Save fixed/both option prices

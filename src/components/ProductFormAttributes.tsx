@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -42,6 +43,19 @@ interface ResolvedOption {
   hex_color: string | null;
 }
 
+// Validates a newly-assigned attribute selection.
+const attributeAssignmentSchema = z.object({
+  attribute_id: z.string().trim().min(1, "Selecione um atributo"),
+});
+
+// Validates the free-text value of an assigned attribute before it is
+// committed upward via onChange.
+const attributeValueTextSchema = z.string().trim().max(500, "O valor deve ter menos de 500 caracteres");
+
+// Validates the numeric value of an assigned attribute before it is
+// committed upward via onChange.
+const attributeValueNumberSchema = z.number().finite("Valor numérico inválido");
+
 interface ProductFormAttributesProps {
   attributes: AttributeFormValue[];
   onChange: (attributes: AttributeFormValue[]) => void;
@@ -55,6 +69,7 @@ export default function ProductFormAttributes({ attributes, onChange, productId,
   const [availableAttributes, setAvailableAttributes] = useState<ProductAttribute[]>([]);
   const [newAttributeId, setNewAttributeId] = useState<string>("");
   const [resolvedOptions, setResolvedOptions] = useState<Record<string, ResolvedOption[]>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadAttributes();
@@ -205,7 +220,8 @@ export default function ProductFormAttributes({ attributes, onChange, productId,
   };
 
   const handleAddAttribute = () => {
-    if (!newAttributeId) return;
+    const validation = attributeAssignmentSchema.safeParse({ attribute_id: newAttributeId });
+    if (!validation.success) return;
 
     const attribute = availableAttributes.find(a => a.id === newAttributeId);
     if (!attribute) return;
@@ -246,6 +262,26 @@ export default function ProductFormAttributes({ attributes, onChange, productId,
   };
 
   const handleValueChange = (attributeId: string, field: string, value: any) => {
+    if (field === 'value_text' && typeof value === 'string') {
+      const result = attributeValueTextSchema.safeParse(value);
+      if (!result.success) {
+        setFieldErrors(prev => ({ ...prev, [attributeId]: result.error.errors[0].message }));
+        return;
+      }
+    }
+    if (field === 'value_number') {
+      const result = attributeValueNumberSchema.safeParse(value);
+      if (!result.success) {
+        setFieldErrors(prev => ({ ...prev, [attributeId]: result.error.errors[0].message }));
+        return;
+      }
+    }
+    setFieldErrors(prev => {
+      if (!(attributeId in prev)) return prev;
+      const next = { ...prev };
+      delete next[attributeId];
+      return next;
+    });
     onChange(attributes.map(av =>
       av.attribute_id === attributeId ? { ...av, [field]: value } : av
     ));
@@ -410,6 +446,9 @@ export default function ProductFormAttributes({ attributes, onChange, productId,
                     </div>
                     <div className="max-w-xs">
                       {renderValueInput(av)}
+                      {fieldErrors[av.attribute_id] && (
+                        <p className="text-xs text-destructive mt-1">{fieldErrors[av.attribute_id]}</p>
+                      )}
                     </div>
                   </div>
                   <Button

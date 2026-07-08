@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { passwordResetSchema } from "@/lib/validations";
 
 interface FirstLoginModalProps {
   open: boolean;
@@ -22,13 +23,9 @@ export function FirstLoginModal({ open, onPasswordChanged }: FirstLoginModalProp
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (password.length < 8) {
-      toast({ title: "Password demasiado curta", description: "A password deve ter pelo menos 8 caracteres.", variant: "destructive" });
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      toast({ title: "Passwords não coincidem", description: "As passwords introduzidas não são iguais.", variant: "destructive" });
+    const validation = passwordResetSchema.safeParse({ password, confirmPassword });
+    if (!validation.success) {
+      toast({ title: "Erro", description: validation.error.issues[0]?.message || "Dados inválidos.", variant: "destructive" });
       return;
     }
 

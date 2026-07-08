@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
+import { scheduleResourceSchema } from '@/lib/validations';
 import { ResourceServiceAreas } from './ResourceServiceAreas';
 import type { ScheduleResource } from '@/types/scheduling';
 
@@ -33,9 +35,11 @@ export function ScheduleResourceDialog({
 }: ScheduleResourceDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  
-  const canEdit = resource 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const canEdit = resource
     ? hasPermission('scheduling.resources.edit') 
     : hasPermission('scheduling.resources.create');
   
@@ -62,6 +66,7 @@ export function ScheduleResourceDialog({
         color: resource?.color || '#10b981',
         max_daily_capacity: resource?.max_daily_capacity || 8,
       });
+      setFieldErrors({});
     }
   }, [open, resource]);
 
@@ -74,7 +79,22 @@ export function ScheduleResourceDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || isViewOnly) return;
+    if (isViewOnly) return;
+
+    const validation = scheduleResourceSchema.safeParse({
+      name: formData.name,
+      resource_type: formData.resource_type,
+      color: formData.color,
+      max_daily_capacity: formData.max_daily_capacity,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast({ title: validation.error.errors[0].message, variant: 'destructive' });
+      return;
+    }
+    setFieldErrors({});
 
     setLoading(true);
     try {
@@ -199,7 +219,9 @@ export function ScheduleResourceDialog({
               onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
               placeholder={t('scheduling.resource.namePlaceholder')}
               required
+              className={fieldErrors.name ? 'border-destructive' : ''}
             />
+            {fieldErrors.name && <p className="text-sm text-destructive mt-1">{fieldErrors.name}</p>}
           </div>
 
           <div className="space-y-2">
@@ -295,7 +317,9 @@ export function ScheduleResourceDialog({
               max={24}
               value={formData.max_daily_capacity}
               onChange={(e) => setFormData(f => ({ ...f, max_daily_capacity: Number(e.target.value) }))}
+              className={fieldErrors.max_daily_capacity ? 'border-destructive' : ''}
             />
+            {fieldErrors.max_daily_capacity && <p className="text-sm text-destructive mt-1">{fieldErrors.max_daily_capacity}</p>}
           </div>
 
           <ResourceServiceAreas resourceId={resource?.id} disabled={isViewOnly} />

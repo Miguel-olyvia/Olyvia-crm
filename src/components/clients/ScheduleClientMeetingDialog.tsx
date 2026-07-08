@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { clientMeetingScheduleSchema } from "@/lib/validations";
 
 interface ScheduleClientMeetingDialogProps {
   open: boolean;
@@ -61,10 +62,19 @@ export function ScheduleClientMeetingDialog({
   };
 
   const handleSchedule = async () => {
-    if (!scheduledAt) {
-      toast({ title: "Data/hora obrigatória", variant: "destructive" });
+    const validation = clientMeetingScheduleSchema.safeParse({
+      subject,
+      notes,
+      channel,
+      scheduledAt,
+    });
+
+    if (!validation.success) {
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
       return;
     }
+
     setSaving(true);
     try {
       const { error } = await supabase.rpc("rpc_schedule_client_meeting", {

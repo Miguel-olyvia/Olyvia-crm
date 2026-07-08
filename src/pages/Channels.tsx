@@ -20,6 +20,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { channelSchema } from "@/lib/validations";
 import {
   Table,
   TableBody,
@@ -57,6 +58,8 @@ const Channels = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -126,14 +129,25 @@ const Channels = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.campaign_id) {
+    const validation = channelSchema.safeParse({
+      name: formData.name,
+      type: formData.type,
+      campaign_id: formData.campaign_id,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('channels.toast.validationError'),
-        description: t('channels.toast.required'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -190,14 +204,25 @@ const Channels = () => {
     e.preventDefault();
     if (!editingChannel) return;
 
-    if (!editFormData.name || !editFormData.campaign_id) {
+    const validation = channelSchema.safeParse({
+      name: editFormData.name,
+      type: editFormData.type,
+      campaign_id: editFormData.campaign_id,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setEditFieldErrors(errors);
       toast({
         title: t('channels.toast.validationError'),
-        description: t('channels.toast.required'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setEditFieldErrors({});
 
     try {
       const { error } = await supabase
@@ -378,6 +403,7 @@ const Channels = () => {
                         ))}
                       </SelectContent>
                     </Select>
+                    {fieldErrors.campaign_id && <p className="text-sm text-destructive">{fieldErrors.campaign_id}</p>}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -389,7 +415,9 @@ const Channels = () => {
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         placeholder={t('channels.form.namePlaceholder')}
                         required
+                        className={fieldErrors.name ? "border-destructive" : ""}
                       />
+                      {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -644,6 +672,7 @@ const Channels = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {editFieldErrors.campaign_id && <p className="text-sm text-destructive">{editFieldErrors.campaign_id}</p>}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -655,7 +684,9 @@ const Channels = () => {
                       onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                       placeholder={t('channels.form.namePlaceholder')}
                       required
+                      className={editFieldErrors.name ? "border-destructive" : ""}
                     />
+                    {editFieldErrors.name && <p className="text-sm text-destructive">{editFieldErrors.name}</p>}
                   </div>
 
                   <div className="space-y-2">

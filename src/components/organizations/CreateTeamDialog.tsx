@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { Star } from "lucide-react";
+import { toast } from "sonner";
+import { teamFormSchema } from "@/lib/validations";
 import type { Team, TeamFormData } from "@/hooks/useOrganizationTeams";
 
 interface MemberOption {
@@ -100,15 +102,25 @@ export function CreateTeamDialog({
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !leaderId) return;
+    const validation = teamFormSchema.safeParse({
+      name,
+      description,
+      icon,
+      leader_id: leaderId,
+      member_ids: Array.from(selectedMembers),
+    });
+    if (!validation.success) {
+      toast.error(validation.error.issues[0]?.message || "Dados do grupo inválidos");
+      return;
+    }
     setSubmitting(true);
     const data: TeamFormData = {
-      name: name.trim(),
-      icon,
-      description: description.trim(),
-      leader_id: leaderId,
+      name: validation.data.name,
+      icon: validation.data.icon,
+      description: validation.data.description || "",
+      leader_id: validation.data.leader_id,
       reports_to_team_id: reportsTo,
-      member_ids: Array.from(selectedMembers),
+      member_ids: validation.data.member_ids,
     };
     const ok = await onSubmit(data);
     setSubmitting(false);

@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import olyviaIcon from "@/assets/olyvia-icon.png";
+import { authLoginSchema, authSignupSchema } from "@/lib/validations";
 
 type AuthMode = "login" | "register" | "forgot-password";
 
@@ -91,17 +92,14 @@ const Auth = () => {
   const trimmedEmail = email.trim().toLowerCase();
 
   const validateForm = (): string | null => {
-    if (!trimmedEmail) return "Introduza o seu email.";
-
     if (mode === "register") {
-      if (!fullName.trim()) return "Introduza o seu nome completo.";
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        return `A password deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
-      }
+      const result = authSignupSchema.safeParse({ fullName, email: trimmedEmail, password });
+      return result.success ? null : result.error.issues[0]?.message ?? "Dados inválidos.";
     }
 
-    if ((mode === "login" || mode === "register") && !password) {
-      return "Introduza a sua password.";
+    if (mode === "login") {
+      const result = authLoginSchema.safeParse({ email: trimmedEmail, password });
+      return result.success ? null : result.error.issues[0]?.message ?? "Dados inválidos.";
     }
 
     return null;

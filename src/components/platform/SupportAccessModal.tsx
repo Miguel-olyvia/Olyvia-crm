@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, ShieldAlert } from "lucide-react";
+import { supportAccessRequestSchema } from "@/lib/validations";
 
 interface Organization {
   id: string;
@@ -94,12 +95,9 @@ export function SupportAccessModal({ open, onOpenChange }: SupportAccessModalPro
   }
 
   function handleSubmit() {
-    if (!orgId) {
-      toast.error("Seleccione uma organização.");
-      return;
-    }
-    if (reason.trim().length < 10) {
-      toast.error("O motivo deve ter pelo menos 10 caracteres.");
+    const validation = supportAccessRequestSchema.safeParse({ orgId, reason, duration });
+    if (!validation.success) {
+      toast.error(validation.error.issues[0].message);
       return;
     }
     requestMutation.mutate();

@@ -51,6 +51,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { productSubcategorySchema } from "@/lib/validations";
 
 interface ProductSubcategory {
   id: string;
@@ -95,6 +96,7 @@ export default function ProductSubcategories() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [subcategoryToDelete, setSubcategoryToDelete] = useState<string | null>(null);
   const [editingSubcategory, setEditingSubcategory] = useState<ProductSubcategory | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [catPricesOpen, setCatPricesOpen] = useState(false);
   const [catPricesCategory, setCatPricesCategory] = useState<{ id: string; name: string } | null>(null);
   const [formData, setFormData] = useState({
@@ -455,14 +457,21 @@ export default function ProductSubcategories() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.parent_id) {
+    const validation = productSubcategorySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('productSubcategories.toast.parentRequired'),
-        description: t('productSubcategories.toast.parentRequiredDesc'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     const companyId = canSelectCompanyInForm ? formData.organization_id : selectedCompanyId;
 
@@ -603,6 +612,7 @@ export default function ProductSubcategories() {
     });
     setFormParentCategories([]);
     setEditingSubcategory(null);
+    setFieldErrors({});
   };
 
   const handleCloseDialog = () => {
@@ -698,6 +708,7 @@ export default function ProductSubcategories() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.parent_id && <p className="text-xs text-destructive">{fieldErrors.parent_id}</p>}
                 </div>
                 <div>
                   <Label htmlFor="name">{t('productSubcategories.form.name')}</Label>
@@ -707,7 +718,9 @@ export default function ProductSubcategories() {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder={t('productSubcategories.form.namePlaceholder')}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                 </div>
                 <div>
                   <Label htmlFor="slug">{t('productSubcategories.form.slug')}</Label>

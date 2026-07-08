@@ -83,6 +83,7 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS } from "@/constants/fieldMappings";
 import { IconGallery, LucideIcon, normalizeLucideIconName } from "@/components/campaigns/IconGallery";
+import { formBuilderFieldSchema, formBuilderStepTitleSchema } from "@/lib/validations";
 
 // Field Types with icons
 const FIELD_TYPES = [
@@ -888,10 +889,16 @@ export function FormBuilder({
   };
 
   const handleAddField = async () => {
-    if (!newField.field_key || !newField.field_label) {
-      toast({ title: "Preencha a chave e o label", variant: "destructive" });
+    const validation = formBuilderFieldSchema.safeParse(newField);
+    if (!validation.success) {
+      toast({
+        title: "Dados do campo inválidos",
+        description: validation.error.issues[0]?.message,
+        variant: "destructive",
+      });
       return;
     }
+    const validatedField = validation.data;
 
     const activeStep = steps.find(s => s.id === activeStepId);
     if (!activeStep) return;
@@ -904,16 +911,16 @@ export function FormBuilder({
       .from("form_fields")
       .insert({
         form_id: formId,
-        field_key: newField.field_key.toLowerCase().replace(/\s+/g, "_"),
-        field_label: newField.field_label,
-        field_type: newField.field_type,
-        is_required: newField.is_required,
+        field_key: validatedField.field_key.toLowerCase().replace(/\s+/g, "_"),
+        field_label: validatedField.field_label,
+        field_type: validatedField.field_type,
+        is_required: validatedField.is_required,
         is_unique: false,
         is_active: true,
         sort_order: stepFields.length,
         step_number: activeStep.step_number,
-        placeholder: newField.placeholder || null,
-        help_text: newField.help_text || null,
+        placeholder: validatedField.placeholder || null,
+        help_text: validatedField.help_text || null,
         created_by: businessUserId,
       })
       .select()
@@ -989,12 +996,23 @@ export function FormBuilder({
 
   /** Locale-aware step title writer. */
   const handleUpdateStepTitle = async (stepId: string, value: string) => {
-    if (isDefaultLocale) {
-      await supabase.from("form_steps").update({ step_title: value }).eq("id", stepId);
-      setSteps(steps.map((s) => (s.id === stepId ? { ...s, step_title: value } : s)));
+    const result = formBuilderStepTitleSchema.safeParse({ step_title: value });
+    if (!result.success) {
+      toast({
+        title: "Título inválido",
+        description: result.error.issues[0]?.message,
+        variant: "destructive",
+      });
       return;
     }
-    await updateOverlay((cfg) => setOverlayValue(cfg, "steps", stepId, activeLocale, "title", value));
+    const validatedTitle = result.data.step_title ?? "";
+
+    if (isDefaultLocale) {
+      await supabase.from("form_steps").update({ step_title: validatedTitle }).eq("id", stepId);
+      setSteps(steps.map((s) => (s.id === stepId ? { ...s, step_title: validatedTitle } : s)));
+      return;
+    }
+    await updateOverlay((cfg) => setOverlayValue(cfg, "steps", stepId, activeLocale, "title", validatedTitle));
   };
 
   /**

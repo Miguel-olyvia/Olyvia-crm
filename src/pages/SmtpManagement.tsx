@@ -16,6 +16,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Mail, Plus, Pencil, Trash2, Loader2, Star, CheckCircle, XCircle, Send, Building2, User, ArrowRight, Globe, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { smtpConfigSchema } from "@/lib/validations";
 
 interface SmtpConfig {
   id: string;
@@ -79,6 +80,7 @@ export default function SmtpManagement() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadSmtpConfigs();
@@ -119,12 +121,14 @@ export default function SmtpManagement() {
     setEditingId(null);
     setFormData(defaultFormData);
     setShowPassword(false);
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
   const openEditDialog = (smtp: SmtpConfig, mode: "user" | "org") => {
     setDialogMode(mode);
     setEditingId(smtp.id);
+    setFieldErrors({});
     setFormData({
       name: smtp.name || "",
       smtp_host: smtp.smtp_host,
@@ -186,10 +190,17 @@ export default function SmtpManagement() {
   };
 
   const handleSave = async () => {
-    if (!formData.smtp_host || !formData.from_email || !formData.name) {
-      toast({ title: "Erro", description: "Preencha todos os campos obrigatórios", variant: "destructive" });
+    const validation = smtpConfigSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({ title: "Erro", description: validation.error.errors[0]?.message || "Preencha todos os campos obrigatórios", variant: "destructive" });
       return;
     }
+    setFieldErrors({});
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -442,16 +453,19 @@ export default function SmtpManagement() {
             <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
               <div className="space-y-2">
                 <Label>Nome do perfil *</Label>
-                <Input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="ex: Gmail Principal" />
+                <Input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="ex: Gmail Principal" className={fieldErrors.name ? "border-destructive" : ""} />
+                {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Servidor SMTP *</Label>
-                  <Input value={formData.smtp_host} onChange={e => setFormData(p => ({ ...p, smtp_host: e.target.value }))} placeholder="smtp.gmail.com" />
+                  <Input value={formData.smtp_host} onChange={e => setFormData(p => ({ ...p, smtp_host: e.target.value }))} placeholder="smtp.gmail.com" className={fieldErrors.smtp_host ? "border-destructive" : ""} />
+                  {fieldErrors.smtp_host && <p className="text-sm text-destructive">{fieldErrors.smtp_host}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label>Porta</Label>
-                  <Input type="number" value={formData.smtp_port} onChange={e => setFormData(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} />
+                  <Input type="number" value={formData.smtp_port} onChange={e => setFormData(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} className={fieldErrors.smtp_port ? "border-destructive" : ""} />
+                  {fieldErrors.smtp_port && <p className="text-sm text-destructive">{fieldErrors.smtp_port}</p>}
                 </div>
               </div>
               <div className="space-y-2">
@@ -483,7 +497,9 @@ export default function SmtpManagement() {
                     value={formData.smtp_username}
                     onChange={e => setFormData(p => ({ ...p, smtp_username: e.target.value }))}
                     placeholder="user@gmail.com"
+                    className={fieldErrors.smtp_username ? "border-destructive" : ""}
                   />
+                  {fieldErrors.smtp_username && <p className="text-sm text-destructive">{fieldErrors.smtp_username}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label>Password *</Label>
@@ -496,13 +512,16 @@ export default function SmtpManagement() {
                     value={formData.smtp_password}
                     onChange={e => setFormData(p => ({ ...p, smtp_password: e.target.value }))}
                     placeholder="••••••••"
+                    className={fieldErrors.smtp_password ? "border-destructive" : ""}
                   />
+                  {fieldErrors.smtp_password && <p className="text-sm text-destructive">{fieldErrors.smtp_password}</p>}
                 </div>
               </form>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Email do remetente *</Label>
-                  <Input value={formData.from_email} onChange={e => setFormData(p => ({ ...p, from_email: e.target.value }))} placeholder="vendas@empresa.com" />
+                  <Input value={formData.from_email} onChange={e => setFormData(p => ({ ...p, from_email: e.target.value }))} placeholder="vendas@empresa.com" className={fieldErrors.from_email ? "border-destructive" : ""} />
+                  {fieldErrors.from_email && <p className="text-sm text-destructive">{fieldErrors.from_email}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label>Nome do remetente</Label>
@@ -512,7 +531,8 @@ export default function SmtpManagement() {
               {dialogMode === "user" && (
                 <div className="space-y-2">
                   <Label>Reply-To (opcional)</Label>
-                  <Input value={formData.reply_to} onChange={e => setFormData(p => ({ ...p, reply_to: e.target.value }))} placeholder="resposta@empresa.com" />
+                  <Input value={formData.reply_to} onChange={e => setFormData(p => ({ ...p, reply_to: e.target.value }))} placeholder="resposta@empresa.com" className={fieldErrors.reply_to ? "border-destructive" : ""} />
+                  {fieldErrors.reply_to && <p className="text-sm text-destructive">{fieldErrors.reply_to}</p>}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">

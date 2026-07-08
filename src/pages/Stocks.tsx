@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -44,6 +45,19 @@ type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   warehouses?: { name: string };
 };
 
+const stockSchema = z.object({
+  product_id: z.string().trim().min(1, "O produto é obrigatório."),
+  warehouse_id: z.string().trim().min(1, "O armazém é obrigatório."),
+  quantity: z.number().min(0, "A quantidade deve ser positiva.").max(999999999, "A quantidade é demasiado elevada."),
+  minimum_quantity: z.number().min(0, "A quantidade mínima deve ser positiva.").max(999999999, "A quantidade mínima é demasiado elevada."),
+  maximum_quantity: z.number().min(0, "A quantidade máxima deve ser positiva.").max(999999999, "A quantidade máxima é demasiado elevada."),
+  reorder_point: z.number().min(0, "O ponto de reencomenda deve ser positivo.").max(999999999, "O ponto de reencomenda é demasiado elevado."),
+  location: z.string().trim().max(255, "A localização deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+}).refine((data) => data.maximum_quantity === 0 || data.maximum_quantity >= data.minimum_quantity, {
+  message: "A quantidade máxima deve ser maior ou igual à quantidade mínima.",
+  path: ["maximum_quantity"],
+});
+
 const Stocks = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -64,6 +78,7 @@ const Stocks = () => {
     reorder_point: 0,
     location: "",
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -144,6 +159,19 @@ const Stocks = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = stockSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t('stocks.toast.error'), description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -239,6 +267,7 @@ const Stocks = () => {
       location: "",
     });
     setEditingStock(null);
+    setFieldErrors({});
   };
 
   const openEditDialog = (stock: Stock) => {
@@ -466,6 +495,7 @@ const Stocks = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.product_id && <p className="text-sm text-destructive mt-1">{fieldErrors.product_id}</p>}
                 </div>
                 <div>
                   <Label htmlFor="warehouse_id">{t('stocks.form.warehouse')}</Label>
@@ -486,6 +516,7 @@ const Stocks = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.warehouse_id && <p className="text-sm text-destructive mt-1">{fieldErrors.warehouse_id}</p>}
                 </div>
                 <div>
                   <Label htmlFor="quantity">{t('stocks.form.quantity')}</Label>
@@ -500,7 +531,9 @@ const Stocks = () => {
                       })
                     }
                     required
+                    className={fieldErrors.quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="minimum_quantity">{t('stocks.form.minimumQuantity')}</Label>
@@ -514,7 +547,9 @@ const Stocks = () => {
                         minimum_quantity: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.minimum_quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.minimum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.minimum_quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="maximum_quantity">{t('stocks.form.maximumQuantity')}</Label>
@@ -528,7 +563,9 @@ const Stocks = () => {
                         maximum_quantity: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.maximum_quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.maximum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.maximum_quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
@@ -542,7 +579,9 @@ const Stocks = () => {
                         reorder_point: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.reorder_point ? "border-destructive" : ""}
                   />
+                  {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
                 </div>
                 <div>
                   <Label htmlFor="location">{t('stocks.form.location')}</Label>
@@ -553,7 +592,9 @@ const Stocks = () => {
                       setFormData({ ...formData, location: e.target.value })
                     }
                     placeholder={t('stocks.form.locationPlaceholder')}
+                    className={fieldErrors.location ? "border-destructive" : ""}
                   />
+                  {fieldErrors.location && <p className="text-sm text-destructive mt-1">{fieldErrors.location}</p>}
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button

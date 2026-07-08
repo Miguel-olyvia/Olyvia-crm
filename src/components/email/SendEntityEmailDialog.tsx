@@ -16,6 +16,7 @@ import { getVariablesForModule, replaceVariables, resolveEntityVariables } from 
 import { useNavigate } from "react-router-dom";
 import type { PdfAttachment } from "@/components/contacts/RegisterCallDialog";
 import { MultiEmailInput } from "@/components/email/MultiEmailInput";
+import { sendEntityEmailSchema } from "@/lib/validations";
 
 interface SendEntityEmailDialogProps {
   open: boolean;
@@ -58,6 +59,7 @@ export function SendEntityEmailDialog({
   const [attachments, setAttachments] = useState<File[]>([]);
   const [userId, setUserId] = useState<string>("");
   const [variablesLoading, setVariablesLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Reset when dialog opens
   useEffect(() => {
@@ -166,11 +168,25 @@ export function SendEntityEmailDialog({
     description: v.category,
   }));
 
-  async function handleSend() {
-    if (!to || !subject) {
-      toast({ title: "Preenche o destinatário e o assunto", variant: "destructive" });
-      return;
+  function validateForm(): boolean {
+    const result = sendEntityEmailSchema.safeParse({ to, cc, subject, body: bodyHtml });
+    if (!result.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({ title: "Dados inválidos", description: firstMessage, variant: "destructive" });
+      return false;
     }
+    setFieldErrors({});
+    return true;
+  }
+
+  async function handleSend() {
+    if (!validateForm()) return;
     setSending(true);
     try {
       // Build attachments array for edge function
@@ -362,6 +378,7 @@ export function SendEntityEmailDialog({
                 )}
               </Label>
               <MultiEmailInput values={recipients} onChange={setRecipients} primaryEmail={to} placeholder="email@exemplo.com" />
+              {fieldErrors.to && <p className="text-xs text-destructive">{fieldErrors.to}</p>}
             </div>
             {showCc && (
               <div className="space-y-1">
@@ -370,6 +387,7 @@ export function SendEntityEmailDialog({
                   <button type="button" onClick={() => { setShowCc(false); setCc([]); }} className="text-xs text-muted-foreground hover:underline">Remover CC</button>
                 </Label>
                 <MultiEmailInput values={cc} onChange={setCc} placeholder="copia@email.com" />
+                {fieldErrors.cc && <p className="text-xs text-destructive">{fieldErrors.cc}</p>}
               </div>
             )}
 
@@ -385,7 +403,8 @@ export function SendEntityEmailDialog({
                   onSelect={handleTemplateSelect}
                 />
               </div>
-              <Input id="email-subject" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Assunto do email" />
+              <Input id="email-subject" value={subject} onChange={e => setSubject(e.target.value)} placeholder="Assunto do email" aria-invalid={!!fieldErrors.subject} />
+              {fieldErrors.subject && <p className="text-xs text-destructive">{fieldErrors.subject}</p>}
             </div>
 
             {/* Body */}
@@ -398,6 +417,7 @@ export function SendEntityEmailDialog({
                 variables={editorVariables}
                 minHeight="200px"
               />
+              {fieldErrors.body && <p className="text-xs text-destructive">{fieldErrors.body}</p>}
             </div>
 
             {/* Attachments */}

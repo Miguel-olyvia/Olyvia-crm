@@ -13,6 +13,8 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useScheduleSettings, ScheduleSettings, ScheduleHoliday } from '@/hooks/useScheduleSettings';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
+import { scheduleSettingsSchema, scheduleHolidaySchema } from '@/lib/validations';
 import { format } from 'date-fns';
 import { enUS, pt, es, fr, de } from 'date-fns/locale';
 
@@ -25,13 +27,16 @@ interface ScheduleSettingsDialogProps {
 export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: ScheduleSettingsDialogProps) {
   const { t, language } = useTranslation();
   const { hasPermission } = usePermissions();
+  const { toast } = useToast();
   const { settings, holidays, loading, saveSettings, addHoliday, deleteHoliday } = useScheduleSettings(companyId);
-  
+
   const canEditSettings = hasPermission('scheduling.settings');
-  
+
   const [formData, setFormData] = useState<Partial<ScheduleSettings>>({});
   const [newHoliday, setNewHoliday] = useState({ name: '', date: '' });
   const [saving, setSaving] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [holidayErrors, setHolidayErrors] = useState<Record<string, string>>({});
 
   const locale = useMemo(() => {
     const locales: Record<string, typeof enUS> = { en: enUS, pt, es, fr, de };
@@ -66,6 +71,27 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   }, [settings]);
 
   const handleSave = async () => {
+    const validation = scheduleSettingsSchema.safeParse({
+      country_code: formData.country_code || 'PT',
+      timezone: formData.timezone || '',
+      week_starts_on: formData.week_starts_on ?? 1,
+      working_hours_start: formData.working_hours_start || '09:00',
+      working_hours_end: formData.working_hours_end || '18:00',
+      working_days: formData.working_days || [1, 2, 3, 4, 5],
+      weekend_color: formData.weekend_color || '#f3f4f6',
+      holiday_color: formData.holiday_color || '#fef3c7',
+      show_weekends: formData.show_weekends ?? true,
+      show_holidays: formData.show_holidays ?? true,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast({ title: validation.error.errors[0].message, variant: 'destructive' });
+      return;
+    }
+    setFieldErrors({});
+
     setSaving(true);
     await saveSettings(formData);
     setSaving(false);
@@ -92,8 +118,19 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   };
 
   const handleAddHoliday = async () => {
-    if (!newHoliday.name || !newHoliday.date) return;
-    
+    const validation = scheduleHolidaySchema.safeParse({
+      name: newHoliday.name,
+      holiday_date: newHoliday.date,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setHolidayErrors(errors);
+      toast({ title: validation.error.errors[0].message, variant: 'destructive' });
+      return;
+    }
+    setHolidayErrors({});
+
     await addHoliday({
       name: newHoliday.name,
       holiday_date: newHoliday.date,
@@ -157,7 +194,9 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                   value={formData.timezone || ''}
                   onChange={(e) => setFormData(prev => ({ ...prev, timezone: e.target.value }))}
                   placeholder="Europe/Lisbon"
+                  className={fieldErrors.timezone ? 'border-destructive' : ''}
                 />
+                {fieldErrors.timezone && <p className="text-sm text-destructive mt-1">{fieldErrors.timezone}</p>}
               </div>
             </div>
 
@@ -272,18 +311,25 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
           </TabsContent>
 
           <TabsContent value="holidays" className="space-y-4 mt-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder={t('scheduling.settings.holidayName')}
-                value={newHoliday.name}
-                onChange={(e) => setNewHoliday(prev => ({ ...prev, name: e.target.value }))}
-              />
-              <Input
-                type="date"
-                value={newHoliday.date}
-                onChange={(e) => setNewHoliday(prev => ({ ...prev, date: e.target.value }))}
-                className="w-40"
-              />
+            <div className="flex gap-2 items-start">
+              <div className="flex-1">
+                <Input
+                  placeholder={t('scheduling.settings.holidayName')}
+                  value={newHoliday.name}
+                  onChange={(e) => setNewHoliday(prev => ({ ...prev, name: e.target.value }))}
+                  className={holidayErrors.name ? 'border-destructive' : ''}
+                />
+                {holidayErrors.name && <p className="text-sm text-destructive mt-1">{holidayErrors.name}</p>}
+              </div>
+              <div>
+                <Input
+                  type="date"
+                  value={newHoliday.date}
+                  onChange={(e) => setNewHoliday(prev => ({ ...prev, date: e.target.value }))}
+                  className={`w-40 ${holidayErrors.holiday_date ? 'border-destructive' : ''}`}
+                />
+                {holidayErrors.holiday_date && <p className="text-sm text-destructive mt-1">{holidayErrors.holiday_date}</p>}
+              </div>
               {canEditSettings && (
                 <Button onClick={handleAddHoliday} disabled={!newHoliday.name || !newHoliday.date}>
                   <Plus className="h-4 w-4" />

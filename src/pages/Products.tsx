@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { z } from "zod";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,18 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+
+const productSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  barcode: z.string().trim().max(100, "O código de barras deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  status: z.string().trim().min(1, "O estado é obrigatório."),
+  category_id: z.string().optional().or(z.literal("")),
+  subcategory_id: z.string().optional().or(z.literal("")),
+  brand_id: z.string().optional().or(z.literal("")),
+  product_type: z.enum(["sale", "purchase", "both"]),
+});
 
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
 const getAllOrgIds = (sel: any): string[] => {
@@ -168,7 +181,8 @@ export default function Products() {
     brand_id: "",
     product_type: "sale", // "sale", "purchase", or "both"
   });
-  
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
     companyId: activeCompany?.id || "",
@@ -617,6 +631,19 @@ export default function Products() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = productSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t('common.error'), description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
     if (!activeCompany?.id) {
       toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
       return;
@@ -944,6 +971,7 @@ export default function Products() {
       brand_id: "",
       product_type: "sale",
     });
+    setFieldErrors({});
     setOrganizationSelection(defaultOrgSelection());
     setPriceFormData({
       purchase: 0,
@@ -1856,7 +1884,9 @@ export default function Products() {
                       onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                       required
                       disabled={!!editingProduct}
+                      className={fieldErrors.sku ? "border-destructive" : ""}
                     />
+                    {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="barcode">{t('products.form.barcode')}</Label>
@@ -1864,7 +1894,9 @@ export default function Products() {
                       id="barcode"
                       value={formData.barcode}
                       onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                      className={fieldErrors.barcode ? "border-destructive" : ""}
                     />
+                    {fieldErrors.barcode && <p className="text-sm text-destructive">{fieldErrors.barcode}</p>}
                   </div>
                 </div>
 
@@ -1875,7 +1907,9 @@ export default function Products() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -1885,7 +1919,9 @@ export default function Products() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

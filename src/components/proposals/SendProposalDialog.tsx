@@ -14,6 +14,7 @@ import { TemplateSelector } from "@/components/email-templates/TemplateSelector"
 import { resolveEntityVariables } from "@/utils/emailTemplateVariables";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { MultiEmailInput } from "@/components/email/MultiEmailInput";
+import { sendDocumentEmailSchema } from "@/lib/validations";
 
 interface SendProposalDialogProps {
   open: boolean;
@@ -43,6 +44,7 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
   const [message, setMessage] = useState("");
   const [resolvedVars, setResolvedVars] = useState<Record<string, string>>({});
   const [entityId, setEntityId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open && proposal) {
@@ -108,11 +110,35 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
     setMessage(templateBody);
   };
 
+  const validateForm = (finalRecipients: string[]): boolean => {
+    const result = sendDocumentEmailSchema.safeParse({
+      recipientName,
+      recipientEmail,
+      recipients: finalRecipients,
+    });
+
+    if (!result.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({ title: "Dados inválidos", description: firstMessage, variant: "destructive" });
+      return false;
+    }
+
+    setFieldErrors({});
+    return true;
+  };
+
   const handleSend = async () => {
     if (!proposal || !recipientEmail) return;
+    const finalRecipients = recipients.length ? recipients : [recipientEmail];
+    if (!validateForm(finalRecipients)) return;
     setSending(true);
     try {
-      const finalRecipients = recipients.length ? recipients : [recipientEmail];
       const { data, error } = await supabase.functions.invoke("send-proposal-email", {
         body: { proposal_id: proposal.id, recipient_email: recipientEmail, recipient_name: recipientName, recipients: finalRecipients, cc, subject, message },
       });
@@ -156,7 +182,8 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
 
           <div className="space-y-2">
             <Label htmlFor="recipientName"><User className="h-3 w-3 inline mr-1" />Nome do Destinatário</Label>
-            <Input id="recipientName" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Nome do cliente" />
+            <Input id="recipientName" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Nome do cliente" aria-invalid={!!fieldErrors.recipientName} />
+            {fieldErrors.recipientName && <p className="text-xs text-destructive">{fieldErrors.recipientName}</p>}
           </div>
           <div className="space-y-2">
             <Label className="flex items-center justify-between">
@@ -168,6 +195,9 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
               )}
             </Label>
             <MultiEmailInput values={recipients} onChange={setRecipients} primaryEmail={recipientEmail} placeholder="cliente@email.com" />
+            {(fieldErrors.recipientEmail || fieldErrors.recipients) && (
+              <p className="text-xs text-destructive">{fieldErrors.recipientEmail || fieldErrors.recipients}</p>
+            )}
           </div>
           {showCc && (
             <div className="space-y-2">

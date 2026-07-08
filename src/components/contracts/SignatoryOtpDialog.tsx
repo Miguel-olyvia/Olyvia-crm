@@ -6,6 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { Loader2, ShieldCheck, Phone } from "lucide-react";
 import type { Signatory } from "./SignatoriesPanel";
+import { otpCodeSchema } from "@/lib/validations";
 
 interface SignatoryOtpDialogProps {
   open: boolean;
@@ -61,7 +62,12 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
   };
 
   const handleVerify = async () => {
-    if (!code.trim() || !signatory) return;
+    if (!signatory) return;
+    const validation = otpCodeSchema.safeParse(code);
+    if (!validation.success) {
+      toast.error(validation.error.issues[0]?.message || "Código inválido");
+      return;
+    }
     setVerifying(true);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {

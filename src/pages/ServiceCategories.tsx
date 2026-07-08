@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useCompany } from "@/contexts/CompanyContext";
+import { serviceCategorySchema } from "@/lib/validations";
 
 interface ServiceCategory {
   id: string;
@@ -72,6 +73,7 @@ export default function ServiceCategories() {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ServiceCategory | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<ServiceCategory | null>(null);
   const [formData, setFormData] = useState({
@@ -178,14 +180,21 @@ export default function ServiceCategories() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.organization_id) {
+    const validation = serviceCategorySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('serviceCategories.toast.companyRequired'),
-        description: t('serviceCategories.toast.selectCompany'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -298,6 +307,7 @@ export default function ServiceCategories() {
       organization_id: userCompanies.length === 1 ? userCompanies[0].id : "",
       sort_order: 0,
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -357,6 +367,7 @@ export default function ServiceCategories() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.organization_id && <p className="text-xs text-destructive">{fieldErrors.organization_id}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -366,7 +377,9 @@ export default function ServiceCategories() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">

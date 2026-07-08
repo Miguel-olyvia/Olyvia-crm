@@ -16,6 +16,24 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link2, Unlink } from "lucide-react";
 import { getOrgTypeLabel, OrgType } from "./OrgChartCard";
+import { z } from "zod";
+
+// Association selections must reference orgs that are actually associable
+// (loaded per dialog session); built dynamically since valid IDs change.
+const buildAssociationsSchema = (validIds: Set<string>) =>
+  z.object({
+    selectedIds: z.array(z.string().trim().min(1, "Associação inválida")),
+  }).superRefine((data, ctx) => {
+    data.selectedIds.forEach((id, idx) => {
+      if (!validIds.has(id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectedIds", idx],
+          message: "Associação inválida ou desatualizada. Recarregue e tente novamente.",
+        });
+      }
+    });
+  });
 
 interface OrgAssociationsDialogProps {
   open: boolean;
@@ -133,6 +151,13 @@ export function OrgAssociationsDialog({
   };
 
   const handleSave = async () => {
+    const validIds = new Set(orgs.map(o => o.id));
+    const schema = buildAssociationsSchema(validIds);
+    const validation = schema.safeParse({ selectedIds: Array.from(selected) });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       // Delete all existing associations for this org

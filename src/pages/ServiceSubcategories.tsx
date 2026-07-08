@@ -43,6 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCompany } from "@/contexts/CompanyContext";
+import { serviceSubcategorySchema } from "@/lib/validations";
 import {
   Tooltip,
   TooltipContent,
@@ -104,6 +105,7 @@ export default function ServiceSubcategories() {
     parent_id: "",
     sort_order: 0,
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const loadData = useCallback(async () => {
     try {
@@ -203,14 +205,24 @@ export default function ServiceSubcategories() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.parent_id) {
+    const validation = serviceSubcategorySchema.safeParse({
+      name: formData.name,
+      parent_id: formData.parent_id,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
-        title: t('serviceSubcategories.toast.parentRequired'),
-        description: t('serviceSubcategories.toast.selectParent'),
+        title: t('serviceSubcategories.toast.error'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       // resolveCurrentBusinessUserId() performs its own auth.getUser() internally and
@@ -417,6 +429,7 @@ export default function ServiceSubcategories() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.parent_id && <p className="text-sm text-destructive">{fieldErrors.parent_id}</p>}
                 </div>
 
                 {formData.parent_id && selectedParentCompanyName && (
@@ -436,7 +449,9 @@ export default function ServiceSubcategories() {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder={t('serviceSubcategories.form.namePlaceholder')}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
                 <div>
                   <Label htmlFor="slug">{t('serviceSubcategories.form.slug')}</Label>

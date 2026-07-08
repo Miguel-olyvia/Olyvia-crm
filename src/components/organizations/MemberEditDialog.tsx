@@ -37,6 +37,7 @@ import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PhoneInput } from "@/components/PhoneInput";
+import { memberEditSchema } from "@/lib/validations";
 
 interface MemberEditDialogProps {
   open: boolean;
@@ -111,6 +112,8 @@ export function MemberEditDialog({
 
   // Addresses
   const [addresses, setAddresses] = useState<AddressData[]>([]);
+
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (open && userId) {
@@ -203,11 +206,32 @@ export function MemberEditDialog({
     }
   };
 
-  const handleSave = async () => {
-    if (!formData.name || !formData.email) {
-      toast.error(t("common.required"));
-      return;
+  const validateForm = (): boolean => {
+    const result = memberEditSchema.safeParse({
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      password: formData.password,
+    });
+
+    if (!result.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      const firstMessage = Object.values(nextErrors)[0];
+      toast.error(firstMessage);
+      return false;
     }
+
+    setFieldErrors({});
+    return true;
+  };
+
+  const handleSave = async () => {
+    if (!validateForm()) return;
 
     setSaving(true);
     try {
@@ -412,7 +436,9 @@ export function MemberEditDialog({
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder={t("users.namePlaceholder")}
+                      aria-invalid={!!fieldErrors.name}
                     />
+                    {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -446,7 +472,9 @@ export function MemberEditDialog({
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       placeholder={t("users.emailPlaceholder")}
+                      aria-invalid={!!fieldErrors.email}
                     />
+                    {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
                   </div>
                   <div className="space-y-2">
                     <PhoneInput
@@ -478,6 +506,7 @@ export function MemberEditDialog({
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       placeholder={t("users.leaveEmptyToKeep")}
                       className="pr-10"
+                      aria-invalid={!!fieldErrors.password}
                     />
                     <Button
                       type="button"
@@ -489,6 +518,7 @@ export function MemberEditDialog({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
                   </div>
+                  {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
                   <p className="text-xs text-muted-foreground">{t("users.passwordChangeHint")}</p>
                 </div>
 

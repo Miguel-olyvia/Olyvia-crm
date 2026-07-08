@@ -14,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { formatCurrency } from "@/lib/utils";
+import { z } from "zod";
 import { Package, Wrench, Tag, ChevronDown, Layers, AlertCircle } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -41,6 +42,24 @@ interface ChoiceComponent {
   retail_price: number;
   has_attributes: boolean;
 }
+
+// Choice group config selections: group_id -> selected component_ids. The
+// concrete rules (required, min/max selections) are only known at runtime
+// (loaded per bundle), so the schema is built dynamically from the groups.
+const buildChoiceSelectionsSchema = (groups: ChoiceGroup[]) =>
+  z.record(z.string(), z.array(z.string())).superRefine((selections, ctx) => {
+    for (const group of groups) {
+      if (!group.is_required) continue;
+      const sel = selections[group.id] || [];
+      if (sel.length < group.min_selections) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [group.id],
+          message: `O grupo "${group.name}" requer pelo menos ${group.min_selections} seleção(ões).`,
+        });
+      }
+    }
+  });
 
 interface BundleChoiceConfig {
   choice_selections: Record<string, string[]>; // group_id -> component_ids
@@ -237,19 +256,15 @@ export function BundleChoiceConfigDialog({
   };
 
   const handleSave = () => {
-    // Validate required groups
-    for (const group of groups) {
-      if (group.is_required) {
-        const sel = selections[group.id] || [];
-        if (sel.length < group.min_selections) {
-          toast({
-            title: "Seleção incompleta",
-            description: `O grupo "${group.name}" requer pelo menos ${group.min_selections} seleção(ões).`,
-            variant: "destructive",
-          });
-          return;
-        }
-      }
+    const schema = buildChoiceSelectionsSchema(groups);
+    const validation = schema.safeParse(selections);
+    if (!validation.success) {
+      toast({
+        title: "Seleção incompleta",
+        description: validation.error.issues[0]?.message || "Verifique as seleções do bundle.",
+        variant: "destructive",
+      });
+      return;
     }
 
     onSave({

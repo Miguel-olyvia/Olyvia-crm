@@ -35,6 +35,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { productCategorySchema } from "@/lib/validations";
 
 interface ProductCategory {
   id: string;
@@ -65,6 +66,7 @@ export default function ProductCategories() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [catPricesOpen, setCatPricesOpen] = useState(false);
   const [catPricesCategory, setCatPricesCategory] = useState<{ id: string; name: string } | null>(null);
   const [formData, setFormData] = useState({
@@ -335,6 +337,22 @@ export default function ProductCategories() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = productCategorySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('productSubcategories.toast.notAuthenticated'));
@@ -474,7 +492,7 @@ export default function ProductCategories() {
       slug: "",
       description: "",
       parent_id: "",
-      
+
       sort_order: 0,
     });
     setOrganizationSelection({
@@ -486,6 +504,7 @@ export default function ProductCategories() {
       selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -535,7 +554,9 @@ export default function ProductCategories() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -546,7 +567,9 @@ export default function ProductCategories() {
                     onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                     placeholder={t('productCategories.form.slugPlaceholder')}
                     disabled={!!editingCategory}
+                    className={fieldErrors.slug ? "border-destructive" : ""}
                   />
+                  {fieldErrors.slug && <p className="text-xs text-destructive">{fieldErrors.slug}</p>}
                   <p className="text-xs text-muted-foreground">
                     {t('productCategories.form.slugHint')}
                   </p>

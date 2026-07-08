@@ -42,6 +42,7 @@ import { SignatoriesPanel, type Signatory } from "@/components/contracts/Signato
 import { SignatoryOtpDialog } from "@/components/contracts/SignatoryOtpDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { DocumentPreview } from "@/components/document-editor/DocumentPreview";
+import { contractTemplateFormSchema } from "@/lib/validations";
 
 interface ContractTemplate {
   id: string;
@@ -444,7 +445,18 @@ const ContractTemplates = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.body_html) { toast.error("Preencha o nome e o corpo da minuta"); return; }
+    const validation = contractTemplateFormSchema.safeParse({
+      name: formData.name,
+      body_html: formData.body_html,
+      is_active: formData.is_active,
+      is_default: formData.is_default,
+      signatory_user_id: formData.signatory_user_id,
+      signatory_role_id: formData.signatory_role_id,
+    });
+    if (!validation.success) {
+      toast.error(validation.error.issues[0].message);
+      return;
+    }
     if (editingTemplate) {
       updateMutation.mutate({ ...formData, id: editingTemplate.id });
     } else {

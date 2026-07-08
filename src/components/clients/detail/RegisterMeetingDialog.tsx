@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { clientMeetingRegisterSchema } from "@/lib/validations";
 
 
 interface RegisterMeetingDialogProps {
@@ -62,6 +63,18 @@ export function RegisterMeetingDialog({
   };
 
   const handleSave = async () => {
+    const validation = clientMeetingRegisterSchema.safeParse({
+      subject,
+      location,
+      sentiment,
+    });
+
+    if (!validation.success) {
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
+      return;
+    }
+
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();

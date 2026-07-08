@@ -23,6 +23,7 @@ import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { roleFormSchema } from "@/lib/validations";
 
 interface RoleTemplate {
   id: string;
@@ -539,13 +540,8 @@ export default function Roles() {
   };
 
   const handleSubmit = () => {
-    if (!formData.name) {
-      toast.error("Preencha o nome da role");
-      return;
-    }
-
     const code = formData.code || generateCodeFromName(formData.name);
-    
+
     const data = {
       code,
       name: formData.name,
@@ -553,6 +549,12 @@ export default function Roles() {
       can_sign_contracts: formData.can_sign_contracts,
       permissions: Array.from(selectedPermissions),
     };
+
+    const validation = roleFormSchema.safeParse(data);
+    if (!validation.success) {
+      toast.error(validation.error.issues[0].message);
+      return;
+    }
 
     if (editingRole) {
       updateMutation.mutate({ id: editingRole.id, isSystem: editingRole.is_system, ...data });

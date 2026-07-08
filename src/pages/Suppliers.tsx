@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -35,6 +36,21 @@ interface FilterOrganization {
   id: string;
   name: string;
 }
+
+const supplierSchema = z.object({
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  contact_person: z.string().trim().max(200, "O contacto deve ter menos de 200 caracteres.").optional().or(z.literal("")),
+  email: z.string().trim().email("Formato de email inválido.").max(255, "O email deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  phone: z.string().trim().max(20, "O telefone deve ter menos de 20 caracteres.").optional().or(z.literal("")),
+  address: z.string().trim().max(255, "A morada deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  city: z.string().trim().max(100, "A cidade deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  postal_code: z.string().trim().max(20, "O código postal deve ter menos de 20 caracteres.").optional().or(z.literal("")),
+  country: z.string().trim().max(100, "O país deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  tax_id: z.string().trim().max(50, "O NIF deve ter menos de 50 caracteres.").optional().or(z.literal("")),
+  website: z.string().trim().url("URL do website inválido.").max(255, "O website deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  notes: z.string().trim().max(2000, "As notas devem ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  is_active: z.boolean(),
+});
 
 const Suppliers = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -89,6 +105,7 @@ const Suppliers = () => {
     notes: "",
     is_active: true,
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>({
     tenantId: "",
@@ -325,6 +342,19 @@ const Suppliers = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = supplierSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t("common.error") || "Erro", description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
@@ -409,6 +439,7 @@ const Suppliers = () => {
       notes: "",
       is_active: true,
     });
+    setFieldErrors({});
     setOrganizationSelection({
       tenantId: "",
       companyId: activeCompany?.id || "",
@@ -1021,7 +1052,9 @@ const Suppliers = () => {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contact_person">{t("suppliers.form.contactPerson")}</Label>
@@ -1029,7 +1062,9 @@ const Suppliers = () => {
                     id="contact_person"
                     value={formData.contact_person}
                     onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                    className={fieldErrors.contact_person ? "border-destructive" : ""}
                   />
+                  {fieldErrors.contact_person && <p className="text-sm text-destructive">{fieldErrors.contact_person}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">{t("suppliers.form.email")}</Label>
@@ -1038,7 +1073,9 @@ const Suppliers = () => {
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className={fieldErrors.email ? "border-destructive" : ""}
                   />
+                  {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">{t("suppliers.form.phone")}</Label>
@@ -1046,7 +1083,9 @@ const Suppliers = () => {
                     id="phone"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className={fieldErrors.phone ? "border-destructive" : ""}
                   />
+                  {fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="tax_id">{t("suppliers.form.taxId")}</Label>
@@ -1054,7 +1093,9 @@ const Suppliers = () => {
                     id="tax_id"
                     value={formData.tax_id}
                     onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+                    className={fieldErrors.tax_id ? "border-destructive" : ""}
                   />
+                  {fieldErrors.tax_id && <p className="text-sm text-destructive">{fieldErrors.tax_id}</p>}
                 </div>
                 <div className="col-span-2 space-y-2">
                   <Label htmlFor="address">{t("suppliers.form.address")}</Label>
@@ -1062,7 +1103,9 @@ const Suppliers = () => {
                     id="address"
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    className={fieldErrors.address ? "border-destructive" : ""}
                   />
+                  {fieldErrors.address && <p className="text-sm text-destructive">{fieldErrors.address}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="city">{t("suppliers.form.city")}</Label>
@@ -1070,7 +1113,9 @@ const Suppliers = () => {
                     id="city"
                     value={formData.city}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    className={fieldErrors.city ? "border-destructive" : ""}
                   />
+                  {fieldErrors.city && <p className="text-sm text-destructive">{fieldErrors.city}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="postal_code">{t("suppliers.form.postalCode")}</Label>
@@ -1078,7 +1123,9 @@ const Suppliers = () => {
                     id="postal_code"
                     value={formData.postal_code}
                     onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
+                    className={fieldErrors.postal_code ? "border-destructive" : ""}
                   />
+                  {fieldErrors.postal_code && <p className="text-sm text-destructive">{fieldErrors.postal_code}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">{t("suppliers.form.country")}</Label>
@@ -1086,7 +1133,9 @@ const Suppliers = () => {
                     id="country"
                     value={formData.country}
                     onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                    className={fieldErrors.country ? "border-destructive" : ""}
                   />
+                  {fieldErrors.country && <p className="text-sm text-destructive">{fieldErrors.country}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="website">{t("suppliers.form.website")}</Label>
@@ -1095,7 +1144,9 @@ const Suppliers = () => {
                     type="url"
                     value={formData.website}
                     onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                    className={fieldErrors.website ? "border-destructive" : ""}
                   />
+                  {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
                 </div>
                 <div className="col-span-2 space-y-2">
                   <Label htmlFor="notes">{t("suppliers.form.notes")}</Label>
@@ -1104,7 +1155,9 @@ const Suppliers = () => {
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     rows={3}
+                    className={fieldErrors.notes ? "border-destructive" : ""}
                   />
+                  {fieldErrors.notes && <p className="text-sm text-destructive">{fieldErrors.notes}</p>}
                 </div>
                 <div className="col-span-2 flex items-center gap-2">
                   <Checkbox
