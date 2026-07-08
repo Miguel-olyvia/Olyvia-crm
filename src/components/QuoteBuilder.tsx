@@ -287,8 +287,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
-  const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("quotes.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   
 
   // Resolve descendant org IDs for the active company subtree

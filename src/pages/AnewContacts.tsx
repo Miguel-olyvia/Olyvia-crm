@@ -1003,6 +1003,15 @@ const AnewContacts = () => {
     loadCompanyUsers();
   }, [activeCompany?.id, scopeOrgIds]);
 
+  // SECURITY: the "Comercial" filter must not leak other users' identities beyond
+  // the viewer's contacts.view scope (see src/lib/contacts/scope.ts). ORG keeps the
+  // full roster; TEAM/OWNED/NONE are filtered in-memory from the already-fetched list.
+  const visibleCompanyUsers = useMemo(() => {
+    if (viewScope === "ORG") return companyUsers;
+    const allowedIds = new Set(scopedUserIds);
+    return companyUsers.filter(u => allowedIds.has(u.id));
+  }, [companyUsers, viewScope, scopedUserIds]);
+
 
   const getHealthScore = useCallback((entityId: string, lastInteractionAt: string | null) => {
     const identity = getIdentity(entityId);
@@ -1993,14 +2002,14 @@ const AnewContacts = () => {
                 </div>
 
                 {/* Commercial filter */}
-                {companyUsers.length > 0 && (
+                {visibleCompanyUsers.length > 0 && (
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[10px] text-muted-foreground font-medium">Comercial</span>
                     <Select value={commercialFilter} onValueChange={setCommercialFilter}>
                       <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Comercial" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
-                        {companyUsers.map(u => (
+                        {visibleCompanyUsers.map(u => (
                             <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                           ))}
                       </SelectContent>

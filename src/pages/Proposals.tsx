@@ -172,8 +172,13 @@ const Proposals = () => {
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { t } = useTranslation();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
-  const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("proposals.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   const { alerts: proposalAlerts, dismissAlert: dismissProposalAlert } = useModuleAlerts('proposal', activeCompany?.id);
   const alertSettings = useAlertSettings();
 

@@ -270,7 +270,12 @@ export default function Quotes() {
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const alertSettings = useAlertSettings();
-  const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("quotes.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
 
   // Fetch dashboard stats via RPC (KPIs sempre correctos) + query separada para visualizacoes
   // scopeIds: null = full ORG scope (isFullScope/system admin); array = restrict to these visible quote ids (OWNED/TEAM).

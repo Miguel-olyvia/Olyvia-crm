@@ -394,6 +394,27 @@ export default function AnewLeads() {
   const [comercialUsers, setComercialUsers] = useState<{ id: string; name: string; districts: string[]; org_ids: string[] }[]>([]);
   const [assignOrgFilter, setAssignOrgFilter] = useState<string>("all");
   const [assignOrgTree, setAssignOrgTree] = useState<{ id: string; name: string; type: string; depth: number }[]>([]);
+  // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
+  // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
+  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  const assignableCompanyUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return companyUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return companyUsers.filter(u => allowedIds.has(u.id));
+    }
+    return companyUsers.filter(u => u.id === scopeAnewUserId);
+  }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
+  const assignableComercialUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return comercialUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return comercialUsers.filter(u => allowedIds.has(u.id));
+    }
+    return comercialUsers.filter(u => u.id === scopeAnewUserId);
+  }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [sortColumn, setSortColumn] = useState<string>("created_at");
@@ -4642,7 +4663,7 @@ export default function AnewLeads() {
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
                         <SelectItem value="unassigned">Não Atribuído</SelectItem>
-                        {companyUsers.map(u => (
+                        {assignableCompanyUsers.map(u => (
                           <SelectItem key={u.id} value={u.id}>
                             <div className="flex items-center gap-2">
                               <User className="w-3 h-3" />
@@ -4804,7 +4825,7 @@ export default function AnewLeads() {
               onBulkDelete={handleBulkDelete}
               workflowStages={workflowStages}
               contactResults={contactResults}
-              companyUsers={companyUsers}
+              companyUsers={assignableCompanyUsers}
               isDeleting={isBulkDeleting}
               isUpdating={isBulkUpdating}
             />
@@ -6024,9 +6045,9 @@ export default function AnewLeads() {
               {(() => {
                 const leadDistrict = newLeadValues.distrito || newLeadValues.district || '';
                 const leadDistrictLower = typeof leadDistrict === 'string' ? leadDistrict.toLowerCase() : '';
-                const orgFilteredUsers = assignOrgFilter === "all" 
-                  ? comercialUsers 
-                  : comercialUsers.filter(u => u.org_ids.includes(assignOrgFilter));
+                const orgFilteredUsers = assignOrgFilter === "all"
+                  ? assignableComercialUsers
+                  : assignableComercialUsers.filter(u => u.org_ids.includes(assignOrgFilter));
                 const filteredUsers = leadDistrictLower
                   ? orgFilteredUsers.filter(u => 
                       u.districts.length > 0 &&
@@ -6170,7 +6191,7 @@ export default function AnewLeads() {
           onOpenChange={setShowEditDialog}
           lead={selectedLead as any}
           companyId={activeCompanyId || ""}
-          companyUsers={companyUsers}
+          companyUsers={assignableCompanyUsers}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
           userId={scopeAnewUserId || scopeAuthUserId || ""}
         />

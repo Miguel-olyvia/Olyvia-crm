@@ -115,6 +115,18 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
     return canActOnEntity(editScope, contact || {}, scopeAnewUserId, scopeAuthUserId, teamMemberIds);
   }, [getPermissionScope, contact, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
+  // SECURITY: the "Comercial Atribuído" picker must not leak other users' identities
+  // beyond the viewer's contacts.edit scope (see src/lib/contacts/scope.ts). ORG keeps
+  // the full roster; TEAM/OWNED/NONE are filtered in-memory from the already-fetched list.
+  const visibleTeamMembers = useMemo(() => {
+    const editScope = getPermissionScope("contacts.edit");
+    if (editScope === "ORG") return teamMembers;
+    const allowedIds = new Set(
+      [scopeAnewUserId, scopeAuthUserId, ...(editScope === "TEAM" ? teamMemberIds : [])].filter(Boolean) as string[],
+    );
+    return teamMembers.filter((m) => allowedIds.has(m.id));
+  }, [teamMembers, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
+
   // New state
   const [interactions, setInteractions] = useState<any[]>([]);
   const [portalSends, setPortalSends] = useState<any[]>([]);
@@ -846,7 +858,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
                         <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Nenhum</SelectItem>
-                          {teamMembers.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
+                          {visibleTeamMembers.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
                         </SelectContent>
                       </Select>
                     </div>

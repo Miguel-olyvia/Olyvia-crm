@@ -22,6 +22,7 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { differenceInDays } from "date-fns";
 import { calculateHealthScore } from "@/hooks/useContactHealthScore";
 
@@ -172,6 +173,21 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   });
   const [orgUsers, setOrgUsers] = useState<{ id: string; name: string }[]>([]);
   const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
+
+  // SECURITY: scope the assignable-users list to the viewer's clients.edit
+  // scope. Never let ORG-scoped teamMemberIds leak into an OWNED/NONE view —
+  // see SECURITY comment in src/lib/contacts/scope.ts.
+  const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds } = usePermissionScope();
+  const scopedOrgUsers = useMemo(() => {
+    const scope = getPermissionScope("clients.edit");
+    if (scope === "ORG") return orgUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set<string>([scopeAnewUserId, ...teamMemberIds].filter(Boolean) as string[]);
+      return orgUsers.filter(u => allowedIds.has(u.id));
+    }
+    // OWNED or NONE: only the viewer themselves
+    return orgUsers.filter(u => u.id === scopeAnewUserId);
+  }, [orgUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const [dealFormData, setDealFormData] = useState({ title: "", description: "", value: "", stage_id: "", expected_close_date: "" });
   const [dealLineItems, setDealLineItems] = useState<CatalogLineItem[]>([]);
@@ -1165,7 +1181,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                         <SelectTrigger><SelectValue placeholder="Selecionar comercial..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="unassigned">Não atribuído</SelectItem>
-                          {orgUsers.map(user => (
+                          {scopedOrgUsers.map(user => (
                             <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                           ))}
                         </SelectContent>

@@ -8,16 +8,71 @@ export interface ComercialUser {
   org_ids: string[];
 }
 
+export type ComercialUsersScopeLevel = "NONE" | "OWNED" | "TEAM" | "ORG";
+
+/**
+ * Viewer's own permission scope info, used to filter the roster returned by
+ * useComercialUsers down to what the caller is actually allowed to see/assign to.
+ *
+ * SECURITY: `teamMemberIds` must only be folded in when `viewerScope === "TEAM"`.
+ * It is session-global (populated whenever ANY permission has TEAM scope), so
+ * it must never be merged in for "OWNED"/"NONE" scope — see scope.ts SECURITY note.
+ */
+export interface ComercialUsersViewerScope {
+  viewerScope: ComercialUsersScopeLevel;
+  viewerAnewUserId: string | null | undefined;
+  teamMemberIds?: readonly string[];
+  /**
+   * Set this to the caller's `usePermissionScope().loading` flag.
+   * While `true`, `viewerScope`/`viewerAnewUserId` are not yet resolved
+   * (they default to "NONE"/null), so fetching/filtering is skipped
+   * entirely to avoid a race where a stale NONE-scope result overwrites
+   * the correct one once the real scope resolves.
+   */
+  scopeLoading?: boolean;
+}
+
+/**
+ * Filters an already-fetched Comercial roster down to what the viewer's scope
+ * allows: ORG sees everyone, TEAM sees self + teammates, OWNED/NONE see only self.
+ */
+function filterUsersByViewerScope(
+  users: ComercialUser[],
+  viewerScope: ComercialUsersViewerScope | undefined,
+): ComercialUser[] {
+  if (!viewerScope) return users;
+  const { viewerScope: scope, viewerAnewUserId, teamMemberIds = [] } = viewerScope;
+  if (scope === "ORG") return users;
+  if (scope === "TEAM") {
+    const allowedIds = new Set<string>(
+      [viewerAnewUserId, ...teamMemberIds].filter(Boolean) as string[],
+    );
+    return users.filter((u) => allowedIds.has(u.id));
+  }
+  // OWNED or NONE: only the viewer themselves
+  return users.filter((u) => u.id === viewerAnewUserId);
+}
+
 /**
  * Loads users belonging to "Comercial" departments under the active company subtree.
  * Falls back to all active members of the subtree when no Comercial dept exists.
  * Mirrors the logic used in AnewLeads.tsx (without districts/address resolution).
+ *
+ * `viewerScope`, when provided, filters the returned roster per SCOPE_MODEL
+ * (see ComercialUsersViewerScope). Omitting it preserves the previous
+ * unfiltered behavior for any other/unknown callers.
  */
-export function useComercialUsers(activeCompanyId: string | null | undefined) {
+export function useComercialUsers(
+  activeCompanyId: string | null | undefined,
+  viewerScope?: ComercialUsersViewerScope,
+) {
   const [users, setUsers] = useState<ComercialUser[]>([]);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
+    if (viewerScope?.scopeLoading) {
+      return;
+    }
     if (!activeCompanyId) {
       setUsers([]);
       return;
@@ -108,17 +163,17 @@ export function useComercialUsers(activeCompanyId: string | null | undefined) {
         if (!userOrgMap[m.user_id].includes(m.organization_id)) userOrgMap[m.user_id].push(m.organization_id);
       });
 
-      setUsers(
-        (usersData || []).map((u: any) => ({
-          id: u.id,
-          name: u.name || "Utilizador",
-          org_ids: userOrgMap[u.id] || [],
-        })).sort((a, b) => a.name.localeCompare(b.name))
-      );
+      const sortedUsers = (usersData || []).map((u: any) => ({
+        id: u.id,
+        name: u.name || "Utilizador",
+        org_ids: userOrgMap[u.id] || [],
+      })).sort((a, b) => a.name.localeCompare(b.name));
+
+      setUsers(filterUsersByViewerScope(sortedUsers, viewerScope));
     } finally {
       setLoading(false);
     }
-  }, [activeCompanyId]);
+  }, [activeCompanyId, viewerScope?.viewerScope, viewerScope?.viewerAnewUserId, viewerScope?.teamMemberIds, viewerScope?.scopeLoading]);
 
   useEffect(() => { load(); }, [load]);
 
