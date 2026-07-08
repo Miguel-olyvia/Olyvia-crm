@@ -1540,74 +1540,6 @@ const Proposals = () => {
     return stage?.name || proposal.status || "";
   }, [getProposalStage]);
 
-  // Stats
-  const stats = useMemo(() => {
-    const now = new Date();
-    const total = proposals.length;
-    const totalValue = proposals.reduce((sum, p) => sum + Number(p.value), 0);
-    
-    const stageCounts: Record<string, number> = {};
-    const stageValues: Record<string, number> = {};
-    
-    workflowStages.forEach(stage => {
-      stageCounts[stage.id] = 0;
-      stageValues[stage.id] = 0;
-    });
-    
-    proposals.forEach(p => {
-      const stage = getProposalStage(p);
-      if (stage) {
-        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
-        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
-      }
-    });
-    
-    const wonValue = proposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value), 0);
-
-    // Extra KPIs
-    const sentProposals = proposals.filter(p => {
-      const sn = getStageName(p);
-      return sn === "sent" || sn === "enviada";
-    });
-    const acceptedProposals = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage?.is_won;
-    });
-    const totalSentOrLater = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage && stage.stage_order > 1; // sent or later
-    }).length;
-    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
-    
-    // Avg close time (days from created_at to accepted_at for accepted proposals)
-    const closeTimes = acceptedProposals.map(p => {
-      const accepted = (p as any).accepted_at;
-      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
-      return differenceInDays(now, parseISO(p.created_at));
-    }).filter(d => d >= 0);
-    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
-
-    const noResponse5d = proposals.filter(p => {
-      const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
-    });
-    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
-
-    const noValidity = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return !p.valid_until && !stage?.is_lost;
-    });
-
-    const expired = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
-    });
-
-    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
-  }, [proposals, workflowStages, getProposalStage, getStageName]);
-
   // Filter and sort
   const filteredProposals = useMemo(() => {
     const now = new Date();
@@ -1675,6 +1607,70 @@ const Proposals = () => {
         return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
       });
   }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, getStageName, comercialFilter, onlyMine, scopeAnewUserId]);
+
+  // Stats — computed over filteredProposals so KPI cards reflect active filters
+  const stats = useMemo(() => {
+    const now = new Date();
+    const total = filteredProposals.length;
+    const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
+
+    const stageCounts: Record<string, number> = {};
+    const stageValues: Record<string, number> = {};
+
+    workflowStages.forEach(stage => {
+      stageCounts[stage.id] = 0;
+      stageValues[stage.id] = 0;
+    });
+
+    filteredProposals.forEach(p => {
+      const stage = getProposalStage(p);
+      if (stage) {
+        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
+        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
+      }
+    });
+
+    const wonValue = filteredProposals
+      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
+      .reduce((sum, p) => sum + Number(p.value), 0);
+
+    // Extra KPIs
+    const acceptedProposals = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return stage?.is_won;
+    });
+    const totalSentOrLater = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return stage && stage.stage_order > 1; // sent or later
+    }).length;
+    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
+
+    // Avg close time (days from created_at to accepted_at for accepted proposals)
+    const closeTimes = acceptedProposals.map(p => {
+      const accepted = (p as any).accepted_at;
+      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
+      return differenceInDays(now, parseISO(p.created_at));
+    }).filter(d => d >= 0);
+    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
+
+    const noResponse5d = filteredProposals.filter(p => {
+      const sn = getStageName(p);
+      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
+    });
+    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
+
+    const noValidity = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return !p.valid_until && !stage?.is_lost;
+    });
+
+    const expired = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
+    });
+
+    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
+  }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -2696,7 +2692,7 @@ const Proposals = () => {
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Taxa Conversão</div>
                 <div className="text-xl font-bold text-primary">{stats.conversionRate}%</div>
-                <div className="text-xs text-muted-foreground">{proposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
+                <div className="text-xs text-muted-foreground">{filteredProposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
               </CardContent>
             </Card>
 
@@ -2740,11 +2736,12 @@ const Proposals = () => {
         {/* Content area */}
         {viewMode === "dashboard" ? (
           <ProposalsDashboardView
-            proposals={proposals}
+            proposals={filteredProposals}
             workflowStages={workflowStages}
             getProposalStage={getProposalStage}
             comercialNamesMap={comercialNamesMap}
             isLoading={loading}
+            hasAnyProposals={proposals.length > 0}
           />
         ) : viewMode === "kanban" ? (
           <ProposalsKanbanView

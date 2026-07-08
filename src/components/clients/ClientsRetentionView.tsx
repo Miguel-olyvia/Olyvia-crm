@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import { Phone, Mail, UserPlus, Pencil, Send, Check, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { differenceInDays, format } from "date-fns";
 
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
@@ -121,29 +122,66 @@ export function ClientsRetentionView({
   const [allContracts, setAllContracts] = useState<FullContract[]>([]);
   const [loadingContracts, setLoadingContracts] = useState(true);
 
+  const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: contractScopeLoading } = usePermissionScope();
+
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
       setLoadingContracts(true);
       try {
+        // client_contracts.view scope: NONE → skip entirely; OWNED/TEAM → restrict to
+        // allowed creators, failing closed to an empty set when unresolved (never "all").
+        const contractViewScope: ScopeLevel = getPermissionScope("client_contracts.view");
+        let contractCreatorFilter: string[] | null = null; // null = ORG (no creator restriction)
+        if (contractViewScope === "OWNED") {
+          contractCreatorFilter = scopeAnewUserId ? [scopeAnewUserId] : [];
+        } else if (contractViewScope === "TEAM") {
+          const allowed = new Set<string>();
+          if (scopeAnewUserId) allowed.add(scopeAnewUserId);
+          teamMemberIds.forEach((id) => allowed.add(id));
+          contractCreatorFilter = Array.from(allowed);
+        } else if (contractViewScope === "NONE") {
+          contractCreatorFilter = [];
+        }
+        const contractScopeBlocked =
+          contractScopeLoading ||
+          contractViewScope === "NONE" ||
+          ((contractViewScope === "OWNED" || contractViewScope === "TEAM") && contractCreatorFilter?.length === 0);
+
         const entityIds = clients.map(c => c.entity_id).filter(Boolean);
-        if (entityIds.length === 0) { setAllContracts([]); return; }
+        // scopeOrgIds must always be non-empty to query: an empty scope means the
+        // active organization isn't resolved yet, never "no org filter at all".
+        const orgScopeBlocked = scopeOrgIds.length === 0;
+        if (entityIds.length === 0 || contractScopeBlocked || orgScopeBlocked) {
+          if (!cancelled) setAllContracts([]);
+          return;
+        }
         const all: FullContract[] = [];
         for (let i = 0; i < entityIds.length; i += 100) {
           const batch = entityIds.slice(i, i + 100);
-          const { data } = await supabase.from("client_contracts")
+          let q = supabase.from("client_contracts")
             .select("id, entity_id, status, total_value, start_date, end_date, created_at, payment_terms, notes")
-            .in("entity_id", batch);
+            .in("entity_id", batch)
+            .is("deleted_at", null)
+            .in("organization_id", scopeOrgIds);
+          if (contractCreatorFilter) q = q.in("created_by", contractCreatorFilter);
+          const { data, error } = await q;
+          if (error) {
+            console.error("Error loading contracts batch for retention view:", error);
+            continue;
+          }
           if (data) all.push(...(data as FullContract[]));
         }
-        setAllContracts(all);
+        if (!cancelled) setAllContracts(all);
       } catch (err) {
         console.error("Error loading contracts for retention view:", err);
       } finally {
-        setLoadingContracts(false);
+        if (!cancelled) setLoadingContracts(false);
       }
     };
     load();
-  }, [clients]);
+    return () => { cancelled = true; };
+  }, [clients, scopeOrgIds, contractScopeLoading, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const now = new Date();
   const INACTIVE_STATUSES = ["inactive", "lost", "churned", "lost_definitive"];

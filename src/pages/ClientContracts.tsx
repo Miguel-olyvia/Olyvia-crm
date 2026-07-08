@@ -572,40 +572,6 @@ const ClientContracts = () => {
   // own snapshot so stale comparisons cannot occur when the page is open for long
   // periods without a re-render.
   const now = new Date();
-  const kpis = useMemo(() => {
-    const now = new Date();
-    const total = contracts.length;
-    const totalValue = contracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const drafts = contracts.filter(c => c.status === "draft");
-    const sent = contracts.filter(c => c.status === "pending_signature");
-    const signed = contracts.filter(c => c.status === "signed" || c.status === "active");
-    const expired = contracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
-    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
-    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const avgValue = total > 0 ? totalValue / total : 0;
-    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
-    const expiring90 = contracts.filter(c => {
-      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
-      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      return d > 0 && d <= 90;
-    });
-    // Avg sign time
-    let avgSignDays = 0;
-    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
-    if (signedWithDates.length > 0) {
-      const totalDays = signedWithDates.reduce((s, c) => {
-        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
-      }, 0);
-      avgSignDays = Math.round(totalDays / signedWithDates.length);
-    }
-    return {
-      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
-      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-    };
-  }, [contracts]);
 
   // Filtered contracts
   const filteredContracts = useMemo(() => {
@@ -644,7 +610,41 @@ const ClientContracts = () => {
     return result;
   }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo]);
 
-  
+  // KPIs — computed over filteredContracts so cards reflect active filters
+  const kpis = useMemo(() => {
+    const now = new Date();
+    const total = filteredContracts.length;
+    const totalValue = filteredContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
+    const drafts = filteredContracts.filter(c => c.status === "draft");
+    const sent = filteredContracts.filter(c => c.status === "pending_signature");
+    const signed = filteredContracts.filter(c => c.status === "signed" || c.status === "active");
+    const expired = filteredContracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
+    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
+    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
+    const avgValue = total > 0 ? totalValue / total : 0;
+    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
+    const expiring90 = filteredContracts.filter(c => {
+      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
+      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return d > 0 && d <= 90;
+    });
+    // Avg sign time
+    let avgSignDays = 0;
+    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
+    if (signedWithDates.length > 0) {
+      const totalDays = signedWithDates.reduce((s, c) => {
+        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
+      }, 0);
+      avgSignDays = Math.round(totalDays / signedWithDates.length);
+    }
+    return {
+      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
+      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+    };
+  }, [filteredContracts, getEffectiveContractValue]);
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {
@@ -1314,20 +1314,20 @@ const ClientContracts = () => {
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : viewMode === "dashboard" ? (
-          <ContractsDashboardView contracts={contracts} />
+          <ContractsDashboardView contracts={filteredContracts} />
         ) : viewMode === "renovacoes" ? (
-          <ContractsRenewalsView contracts={contracts} onAction={(action, c) => {
+          <ContractsRenewalsView contracts={filteredContracts} onAction={(action, c) => {
             if (action === "sign_first" && c) { setSigningContractId(c.id); setIsSignConfirmOpen(true); }
             else toast.info(`${action} - ${c?.contract_number}`);
           }} />
         ) : viewMode === "assinaturas" ? (
-          <ContractsSignaturesView contracts={contracts} onAction={(action, c) => {
+          <ContractsSignaturesView contracts={filteredContracts} onAction={(action, c) => {
             if (action === "mark_signed" && c) { setSigningContractId(c.id); setIsSignConfirmOpen(true); }
             else if ((action === "send_signature" || action === "resend") && c) handleOpenSendChannel(c);
             else toast.info(`${action} - ${c?.contract_number}`);
           }} />
         ) : viewMode === "documentos" ? (
-          <ContractsDocumentsView contracts={contracts} />
+          <ContractsDocumentsView contracts={filteredContracts} />
         ) : viewMode === "minutas" ? (
           <div className="text-center py-8">
             <Button onClick={() => navigate("/contract-templates")} className="gap-1.5">

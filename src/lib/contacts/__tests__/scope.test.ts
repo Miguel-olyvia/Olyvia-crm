@@ -24,12 +24,40 @@ describe("contact scope helpers", () => {
     expect(normalizeContactScope("ORG", true)).toBe("OWNED");
   });
 
-  it("keeps business, auth and team ids for mixed ownership rows", () => {
-    expect(getContactScopeUserIds("biz-1", "auth-1", ["team-1", "biz-1"])).toEqual([
+  it("keeps business, auth and team ids for mixed ownership rows under TEAM scope", () => {
+    expect(getContactScopeUserIds("TEAM", "biz-1", "auth-1", ["team-1", "biz-1"])).toEqual([
       "biz-1",
       "auth-1",
       "team-1",
     ]);
+  });
+
+  it("never includes teamMemberIds for OWNED scope, even when teamMemberIds is non-empty", () => {
+    // teamMemberIds is populated per-session (any TEAM-scoped permission on the
+    // profile), not per-permission — an OWNED scope for this permission must
+    // still exclude it entirely.
+    const ownedIds = getContactScopeUserIds("OWNED", "biz-1", "auth-1", ["team-1", "team-2"]);
+    expect(ownedIds).toEqual(["biz-1", "auth-1"]);
+    expect(ownedIds).not.toContain("team-1");
+    expect(ownedIds).not.toContain("team-2");
+
+    const filter = buildContactScopeOrFilter("OWNED", ownedIds);
+    expect(filter).toBe("assigned_to.eq.biz-1,created_by.eq.biz-1,assigned_to.eq.auth-1,created_by.eq.auth-1");
+    expect(filter).not.toContain("team-1");
+    expect(filter).not.toContain("team-2");
+  });
+
+  it("still includes teamMemberIds for TEAM scope", () => {
+    const teamIds = getContactScopeUserIds("TEAM", "biz-1", "auth-1", ["team-1"]);
+    expect(teamIds).toEqual(["biz-1", "auth-1", "team-1"]);
+
+    const filter = buildContactScopeOrFilter("TEAM", teamIds);
+    expect(filter).toContain("team-1");
+  });
+
+  it("returns only self ids for ORG and NONE scopes (teamMemberIds ignored either way)", () => {
+    expect(getContactScopeUserIds("ORG", "biz-1", "auth-1", ["team-1"])).toEqual(["biz-1", "auth-1"]);
+    expect(getContactScopeUserIds("NONE", "biz-1", "auth-1", ["team-1"])).toEqual(["biz-1", "auth-1"]);
   });
 
   it("treats created_by as owned when assigned_to is empty", () => {

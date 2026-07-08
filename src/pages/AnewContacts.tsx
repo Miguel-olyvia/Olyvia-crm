@@ -246,8 +246,8 @@ const AnewContacts = () => {
     [getPermissionScope, onlyMine],
   );
   const scopedUserIds = useMemo(
-    () => getContactScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds),
-    [scopeAnewUserId, scopeAuthUserId, teamMemberIds],
+    () => getContactScopeUserIds(viewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds),
+    [viewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
   );
   // Default (no explicit companyFilter selection) is strictly the active org
   // only — no automatic widening to descendant orgs. Explicitly picking a
@@ -517,10 +517,21 @@ const AnewContacts = () => {
   // Cache auth user and exclude IDs to avoid redundant network calls on each scroll page
   const cachedAuthRef = useRef<{ authUserId: string | null; internalUserId: string | null } | null>(null);
   const cachedExcludeRef = useRef<{ ids: string[]; clientPairs: Set<string>; key: string } | null>(null);
+  // Abort/ignore stale requests when a filter change fires a new page-1 load
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const loadContacts = useCallback(async (offset: number, isInitial: boolean = false) => {
     const shouldShowInitialLoader = isInitial && !hasLoadedContactsRef.current && contactsLengthRef.current === 0;
     if (shouldShowInitialLoader) setLoading(true); else if (offset > 0) setLoadingMore(true);
+    let requestId = 0;
+    let abortController: AbortController | null = null;
+    if (isInitial) {
+      loadAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      loadAbortControllerRef.current = abortController;
+      requestId = ++loadRequestIdRef.current;
+    }
     try {
       // Cache auth user resolution — only fetch once per session
       let authUserId: string | null = null;
@@ -565,7 +576,7 @@ const AnewContacts = () => {
           clientOrgPairs.add(`${r.entity_id}|${r.organization_id}`);
         });
         cachedExcludeRef.current = { ids: excludeEntityIds, clientPairs: clientOrgPairs, key: excludeCacheKey };
-        if (isInitial) setClientOrgPairKeys(new Set(clientOrgPairs));
+        if (isInitial && requestId === loadRequestIdRef.current) setClientOrgPairKeys(new Set(clientOrgPairs));
       }
 
       // Server-side search via shared searchEntityIds (trigram-indexed RPC: name + email + phone + NIF)
@@ -582,7 +593,7 @@ const AnewContacts = () => {
         }
         searchEntityIds = matchedIds;
         if (searchEntityIds.length === 0) {
-          if (isInitial) { setContacts([]); setTotalCount(0); }
+          if (isInitial && requestId === loadRequestIdRef.current) { setContacts([]); setTotalCount(0); }
           setHasMore(false); setLoading(false); setLoadingMore(false);
           return;
         }
@@ -601,12 +612,14 @@ const AnewContacts = () => {
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
       if (commercialFilter !== "all") query = query.eq("assigned_to", commercialFilter);
-      if (viewScope === "NONE") { if (isInitial) setContacts([]); setHasMore(false); setLoading(false); return; }
+      if (viewScope === "NONE") { if (isInitial && requestId === loadRequestIdRef.current) setContacts([]); setHasMore(false); setLoading(false); return; }
       const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
       if (scopeFilter) query = query.or(scopeFilter);
       query = query.order("created_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
+      if (isInitial && requestId !== loadRequestIdRef.current) return;
 
       let newContacts = (data || []) as ContactRecord[];
       const entityIds = newContacts.map(c => c.entity_id).filter(Boolean);
@@ -642,8 +655,11 @@ const AnewContacts = () => {
       setHasMore(newContacts.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
       hasLoadedContactsRef.current = true;
     } catch (error: any) {
+      if (isInitial && requestId !== loadRequestIdRef.current) return;
       toast({ title: t('contacts.toast.loadContactsError'), description: error.message, variant: "destructive" });
-    } finally { setLoading(false); setLoadingMore(false); }
+    } finally {
+      if (!isInitial || requestId === loadRequestIdRef.current) { setLoading(false); setLoadingMore(false); }
+    }
   }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope, getPermissionScope]);
 
   // Keep a stable ref to loadContacts for infinite scroll
@@ -929,10 +945,10 @@ const AnewContacts = () => {
   // M3: aggregate counts are computed server-side instead of loading up to
   // 10,000 contacts client-side just to derive totals.
   useEffect(() => {
-    if (scopeLoading || !activeCompany?.id) return;
+    if (scopeLoading || !activeCompany?.id || effectiveOrgIds.length === 0) return;
     const loadAlertCounts = async () => {
       try {
-        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: [activeCompany.id] });
+        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: effectiveOrgIds });
         if (!error && data) {
           setServerAlertCounts(data as any);
         }
@@ -941,7 +957,7 @@ const AnewContacts = () => {
     loadAlertCounts();
     const interval = setInterval(loadAlertCounts, 120000); // 2min instead of 30s
     return () => clearInterval(interval);
-  }, [activeCompany?.id, scopeLoading]);
+  }, [activeCompany?.id, scopeLoading, effectiveOrgIds]);
 
   useEffect(() => {
     if (activeView === "list" || scopeLoading || isParentOrg === null) return;
@@ -1058,18 +1074,23 @@ const AnewContacts = () => {
     quotesData, dealsFilter, tagsFilter, tagsData, sentimentFilter, lastSentiments, commercialFilter, smartFilter,
   ]);
 
-  // Alert data - use server-side RPC only when scope is ORG, otherwise compute from loaded data
+  // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
+  // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
+  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || searchQuery.length > 0 || statusFilter !== "all" || companyFilter !== "all";
+  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all" || smartFilter || noContact7dFilter || noContact14dFilter;
+
+  // Alert data - use server-side RPC only when scope is ORG and no client filter narrows the list, otherwise compute from loaded data
   const alertData = useMemo(() => {
     const viewScope = getPermissionScope("contacts.view");
-    if (viewScope === "ORG" && serverAlertCounts) {
+    if (viewScope === "ORG" && serverAlertCounts && !hasActiveClientFilter) {
       return {
         noContact14d: serverAlertCounts.no_contact_14d || 0,
         noDeal: serverAlertCounts.without_deals || 0,
         unassigned: serverAlertCounts.unassigned || 0,
       };
     }
-    // For OWNED/TEAM scope, compute from the scoped data
-    const source = allContacts.length > 0 ? allContacts : contacts;
+    // For OWNED/TEAM scope, or when a client filter narrows the list, compute from the scoped/filtered data
+    const source = hasActiveClientFilter ? filteredContacts : (allContacts.length > 0 ? allContacts : contacts);
     let noContact14d = 0, noDeal = 0, unassigned = 0;
     source.forEach(c => {
       const lastDate = lastInteractions[c.entity_id] || c.last_interaction_at;
@@ -1078,7 +1099,7 @@ const AnewContacts = () => {
       if (!c.assigned_to) unassigned++;
     });
     return { noContact14d, noDeal, unassigned };
-  }, [serverAlertCounts, getPermissionScope, allContacts, contacts, lastInteractions, dealsData]);
+  }, [serverAlertCounts, getPermissionScope, allContacts, contacts, filteredContacts, lastInteractions, dealsData, hasActiveClientFilter]);
 
   // Insight contacts (high health + no deal + >14d no contact) - use allContacts when available
   const insightContacts = useMemo(() => {
@@ -1094,11 +1115,6 @@ const AnewContacts = () => {
       entityId: c.entity_id,
     }));
   }, [contacts, allContacts, lastInteractions, dealsData, proposalsData, interactionCounts, getIdentity, getHealthScore, quotesData]);
-
-  // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
-  // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
-  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || searchQuery.length > 0;
-  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all" || smartFilter || noContact7dFilter || noContact14dFilter;
 
   // KPI data - use server-side counts for stable numbers when no filter, client-side filtered data when filters active
   const kpiData = useMemo(() => {
@@ -1143,7 +1159,7 @@ const AnewContacts = () => {
 
   // Active filter count
   const activeFilterCount = [
-    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact7dFilter, noContact14dFilter,
+    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact7dFilter, noContact14dFilter, statusFilter !== "all", companyFilter !== "all",
   ].filter(Boolean).length;
 
   const clearAllFilters = () => {

@@ -232,6 +232,7 @@ export default function Quotes() {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const currentPageRef = useRef(0);
+  const fetchRequestIdRef = useRef(0);
   const quoteDraftAutoOpenedRef = useRef(false);
   
   // Filter states
@@ -272,16 +273,36 @@ export default function Quotes() {
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
 
   // Fetch dashboard stats via RPC (KPIs sempre correctos) + query separada para visualizacoes
-  const fetchDashboardStats = useCallback(async () => {
+  // scopeIds: null = full ORG scope (isFullScope/system admin); array = restrict to these visible quote ids (OWNED/TEAM).
+  const fetchDashboardStats = useCallback(async (scopeIds: string[] | null) => {
     if (!activeCompany?.id) return;
+    // Always invoked synchronously (fire-and-forget) from within fetchQuotes,
+    // right after fetchQuotes confirms it still owns fetchRequestIdRef — so
+    // capturing it here ties this call to the same request lifecycle and
+    // lets us drop stale results if a newer fetchQuotes call supersedes it.
+    const requestId = fetchRequestIdRef.current;
     setStatsLoading(true);
     setStatsError(null);
     try {
       // KPIs via RPC — agrega no servidor independentemente do volume de registos
+      // Only status + search are wired here: both are already enforced/matched
+      // by fetchQuotes' own server-side query (estado filter) or mirror the
+      // client-side text search. dateFrom/dateTo/comercialFilter are NOT sent:
+      // the list itself only applies those client-side over the already-loaded
+      // page, so passing them to the KPI RPC would make the KPI cards stricter
+      // than what the list actually queries from the server — a new, opposite
+      // inconsistency. Revisit only once the list filters those server-side too.
+      const trimmedSearch = searchTerm.trim();
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
+        p_filters: {
+          visible_ids: scopeIds,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          search: trimmedSearch || undefined,
+        },
       });
       if (kpiError) throw kpiError;
+      if (fetchRequestIdRef.current !== requestId) return;
       const kpi = kpiData as any;
       setDashboardStats({
         total:           kpi.total           ?? 0,
@@ -306,31 +327,49 @@ export default function Quotes() {
       });
 
       // Query separada com limite para graficos/visualizacoes no dashboard
-      const vizQuery = supabase
-        .from("quotes")
-        .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
-        .is("deleted_at", null)
-        .eq("organization_id", activeCompany.id)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      const { data: vizData, error: vizError } = await vizQuery;
-      if (vizError) throw vizError;
-      setAllQuotesForDashboard((vizData || []).map((q: any) => ({
+      let vizRows: any[] = [];
+      if (scopeIds === null) {
+        const { data: vizData, error: vizError } = await supabase
+          .from("quotes")
+          .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+          .is("deleted_at", null)
+          .eq("organization_id", activeCompany.id)
+          .order("created_at", { ascending: false })
+          .limit(500);
+        if (vizError) throw vizError;
+        vizRows = vizData || [];
+      } else if (scopeIds.length > 0) {
+        vizRows = await fetchInBatches(scopeIds, async (chunk) => {
+          const { data, error } = await supabase
+            .from("quotes")
+            .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+            .is("deleted_at", null)
+            .eq("organization_id", activeCompany.id)
+            .in("id", chunk);
+          if (error) throw error;
+          return (data as any[]) || [];
+        }, 30);
+        vizRows = vizRows
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 500);
+      }
+      if (fetchRequestIdRef.current !== requestId) return;
+      setAllQuotesForDashboard(vizRows.map((q: any) => ({
         id: q.id, estado: q.estado, total: q.total, created_at: q.created_at,
         accepted_at: q.accepted_at ?? null, validade_dias: q.validade_dias ?? null,
         assigned_to: q.assigned_to,
       })));
     } catch (err: any) {
       console.error("Error fetching dashboard stats:", err);
-      setStatsError(err?.message ?? "Erro ao carregar estatísticas");
+      if (fetchRequestIdRef.current === requestId) {
+        setStatsError(err?.message ?? "Erro ao carregar estatísticas");
+      }
     } finally {
-      setStatsLoading(false);
+      if (fetchRequestIdRef.current === requestId) {
+        setStatsLoading(false);
+      }
     }
-  }, [activeCompany?.id]);
-
-  useEffect(() => {
-    if (activeCompany?.id) fetchDashboardStats();
-  }, [activeCompany?.id, fetchDashboardStats]);
+  }, [activeCompany?.id, statusFilter, searchTerm]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
@@ -399,8 +438,9 @@ export default function Quotes() {
     } else {
       setLoading(true);
       currentPageRef.current = 0;
-      fetchDashboardStats();
     }
+
+    const requestId = ++fetchRequestIdRef.current;
 
     const from = currentPageRef.current * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -408,6 +448,7 @@ export default function Quotes() {
     const { data: { user } } = await supabase.auth.getUser();
     const viewScope = getPermissionScope("quotes.view");
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
+    const searchQuoteNumber = searchTerm.trim().length >= 2 ? searchTerm.trim() : null;
 
     if (!append) {
       let stagesQuery = supabase
@@ -432,16 +473,24 @@ export default function Quotes() {
           .is("deleted_at", null);
 
         adminQuery = adminQuery.eq("organization_id", activeCompany.id);
+        if (statusFilter !== "all") adminQuery = adminQuery.eq("estado", statusFilter);
+        if (searchQuoteNumber) adminQuery = adminQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
 
         const { data, error } = await adminQuery.order("created_at", { ascending: false }).range(from, to);
         if (error) throw error;
         quotesData = (data || []) as unknown as Quote[];
 
+        if (fetchRequestIdRef.current !== requestId) return;
+
         if (!append) {
-          const countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
+          let countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
+          if (statusFilter !== "all") countQuery = countQuery.eq("estado", statusFilter);
+          if (searchQuoteNumber) countQuery = countQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
           const { count } = await countQuery;
+          if (fetchRequestIdRef.current !== requestId) return;
           setTotalCount(count || 0);
           setMyQuoteIds(new Set());
+          fetchDashboardStats(null);
         }
         if (append) {
           setQuotes(prev => {
@@ -465,9 +514,11 @@ export default function Quotes() {
         const allowedArr = Array.from(allowedUserIds);
         if (allowedArr.length === 0) {
           if (!append) {
+            if (fetchRequestIdRef.current !== requestId) return;
             setQuotes([]);
             setTotalCount(0);
             setMyQuoteIds(new Set());
+            fetchDashboardStats([]);
           }
           setHasMore(false);
           currentPageRef.current += 1;
@@ -536,8 +587,11 @@ export default function Quotes() {
 
           const visibleQuoteIds = await resolveVisibleQuoteIds(allowedArr);
 
+          if (fetchRequestIdRef.current !== requestId) return;
+
           if (!append && scopeAnewUserId) {
             const mineSet = await resolveVisibleQuoteIds([scopeAnewUserId]);
+            if (fetchRequestIdRef.current !== requestId) return;
             setMyQuoteIds(mineSet);
           }
 
@@ -545,6 +599,7 @@ export default function Quotes() {
             if (!append) {
               setQuotes([]);
               setTotalCount(0);
+              fetchDashboardStats([]);
             }
             setHasMore(false);
             currentPageRef.current += 1;
@@ -555,15 +610,20 @@ export default function Quotes() {
             //    by deleted_at), in chunks of 30, to compute true totalCount
             //    and page slice without exceeding URL size.
             const metaRowsRaw = await fetchInBatches(idsArr, async (chunk) => {
-              const { data, error } = await (supabase as any)
+              let metaQuery = (supabase as any)
                 .from("quotes")
                 .select("id, created_at")
                 .eq("organization_id", activeCompany.id)
                 .in("id", chunk)
                 .is("deleted_at", null);
+              if (statusFilter !== "all") metaQuery = metaQuery.eq("estado", statusFilter);
+              if (searchQuoteNumber) metaQuery = metaQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              const { data, error } = await metaQuery;
               if (error) throw error;
               return (data as any[]) || [];
             }, 30);
+
+            if (fetchRequestIdRef.current !== requestId) return;
 
             // 2) Dedup by id (chunks shouldn't overlap, but defensive)
             const metaMap = new Map<string, { id: string; created_at: string }>();
@@ -579,7 +639,10 @@ export default function Quotes() {
               return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
             });
 
-            if (!append) setTotalCount(metaRows.length);
+            if (!append) {
+              setTotalCount(metaRows.length);
+              fetchDashboardStats(idsArr);
+            }
 
             const pageIds = metaRows.slice(from, to + 1).map(r => r.id);
 
@@ -589,13 +652,17 @@ export default function Quotes() {
               setHasMore(false);
               currentPageRef.current += 1;
             } else {
-              const { data, error } = await (supabase as any)
+              let pageQuery = (supabase as any)
                 .from("quotes")
                 .select(`*, deals!deal_id (id, title, entity_id), proposals!proposal_id (id, title, stage_id)`)
                 .eq("organization_id", activeCompany.id)
                 .in("id", pageIds)
                 .is("deleted_at", null);
+              if (statusFilter !== "all") pageQuery = pageQuery.eq("estado", statusFilter);
+              if (searchQuoteNumber) pageQuery = pageQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              const { data, error } = await pageQuery;
               if (error) throw error;
+              if (fetchRequestIdRef.current !== requestId) return;
               const fetched = (data || []) as unknown as Quote[];
 
               // Reorder to match pageIds order
@@ -620,10 +687,12 @@ export default function Quotes() {
     } catch (error: any) {
       toast({ title: t('quotes.toast.loadError'), description: error.message, variant: "destructive" });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (fetchRequestIdRef.current === requestId) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm]);
 
   // Resolve entity names
   useEffect(() => {
@@ -830,7 +899,7 @@ export default function Quotes() {
 
   useEffect(() => {
     if (activeCompany?.id) fetchQuotes();
-  }, [activeCompany?.id, fetchQuotes]);
+  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm]);
 
   // Limpa qualquer rascunho de novo orçamento ao entrar na página de listagem
   // (evita reabrir o Quote Builder automaticamente).

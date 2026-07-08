@@ -38,6 +38,8 @@ interface ProposalsDashboardViewProps {
   isLoading?: boolean;
   hasError?: boolean;
   errorMessage?: string;
+  /** Whether the organization has any proposals at all, ignoring active filters. */
+  hasAnyProposals?: boolean;
 }
 
 // Pick readable text color (black/white) for a given hex background via YIQ luminance.
@@ -59,6 +61,7 @@ export function ProposalsDashboardView({
   isLoading,
   hasError,
   errorMessage,
+  hasAnyProposals,
 }: ProposalsDashboardViewProps) {
   const funnelData = useMemo(() => {
     const ordered = [...workflowStages]
@@ -208,13 +211,25 @@ export function ProposalsDashboardView({
   }
 
   if (proposals.length === 0) {
+    // hasAnyProposals is undefined when the caller passes the raw, unfiltered
+    // array (proposals.length === 0 already means the org has none). When the
+    // caller passes a filtered array, hasAnyProposals distinguishes a truly
+    // empty organization from a filter that excludes every proposal.
+    const isOrgTrulyEmpty = hasAnyProposals === undefined ? true : !hasAnyProposals;
+
     return (
       <div className="p-4 md:px-6">
         <Card>
           <CardContent className="p-10 text-center space-y-2">
-            <p className="text-sm font-medium">Ainda não há propostas para mostrar.</p>
+            <p className="text-sm font-medium">
+              {isOrgTrulyEmpty
+                ? "Ainda não há propostas para mostrar."
+                : "Nenhum resultado para os filtros atuais."}
+            </p>
             <p className="text-xs text-muted-foreground">
-              Cria a primeira proposta para começar a ver métricas neste dashboard.
+              {isOrgTrulyEmpty
+                ? "Cria a primeira proposta para começar a ver métricas neste dashboard."
+                : "Ajusta ou limpa os filtros para ver as métricas das restantes propostas."}
             </p>
           </CardContent>
         </Card>

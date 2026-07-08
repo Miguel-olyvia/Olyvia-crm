@@ -337,17 +337,86 @@ const Deals = () => {
     resolveRootOrg();
   }, [activeCompany?.id]);
 
-  // Fetch dashboard stats via RPC (KPIs) + separate query for kanban deals
+  // Shared search-id resolution (title/entity match), reused by loadData and
+  // fetchDealsDashboardStats so both apply identical search semantics.
+  const resolveSearchDealIds = useCallback(async (search: string, scopeOrgIds: string[]): Promise<string[]> => {
+    const term = search.trim();
+    const { ids: matchedEntityIds, truncated } = await searchEntityIds(term);
+    if (truncated && truncatedWarnedRef.current !== term) {
+      truncatedWarnedRef.current = term;
+      toast({
+        title: "Demasiados resultados",
+        description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
+      });
+    }
+    if (scopeOrgIds.length === 0) return [];
+    const escTerm = term.replace(/[,()*]/g, " ").replace(/\s+/g, " ").trim();
+    let searchIdsQuery = (supabase.from("deals") as any)
+      .select("id")
+      .is("deleted_at", null)
+      .in("organization_id", scopeOrgIds);
+    if (matchedEntityIds.length > 0) {
+      searchIdsQuery = searchIdsQuery.or(`title.ilike.%${escTerm}%,entity_id.in.(${matchedEntityIds.join(",")})`);
+    } else {
+      searchIdsQuery = searchIdsQuery.ilike("title", `%${escTerm}%`);
+    }
+    const { data: idsRows } = await searchIdsQuery.limit(2000);
+    return (idsRows || []).map((r: any) => r.id);
+  }, [toast]);
+
+  // Guards against stale results when a newer stats fetch supersedes an older
+  // in-flight one (e.g. rapid filter changes) — acts as a logical abort.
+  const statsRequestIdRef = useRef(0);
+
+  // Fetch dashboard stats via RPC (KPIs) + separate query for kanban deals.
+  // Applies the same TEAM/OWNED ownership scope and stage/date/search filters
+  // as loadData, so the KPI cards and Dashboard tab never exceed what the
+  // user can see in List/Kanban.
   const fetchDealsDashboardStats = useCallback(async () => {
     if (!activeCompany?.id) return;
     setStatsLoading(true);
+    const requestId = ++statsRequestIdRef.current;
     try {
       const scopeOrgIdsArr = [activeCompany.id];
+      const viewScope = getPermissionScope("deals.view");
+      const scopedInternalUserIds = new Set<string>();
+      if (scopeAnewUserId) scopedInternalUserIds.add(scopeAnewUserId);
+      if (viewScope === "TEAM" && teamMemberIds.length > 0) {
+        teamMemberIds.forEach((id) => scopedInternalUserIds.add(id));
+      }
+      const isFullScope = viewScope === "ORG" || isSystemAdmin;
+
+      let searchDealIds: string[] | null = null;
+      if (debouncedSearch && debouncedSearch.trim().length >= 3) {
+        searchDealIds = await resolveSearchDealIds(debouncedSearch, scopeOrgIdsArr);
+        if (requestId !== statsRequestIdRef.current) return;
+        if (searchDealIds.length === 0) {
+          setDealsDashboardStats({
+            total: 0, totalValue: 0, stageStats: {}, stageValues: {},
+            wonCount: 0, wonValue: 0, lostCount: 0, conversionRate: 0, avgCloseTimeDays: 0,
+            stalledCount: 0, stalledValue: 0, openCount: 0, openValue: 0,
+          });
+          setDashboardDeals([]);
+          setStatsError(false);
+          return;
+        }
+      }
+
+      const p_filters = {
+        stage_id: stageFilter !== "all" ? stageFilter : null,
+        date_from: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+        date_to: dateTo ? endOfDay(dateTo).toISOString() : null,
+        deal_ids: searchDealIds,
+      };
 
       // KPIs via RPC — sempre correctos independentemente do numero de registos
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_deals_kpi_stats", {
         p_org_ids: scopeOrgIdsArr,
+        p_scope: isFullScope ? "ORG" : "TEAM_OR_OWNED",
+        p_scope_user_ids: isFullScope ? undefined : Array.from(scopedInternalUserIds),
+        p_filters,
       });
+      if (requestId !== statsRequestIdRef.current) return;
       if (kpiError) throw kpiError;
       const kpi = kpiData as any;
       setDealsDashboardStats({
@@ -366,14 +435,31 @@ const Deals = () => {
         stageValues:      kpi.stageValues       ?? {},
       });
 
-      // Kanban deals — query paginada com limite razoavel para visualizacao
-      const { data: kanbanData, error: kanbanError } = await supabase
+      // Kanban deals — query paginada com limite razoavel para visualizacao,
+      // com o mesmo âmbito de propriedade (TEAM/OWNED) e filtros do loadData.
+      let kanbanQuery = supabase
         .from("deals")
         .select("id, title, value, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .is("deleted_at", null)
         .in("organization_id", scopeOrgIdsArr)
         .order("created_at", { ascending: false })
         .limit(500);
+      if (stageFilter !== "all") kanbanQuery = kanbanQuery.eq("stage_id", stageFilter);
+      if (dateFrom) kanbanQuery = kanbanQuery.gte("created_at", startOfDay(dateFrom).toISOString());
+      if (dateTo) kanbanQuery = kanbanQuery.lte("created_at", endOfDay(dateTo).toISOString());
+      if (searchDealIds !== null) kanbanQuery = kanbanQuery.in("id", searchDealIds);
+      if (!isFullScope) {
+        const allowedBusinessIds = Array.from(scopedInternalUserIds);
+        if (allowedBusinessIds.length > 0) {
+          kanbanQuery = kanbanQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+        } else {
+          // No allowed owners resolved for a scoped user — force zero rows instead of leaking org-wide data.
+          kanbanQuery = kanbanQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
+      }
+
+      const { data: kanbanData, error: kanbanError } = await kanbanQuery;
+      if (requestId !== statsRequestIdRef.current) return;
       if (kanbanError) throw kanbanError;
       const all = (kanbanData || []) as any[];
       const assignedToIds = [...new Set(all.map(d => d.assigned_to).filter(Boolean))] as string[];
@@ -386,6 +472,7 @@ const Deals = () => {
           ? (supabase.from("anew_leads") as any).select("id, source, campaign_id").in("id", leadIds)
           : { data: [] },
       ]);
+      if (requestId !== statsRequestIdRef.current) return;
       const assignedMap = new Map((assignedUsersRes.data || []).map((u: any) => [u.id, u.name]));
       const leadSourceMap = new Map((leadSourcesRes.data || []).map((l: any) => [l.id, l.source || (l.campaign_id ? "campanha" : "manual")]));
       setDashboardDeals(all.map((deal) => ({
@@ -402,19 +489,21 @@ const Deals = () => {
         assigned_to_name:   deal.assigned_to ? (assignedMap.get(deal.assigned_to) || "Utilizador") : null,
         lead_source:        deal.lead_id ? (leadSourceMap.get(deal.lead_id) || null) : null,
       })) as Deal[]);
+      setStatsError(false);
     } catch (err) {
+      if (requestId !== statsRequestIdRef.current) return;
       console.error("Error fetching deals dashboard stats:", err);
       setDashboardDeals([]);
       setStatsError(true);
     } finally {
-      setStatsLoading(false);
+      if (requestId === statsRequestIdRef.current) {
+        setStatsLoading(false);
+      }
     }
-  // fetchDealsDashboardStats does not read `stages` — it only reads activeCompany.id.
-  // Removing `stages` from deps prevents an extra double-fire (loadData sets stages → stages change → stats fire again).
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, stageFilter, dateFrom, dateTo, debouncedSearch, resolveSearchDealIds]);
 
   // Stable ref so loadData doesn't depend on fetchDealsDashboardStats identity.
-  // Stats are triggered exclusively via fetchStatsRef.current() inside loadData.
+  // Stats are triggered via fetchStatsRef.current() from their own dedicated effect below.
   const fetchStatsRef = useRef(fetchDealsDashboardStats);
   fetchStatsRef.current = fetchDealsDashboardStats;
 
@@ -464,13 +553,17 @@ const Deals = () => {
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  // Guards against stale results when a newer loadData call supersedes an
+  // older in-flight one (e.g. rapid filter/search changes) — acts as a logical abort.
+  const loadDataRequestIdRef = useRef(0);
+
   const loadData = useCallback(async (append = false) => {
+    const requestId = ++loadDataRequestIdRef.current;
     if (append) {
       setLoadingMore(true);
     } else {
       setLoading(true);
       currentPageRef.current = 0;
-      fetchStatsRef.current();
     }
 
     const from = currentPageRef.current * PAGE_SIZE;
@@ -479,6 +572,7 @@ const Deals = () => {
     try {
       // Get current user for filtering
       const { data: { user } } = await supabase.auth.getUser();
+      if (requestId !== loadDataRequestIdRef.current) return;
       const viewScope = getPermissionScope("deals.view");
 
       // If scope is still loading, skip — will re-run when ready
@@ -520,35 +614,14 @@ const Deals = () => {
       // Server-side search: pre-resolve deal IDs matching title or entity (name/email/phone/NIF)
       let searchDealIds: string[] | null = null;
       if (debouncedSearch && debouncedSearch.trim().length >= 3) {
-        const term = debouncedSearch.trim();
-        const { ids: matchedEntityIds, truncated } = await searchEntityIds(term);
-        if (truncated && truncatedWarnedRef.current !== term) {
-          truncatedWarnedRef.current = term;
-          toast({
-            title: "Demasiados resultados",
-            description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-          });
-        }
-        // Escape special chars for PostgREST or filter
-        const escTerm = term.replace(/[,()*]/g, " ").replace(/\s+/g, " ").trim();
-        let searchIdsQuery = (supabase.from("deals") as any)
-          .select("id")
-          .is("deleted_at", null);
-        if (scopeOrgIdsArr.length > 0) {
-          searchIdsQuery = searchIdsQuery.in("organization_id", scopeOrgIdsArr);
-        } else {
+        if (scopeOrgIdsArr.length === 0) {
           // No active org — abort to prevent unscoped cross-org search
           setLoading(false);
           setLoadingMore(false);
           return;
         }
-        if (matchedEntityIds.length > 0) {
-          searchIdsQuery = searchIdsQuery.or(`title.ilike.%${escTerm}%,entity_id.in.(${matchedEntityIds.join(",")})`);
-        } else {
-          searchIdsQuery = searchIdsQuery.ilike("title", `%${escTerm}%`);
-        }
-        const { data: idsRows } = await searchIdsQuery.limit(2000);
-        searchDealIds = (idsRows || []).map((r: any) => r.id);
+        searchDealIds = await resolveSearchDealIds(debouncedSearch, scopeOrgIdsArr);
+        if (requestId !== loadDataRequestIdRef.current) return;
         if (searchDealIds.length === 0) {
           if (!append) {
             setDeals([]);
@@ -584,9 +657,14 @@ const Deals = () => {
       // Apply scope-based ownership filtering
       const isFullScope = viewScope === "ORG" || isSystemAdmin;
 
-      if (!isFullScope && scopedInternalUserIds.size > 0) {
-        const allowedBusinessIds = Array.from(scopedInternalUserIds);
-        dealsQuery = dealsQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+      if (!isFullScope) {
+        if (scopedInternalUserIds.size > 0) {
+          const allowedBusinessIds = Array.from(scopedInternalUserIds);
+          dealsQuery = dealsQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+        } else {
+          // No allowed owners resolved for a scoped user — force zero rows instead of leaking org-wide data.
+          dealsQuery = dealsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
       }
       
       const { data: dealsData, error: dealsError } = await dealsQuery;
@@ -701,6 +779,8 @@ const Deals = () => {
         if (p.deal_id) proposalsByDeal.set(p.deal_id, p.stage_id);
       });
 
+      if (requestId !== loadDataRequestIdRef.current) return;
+
       // Map deals with resolved names
       const mappedDeals: Deal[] = allDealsData.map(deal => ({
         ...deal,
@@ -748,14 +828,17 @@ const Deals = () => {
       setHasMore(mappedDeals.length === PAGE_SIZE);
       currentPageRef.current += 1;
     } catch (error: any) {
+      if (requestId !== loadDataRequestIdRef.current) return;
       toast({
         title: t('deals.toast.loadError'),
         description: error.message,
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (requestId === loadDataRequestIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   // Intentionally omitted from deps:
   //   - formData.stage_id: only used once on initial load to set a default; including it would
@@ -764,7 +847,7 @@ const Deals = () => {
   // Sorting (sortColumn/sortDirection) is applied client-side on the already-loaded page; PAGE_SIZE=200
   // makes a full client-sort acceptable. If server-side sort is ever required, add them here and to the reset effect.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast, t, activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch]);
+  }, [toast, t, activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch, resolveSearchDealIds]);
 
   useEffect(() => {
     // Reset and reload when company, scope readiness, or search changes.
@@ -781,6 +864,16 @@ const Deals = () => {
     //   - stageFilter / dateFrom / dateTo: client-side filters, do not need a server re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, companyUserType, scopeLoading, debouncedSearch]);
+
+  // Dedicated stats-fetch trigger: unlike the list-reload effect above (which
+  // intentionally excludes stageFilter/dateFrom/dateTo), the KPI/Dashboard
+  // stats must react to every filter so they stay consistent with what
+  // List/Kanban would show under the same filters.
+  useEffect(() => {
+    if (scopeLoading) return;
+    fetchStatsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, scopeLoading, stageFilter, dateFrom, dateTo, debouncedSearch, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const resolveDealForDetails = useCallback(async (dealId: string): Promise<Deal | null> => {
     const localDeal = deals.find((deal) => deal.id === dealId);
@@ -2071,10 +2164,10 @@ const Deals = () => {
                     <CardTitle className="text-xs font-medium uppercase tracking-wide" style={{ color: stage.color }}>{getDealStageLabel(stage, t)}</CardTitle>
                   </CardHeader>
                   <CardContent className="p-3 pt-0">
-                    <span className="text-2xl font-bold" style={{ color: stage.color }}>{(dealsDashboardStats?.stageStats[stage.id] ?? stats.stageStats[stage.id]) || 0}</span>
+                    <span className="text-2xl font-bold" style={{ color: stage.color }}>{dealsDashboardStats ? (dealsDashboardStats.stageStats[stage.id] ?? 0) : stats.stageStats[stage.id] || 0}</span>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {formatCurrency((dealsDashboardStats?.stageValues[stage.id] ?? stats.stageValues[stage.id]) || 0)}
-                      {((dealsDashboardStats?.stageValues[stage.id] ?? stats.stageValues[stage.id]) || 0) === 0 && ((dealsDashboardStats?.stageStats[stage.id] ?? stats.stageStats[stage.id]) || 0) > 0 && (
+                      {formatCurrency(dealsDashboardStats ? (dealsDashboardStats.stageValues[stage.id] ?? 0) : stats.stageValues[stage.id] || 0)}
+                      {(dealsDashboardStats ? (dealsDashboardStats.stageValues[stage.id] ?? 0) : stats.stageValues[stage.id] || 0) === 0 && (dealsDashboardStats ? (dealsDashboardStats.stageStats[stage.id] ?? 0) : stats.stageStats[stage.id] || 0) > 0 && (
                         <AlertTriangle className="inline h-3 w-3 ml-1 text-amber-500" />
                       )}
                     </p>

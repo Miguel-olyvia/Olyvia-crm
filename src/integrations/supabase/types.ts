@@ -14180,7 +14180,15 @@ export type Database = {
         Args: { p_org_ids: string[] }
         Returns: Json
       }
-      get_deals_kpi_stats: { Args: { p_org_ids: string[] }; Returns: Json }
+      get_deals_kpi_stats: {
+        Args: {
+          p_filters?: Json
+          p_org_ids: string[]
+          p_scope?: string
+          p_scope_user_ids?: string[]
+        }
+        Returns: Json
+      }
       get_effective_price: {
         Args: {
           p_price_type?: Database["public"]["Enums"]["price_type"]
@@ -14293,6 +14301,7 @@ export type Database = {
         | { Args: { cat_id: string; depth?: number }; Returns: string }
       get_quotes_kpi_stats: {
         Args: {
+          p_filters?: Json
           p_is_parent_org?: boolean
           p_org_id: string
           p_root_org_id?: string

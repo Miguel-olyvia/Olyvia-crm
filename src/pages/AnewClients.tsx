@@ -42,6 +42,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { buildContactScopeOrFilter, getContactScopeUserIds } from "@/lib/contacts/scope";
 import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -101,6 +102,49 @@ interface ClientAddress {
   postal_code: string; district: string; municipality: string; is_primary: boolean;
 }
 
+const INACTIVE_CLIENT_STATUSES = ["inactive", "churned", "lost"];
+
+interface MatchesStatusFilterContext {
+  getIdentity: (entityId: string) => { vat?: string | null } | undefined | null;
+  contractMap?: Map<string, { expiringContracts: unknown[] }>;
+  noContactEntityIds?: Set<string>;
+}
+
+// Single source of truth for "does this client satisfy statusFilter" — used by
+// loadClients' post-filters, displayClients (main table) and dashboardScopedClients
+// (KPI cards), so the table and the KPIs can never drift apart again.
+const matchesStatusFilter = (client: ClientRecord, filter: string, ctx: MatchesStatusFilterContext): boolean => {
+  switch (filter) {
+    case "all":
+      return true;
+    case "active":
+      return !INACTIVE_CLIENT_STATUSES.includes(client.status || "");
+    case "inactive":
+      return INACTIVE_CLIENT_STATUSES.includes(client.status || "");
+    case "no_contact_30d": {
+      if (INACTIVE_CLIENT_STATUSES.includes(client.status || "")) return false;
+      if (ctx.noContactEntityIds) return ctx.noContactEntityIds.has(client.entity_id);
+      return true;
+    }
+    case "no_contact_60d": {
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000);
+      const lastInteraction = client.last_interaction_at ? new Date(client.last_interaction_at) : null;
+      return !lastInteraction || lastInteraction < sixtyDaysAgo;
+    }
+    case "expiring_contracts": {
+      if (INACTIVE_CLIENT_STATUSES.includes(client.status || "")) return false;
+      const contract = ctx.contractMap?.get(client.entity_id);
+      return !!contract && contract.expiringContracts.length > 0;
+    }
+    case "missing_nif": {
+      const identity = ctx.getIdentity(client.entity_id);
+      return !identity?.vat;
+    }
+    default:
+      return client.status === filter;
+  }
+};
+
 const AnewClients = () => {
   const { t } = useTranslation();
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -115,7 +159,18 @@ const AnewClients = () => {
   const { lookupPostalCode, loading: postalLoading } = usePostalCodeLookup();
   const navigate = useNavigate();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const { getPermissionScope, anewUserId: scopeAnewUserId, loading: scopeLoading } = usePermissionScope();
+  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  // Must match the "clients.view" scope used at every buildContactScopeOrFilter
+  // call site below — team member ids are only ever folded into scopedUserIds
+  // when this scope is TEAM (see getContactScopeUserIds for why).
+  const clientsViewScope = useMemo(
+    () => getPermissionScope("clients.view"),
+    [getPermissionScope],
+  );
+  const scopedUserIds = useMemo(
+    () => getContactScopeUserIds(clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds),
+    [clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
+  );
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { resolveEntities, getIdentity } = useEntityIdentity();
   const { alerts: clientAlerts, dismissAlert: dismissClientAlert } = useModuleAlerts('client', activeCompany?.id);
@@ -150,6 +205,11 @@ const AnewClients = () => {
   const PAGE_SIZE = 10;
   const initialLoadDoneRef = useRef(false);
   const truncatedWarnedRef = useRef<string | null>(null);
+  const clientsAbortControllerRef = useRef<AbortController | null>(null);
+  const clientsRequestIdRef = useRef(0);
+  // Separate abort controller for "load more" (pagination) calls so they never share/abort
+  // the controller used by page-1 (filter-change) calls — see loadClients below.
+  const clientsLoadMoreAbortControllerRef = useRef<AbortController | null>(null);
   // Background: all clients for analytics views (Value, Retention, Dashboard)
   const [allClients, setAllClients] = useState<ClientRecord[]>([]);
   const [allClientsLoaded, setAllClientsLoaded] = useState(false);
@@ -197,6 +257,13 @@ const AnewClients = () => {
   const [lastContactFilter, setLastContactFilter] = useState("all");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Stable org scope array for Value/Retention views — avoids a new array
+  // literal on every render, which would otherwise retrigger their fetch effects.
+  const activeCompanyScopeOrgIds = useMemo(
+    () => (activeCompany?.id ? [activeCompany.id] : []),
+    [activeCompany?.id]
+  );
 
   // Enriched data for paginated list
   const entityIds = useMemo(() => clients.map(c => c.entity_id).filter(Boolean), [clients]);
@@ -312,6 +379,45 @@ const AnewClients = () => {
     return { noContactClients, expiringContracts, upsellClients, avgValue, vipAtRisk };
   }, [analyticsClients, analyticsHealthScores, analyticsContractMap, analyticsInteractionMap, analyticsTagMap, getIdentity]);
 
+  // Clients feeding the dashboard KPI cards — always a filtered subset of analyticsClients
+  // (org+permission+search+date scoped), narrowed by the same predicates the main list uses,
+  // so KPI cards and the paginated table can never disagree.
+  const dashboardScopedClients = useMemo(() => {
+    const noContactEntityIds = new Set(alertData.noContactClients.map(c => c.entityId).filter(Boolean));
+    let filtered = analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
+      getIdentity, contractMap: analyticsContractMap, noContactEntityIds,
+    }));
+
+    if (healthFilter !== "all") {
+      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
+    }
+
+    if (lastContactFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(c => {
+        const int = analyticsInteractionMap.get(c.entity_id);
+        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
+        switch (lastContactFilter) {
+          case "7d": return days <= 7;
+          case "30d": return days <= 30;
+          case "30d+": return days > 30;
+          case "60d+": return days > 60;
+          default: return true;
+        }
+      });
+    }
+
+    if (onlyMine && scopeAnewUserId) {
+      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
+    }
+
+    if (salesRepFilter !== "all") {
+      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
+    }
+
+    return filtered;
+  }, [analyticsClients, statusFilter, healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap, analyticsContractMap, alertData, getIdentity]);
+
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
     let filtered = [...clients];
@@ -327,14 +433,8 @@ const AnewClients = () => {
     }
 
     // Special status filters (from KPI cards)
-    if (statusFilter === "no_contact_30d") {
-      filtered = filtered.filter(c => !["inactive", "churned", "lost"].includes(c.status || ""));
-    } else if (statusFilter === "expiring_contracts") {
-      filtered = filtered.filter(c => {
-        if (["inactive", "churned", "lost"].includes(c.status || "")) return false;
-        const contract = contractMap.get(c.entity_id);
-        return !!contract && contract.expiringContracts.length > 0;
-      });
+    if (statusFilter === "no_contact_30d" || statusFilter === "expiring_contracts") {
+      filtered = filtered.filter(c => matchesStatusFilter(c, statusFilter, { getIdentity, contractMap }));
     }
 
     // Last contact filter
@@ -376,7 +476,7 @@ const AnewClients = () => {
     }
 
     return filtered;
-  }, [clients, healthFilter, salesRepFilter, statusFilter, lastContactFilter, onlyMine, activeView, sortColumn, sortDir, healthScores, contractMap, interactionMap, scopeAnewUserId]);
+  }, [clients, healthFilter, salesRepFilter, statusFilter, lastContactFilter, onlyMine, activeView, sortColumn, sortDir, healthScores, contractMap, interactionMap, scopeAnewUserId, getIdentity]);
 
   // Max contract value for progress bars
   const maxContractValue = useMemo(() => {
@@ -467,9 +567,24 @@ const AnewClients = () => {
     const shouldShowInitialLoader = isInitial && !silent;
     if (shouldShowInitialLoader) setLoading(true);
     else if (!isInitial) setLoadingMore(true);
+    // Any fresh (page-1) load — i.e. any global filter change — cancels the previous
+    // in-flight request so a slow stale response can never clobber newer filter results.
+    let requestId = clientsRequestIdRef.current;
+    let abortController: AbortController | null;
+    if (isInitial) {
+      clientsAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      clientsAbortControllerRef.current = abortController;
+      requestId = ++clientsRequestIdRef.current;
+    } else {
+      // "Load more" gets its own controller so an initial (filter-change) call aborting
+      // clientsAbortControllerRef never cancels an in-flight pagination request.
+      clientsLoadMoreAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      clientsLoadMoreAbortControllerRef.current = abortController;
+    }
     try {
       const viewScope = getPermissionScope("clients.view");
-      const internalUserId: string | null = scopeAnewUserId || null;
 
       let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
@@ -488,22 +603,27 @@ const AnewClients = () => {
           const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
           if (atRiskIds.length > 0) {
             query = query.in("entity_id", atRiskIds);
+          } else {
+            // No at-risk clients — force an empty result instead of falling back to
+            // "all non-inactive clients" (matches the pattern used in Deals.tsx).
+            query = query.eq("entity_id", "00000000-0000-0000-0000-000000000000");
           }
         }
       }
 
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-      if (viewScope === "OWNED" && internalUserId) {
-        const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-        query = query.or(orFilters.join(','));
-      } else if (viewScope === "NONE") {
+      if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
+      } else {
+        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+        if (scopeFilter) query = query.or(scopeFilter);
       }
 
       // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
       if (effectiveSearch) {
         const { ids: matchedIds, truncated } = await searchEntityIds(effectiveSearch);
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
         if (truncated && truncatedWarnedRef.current !== effectiveSearch) {
           truncatedWarnedRef.current = effectiveSearch;
           toast({
@@ -520,8 +640,10 @@ const AnewClients = () => {
       }
 
       query = query.order("updated_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
+      if (isInitial && requestId !== clientsRequestIdRef.current) return;
 
       let newClients = (data || []) as ClientRecord[];
       const eIds = newClients.map(c => c.entity_id).filter(Boolean);
@@ -530,21 +652,9 @@ const AnewClients = () => {
       // Text search is applied server-side above via searchEntityIds (entity_id .in).
 
 
-      // Post-filter: missing NIF
-      if (statusFilter === "missing_nif") {
-        newClients = newClients.filter(c => {
-          const id = getIdentity(c.entity_id);
-          return !id?.vat;
-        });
-      }
-
-      // Post-filter: no contact (60d)
-      if (statusFilter === "no_contact_60d") {
-        const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000);
-        newClients = newClients.filter(c => {
-          const lastInteraction = c.last_interaction_at ? new Date(c.last_interaction_at) : null;
-          return !lastInteraction || lastInteraction < sixtyDaysAgo;
-        });
+      // Post-filter: missing NIF / no contact (60d)
+      if (statusFilter === "missing_nif" || statusFilter === "no_contact_60d") {
+        newClients = newClients.filter(c => matchesStatusFilter(c, statusFilter, { getIdentity }));
       }
 
       const assignedIds = newClients.map(c => c.assigned_to).filter(Boolean) as string[];
@@ -565,14 +675,17 @@ const AnewClients = () => {
       });
       setHasMore(newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
     } catch (error: unknown) {
+      if (abortController?.signal.aborted || (isInitial && requestId !== clientsRequestIdRef.current)) return;
       const message = error instanceof Error ? error.message : "Erro inesperado.";
       toast({ title: t('clients.loading'), description: message, variant: "destructive" });
     } finally {
-      if (isInitial) initialLoadDoneRef.current = true;
-      setLoading(false);
-      setLoadingMore(false);
+      if (!isInitial || requestId === clientsRequestIdRef.current) {
+        if (isInitial) initialLoadDoneRef.current = true;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [getPermissionScope, scopeAnewUserId, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
@@ -627,7 +740,6 @@ const AnewClients = () => {
     try {
       const viewScope = getPermissionScope("clients.view");
       if (viewScope === "NONE") { setAllClients([]); setAllClientsLoaded(true); return; }
-      const internalUserId: string | null = scopeAnewUserId || null;
 
       // Server-side search: pre-resolve matching entity_ids (covers full universe, not just first batch)
       let searchEntityIdsList: string[] | null = null;
@@ -649,11 +761,11 @@ const AnewClients = () => {
         let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at").is("deleted_at", null);
         if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
         else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-        if (viewScope === "OWNED" && internalUserId) {
-          const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-          query = query.or(orFilters.join(','));
-        }
+        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+        if (scopeFilter) query = query.or(scopeFilter);
         if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
+        if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
+        if (dateTo) query = query.lte("created_at", dateTo.toISOString());
         query = query.order("updated_at", { ascending: false }).range(offset, offset + BATCH - 1);
         const { data, error } = await query;
         if (error) throw error;
@@ -684,7 +796,7 @@ const AnewClients = () => {
     } catch (err) {
       console.error("Error loading all clients for analytics:", err);
     }
-  }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, resolveEntities, effectiveSearch]);
+  }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, scopedUserIds, resolveEntities, effectiveSearch, dateFrom, dateTo]);
 
   // Trigger background load for accurate KPIs — defer via idle to avoid competing with first paint
   useEffect(() => {
@@ -1549,12 +1661,10 @@ const AnewClients = () => {
         {/* Dashboard KPIs */}
         <AnewClientsDashboard
           key={dashboardKey}
-          companyId={companyFilter !== "all" ? companyFilter : undefined}
+          scopedClients={dashboardScopedClients}
           activeFilter={statusFilter}
           onFilterChange={setStatusFilter}
-          scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
           activeView={activeView}
-          salesRepFilter={salesRepFilter}
           healthScoresMap={analyticsHealthScores}
         />
 
@@ -1595,7 +1705,7 @@ const AnewClients = () => {
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
             identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
-            scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
+            scopeOrgIds={activeCompanyScopeOrgIds}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
@@ -1614,7 +1724,7 @@ const AnewClients = () => {
             tags={analyticsTagMap}
             identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
-            scopeOrgIds={activeCompany?.id ? [activeCompany.id] : []}
+            scopeOrgIds={activeCompanyScopeOrgIds}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
