@@ -23,6 +23,19 @@ const LOGO_SIZES = [
   { value: "large", label: "Grande" },
 ] as const;
 
+const ALLOWED_LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function validateFile(file: File): string | null {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type)) {
+    return "Formato inválido. Selecione um ficheiro PNG, JPG ou WEBP.";
+  }
+  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+    return "Imagem demasiado grande (máx. 5MB)";
+  }
+  return null;
+}
+
 export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
@@ -36,12 +49,10 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Selecione um ficheiro de imagem (PNG, JPG)");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Imagem demasiado grande (máx. 5MB)");
+    const validationError = validateFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
     uploadingRef.current = true;

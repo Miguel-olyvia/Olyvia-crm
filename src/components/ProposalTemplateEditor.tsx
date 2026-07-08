@@ -660,6 +660,19 @@ function ColorPicker({ label, value, onChange }: { label: string; value: string;
   );
 }
 
+const ALLOWED_LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function validateFile(file: File): string | null {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type)) {
+    return "Formato inválido. Selecione um ficheiro PNG, JPG ou WEBP.";
+  }
+  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+    return "Imagem demasiado grande (máx. 5MB)";
+  }
+  return null;
+}
+
 interface ProposalTemplateEditorProps {
   templateId?: string | null;
   onClose: () => void;
@@ -711,12 +724,10 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Erro", description: "Selecione um ficheiro de imagem (PNG, JPG)", variant: "destructive" });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "Erro", description: "Imagem demasiado grande (máx. 5MB)", variant: "destructive" });
+    const validationError = validateFile(file);
+    if (validationError) {
+      toast({ title: "Erro", description: validationError, variant: "destructive" });
+      if (logoInputRef.current) logoInputRef.current.value = "";
       return;
     }
     setUploadingLogo(true);

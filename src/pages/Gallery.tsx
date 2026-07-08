@@ -301,9 +301,43 @@ export default function Gallery() {
     }
   };
 
+  const MEDIA_ALLOWED_MIME_PREFIXES = ["image/", "video/", "audio/"];
+  const MEDIA_ALLOWED_MIME_TYPES = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ];
+  const MEDIA_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
+  const validateFile = (file: File): string | null => {
+    const isAllowedMime =
+      MEDIA_ALLOWED_MIME_PREFIXES.some(prefix => file.type.startsWith(prefix)) ||
+      MEDIA_ALLOWED_MIME_TYPES.includes(file.type);
+
+    if (!isAllowedMime) {
+      return t('gallery.toast.invalidFileType');
+    }
+
+    if (file.size > MEDIA_MAX_FILE_SIZE_BYTES) {
+      return t('gallery.toast.fileTooLarge');
+    }
+
+    return null;
+  };
+
   const handleUpload = async () => {
     if (!selectedFile || !selectedCompanyId) {
       toast({ title: t('gallery.toast.selectFile'), variant: "destructive" });
+      return;
+    }
+
+    const validationError = validateFile(selectedFile);
+    if (validationError) {
+      toast({ title: validationError, variant: "destructive" });
       return;
     }
 
@@ -314,7 +348,7 @@ export default function Gallery() {
 
       const fileExt = selectedFile.name.split(".").pop();
       const fileName = `${selectedCompanyId}/${Date.now()}-${newAsset.name || selectedFile.name}.${fileExt}`;
-      
+
       const { error: uploadError } = await supabase.storage
         .from("media")
         .upload(fileName, selectedFile);
