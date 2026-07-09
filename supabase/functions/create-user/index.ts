@@ -33,8 +33,59 @@ const requestSchema = z.object({
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import {
+  deriveKeyFromEnv,
+  encryptNif,
+  hashNif,
+  tokenizeNif,
+} from "../_shared/nifCrypto.ts";
 
 initSentry();
+
+interface NifEncryptedFields {
+  p_nif_encrypted: string;
+  p_nif_hash: string;
+  p_nif_tokens: string[];
+}
+
+/**
+ * Computes the encrypted/hash/tokenized representations of a NIF using the
+ * same server-side keys and algorithms as nif-write-proxy. This function
+ * already runs with service_role and never crosses the network, so it can
+ * call _shared/nifCrypto.ts directly instead of going through the proxy.
+ *
+ * Best-effort: if NIF_ENC_KEY/NIF_HMAC_KEY are not configured in this
+ * environment yet, returns null and logs a warning (never the plaintext
+ * NIF) instead of blocking user creation. Dual-write of the encrypted NIF
+ * fields is optional in this integration; the plaintext p_fiscal.nif path
+ * remains the source of truth until every environment has the keys set.
+ */
+async function computeNifEncryptedFields(
+  nif: string,
+): Promise<NifEncryptedFields | null> {
+  try {
+    const encKey = deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM");
+    const hmacKey = deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC");
+
+    const [nifEncrypted, nifHash, nifTokens] = await Promise.all([
+      encryptNif(nif, encKey),
+      hashNif(nif, hmacKey),
+      tokenizeNif(nif, hmacKey),
+    ]);
+
+    return {
+      p_nif_encrypted: nifEncrypted,
+      p_nif_hash: nifHash,
+      p_nif_tokens: nifTokens,
+    };
+  } catch (e: unknown) {
+    console.warn(
+      "create-user: skipping NIF encryption (keys unavailable or derivation failed):",
+      e instanceof Error ? e.message : "unknown error",
+    );
+    return null;
+  }
+}
 
 // Unified admin check via anew_memberships + anew_roles
 async function resolveCallerAdmin(supabase: any, authUserId: string) {
@@ -422,6 +473,14 @@ serve(async (req: Request) => {
     // Create memberships payload from frontend data (supports both membership and memberships)
     const normalizedMemberships = normalizeMemberships(memberships, membership);
 
+    // Dual-write: alongside the plaintext p_fiscal.nif, also compute and
+    // send the encrypted/hash/tokenized NIF representations when a NIF was
+    // supplied and the encryption keys are configured in this environment.
+    // Best-effort — see computeNifEncryptedFields for the fallback behavior.
+    const nifEncryptedFields = normalizedFiscal?.nif
+      ? await computeNifEncryptedFields(normalizedFiscal.nif)
+      : null;
+
     // Establish AND finalize the anew_users row PLUS every optional
     // related-table write (entity, emails, memberships, fiscal, addresses,
     // additional phones) in a single RPC call. The Edge Function itself
@@ -451,6 +510,7 @@ serve(async (req: Request) => {
         p_addresses: preparedAddresses,
         p_additional_emails: preparedAdditionalEmails,
         p_additional_phones: preparedAdditionalPhones,
+        ...(nifEncryptedFields ?? {}),
       },
     ).single();
 
