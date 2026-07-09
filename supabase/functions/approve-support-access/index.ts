@@ -100,31 +100,25 @@ serve(async (req: Request): Promise<Response> => {
     // Requester may always revoke their own active session without super_admin role.
     const isOwnRevoke = isRevokeOfApproved && caller.anewUserId === accessRequest.admin_user_id;
 
-    // ── 4. Verify caller is super_admin of the target org (skip for own revoke) ─
+    // ── 4. Verify caller is another system_admin (skip for own revoke) ──────────
+    // Break-glass approval for this infra-level access must stay internal to
+    // Olyvia — it cannot depend on a client-org super_admin being reachable
+    // (e.g. at 3am during an incident). The client-org super_admin is notified
+    // for transparency instead (see request-support-access), not asked to
+    // approve.
     if (!isOwnRevoke) {
-      const { data: roleRows } = await supabase
-        .from("anew_roles")
-        .select("id")
-        .eq("code", "super_admin");
+      const { data: ctx, error: ctxError } = await supabase.rpc("get_user_context", {
+        _auth_user_id: caller.authUid,
+      });
 
-      const superAdminRoleIds = (roleRows || []).map((r: { id: string }) => r.id);
-
-      if (superAdminRoleIds.length === 0) {
-        throw new AuthError("super_admin role not configured", 500);
+      if (ctxError) {
+        console.error("[approve-support-access] get_user_context error:", ctxError);
+        throw new AuthError("Failed to resolve user context", 500);
       }
 
-      const { data: membership } = await supabase
-        .from("anew_memberships")
-        .select("id")
-        .eq("user_id", caller.anewUserId)
-        .eq("organization_id", targetOrgId)
-        .eq("status", "active")
-        .in("role_id", superAdminRoleIds)
-        .maybeSingle();
-
-      if (!membership) {
+      if (!ctx?.is_system_admin) {
         throw new AuthError(
-          "Only an active super_admin of this organisation can approve or reject support access",
+          "Only another system admin can approve or reject support access requests",
           403
         );
       }

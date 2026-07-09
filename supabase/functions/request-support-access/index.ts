@@ -114,30 +114,70 @@ serve(async (req: Request): Promise<Response> => {
 
     const requestId: string = logEntry.id;
 
-    // ── 6. Fetch super_admin(s) for the target org ────────────────────────────
+    // ── 6. Fetch other system_admin(s) to approve, and super_admin(s) to notify ──
+    // Approval must stay internal to Olyvia (see approve-support-access) — it
+    // cannot depend on the client-org super_admin being reachable at odd hours.
+    // The client-org super_admin is still notified, for transparency, but has
+    // no approve/reject action.
     // anew_memberships has no FK constraints, so PostgREST cannot resolve an
     // embedded `anew_roles!inner(code)` filter/select (PGRST200). Resolve
-    // with a decoupled two-step lookup instead.
-    let adminUsers: Array<{ id: string; email: string; name: string }> = [];
+    // with decoupled two-step lookups instead.
+    let approverUsers: Array<{ id: string; email: string; name: string }> = [];
+    let fyiUsers: Array<{ id: string; email: string; name: string }> = [];
 
     const { data: roleRows, error: roleError } = await supabase
       .from("anew_roles")
-      .select("id")
-      .eq("code", "super_admin");
+      .select("id, code")
+      .in("code", ["system_admin", "super_admin"]);
 
     if (roleError) {
-      console.error("[request-support-access] error fetching super_admin role id:", roleError);
+      console.error("[request-support-access] error fetching role ids:", roleError);
     }
 
-    const roleIds = (roleRows || []).map((r: { id: string }) => r.id);
+    const systemAdminRoleIds = (roleRows || [])
+      .filter((r: { code: string }) => r.code === "system_admin")
+      .map((r: { id: string }) => r.id);
+    const superAdminRoleIds = (roleRows || [])
+      .filter((r: { code: string }) => r.code === "super_admin")
+      .map((r: { id: string }) => r.id);
 
-    if (roleIds.length > 0) {
+    if (systemAdminRoleIds.length > 0) {
+      const { data: memberships, error: membershipsError } = await supabase
+        .from("anew_memberships")
+        .select("user_id")
+        .eq("status", "active")
+        .in("role_id", systemAdminRoleIds);
+
+      if (membershipsError) {
+        console.error("[request-support-access] error fetching system_admin memberships:", membershipsError);
+      }
+
+      const userIds = (memberships || [])
+        .map((m: { user_id: string }) => m.user_id)
+        .filter((id: string) => id !== caller.anewUserId);
+
+      if (userIds.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from("anew_users")
+          .select("id, email, name")
+          .in("id", userIds)
+          .eq("status", "active");
+
+        if (usersError) {
+          console.error("[request-support-access] error fetching system_admin users:", usersError);
+        }
+
+        approverUsers = (users || []) as Array<{ id: string; email: string; name: string }>;
+      }
+    }
+
+    if (superAdminRoleIds.length > 0) {
       const { data: memberships, error: membershipsError } = await supabase
         .from("anew_memberships")
         .select("user_id")
         .eq("organization_id", org_id)
         .eq("status", "active")
-        .in("role_id", roleIds);
+        .in("role_id", superAdminRoleIds);
 
       if (membershipsError) {
         console.error("[request-support-access] error fetching super_admin memberships:", membershipsError);
@@ -156,7 +196,7 @@ serve(async (req: Request): Promise<Response> => {
           console.error("[request-support-access] error fetching super_admin users:", usersError);
         }
 
-        adminUsers = (users || []) as Array<{ id: string; email: string; name: string }>;
+        fyiUsers = (users || []) as Array<{ id: string; email: string; name: string }>;
       }
     }
 
@@ -170,8 +210,8 @@ serve(async (req: Request): Promise<Response> => {
     const callerName = callerUser?.name ?? "A system administrator";
     const approvalLink = `${Deno.env.get("SUPABASE_URL")}/functions/v1/approve-support-access`;
 
-    // ── 8. Send notification email to each super_admin ────────────────────────
-    const emailPromises = adminUsers.map(async (admin) => {
+    // ── 8. Send approval-request email to other system_admins, FYI to super_admin(s) ──
+    const approvalEmailPromises = approverUsers.map(async (admin) => {
       const html = buildNotificationEmailHtml({
         requestId,
         orgName: org.name,
@@ -209,7 +249,41 @@ serve(async (req: Request): Promise<Response> => {
       }
     });
 
-    await Promise.all(emailPromises);
+    const fyiEmailPromises = fyiUsers.map(async (admin) => {
+      const html = buildFyiEmailHtml({
+        orgName: org.name,
+        reason,
+        durationHours: duration_hours,
+        callerName,
+        adminName: admin.name,
+      });
+
+      try {
+        const resp = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseServiceKey}`,
+          },
+          body: JSON.stringify({
+            to: admin.email,
+            subject: `[Olyvia] Support Access Notice — ${org.name}`,
+            html,
+            user_id: admin.id,
+            organization_id: org_id,
+          }),
+        });
+
+        const result = await resp.json();
+        if (result.error) {
+          console.error("[request-support-access] FYI email failed for", admin.email, result.error);
+        }
+      } catch (emailErr) {
+        console.error("[request-support-access] FYI email dispatch error:", emailErr);
+      }
+    });
+
+    await Promise.all([...approvalEmailPromises, ...fyiEmailPromises]);
 
     return new Response(
       JSON.stringify({ request_id: requestId, status: "pending" }),
@@ -251,7 +325,8 @@ function buildNotificationEmailHtml(p: NotificationEmailParams): string {
   <p>Dear ${escapeHtml(p.adminName)},</p>
   <p>
     <strong>${escapeHtml(p.callerName)}</strong> has requested temporary support access
-    to your organisation <strong>${escapeHtml(p.orgName)}</strong>.
+    to organisation <strong>${escapeHtml(p.orgName)}</strong>. As a fellow system admin,
+    your review is requested.
   </p>
   <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
     <tr>
@@ -271,6 +346,46 @@ function buildNotificationEmailHtml(p: NotificationEmailParams): string {
   <p style="font-size: 12px; color: #6b7280;">
     This is an automated security notification. Do not forward this email.
     Request ID: ${escapeHtml(p.requestId)}
+  </p>
+</body>
+</html>`.trim();
+}
+
+interface FyiEmailParams {
+  orgName: string;
+  reason: string;
+  durationHours: number;
+  callerName: string;
+  adminName: string;
+}
+
+function buildFyiEmailHtml(p: FyiEmailParams): string {
+  return `
+<!DOCTYPE html>
+<html lang="pt">
+<head><meta charset="UTF-8"><title>Support Access Notice</title></head>
+<body style="font-family: sans-serif; color: #1a1a1a; max-width: 600px; margin: 0 auto; padding: 24px;">
+  <h2 style="color: #2563eb;">Support Access Notice</h2>
+  <p>Dear ${escapeHtml(p.adminName)},</p>
+  <p>
+    <strong>${escapeHtml(p.callerName)}</strong>, an Olyvia system administrator, has
+    requested temporary support access to your organisation
+    <strong>${escapeHtml(p.orgName)}</strong>. This is a notice only — approval is
+    handled internally by Olyvia and does not require any action from you.
+  </p>
+  <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+    <tr>
+      <td style="padding: 8px; border: 1px solid #e5e7eb; font-weight: bold;">Reason</td>
+      <td style="padding: 8px; border: 1px solid #e5e7eb;">${escapeHtml(p.reason)}</td>
+    </tr>
+    <tr>
+      <td style="padding: 8px; border: 1px solid #e5e7eb; font-weight: bold;">Duration requested</td>
+      <td style="padding: 8px; border: 1px solid #e5e7eb;">${p.durationHours} hour${p.durationHours !== 1 ? "s" : ""}</td>
+    </tr>
+  </table>
+  <p>All access under this request is logged and time-limited. If you have concerns, contact Olyvia support.</p>
+  <p style="font-size: 12px; color: #6b7280;">
+    This is an automated security notification. Do not forward this email.
   </p>
 </body>
 </html>`.trim();
