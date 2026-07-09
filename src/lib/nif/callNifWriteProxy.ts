@@ -1,7 +1,20 @@
 import { supabase } from '@/integrations/supabase/client';
+import { getFriendlyErrorMessage } from '@/utils/friendlyError';
 
-interface NifWriteProxyError {
-  message: string;
+const DEFAULT_ERROR_MESSAGE = 'Erro desconhecido ao invocar nif-write-proxy';
+
+/**
+ * Erro real (instância de `Error`) devolvido por `callNifWriteProxy`.
+ *
+ * É uma subclasse de `Error` — em vez de um objeto simples `{ message }` —
+ * para que continue a funcionar com `error instanceof Error` em logging,
+ * Sentry, error boundaries, etc.
+ */
+export class NifWriteProxyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NifWriteProxyError';
+  }
 }
 
 interface NifWriteProxyResult<T> {
@@ -9,16 +22,18 @@ interface NifWriteProxyResult<T> {
   error: NifWriteProxyError | null;
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  return 'Erro desconhecido ao invocar nif-write-proxy';
+/**
+ * Extrai a mensagem de erro real de `error`.
+ *
+ * Reaproveita `getFriendlyErrorMessage` (também usado em `UsersNew.tsx` para
+ * `update-user-password`), que sabe ler `error.context` (um `Response`) de um
+ * `FunctionsHttpError` do supabase-js via `.json()`/`.text()` assíncrono — a
+ * única forma de obter a mensagem real da RPC/Postgres quando a Edge Function
+ * responde com um status não-2xx. Sem isto, `error.message` seria sempre a
+ * string genérica "Edge Function returned a non-2xx status code".
+ */
+async function getErrorMessage(error: unknown): Promise<string> {
+  return getFriendlyErrorMessage(error, DEFAULT_ERROR_MESSAGE);
 }
 
 /**
@@ -31,6 +46,12 @@ function getErrorMessage(error: unknown): string {
  * Devolve o mesmo formato `{ data, error }` que `supabase.rpc(...)` devolve,
  * para minimizar alterações nos call sites existentes. Nunca lança: erros de
  * rede ou de invocação são normalizados para `{ data: null, error }`.
+ *
+ * Nota: o parâmetro genérico `T` não é atualmente especializado em nenhum dos
+ * call sites existentes (todos ignoram `data` e só usam `error`), pelo que
+ * `data` fica sempre `unknown` na prática. Aceite por agora; especializar `T`
+ * por call site pode ser feito depois, se algum consumidor passar a precisar
+ * de ler `data`.
  */
 export async function callNifWriteProxy<T = unknown>(
   rpc: string,
@@ -47,11 +68,11 @@ export async function callNifWriteProxy<T = unknown>(
     });
 
     if (error) {
-      return { data: null, error: { message: getErrorMessage(error) } };
+      return { data: null, error: new NifWriteProxyError(await getErrorMessage(error)) };
     }
 
     return { data: data ?? null, error: null };
   } catch (error: unknown) {
-    return { data: null, error: { message: getErrorMessage(error) } };
+    return { data: null, error: new NifWriteProxyError(await getErrorMessage(error)) };
   }
 }
