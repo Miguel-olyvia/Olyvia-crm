@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useColumnResize, ColumnWidths } from "@/hooks/useColumnResize";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -1021,7 +1022,8 @@ export default function UsersNew() {
         const validAddressesForRpc = isAddressVisible() ? prepareValidAddresses(formAddresses) : null;
 
         console.log("[UserEdit] Calling rpc_update_user for", selectedUser.id);
-        const { error: rpcError } = await supabase.rpc("rpc_update_user", {
+        const nif = formFiscalData.nif;
+        const params = {
           p_user_id: selectedUser.id,
           p_entity_id: selectedUser.entity_id ?? null,
           p_name: formData.name,
@@ -1060,7 +1062,8 @@ export default function UsersNew() {
                 country_code: formFiscalData.country_code,
               }
             : null,
-        });
+        };
+        const { error: rpcError } = await callNifWriteProxy("rpc_update_user", params, nif);
 
         if (rpcError) {
           console.error("[UserEdit] rpc_update_user failed:", rpcError);

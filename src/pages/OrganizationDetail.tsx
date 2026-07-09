@@ -44,6 +44,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 
 interface Organization {
   id: string;
@@ -445,8 +446,9 @@ export default function OrganizationDetail() {
           country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
         }));
 
+      const nif = hasFiscalData ? newOrgFormData.nif : null;
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        (supabase as any).rpc("rpc_create_organization_with_hierarchy", {
+        callNifWriteProxy("rpc_create_organization_with_hierarchy", {
           p_current_org_id: id,
           p_hierarchy_type: hierarchyForm.type,
           p_name: newOrgName,
@@ -455,11 +457,11 @@ export default function OrganizationDetail() {
           p_status: newOrgFormData.status || "active",
           p_sector: newOrgFormData.sector || null,
           p_is_fiscal: newOrgFormData.isFiscal,
-          p_nif: hasFiscalData ? newOrgFormData.nif : null,
+          p_nif: nif,
           p_commercial_name: hasFiscalData ? (newOrgFormData.commercialName || null) : null,
           p_country_code: "PT",
           p_addresses: addressesPayload,
-        })
+        }, nif)
       );
 
       if (error) throw error;

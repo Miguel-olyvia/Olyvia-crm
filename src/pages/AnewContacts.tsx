@@ -15,6 +15,7 @@ import { fetchSameOrgFieldsByEntity, revalidateStrongDuplicatesBeforeWrite } fro
 import { ensureEntityOrgLink, linkEntityToOrg } from "@/utils/orgEntity";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { searchEntityIds as searchEntityIdsFn } from "@/lib/clientSearch";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
@@ -1433,8 +1434,9 @@ const AnewContacts = () => {
       // No duplicate — proceed with creation.
       // M1 — single transactional RPC: guarantees the contact never persists
       // without its role. Any RPC error is treated as a total creation failure.
+      const createContactNif = contactVat || null;
       const { error: createRpcError } = await withAuditContext(supabase, internalUserId, () =>
-        supabase.rpc('create_contact_with_role', {
+        callNifWriteProxy('create_contact_with_role', {
           p_payload: {
             entityId: contactEntityId,
             organizationId,
@@ -1451,7 +1453,7 @@ const AnewContacts = () => {
             sourceType: "manual",
             assignedTo: null,
           },
-        })
+        }, createContactNif)
       );
       if (createRpcError) throw createRpcError;
       if (addressData.postal_code || addressData.street || addressData.city) {
@@ -1564,8 +1566,9 @@ const AnewContacts = () => {
       // M1 — single transactional RPC creates a brand-new entity (entityId
       // omitted) + contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
+      const createAnywayNif = pendingContactData.vat || null;
       const { error: createAnywayRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
-        supabase.rpc('create_contact_with_role', {
+        callNifWriteProxy('create_contact_with_role', {
           p_payload: {
             entityId: null,
             organizationId: pendingContactData.organizationId,
@@ -1582,7 +1585,7 @@ const AnewContacts = () => {
             sourceType: "manual",
             assignedTo: null,
           },
-        })
+        }, createAnywayNif)
       );
       if (createAnywayRpcError) throw createAnywayRpcError;
       toast({ title: t('contacts.toast.createSuccess') });
@@ -1601,8 +1604,9 @@ const AnewContacts = () => {
       // M1 — single transactional RPC reusing the shared entity_id: creates
       // the contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
+      const shareContactNif = pendingContactData.vat || null;
       const { error: shareRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
-        supabase.rpc('create_contact_with_role', {
+        callNifWriteProxy('create_contact_with_role', {
           p_payload: {
             entityId: match.entityId,
             organizationId: pendingContactData.organizationId,
@@ -1619,7 +1623,7 @@ const AnewContacts = () => {
             sourceType: "manual",
             assignedTo: null,
           },
-        })
+        }, shareContactNif)
       );
       if (shareRpcError) throw shareRpcError;
       toast({ title: "Contacto criado a partir de entidade do grupo" });
@@ -1717,7 +1721,8 @@ const AnewContacts = () => {
 
         // M1 - single transactional RPC: creates entity (if needed) + contact + role
         // atomically, guaranteeing the contact never persists without its role.
-        const { error: rpcError } = await supabase.rpc('create_contact_with_role', {
+        const importContactNif = c.vat || null;
+        const { error: rpcError } = await callNifWriteProxy('create_contact_with_role', {
           p_payload: {
             entityId: entityId || null,
             organizationId: orgId,
@@ -1733,7 +1738,7 @@ const AnewContacts = () => {
             sourceType: "import",
             assignedTo: null,
           },
-        });
+        }, importContactNif);
         if (rpcError) {
           console.error('[import] create_contact_with_role failed', rpcError);
           skippedCount++;

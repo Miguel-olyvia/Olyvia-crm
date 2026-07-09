@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
@@ -663,7 +664,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         await withAuditContext(supabase, businessUserId, async () => {
           const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
           const displayName = composeDisplayName(normalized.first, normalized.last);
-          const { error: rpcError } = await supabase.rpc("rpc_update_client", {
+          const nif = editFormData.vat || null;
+          const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
             p_client_id: client.id,
             p_entity_id: entityId,
             p_display_name: displayName,
@@ -686,7 +688,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_address_city: editFormData.city || null,
             p_address_postal_code: editFormData.postal_code || null,
             p_address_number: null,
-          } satisfies RpcUpdateClientArgs);
+          } satisfies RpcUpdateClientArgs, nif);
           if (rpcError) throw rpcError;
         });
       }

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
@@ -1221,7 +1222,8 @@ const AnewClients = () => {
     addr: ClientAddress,
     entityFields?: ClientEntityFields,
   ) => {
-    const { error } = await supabase.rpc("rpc_create_client_manual", {
+    const nif = entityFields?.vat ?? null;
+    const { error } = await callNifWriteProxy("rpc_create_client_manual", {
       p_entity_id: entityId,
       p_organization_id: organizationId,
       p_root_organization_id: resolvedRootOrgId || organizationId,
@@ -1240,7 +1242,7 @@ const AnewClients = () => {
       p_phone: entityFields?.phone ?? null,
       p_phone_country_code: entityFields?.phoneCountryCode ?? null,
       p_vat: entityFields?.vat ?? null,
-    });
+    }, nif);
     if (error) throw error;
   };
 

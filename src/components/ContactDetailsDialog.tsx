@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -542,7 +543,8 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
       const displayName = composeDisplayName(normalized.first, normalized.last);
 
-      const { error: rpcErr } = await supabase.rpc('rpc_update_contact', {
+      const updateContactNif = editFormData.vat || null;
+      const { error: rpcErr } = await callNifWriteProxy('rpc_update_contact', {
         p_contact_id: contact.id,
         p_entity_id: entityId || null,
         p_display_name: displayName,
@@ -561,7 +563,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
         p_city: editFormData.city || null,
         p_postal_code: editFormData.postal_code || null,
         p_entity_type: entityType,
-      });
+      }, updateContactNif);
       if (rpcErr) throw rpcErr;
 
       toast({ title: t('contacts.details.contactUpdated') });

@@ -28,6 +28,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 
 interface Organization {
   id: string;
@@ -371,8 +372,9 @@ export default function Organizations() {
           country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
         }));
 
+      const nif = hasFiscalData ? formData.nif : null;
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        (supabase as any).rpc("rpc_create_organization", {
+        callNifWriteProxy("rpc_create_organization", {
           p_name: newOrgName,
           p_type: typeToUse,
           p_description: formData.description || null,
@@ -381,11 +383,11 @@ export default function Organizations() {
           p_phone: formData.phone?.trim() || null,
           p_is_fiscal: formData.isFiscal,
           p_parent_id: formData.parentId || null,
-          p_nif: hasFiscalData ? formData.nif : null,
+          p_nif: nif,
           p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
           p_country_code: "PT",
           p_addresses: addressesPayload,
-        })
+        }, nif)
       );
       if (error) throw error;
 
@@ -416,8 +418,9 @@ export default function Organizations() {
           country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
         }));
 
+      const nif = hasFiscalData ? formData.nif : null;
       const { error } = await withAuditContext(supabase, businessUserId, () =>
-        (supabase as any).rpc("rpc_update_organization", {
+        callNifWriteProxy("rpc_update_organization", {
           p_id: selectedOrg.id,
           p_name: formData.name,
           p_type: typeToUse,
@@ -427,11 +430,11 @@ export default function Organizations() {
           p_phone: formData.phone?.trim() || null,
           p_is_fiscal: formData.isFiscal,
           p_parent_id: formData.parentId || null,
-          p_nif: hasFiscalData ? formData.nif : null,
+          p_nif: nif,
           p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
           p_country_code: "PT",
           p_addresses: addressesPayload,
-        })
+        }, nif)
       );
       if (error) throw error;
 
