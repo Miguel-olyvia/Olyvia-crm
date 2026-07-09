@@ -286,6 +286,18 @@ export default function Scheduling() {
   const toggleBoardFilter = (id: string) => setSelectedBoardIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleResourceFilter = (id: string) => setSelectedResourceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  // SECURITY: the assignee/user pickers must respect the viewer's own scheduling.items.view scope.
+  // ORG (or system admin) sees the full roster; TEAM sees only their own teammates + self; OWNED/NONE see only themselves.
+  // `users` here is the raw, unscoped org roster loaded for name resolution — never pass it directly to picker UI.
+  const assignableUsers = useMemo(() => {
+    if (canSeeAll) return users;
+    if (isTeamScope) {
+      const allowedIds = new Set([anewUserId, ...teamMemberIds].filter(Boolean));
+      return users.filter(u => allowedIds.has(u.id));
+    }
+    return users.filter(u => u.id === anewUserId);
+  }, [users, canSeeAll, isTeamScope, anewUserId, teamMemberIds]);
+
   if (loading && boards.length === 0) return <><div className="flex justify-center items-center h-64"><OlyviaLoader size={40} /></div></>;
 
   return (
@@ -502,10 +514,10 @@ export default function Scheduling() {
       </div>
 
       <ScheduleItemDialog open={itemDialogOpen} onOpenChange={setItemDialogOpen} item={selectedItem} boards={boards} resources={resources}
-        contacts={contacts} employees={employees} companyUsers={users} currentUserId={currentUserId} currentEmployeeId={undefined}
+        contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
         defaultDate={defaultDate} companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />
-      <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={users} onSave={handleSaveResource} />
+      <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={assignableUsers} allUsers={users} onSave={handleSaveResource} />
       <ScheduleSettingsDialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen} companyId={activeCompany?.id} />
 
       <AlertDialog open={!!boardToDelete} onOpenChange={(open) => !open && setBoardToDelete(null)}>

@@ -18,6 +18,9 @@ interface ScheduleResourceDialogProps {
   resource?: ScheduleResource | null;
   employees: { id: string; first_name: string; last_name: string }[];
   users: { id: string; name: string }[];
+  // Full/unscoped roster used only for resolving the display name of an already-assigned
+  // user (not a scope violation). Falls back to `users` if not provided.
+  allUsers?: { id: string; name: string }[];
   onSave: (data: Partial<ScheduleResource>) => Promise<void>;
 }
 
@@ -31,6 +34,7 @@ export function ScheduleResourceDialog({
   resource,
   employees,
   users,
+  allUsers,
   onSave,
 }: ScheduleResourceDialogProps) {
   const { t } = useTranslation();
@@ -115,9 +119,12 @@ export function ScheduleResourceDialog({
     return RESOURCE_TYPES.find(t => t.value === type)?.label || type;
   };
 
-  // Get user name by ID
+  // Get user name by ID.
+  // Uses the full/unscoped roster (`allUsers`) because showing the name of an
+  // already-assigned resource is not a scope violation, even if that user falls
+  // outside the viewer's own scheduling.items.view scope (`users`).
   const getUserName = (userId: string) => {
-    return users.find(u => u.id === userId)?.name || '-';
+    return (allUsers ?? users).find(u => u.id === userId)?.name || '-';
   };
 
   // Get employee name by ID
