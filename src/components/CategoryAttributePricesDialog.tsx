@@ -18,6 +18,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   categoryId: string;
   categoryName: string;
+  companyId: string;
   attributeId?: string;
 }
 
@@ -40,7 +41,7 @@ interface ValueRow {
 }
 
 export default function CategoryAttributePricesDialog({
-  open, onOpenChange, categoryId, categoryName, attributeId: propAttributeId
+  open, onOpenChange, categoryId, categoryName, companyId, attributeId: propAttributeId
 }: Props) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -216,6 +217,9 @@ export default function CategoryAttributePricesDialog({
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
+      if (!companyId) throw new Error("Nenhuma organização ativa selecionada");
+      const organizationId = companyId;
+
       const updates: Array<TablesUpdate<"product_attribute_value_prices"> & { id: string }> = [];
       const inserts: Array<TablesInsert<"product_attribute_value_prices">> = [];
 
@@ -233,6 +237,7 @@ export default function CategoryAttributePricesDialog({
           } else {
             inserts.push({
               category_id: categoryId,
+              organization_id: organizationId,
               product_id: null,
               attribute_id: attrId,
               value_option: row.value,

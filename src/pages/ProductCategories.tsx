@@ -785,6 +785,7 @@ export default function ProductCategories() {
           onOpenChange={setCatPricesOpen}
           categoryId={catPricesCategory.id}
           categoryName={catPricesCategory.name}
+          companyId={activeCompany?.id || ''}
         />
       )}
     </>

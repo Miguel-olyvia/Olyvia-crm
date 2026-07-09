@@ -983,6 +983,7 @@ export default function ProductSubcategories() {
           onOpenChange={setCatPricesOpen}
           categoryId={catPricesCategory.id}
           categoryName={catPricesCategory.name}
+          companyId={activeCompany?.id || ''}
         />
       )}
     </>
