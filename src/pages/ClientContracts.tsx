@@ -41,6 +41,7 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -143,6 +144,9 @@ const ClientContracts = () => {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
   const [contractPortalStatuses, setContractPortalStatuses] = useState<Record<string, string>>({});
+  const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
+  const [reassigningContract, setReassigningContract] = useState<ClientContract | null>(null);
+  const [reassignOwnerId, setReassignOwnerId] = useState<string>("");
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
 
@@ -800,6 +804,120 @@ const ClientContracts = () => {
     onError: (error) => { toast.error("Erro: " + error.message); },
   });
 
+  // Duplicar: cria um novo draft reutilizando rpc_create_client_contract com as
+  // colunas do contrato de origem (mesmo RPC já usado por createMutation — sem
+  // scope-bypass, permissão/organização é sempre re-validada server-side). As
+  // datas ficam em branco porque o duplicado é sempre um novo draft.
+  const duplicateMutation = useMutation({
+    mutationFn: async (contract: ClientContract) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+        p_client_id: contract.client_id,
+        p_entity_id: contract.entity_id || null,
+        p_organization_id: contract.organization_id,
+        p_root_organization_id: contract.root_organization_id || contract.organization_id,
+        p_proposal_id: contract.proposal_id || null,
+        p_contract_template_id: contract.contract_template_id || null,
+        p_total_value: contract.total_value ?? 0,
+        p_currency: contract.currency || "EUR",
+        p_start_date: null,
+        p_end_date: null,
+        p_notes: contract.notes || null,
+        p_payment_terms: contract.payment_terms || null,
+        p_contract_body_html: contract.contract_body_html || null,
+        p_final_body_html: null,
+        p_prompt_values: contract.prompt_values && Object.keys(contract.prompt_values).length > 0 ? contract.prompt_values : null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato duplicado — novo draft criado"); },
+    onError: (error: any) => { toast.error("Erro ao duplicar contrato: " + (error?.message || "erro desconhecido")); },
+  });
+
+  // Reatribuir comercial: muda o "owner" (created_by) do contrato via RPC dedicada.
+  const reassignMutation = useMutation({
+    mutationFn: async ({ id, newOwnerId }: { id: string; newOwnerId: string }) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { error } = await supabase.rpc('rpc_reassign_client_contract' as any, {
+        p_id: id,
+        p_new_owner_id: newOwnerId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success("Comercial reatribuído com sucesso");
+      setIsReassignDialogOpen(false);
+      setReassigningContract(null);
+      setReassignOwnerId("");
+    },
+    onError: (error: any) => { toast.error("Erro ao reatribuir: " + (error?.message || "erro desconhecido")); },
+  });
+
+  // Org roster for the "Reatribuir comercial" picker — mirrors AnewLeads.tsx's
+  // loadCompanyUsers (same descendant-subtree walk, same internal-role exclusion).
+  const { data: companyUsers = [] } = useQuery({
+    queryKey: ["client-contracts-company-users", activeCompany?.id],
+    queryFn: async () => {
+      if (!activeCompany?.id) return [];
+      const subtreeIds = [activeCompany.id];
+      try {
+        const { data: allHierarchy } = await supabase
+          .from("anew_hierarchy")
+          .select("parent_org_id, child_org_id")
+          .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
+        const childrenMap = new Map<string, string[]>();
+        (allHierarchy || []).forEach((h: any) => {
+          if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
+          childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
+        });
+        const queue = [activeCompany.id];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          const children = childrenMap.get(current) || [];
+          for (const child of children) {
+            if (!subtreeIds.includes(child)) { subtreeIds.push(child); queue.push(child); }
+          }
+        }
+      } catch { /* fallback to just activeCompany */ }
+
+      const { data: memberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, role_id")
+        .in("organization_id", subtreeIds)
+        .eq("status", "active");
+      if (!memberships || memberships.length === 0) return [] as { id: string; name: string }[];
+
+      const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+      const filteredMemberships = memberships.filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+      const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
+      if (userIds.length === 0) return [] as { id: string; name: string }[];
+
+      const { data: usersData } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name")
+        .in("id", userIds);
+      return (usersData || []).map((u: any) => ({ id: u.id as string, name: u.name || "Utilizador" }));
+    },
+    enabled: !!activeCompany?.id,
+  });
+
   const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
@@ -809,6 +927,37 @@ const ClientContracts = () => {
     isSystemAdmin || canActOnEntity(editScope, c, scopeAnewUserId, null, teamMemberIds);
   const canDeleteContract = (c: { created_by?: string | null }) =>
     isSystemAdmin || canActOnEntity(deleteScope, c, scopeAnewUserId, null, teamMemberIds);
+
+  // SECURITY: the "Reatribuir comercial" picker must respect the viewer's own
+  // client_contracts.edit scope. ORG sees the full roster; TEAM sees only their
+  // own teammates; OWNED/NONE see only themselves. Mirrors AnewLeads.tsx's
+  // assignableCompanyUsers idiom, applied against editScope instead of leads scope.
+  const assignableCompanyUsers = useMemo(() => {
+    if (isSystemAdmin || editScope === "ORG") return companyUsers;
+    if (editScope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return companyUsers.filter(u => allowedIds.has(u.id));
+    }
+    return companyUsers.filter(u => u.id === scopeAnewUserId);
+  }, [companyUsers, isSystemAdmin, editScope, scopeAnewUserId, teamMemberIds]);
+
+  const handleDuplicate = (contract: ClientContract) => {
+    if (!(isSystemAdmin || canCreate)) {
+      toast.error("Acesso negado");
+      return;
+    }
+    duplicateMutation.mutate(contract);
+  };
+
+  const handleOpenReassign = (contract: ClientContract) => {
+    if (!canEditContract(contract)) {
+      toast.error("Acesso negado");
+      return;
+    }
+    setReassigningContract(contract);
+    setReassignOwnerId(contract.created_by || "");
+    setIsReassignDialogOpen(true);
+  };
 
   const handleFinalize = async (contractId: string) => {
     const contract = contracts.find(c => c.id === contractId) as any;
@@ -1518,8 +1667,8 @@ const ClientContracts = () => {
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                   <DropdownMenuItem>📄 Duplicar contrato</DropdownMenuItem>
-                                   <DropdownMenuItem>👤 Reatribuir comercial</DropdownMenuItem>
+                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar contrato</DropdownMenuItem>
+                                   <DropdownMenuItem onClick={() => handleOpenReassign(contract)}>👤 Reatribuir comercial</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1548,7 +1697,7 @@ const ClientContracts = () => {
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
                                   <DropdownMenuItem>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -1578,7 +1727,7 @@ const ClientContracts = () => {
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1594,7 +1743,7 @@ const ClientContracts = () => {
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuItem>📜 Ver histórico completo</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
@@ -1669,6 +1818,44 @@ const ClientContracts = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Reassign (Reatribuir comercial) Dialog */}
+        <Dialog
+          open={isReassignDialogOpen}
+          onOpenChange={(open) => {
+            setIsReassignDialogOpen(open);
+            if (!open) { setReassigningContract(null); setReassignOwnerId(""); }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>👤 Reatribuir comercial</DialogTitle>
+              <DialogDescription>
+                Escolha o novo responsável pelo contrato{reassigningContract?.contract_number ? ` ${reassigningContract.contract_number}` : ""}.
+              </DialogDescription>
+            </DialogHeader>
+            <Select value={reassignOwnerId} onValueChange={setReassignOwnerId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecionar comercial" />
+              </SelectTrigger>
+              <SelectContent>
+                {assignableCompanyUsers.map(u => (
+                  <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsReassignDialogOpen(false)}>Cancelar</Button>
+              <Button
+                disabled={!reassignOwnerId || reassignMutation.isPending}
+                onClick={() => reassigningContract && reassignMutation.mutate({ id: reassigningContract.id, newOwnerId: reassignOwnerId })}
+              >
+                {reassignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Send Channel Dialog */}
         <SendChannelDialog

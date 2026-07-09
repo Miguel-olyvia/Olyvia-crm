@@ -1513,21 +1513,22 @@ const Proposals = () => {
     }
   };
 
-  const handleAcceptProposal = async () => {
-    if (!selectedProposal) return;
+  const handleAcceptProposal = async (proposalToAccept?: Proposal) => {
+    const targetProposal = proposalToAccept ?? selectedProposal;
+    if (!targetProposal) return;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
       const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
       if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
-      const oldStageId = selectedProposal.stage_id;
+      const oldStageId = targetProposal.stage_id;
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
       if (!businessUserIdAccept) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
-      const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", selectedProposal.id);
+      const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
       if (error) throw error;
       await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
       });
       toast({ title: "Proposta aceite com sucesso" });
       setDetailsOpen(false);
@@ -1959,7 +1960,7 @@ const Proposals = () => {
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
-          <DropdownMenuItem className="text-green-600" onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(); }}>
+          <DropdownMenuItem className="text-green-600" onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(proposal); }}>
             <CheckSquare className="w-3.5 h-3.5 mr-2" /> Aceitar
             <span className="text-[10px] text-muted-foreground ml-1">⚡ cria contrato</span>
           </DropdownMenuItem>
@@ -3167,7 +3168,7 @@ const Proposals = () => {
       <ProposalDetailsDialog open={detailsOpen} onOpenChange={setDetailsOpen} proposal={selectedProposal}
         onSendProposal={() => { if (selectedProposal) { setSendProposal(selectedProposal); setSendDialogOpen(true); setDetailsOpen(false); } }}
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
-        onAccept={handleAcceptProposal}
+        onAccept={() => handleAcceptProposal(selectedProposal ?? undefined)}
         onReject={() => setRejectReasonDialogOpen(true)}
       />
 
