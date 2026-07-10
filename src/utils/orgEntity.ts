@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
 
 export type EntityMatchScope = "same_org" | "group";
 
@@ -99,20 +100,14 @@ type EnsureOrgEntityOptions = {
 };
 
 async function findEntityByFiscalIdentity(nif: string, countryCode: string): Promise<string | null> {
-  const { data: fiscalEntities, error: fiscalError } = await (supabase as any)
-    .from("fiscal_entities")
-    .select("id")
-    .eq("nif", nif)
-    .eq("country_code", countryCode)
-    .limit(2);
-
-  if (fiscalError) throw fiscalError;
-  if (!fiscalEntities || fiscalEntities.length !== 1) return null;
+  const { data: resolved, error: resolveError } = await callFiscalEntityResolve({ nif, countryCode });
+  if (resolveError) throw resolveError;
+  if (!resolved) return null;
 
   const { data: links, error: linkError } = await (supabase as any)
     .from("anew_entity_fiscal_entities")
     .select("entity_id")
-    .eq("fiscal_entity_id", fiscalEntities[0].id)
+    .eq("fiscal_entity_id", resolved.fiscalEntityId)
     .limit(2);
 
   if (linkError) throw linkError;

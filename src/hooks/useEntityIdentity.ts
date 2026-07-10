@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { callFiscalEntityResolve } from '@/lib/nif/callFiscalEntityResolve';
 
 export interface EntityIdentity {
   entity_id: string;
@@ -181,22 +182,23 @@ export async function resolveEntityByIdentity(params: {
           .limit(CANDIDATE_LIMIT)
           .then(r => (r.data || []).map((row: any) => row.entity_id as string))
       : Promise.resolve([] as string[]),
+    // NOTE: fiscal-entity-resolve is a find-or-create operation scoped to
+    // (nif, countryCode), defaulting countryCode to "PT" — unlike the
+    // previous direct query, it cannot match a NIF registered under a
+    // different country code. This mirrors the Edge Function contract,
+    // which does not support cross-country NIF lookups from this call.
     normalizedVat
-      ? (supabase as any)
-          .from('fiscal_entities')
-          .select('id')
-          .eq('nif', normalizedVat)
-          .limit(CANDIDATE_LIMIT)
-          .then(async (r: any) => {
-            const fiscalIds = (r.data || []).map((row: any) => row.id);
-            if (fiscalIds.length === 0) return [] as string[];
-            const { data: links } = await supabase
-              .from('anew_entity_fiscal_entities')
-              .select('entity_id')
-              .in('fiscal_entity_id', fiscalIds)
-              .eq('is_primary', true);
-            return (links || []).map((l: any) => l.entity_id as string);
-          })
+      ? (async () => {
+          const { data: resolved, error } = await callFiscalEntityResolve({ nif: normalizedVat });
+          if (error || !resolved) return [] as string[];
+          const { data: links } = await supabase
+            .from('anew_entity_fiscal_entities')
+            .select('entity_id')
+            .eq('fiscal_entity_id', resolved.fiscalEntityId)
+            .eq('is_primary', true)
+            .limit(CANDIDATE_LIMIT);
+          return (links || []).map((l: any) => l.entity_id as string);
+        })()
       : Promise.resolve([] as string[]),
   ]);
 
@@ -336,9 +338,13 @@ export async function createEntityWithIdentity(params: {
   }
 
   if (vat) {
-    const { data: fiscalEntity } = await (supabase as any).from('fiscal_entities').insert({ nif: vat, entity_type: type === 'person' ? 'individual' : 'company', created_by: createdBy }).select('id').single();
-    if (fiscalEntity) {
-      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: fiscalEntity.id, is_primary: true, created_by: createdBy });
+    const { data: resolved, error: resolveError } = await callFiscalEntityResolve({
+      nif: vat,
+      entityType: type === 'person' ? 'individual' : 'company',
+    });
+    if (resolveError) throw resolveError;
+    if (resolved) {
+      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: resolved.fiscalEntityId, is_primary: true, created_by: createdBy });
     }
   }
 
