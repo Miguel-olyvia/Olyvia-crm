@@ -23,9 +23,19 @@ export async function findLocalEntityForOrg(params: {
   email?: string | null;
   phone?: string | null;
   nif?: string | null;
+  /**
+   * Precomputed HMAC-SHA256 hash of the normalized NIF (see
+   * `_shared/nifCrypto.ts` hashNif). When supplied, the NIF match is done
+   * against `fiscal_entities.nif_hash` instead of the plaintext `nif` column
+   * — the caller must never pass the plaintext NIF through a channel that
+   * also reaches an external LLM. `nif` itself becomes unused for the match
+   * in that case (kept only for backward-compatible callers that don't
+   * supply a hash yet).
+   */
+  nifHash?: string | null;
   countryCode?: string;
 }): Promise<ScopedLookupHit | null> {
-  const { supabase, organizationId, email, phone, nif, countryCode = "PT" } = params;
+  const { supabase, organizationId, email, phone, nif, nifHash, countryCode = "PT" } = params;
   if (!organizationId) return null;
 
   // --- 1. Resolve candidate entity_ids from each identifier ---
@@ -59,25 +69,29 @@ export async function findLocalEntityForOrg(params: {
     }
   }
 
-  if (nif) {
-    const cleanNif = String(nif).trim().toUpperCase();
-    if (cleanNif) {
-      const { data: fes } = await supabase
-        .from("fiscal_entities")
-        .select("id")
-        .eq("nif", cleanNif)
-        .eq("country_code", countryCode)
-        .limit(5);
-      const feIds = (fes ?? []).map((f: any) => f.id);
-      if (feIds.length) {
-        const { data: links } = await supabase
-          .from("anew_entity_fiscal_entities")
-          .select("entity_id")
-          .in("fiscal_entity_id", feIds)
-          .limit(20);
-        for (const r of links ?? []) {
-          if (r?.entity_id) candidates.push({ entityId: r.entity_id, matchField: "nif" });
-        }
+  const cleanNifHash = nifHash ? String(nifHash).trim() : null;
+  const cleanNif = !cleanNifHash && nif ? String(nif).trim().toUpperCase() : null;
+  if (cleanNifHash || cleanNif) {
+    // Prefer the precomputed nif_hash (never handles plaintext here); only
+    // fall back to the legacy plaintext `nif` compare for callers that have
+    // not migrated to pass nifHash yet.
+    const query = supabase
+      .from("fiscal_entities")
+      .select("id")
+      .eq("country_code", countryCode)
+      .limit(5);
+    const { data: fes } = cleanNifHash
+      ? await query.eq("nif_hash", cleanNifHash)
+      : await query.eq("nif", cleanNif as string);
+    const feIds = (fes ?? []).map((f: any) => f.id);
+    if (feIds.length) {
+      const { data: links } = await supabase
+        .from("anew_entity_fiscal_entities")
+        .select("entity_id")
+        .in("fiscal_entity_id", feIds)
+        .limit(20);
+      for (const r of links ?? []) {
+        if (r?.entity_id) candidates.push({ entityId: r.entity_id, matchField: "nif" });
       }
     }
   }

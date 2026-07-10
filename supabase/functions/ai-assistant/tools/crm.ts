@@ -5,8 +5,27 @@
 
 import { findLocalEntityForOrg, ensureEntityOrgLinkSR } from "../../_shared/entityScopedLookup.ts";
 import { sanitizeEmail, sanitizePhone } from "../../_shared/inputSanitizers.ts";
+import { deriveKeyFromEnv, hashNif } from "../../_shared/nifCrypto.ts";
 import { requireWrite } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
+
+/**
+ * Computes the HMAC-SHA256 hash of a NIF for local-entity lookup, so the
+ * plaintext value never has to be sent in a query built for cross-checking
+ * later output. Returns null (never throws) when the NIF_HMAC_KEY env var is
+ * missing/misconfigured or the value is empty — callers must fail open to
+ * "no hash available" rather than surface crypto internals to the model.
+ */
+async function safeHashNif(nif: string | null): Promise<string | null> {
+  if (!nif) return null;
+  try {
+    const hmacKey = deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC");
+    return await hashNif(nif, hmacKey);
+  } catch (e) {
+    console.error("resolveEntityForCreation: failed to hash nif", e);
+    return null;
+  }
+}
 
 /**
  * @deprecated — DO NOT use in create_lead / create_contact (Fase 0A guardrail).
@@ -127,12 +146,19 @@ async function resolveEntityForCreation(
 
   if (!email && !phone && !nif) return { mode: "create" };
 
+  // The cleartext NIF is only ever used locally, in-process, to derive its
+  // HMAC hash — it must never be embedded in a query result or response that
+  // could round-trip back through the LLM. Fall back to null (no hash) on
+  // any crypto/config failure rather than silently querying by plaintext.
+  const nifHash = await safeHashNif(nif);
+
   const hit = await findLocalEntityForOrg({
     supabase: ctx.supabase,
     organizationId: ctx.organizationId as string,
     email,
     phone,
-    nif,
+    nif: nifHash ? null : nif,
+    nifHash,
   });
   if (!hit) return { mode: "create" };
 
@@ -151,8 +177,25 @@ async function resolveEntityForCreation(
       candidate_entity_id: hit.entityId,
       candidate_name: ent?.display_name ?? null,
       match_field: hit.matchField,
-      proposed_payload: proposedPayload,
+      proposed_payload: sanitizeProposedPayloadForModel(proposedPayload),
     },
+  };
+}
+
+/**
+ * Never echo a cleartext NIF back to the LLM. The model only needs to know
+ * that a NIF was supplied (to ask "is this the same person?"), never the
+ * value itself — the NIF must not round-trip through an external LLM.
+ * Returns a new object; the input is never mutated.
+ */
+function sanitizeProposedPayloadForModel(proposedPayload: Record<string, unknown>): Record<string, unknown> {
+  if (!proposedPayload || typeof proposedPayload !== "object") return proposedPayload;
+  if (!Object.prototype.hasOwnProperty.call(proposedPayload, "nif")) return proposedPayload;
+
+  const { nif, ...rest } = proposedPayload;
+  return {
+    ...rest,
+    ...(nif ? { nif_provided: true } : {}),
   };
 }
 
