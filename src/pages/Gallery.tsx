@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -380,7 +381,7 @@ export default function Gallery() {
       loadAssets();
     } catch (error: unknown) {
       console.error("Upload error:", error);
-      toast({ title: t('gallery.toast.uploadError'), description: (error as Error).message, variant: "destructive" });
+      toast({ title: t('gallery.toast.uploadError'), description: getUploadErrorMessage(error), variant: "destructive" });
     } finally {
       setUploading(false);
     }

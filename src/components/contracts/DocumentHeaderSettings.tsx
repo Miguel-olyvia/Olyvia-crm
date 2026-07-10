@@ -10,6 +10,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 
 interface Props {
   settings: DocumentSettings;
@@ -65,9 +66,9 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       onChange({ logo_url: urlData.publicUrl });
       toast.success("Logotipo carregado com sucesso");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Logo upload error:", err);
-      toast.error("Erro ao carregar logotipo: " + (err.message || "erro desconhecido"));
+      toast.error("Erro ao carregar logotipo: " + getUploadErrorMessage(err));
     } finally {
       uploadingRef.current = false;
       if (fileInputRef.current) fileInputRef.current.value = "";

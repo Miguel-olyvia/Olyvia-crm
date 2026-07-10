@@ -66,6 +66,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { getUploadErrorMessage } from "@/lib/uploadErrors";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
@@ -740,8 +741,8 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       setConfig(prev => ({ ...prev, logo_url: urlData.publicUrl }));
       toast({ title: "Logotipo carregado com sucesso" });
-    } catch (err: any) {
-      toast({ title: "Erro ao carregar logotipo", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Erro ao carregar logotipo", description: getUploadErrorMessage(err), variant: "destructive" });
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
