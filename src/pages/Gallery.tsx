@@ -224,6 +224,11 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 };
 
+// Forces Content-Disposition: attachment so a malicious file opened via
+// window.open() downloads instead of rendering inline (e.g. an SVG/HTML
+// payload disguised with an allowed extension and a forged Content-Type).
+const withForceDownload = (url: string) => `${url}${url.includes("?") ? "&" : "?"}download`;
+
 export default function Gallery() {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -647,7 +652,7 @@ export default function Gallery() {
                               <DropdownMenuItem onClick={() => copyUrl(asset.file_url)}>
                                 <Copy className="h-4 w-4 mr-2" /> {t('gallery.actions.copyUrl')}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => window.open(asset.file_url, "_blank")}>
+                              <DropdownMenuItem onClick={() => window.open(withForceDownload(asset.file_url), "_blank")}>
                                 <ExternalLink className="h-4 w-4 mr-2" /> {t('gallery.actions.openNew')}
                               </DropdownMenuItem>
                               <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(asset)}>
@@ -879,7 +884,7 @@ export default function Gallery() {
                   <p className="mt-4">{t('gallery.preview.close')}</p>
                   <Button 
                     className="mt-2"
-                    onClick={() => window.open(previewAsset?.file_url, "_blank")}
+                    onClick={() => previewAsset?.file_url && window.open(withForceDownload(previewAsset.file_url), "_blank")}
                   >
                     <ExternalLink className="h-4 w-4 mr-2" />
                     {t('gallery.actions.openNew')}
@@ -893,7 +898,7 @@ export default function Gallery() {
                     <Copy className="h-4 w-4 mr-2" />
                     {t('gallery.actions.copyUrl')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => window.open(previewAsset.file_url, "_blank")}>
+                  <Button variant="outline" size="sm" onClick={() => window.open(withForceDownload(previewAsset.file_url), "_blank")}>
                     <ExternalLink className="h-4 w-4 mr-2" />
                     {t('gallery.actions.openNew')}
                   </Button>

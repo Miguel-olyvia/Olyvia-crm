@@ -228,7 +228,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   };
 
   const handleView = async (doc: any) => {
-    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600);
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600, { download: true });
     if (error || !data?.signedUrl) { toast.error("Erro ao abrir ficheiro"); return; }
     window.open(data.signedUrl, "_blank");
   };
