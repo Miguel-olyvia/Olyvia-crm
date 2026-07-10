@@ -28,12 +28,22 @@ export async function findEntityMatches(params: {
   if (!orgId) return [];
   if (!email && !phone && !nif) return [];
 
+  // p_nif_hash is included explicitly (even as null) so PostgREST resolves
+  // unambiguously to the 6-arg find_entity_matches overload added in
+  // 20261030010000_nif_enc_find_entity_matches_hash_overload.sql. Without this
+  // key present in the request, PostgREST cannot disambiguate between the
+  // 5-arg and 6-arg overloads (PGRST203) - Postgres's own "fewest defaults"
+  // tie-break does not apply at the PostgREST RPC layer. The browser has no
+  // access to the HMAC key, so it cannot compute a real hash here; null falls
+  // back to the legacy plaintext nif comparison inside the function, same
+  // behavior as before this fix.
   const { data, error } = await (supabase as any).rpc("find_entity_matches", {
     p_org_id: orgId,
     p_email: email ?? null,
     p_phone: phone ?? null,
     p_nif: nif ?? null,
     p_country_code: countryCode,
+    p_nif_hash: null,
   });
   if (error) throw error;
   return (data ?? []).map((r: any) => ({

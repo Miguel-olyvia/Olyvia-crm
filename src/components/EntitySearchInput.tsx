@@ -84,23 +84,68 @@ export function EntitySearchInput({
         const isAdmin = isSystemAdmin;
         const orgId = activeCompany?.id;
 
-        // Entity-id matching across name/email/phone (direct table query, RLS-scoped)
-        // plus NIF (via the search-entities Edge Function, which never exposes
-        // plaintext NIF/hash — replaces the legacy search_proposal_entities
-        // RPC's `pf.nif ILIKE` path). Used by leads, clients and contacts below.
+        // Contacts/clients: scoped strictly to the active organization and active
+        // status, via the optimized RPC (name/email/phone match server-side).
+        // Fallback to a direct query only when the RPC fails or for the "lead"
+        // type in isolation (leads aren't covered by this RPC).
+        const rpcEntityTypes = searchTypes.filter((type) => type === "contact" || type === "client");
+        let rpcCoveredTypes: ("contact" | "client")[] = [];
+
+        // NIF matching runs in parallel with the RPC, via the search-entities
+        // Edge Function, which never exposes plaintext NIF/hash to the client
+        // (unlike the legacy `pf.nif ILIKE` branch still present inside the
+        // search_proposal_entities RPC itself for name/email/phone/nif combined).
+        const [rpcOutcome, nifEntityIds] = await Promise.all([
+          rpcEntityTypes.length > 0 && orgId
+            ? (supabase as any).rpc("search_proposal_entities", {
+                p_search: term,
+                p_limit: 50,
+                p_organization_id: orgId,
+              })
+            : Promise.resolve({ data: null, error: null }),
+          searchEntityIdsByNif(term, 100),
+        ]);
+        const nifMatchedEntityIds = new Set<string>(nifEntityIds);
+
+        if (rpcEntityTypes.length > 0 && orgId) {
+          const { data: scopedResults, error: scopedError } = rpcOutcome;
+          if (scopedError) {
+            console.error("Entity scoped search error, falling back to direct query:", scopedError);
+          } else {
+            rpcCoveredTypes = rpcEntityTypes as ("contact" | "client")[];
+            (scopedResults || []).forEach((row: any) => {
+              if (!rpcEntityTypes.includes(row.type)) return;
+              allResults.push({
+                type: row.type,
+                id: row.id,
+                name: row.name || `${typeConfig[row.type as keyof typeof typeConfig]?.label || "Contacto"} #${String(row.id).slice(0, 8)}`,
+                email: row.email || undefined,
+                phone: row.phone || undefined,
+                entityId: row.entity_id || undefined,
+                status: row.status || undefined,
+              });
+            });
+          }
+        }
+
+        // Leads still need entity-id matching across the visible org scope.
         const needsLeads = searchTypes.includes("lead");
-        const needsClients = searchTypes.includes("client");
-        const needsContacts = searchTypes.includes("contact");
+        // Fallback for clients/contacts (only used when RPC failed) must also match by entity id.
+        // Also re-run when the RPC succeeded but a NIF match exists: an entity found
+        // only via NIF (not by name/email/phone) must still surface even though the
+        // RPC already covers that type — union NIF matches with the RPC results.
+        const needsContactClientFallback =
+          (searchTypes.includes("client") && (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0)) ||
+          (searchTypes.includes("contact") && (!rpcCoveredTypes.includes("contact") || nifMatchedEntityIds.size > 0));
         let matchedEntityIds: string[] = [];
-        let nifMatchedEntityIds = new Set<string>();
         let orgIds: string[] = orgId ? [orgId] : [];
-        if (needsLeads || needsClients || needsContacts) {
+        if (needsLeads || needsContactClientFallback) {
           if (needsLeads && user?.id) {
             const { data: visibleOrgIds } = await (supabase as any).rpc("get_user_visible_org_ids", { _auth_uid: user.id });
             orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
           }
           const like = `%${term.trim()}%`;
-          const [nameMatches, emailMatches, phoneMatches, nifEntityIds] = await Promise.all([
+          const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
             supabase
               .from("anew_entities")
               .select("id")
@@ -108,9 +153,7 @@ export function EntitySearchInput({
               .limit(100),
             supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(100),
             supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(100),
-            searchEntityIdsByNif(term, 100),
           ]);
-          nifMatchedEntityIds = new Set(nifEntityIds);
           matchedEntityIds = Array.from(new Set([
             ...(nameMatches.data || []).map((r: any) => r.id),
             ...(emailMatches.data || []).map((r: any) => r.entity_id),
@@ -182,8 +225,13 @@ export function EntitySearchInput({
           await collectFromRows(leads, "lead", "Lead");
         }
 
-        // ── Search Clients ──
-        if (searchTypes.includes("client") && matchedEntityIds.length > 0 && orgId) {
+        // ── Search Clients (fallback when RPC failed, or to union NIF-only matches) ──
+        if (
+          searchTypes.includes("client") &&
+          (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0) &&
+          matchedEntityIds.length > 0 &&
+          orgId
+        ) {
           const { data: clients } = await (supabase as any)
             .from("anew_clients")
             .select("id, entity_id, status")
@@ -195,8 +243,13 @@ export function EntitySearchInput({
           await collectFromRows(clients, "client", "Cliente");
         }
 
-        // ── Search Contacts ──
-        if (searchTypes.includes("contact") && matchedEntityIds.length > 0 && orgId) {
+        // ── Search Contacts (fallback when RPC failed, or to union NIF-only matches) ──
+        if (
+          searchTypes.includes("contact") &&
+          (!rpcCoveredTypes.includes("contact") || nifMatchedEntityIds.size > 0) &&
+          matchedEntityIds.length > 0 &&
+          orgId
+        ) {
           const { data: contacts } = await (supabase as any)
             .from("anew_contacts")
             .select("id, entity_id, status")
@@ -209,7 +262,7 @@ export function EntitySearchInput({
           await collectFromRows(contacts, "contact", "Contacto");
         }
 
-        // Dedupe by type+id (defensive: matches could theoretically overlap)
+        // Dedupe by type+id (RPC + fallback could overlap in rare cases)
         const seen = new Set<string>();
         const deduped = allResults.filter(r => {
           const key = `${r.type}-${r.id}`;
