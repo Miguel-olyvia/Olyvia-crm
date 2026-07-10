@@ -280,10 +280,18 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const smtpConfig = resolvedSmtp.smtp;
 
-    // Generate public URL with tracking token
+    // Link to the authenticated client portal proposal view (see src/App.tsx,
+    // route "/client-portal/proposals/:id" rendered by
+    // ClientPortalProposalDetail.tsx, guarded by ClientRouteGuard). The
+    // legacy unauthenticated "/proposta/:public_token" link has been removed
+    // (see 20261029020000_remove_legacy_proposal_public_link_access.sql) and
+    // no longer resolves to anything. This email assumes the recipient
+    // already has, or will separately receive, their client-portal
+    // credentials (provisioned via the create-client-portal-access Edge
+    // Function) — this function does not create or verify portal access.
     const baseUrl = Deno.env.get("SITE_URL") || "https://olyvia.lovable.app";
-    const publicUrl = `${baseUrl}/proposta/${proposal.public_token}`;
-    
+    const publicUrl = `${baseUrl}/client-portal/proposals/${proposal.id}`;
+
     // Build tracking pixel URL
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const trackingPixelUrl = `${supabaseUrl}/functions/v1/track-proposal-view?t=${proposal.tracking_token}`;

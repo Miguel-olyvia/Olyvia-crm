@@ -25,8 +25,6 @@ import {
   Package,
   Receipt,
   Link2,
-  ExternalLink,
-  Copy,
   Send,
   History,
   Percent,
@@ -397,24 +395,6 @@ export function ProposalDetailsDialog({
     }
   };
 
-  const copyPublicLink = () => {
-    if (extendedData?.public_token) {
-      const link = `${window.location.origin}/proposal/${extendedData.public_token}`;
-      navigator.clipboard.writeText(link);
-      toast({
-        title: "Link copiado",
-        description: "O link público foi copiado para a área de transferência.",
-      });
-    }
-  };
-
-  const openPublicLink = () => {
-    if (extendedData?.public_token) {
-      const link = `${window.location.origin}/proposal/${extendedData.public_token}`;
-      window.open(link, "_blank");
-    }
-  };
-
   const getStageBadge = () => {
     const stage = proposal?.proposal_workflow_stages;
     if (stage) {
@@ -486,18 +466,6 @@ export function ProposalDetailsDialog({
 
             {/* Quick Actions */}
             <div className="flex flex-wrap gap-2">
-              {extendedData?.public_token && extendedData?.public_link_enabled && (
-                <>
-                  <Button variant="outline" size="sm" onClick={copyPublicLink}>
-                    <Copy className="w-4 h-4 mr-2" />
-                    Copiar Link
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={openPublicLink}>
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Ver Proposta
-                  </Button>
-                </>
-              )}
               {onSendProposal && (
                 <Button variant="outline" size="sm" onClick={onSendProposal}>
                   <Send className="w-4 h-4 mr-2" />
@@ -1056,9 +1024,6 @@ export function ProposalDetailsDialog({
         recipientPhone: client.phone,
         proposalTitle: proposal?.title,
         proposalValue: proposal?.value,
-        proposalLink: extendedData?.public_token && extendedData?.public_link_enabled 
-          ? `${window.location.origin}/proposal/${extendedData.public_token}` 
-          : undefined,
         dealId: proposal?.deal_id || undefined,
       } : null}
     />

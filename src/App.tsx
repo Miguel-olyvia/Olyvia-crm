@@ -85,7 +85,6 @@ const MarketingApi = lazy(() => import("./pages/MarketingApi"));
 const MarketingIntegration = lazy(() => import("./pages/MarketingIntegration"));
 const PostalCodesImport = lazy(() => import("./pages/PostalCodesImport"));
 const PublicLeadForm = lazy(() => import("./pages/PublicLeadForm"));
-const PublicProposal = lazy(() => import("./pages/PublicProposal"));
 const TestIframe = lazy(() => import("./pages/TestIframe"));
 const TestWidget = lazy(() => import("./pages/TestWidget"));
 const AcquisitionHelp = lazy(() => import("./pages/AcquisitionHelp"));
@@ -165,7 +164,6 @@ const App = () => (
                   <Route path="/form/:formId" element={<PublicLeadForm />} />
                   <Route path="/lead-form/:formId" element={<PublicLeadForm />} />
                   <Route path="/campaign/:campaignId" element={<PublicLeadForm />} />
-                  <Route path="/proposal/:token" element={<PublicProposal />} />
                   <Route path="/test-iframe" element={<TestIframe />} />
                   <Route path="/test-widget" element={<TestWidget />} />
 
