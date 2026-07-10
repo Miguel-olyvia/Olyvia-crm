@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
-import { getUploadErrorMessage } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 
 export type DocumentEntityType = "quote" | "proposal" | "contract";
 
@@ -128,9 +128,18 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
 
       const filePath = `${organizationId}/${entityType}/${entityId}/${Date.now()}_${selectedFile.name}`;
       const { error: uploadError } = await supabase.storage
-        .from("documents")
+        .from("documents-quarantine")
         .upload(filePath, selectedFile);
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "documents-quarantine", finalBucket: "documents", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast.error("Erro ao anexar documento: " + (validateResult.error || getUploadErrorMessage(validateError)));
+        return;
+      }
 
       const { error: dbError } = await (supabase as any)
         .from("documents")

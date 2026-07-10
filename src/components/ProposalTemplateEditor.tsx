@@ -66,7 +66,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
-import { getUploadErrorMessage } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
@@ -736,8 +736,18 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       const orgId = activeCompany?.id || "general";
       const ext = file.name.split(".").pop() || "png";
       const filePath = `${orgId}/proposal-logo-${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({ title: "Erro ao carregar logotipo", description: validateResult.error || getUploadErrorMessage(validateError), variant: "destructive" });
+        return;
+      }
+
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       setConfig(prev => ({ ...prev, logo_url: urlData.publicUrl }));
       toast({ title: "Logotipo carregado com sucesso" });

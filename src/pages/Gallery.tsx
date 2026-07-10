@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getUploadErrorMessage } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -356,10 +356,19 @@ export default function Gallery() {
       const fileName = `${selectedCompanyId}/${Date.now()}-${newAsset.name || selectedFile.name}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from("media")
+        .from("media-quarantine")
         .upload(fileName, selectedFile);
 
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "media-quarantine", finalBucket: "media", path: fileName },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({ title: t('gallery.toast.uploadError'), description: validateResult.error || getUploadErrorMessage(validateError), variant: "destructive" });
+        return;
+      }
 
       const { data: urlData } = supabase.storage.from("media").getPublicUrl(fileName);
       const fileUrl = urlData.publicUrl;

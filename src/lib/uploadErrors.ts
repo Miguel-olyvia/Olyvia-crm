@@ -13,3 +13,23 @@ export function getUploadErrorMessage(error: unknown): string {
   }
   return raw;
 }
+
+export interface ValidateUploadResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
+ * Narrows the unknown response body of the `validate-upload` Edge Function
+ * invocation into a safe shape, since the function can reply with either
+ * `{ ok: true, finalPath }`, `{ ok: false, error }`, or `{ error }` on a
+ * non-2xx HTTP status.
+ */
+export function parseValidateUploadResponse(data: unknown): ValidateUploadResult {
+  if (!data || typeof data !== "object") return { ok: false };
+  const candidate = data as Record<string, unknown>;
+  return {
+    ok: candidate.ok === true,
+    error: typeof candidate.error === "string" ? candidate.error : undefined,
+  };
+}

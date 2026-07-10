@@ -10,7 +10,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
-import { getUploadErrorMessage } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 
 interface Props {
   settings: DocumentSettings;
@@ -61,8 +61,18 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       const orgId = activeCompany?.id || settings.organization_id;
       const ext = file.name.split(".").pop() || "png";
       const filePath = `${orgId}/doc-logo-${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast.error("Erro ao carregar logotipo: " + (validateResult.error || getUploadErrorMessage(validateError)));
+        return;
+      }
+
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       onChange({ logo_url: urlData.publicUrl });
       toast.success("Logotipo carregado com sucesso");
