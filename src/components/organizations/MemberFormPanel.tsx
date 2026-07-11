@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PhoneInput } from "@/components/PhoneInput";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { UserCombobox } from "@/components/users/UserCombobox";
@@ -353,15 +354,16 @@ export function MemberFormPanel({
     const entityId = userData?.entity_id;
     const { data: fiscalData } = entityId ? await (supabase as any)
       .from("anew_entity_fiscal_entities")
-      .select("fiscal_entity_id, fiscal_entities(nif, country_code)")
+      .select("fiscal_entity_id, fiscal_entities(country_code)")
       .eq("entity_id", entityId)
       .eq("is_primary", true)
       .maybeSingle() : { data: null };
-    
+
     if (fiscalData?.fiscal_entities) {
+      const nif = await callNifRevealSingle(fiscalData.fiscal_entity_id);
       setEditUserData(prev => ({
         ...prev,
-        nif: fiscalData.fiscal_entities.nif || "",
+        nif: nif || "",
         nif_country: fiscalData.fiscal_entities.country_code || "PT",
       }));
     }

@@ -2,6 +2,10 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { callFiscalEntityResolve } from '@/lib/nif/callFiscalEntityResolve';
+import { callNifReveal, callNifRevealSingle } from '@/lib/nif/callNifReveal';
+
+// Must stay <= nif-reveal's MAX_BATCH_SIZE (supabase/functions/nif-reveal/handler.ts).
+const NIF_REVEAL_BATCH_SIZE = 100;
 
 export interface EntityIdentity {
   entity_id: string;
@@ -89,14 +93,18 @@ export function useEntityIdentity() {
         }
       }
 
-      // Resolve VAT: fetch fiscal_entities by IDs from the links
+      // Resolve VAT: decrypt via nif-reveal (batched, <= NIF_REVEAL_BATCH_SIZE
+      // ids per call) instead of reading fiscal_entities.nif in plaintext.
       const vatMap: Record<string, string> = {};
       if (fiscalLinks.length > 0) {
         const fiscalEntityIds = [...new Set(fiscalLinks.map((f: any) => f.fiscal_entity_id).filter(Boolean))];
         if (fiscalEntityIds.length > 0) {
-          const fiscalEntities = await selectInBatches(fiscalEntityIds, batch => (supabase as any).from('fiscal_entities').select('id, nif').in('id', batch)) as any[];
           const nifMap: Record<string, string> = {};
-          (fiscalEntities || []).forEach((fe: any) => { if (fe.nif) nifMap[fe.id] = fe.nif; });
+          const batches = chunk(fiscalEntityIds, NIF_REVEAL_BATCH_SIZE);
+          const revealResults = await Promise.all(batches.map(batch => callNifReveal(batch)));
+          revealResults.forEach(({ data }) => {
+            if (data) Object.assign(nifMap, data.revealed);
+          });
           fiscalLinks.forEach((f: any) => {
             const nif = nifMap[f.fiscal_entity_id];
             if (nif) vatMap[f.entity_id] = nif;
@@ -268,8 +276,7 @@ export async function validateEntityCoherence(
   let storedVat: string | null = null;
   const fiscalId = (fiscalLinksRes.data?.[0] as any)?.fiscal_entity_id;
   if (fiscalId) {
-    const { data: fe } = await (supabase as any).from('fiscal_entities').select('nif').eq('id', fiscalId).maybeSingle();
-    storedVat = fe?.nif || null;
+    storedVat = await callNifRevealSingle(fiscalId);
   }
 
   const matches = {

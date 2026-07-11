@@ -6,6 +6,25 @@
 //   { notFound: true }      — 0 resultados
 //   { ambiguous: [...] }    — top 5 candidatos para desambiguação
 
+import { deriveKeyFromEnv, hashNif } from "../../_shared/nifCrypto.ts";
+
+/**
+ * Computes the HMAC-SHA256 hash of a NIF for exact-match lookup against
+ * fiscal_entities.nif_hash, so the plaintext NIF never has to be compared
+ * in-database. Returns null (never throws) when the NIF_HMAC_KEY env var is
+ * missing/misconfigured — callers must fail open to "NIF branch didn't
+ * resolve" rather than surface crypto internals to the model.
+ */
+async function safeHashNif(nif: string): Promise<string | null> {
+  try {
+    const hmacKey = deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC");
+    return await hashNif(nif, hmacKey);
+  } catch (e) {
+    console.error("resolveEntityId: failed to hash nif", e);
+    return null;
+  }
+}
+
 export type EntityKind = "quote" | "deal" | "proposal" | "lead" | "contact" | "client" | "product" | "service" | "bundle" | "schedule_item" | "contract";
 
 export type ResolveResult =
@@ -49,11 +68,15 @@ async function resolveCrmEntity(
     return String(name ?? row.id);
   };
 
-  // 2) NIF branch (9 dígitos) → fiscal_entities.nif → anew_entity_fiscal_entities
+  // 2) NIF branch (9 dígitos) → fiscal_entities.nif_hash → anew_entity_fiscal_entities
   if (NIF_RE.test(ref)) {
-    const { data: fe } = await supabase
-      .from("fiscal_entities").select("id").eq("nif", ref).limit(5);
-    const fiscalIds = (fe ?? []).map((r: any) => r.id).filter(Boolean);
+    const nifHash = await safeHashNif(ref);
+    const fiscalIds: string[] = [];
+    if (nifHash) {
+      const { data: fe } = await supabase
+        .from("fiscal_entities").select("id").eq("nif_hash", nifHash).limit(5);
+      fiscalIds.push(...((fe ?? []).map((r: any) => r.id).filter(Boolean)));
+    }
     if (fiscalIds.length > 0) {
       const { data: links } = await supabase
         .from("anew_entity_fiscal_entities")

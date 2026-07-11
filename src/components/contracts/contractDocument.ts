@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
@@ -249,16 +250,20 @@ async function fetchPrimaryFiscalEntity(entityId: string): Promise<{ nif?: strin
 
   if (fiscalLinkError || !fiscalLinks?.[0]?.fiscal_entity_id) return {};
 
+  const fiscalEntityId = fiscalLinks[0].fiscal_entity_id;
+
   const { data: fiscalEntity, error: fiscalEntityError } = await (supabase as any)
     .from("fiscal_entities")
-    .select("nif, commercial_name, country_code")
-    .eq("id", fiscalLinks[0].fiscal_entity_id)
+    .select("commercial_name, country_code")
+    .eq("id", fiscalEntityId)
     .maybeSingle();
 
   if (fiscalEntityError || !fiscalEntity) return {};
 
+  const nif = await callNifRevealSingle(fiscalEntityId);
+
   return {
-    nif: String(fiscalEntity.nif || "").trim(),
+    nif: String(nif || "").trim(),
     commercial_name: fiscalEntity.commercial_name,
     country_code: fiscalEntity.country_code,
   };

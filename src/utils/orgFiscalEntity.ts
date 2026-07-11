@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { ensureOrgEntity } from "@/utils/orgEntity";
 import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 export async function upsertOrgFiscalEntity(
   orgId: string,
@@ -70,14 +71,16 @@ export async function loadOrgFiscalEntity(
 
   const { data: fe } = await (supabase as any)
     .from("fiscal_entities")
-    .select("nif, commercial_name, country_code")
+    .select("commercial_name, country_code")
     .eq("id", link.fiscal_entity_id)
     .maybeSingle();
 
   if (!fe) return null;
 
+  const nif = await callNifRevealSingle(link.fiscal_entity_id);
+
   return {
-    nif: fe.nif || "",
+    nif: nif || "",
     commercialName: fe.commercial_name || "",
     countryCode: fe.country_code || "PT",
   };

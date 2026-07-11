@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { useColumnResize, ColumnWidths } from "@/hooks/useColumnResize";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -913,15 +914,16 @@ export default function UsersNew() {
     // Load user fiscal entity from unified table
     const { data: fiscalLinks } = await (supabase as any)
       .from("anew_entity_fiscal_entities")
-      .select("*, fiscal_entity:fiscal_entities(*)")
+      .select("*, fiscal_entity:fiscal_entities(id, commercial_name, country_code)")
       .eq("entity_id", user.entity_id)
       .is("valid_to", null)
       .limit(1);
 
     if (fiscalLinks && fiscalLinks.length > 0) {
       const fe = fiscalLinks[0].fiscal_entity;
+      const nif = await callNifRevealSingle(fe?.id);
       setFormFiscalData({
-        nif: fe?.nif || "",
+        nif: nif || "",
         commercial_name: fe?.commercial_name || "",
         country_code: fe?.country_code || "PT",
       });
