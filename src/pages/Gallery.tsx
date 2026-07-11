@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -366,7 +366,7 @@ export default function Gallery() {
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast({ title: t('gallery.toast.uploadError'), description: validateResult.error || getUploadErrorMessage(validateError), variant: "destructive" });
+        toast({ title: t('gallery.toast.uploadError'), description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
         return;
       }
 

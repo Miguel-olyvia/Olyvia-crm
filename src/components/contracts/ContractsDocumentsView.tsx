@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
-import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
@@ -180,7 +180,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast.error("Erro ao anexar documento: " + (validateResult.error || getUploadErrorMessage(validateError)));
+        toast.error("Erro ao anexar documento: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
         return;
       }
 

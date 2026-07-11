@@ -33,3 +33,30 @@ export function parseValidateUploadResponse(data: unknown): ValidateUploadResult
     error: typeof candidate.error === "string" ? candidate.error : undefined,
   };
 }
+
+/**
+ * On a non-2xx response, supabase-js's functions.invoke() returns `data: null`
+ * and wraps the raw HTTP response in `error.context`, so the JSON body (e.g.
+ * `{ ok: false, error: "..." }` from validate-upload) never reaches `data`.
+ * This reads that body directly so the real rejection reason reaches the UI.
+ */
+export async function resolveValidateUploadErrorMessage(
+  validateResult: ValidateUploadResult,
+  error: unknown,
+): Promise<string> {
+  if (validateResult.error) return validateResult.error;
+
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    try {
+      const body = await context.clone().json();
+      if (body && typeof body === "object" && typeof (body as Record<string, unknown>).error === "string") {
+        return (body as Record<string, unknown>).error as string;
+      }
+    } catch {
+      // Body wasn't JSON or already consumed; fall through to the generic message.
+    }
+  }
+
+  return getUploadErrorMessage(error);
+}

@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
-import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 
 export type DocumentEntityType = "quote" | "proposal" | "contract";
 
@@ -137,7 +137,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast.error("Erro ao anexar documento: " + (validateResult.error || getUploadErrorMessage(validateError)));
+        toast.error("Erro ao anexar documento: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
         return;
       }
 

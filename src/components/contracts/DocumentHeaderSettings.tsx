@@ -10,7 +10,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
-import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 
 interface Props {
   settings: DocumentSettings;
@@ -69,7 +69,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast.error("Erro ao carregar logotipo: " + (validateResult.error || getUploadErrorMessage(validateError)));
+        toast.error("Erro ao carregar logotipo: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
         return;
       }
 

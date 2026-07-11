@@ -66,7 +66,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
-import { getUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
@@ -744,7 +744,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast({ title: "Erro ao carregar logotipo", description: validateResult.error || getUploadErrorMessage(validateError), variant: "destructive" });
+        toast({ title: "Erro ao carregar logotipo", description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
         return;
       }
 
