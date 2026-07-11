@@ -4,6 +4,7 @@ import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { deriveKeyFromEnv, encryptNif, hashNif, normalizeNif } from "../_shared/nifCrypto.ts";
 
 initSentry();
 
@@ -36,51 +37,75 @@ async function createOrganizationEntity(supabaseAdmin: any, displayName: string,
   return data.id;
 }
 
-async function resolveCompanyEntityByVat(supabaseAdmin: any, vat: string, country: string) {
-  const { data: fiscalEntities, error: fiscalError } = await supabaseAdmin
-    .from("fiscal_entities")
-    .select("id")
-    .eq("nif", vat)
-    .eq("country_code", country)
-    .limit(2);
+/**
+ * Resolves-or-creates the fiscal_entities row for the company's VAT/NIF via
+ * the resolve_fiscal_entity RPC — the same atomic, encryption-aware path
+ * used by the fiscal-entity-resolve Edge Function. This is a public
+ * self-registration endpoint, so unlike that function (which forwards an
+ * authenticated caller's identity), here the encryption/hash derivation runs
+ * inline using the service-role client already held by this function.
+ *
+ * Never writes `nif` in clear without also computing `nif_encrypted` /
+ * `nif_hash`, and never resolves/dedups by comparing the clear `nif` column
+ * — resolution happens by (nif_hash, country_code) inside the RPC.
+ *
+ * Returns null when `vat` is empty/absent (VAT is optional on this
+ * endpoint), in which case no fiscal_entities row is created at all.
+ */
+async function resolveOrCreateCompanyFiscalEntity(
+  supabaseAdmin: any,
+  vat: string | undefined,
+  country: string,
+  companyName: string,
+  createdBy: string,
+): Promise<string | null> {
+  const normalizedNif = normalizeNif(vat || "");
+  if (normalizedNif === "") return null;
 
-  if (fiscalError) throw fiscalError;
-  if (!fiscalEntities || fiscalEntities.length !== 1) return null;
+  const encKey = deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM");
+  const hmacKey = deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC");
 
+  const [nifEncrypted, nifHash] = await Promise.all([
+    encryptNif(normalizedNif, encKey),
+    hashNif(normalizedNif, hmacKey),
+  ]);
+
+  const { data, error } = await supabaseAdmin.rpc("resolve_fiscal_entity", {
+    p_nif: normalizedNif,
+    p_nif_hash: nifHash,
+    p_nif_encrypted: nifEncrypted,
+    p_country_code: country,
+    p_commercial_name: companyName,
+    p_entity_type: "company",
+    p_created_by: createdBy,
+  });
+
+  if (error) throw error;
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row?.fiscal_entity_id) {
+    throw new Error("resolve_fiscal_entity returned no row");
+  }
+  return row.fiscal_entity_id as string;
+}
+
+/**
+ * Resolves the anew_entity (organization) already linked to a fiscal entity,
+ * if exactly one exists — used to detect "this company already registered
+ * under this VAT" without ever comparing the clear `nif` column.
+ */
+async function resolveCompanyEntityByFiscalEntityId(supabaseAdmin: any, fiscalEntityId: string) {
   const { data: links, error: linkError } = await supabaseAdmin
     .from("anew_entity_fiscal_entities")
     .select("entity_id")
-    .eq("fiscal_entity_id", fiscalEntities[0].id)
+    .eq("fiscal_entity_id", fiscalEntityId)
     .limit(2);
 
   if (linkError) throw linkError;
   return links?.length === 1 ? links[0].entity_id : null;
 }
 
-async function upsertCompanyFiscalEntity(supabaseAdmin: any, entityId: string, vat: string, country: string, companyName: string, createdBy: string) {
-  const { data: existing, error: existingError } = await supabaseAdmin
-    .from("fiscal_entities")
-    .select("id")
-    .eq("nif", vat)
-    .eq("country_code", country)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingError) throw existingError;
-
-  let fiscalEntityId = existing?.id;
-  if (fiscalEntityId) {
-    await supabaseAdmin.from("fiscal_entities").update({ commercial_name: companyName, updated_at: new Date().toISOString() }).eq("id", fiscalEntityId);
-  } else {
-    const { data: created, error } = await supabaseAdmin
-      .from("fiscal_entities")
-      .insert({ nif: vat, commercial_name: companyName, country_code: country, created_by: createdBy })
-      .select("id")
-      .single();
-    if (error) throw error;
-    fiscalEntityId = created.id;
-  }
-
+async function linkCompanyFiscalEntity(supabaseAdmin: any, entityId: string, fiscalEntityId: string, createdBy: string) {
   await supabaseAdmin.from("anew_entity_fiscal_entities").delete().eq("entity_id", entityId);
   await supabaseAdmin.from("anew_entity_fiscal_entities").insert({ entity_id: entityId, fiscal_entity_id: fiscalEntityId, is_primary: true, created_by: createdBy });
 }
@@ -245,7 +270,24 @@ serve(async (req) => {
         );
       }
 
-      const existingCompanyEntityId = await resolveCompanyEntityByVat(supabaseAdmin, vat, country);
+      let fiscalEntityId: string | null = null;
+      try {
+        fiscalEntityId = await resolveOrCreateCompanyFiscalEntity(supabaseAdmin, vat, country, company_name, anewUser.id);
+      } catch (fiscalError: unknown) {
+        console.error("Error resolving company fiscal entity:", fiscalError);
+        await supabaseAdmin.from("anew_organizations").delete().eq("id", rootOrg.id);
+        await supabaseAdmin.from("anew_entities").delete().eq("id", rootEntityId);
+        await supabaseAdmin.auth.admin.deleteUser(authUserId);
+        const message = fiscalError instanceof Error ? fiscalError.message : "Failed to resolve fiscal entity";
+        return new Response(
+          JSON.stringify({ error: message }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const existingCompanyEntityId = fiscalEntityId
+        ? await resolveCompanyEntityByFiscalEntityId(supabaseAdmin, fiscalEntityId)
+        : null;
       const companyEntityId = existingCompanyEntityId || await createOrganizationEntity(supabaseAdmin, company_name, anewUser.id);
 
       // Step 4: Create company organization (type=company)
@@ -274,7 +316,9 @@ serve(async (req) => {
         );
       }
 
-      await upsertCompanyFiscalEntity(supabaseAdmin, companyEntityId, vat, country, company_name, anewUser.id);
+      if (fiscalEntityId) {
+        await linkCompanyFiscalEntity(supabaseAdmin, companyEntityId, fiscalEntityId, anewUser.id);
+      }
 
       // Step 5: Create hierarchy (root → company)
       const { error: hierarchyError } = await supabaseAdmin
