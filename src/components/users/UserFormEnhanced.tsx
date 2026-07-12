@@ -41,11 +41,11 @@ import {
   Wand2,
   Shield,
   Lock,
+  Mail,
 } from "lucide-react";
 import { MembershipScopesDialog, PendingScopeEntry } from "./MembershipScopesDialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationCombobox } from "./OrganizationCombobox";
-import { MultiValueEmailInput, EmailEntry } from "./MultiValueEmailInput";
 import { MultiValuePhoneInput, PhoneEntry } from "./MultiValuePhoneInput";
 // SocialLinksInput removed - social links are now template-configurable fields
 import { TemplateTabSelector } from "./TemplateTabSelector";
@@ -123,8 +123,6 @@ interface UserFormData {
 interface UserFormEnhancedProps {
   formData: UserFormData;
   setFormData: (data: UserFormData) => void;
-  emails: EmailEntry[];
-  setEmails: (emails: EmailEntry[]) => void;
   phones: PhoneEntry[];
   setPhones: (phones: PhoneEntry[]) => void;
   socialLinks: SocialLinks;
@@ -159,8 +157,6 @@ interface UserFormEnhancedProps {
 export function UserFormEnhanced({
   formData,
   setFormData,
-  emails,
-  setEmails,
   phones,
   setPhones,
   socialLinks,
@@ -955,15 +951,15 @@ export function UserFormEnhanced({
   };
 
   /**
-   * Validates the basic profile fields (name, at least one email, password
-   * format) with Zod before delegating to the parent's onSave. Password is
-   * required on create but optional on edit (blank keeps the current one),
-   * so that rule is enforced here rather than in the shared Zod schema.
+   * Validates the basic profile fields (name, email, password format) with
+   * Zod before delegating to the parent's onSave. Password is required on
+   * create but optional on edit (blank keeps the current one), so that rule
+   * is enforced here rather than in the shared Zod schema.
    */
   const validateForm = (): boolean => {
     const result = userFormSchema.safeParse({
       name: formData.name,
-      emails,
+      email: formData.email,
       password: formData.password,
     });
 
@@ -1112,12 +1108,22 @@ export function UserFormEnhanced({
               </div>
             )}
 
-            {/* Emails - Multi-value - Required */}
-            <MultiValueEmailInput
-              emails={emails}
-              onChange={setEmails}
-            />
-            {fieldErrors.emails && <p className="text-xs text-destructive">{fieldErrors.emails}</p>}
+            {/* Email - Single value (login email) - Required */}
+            <div className="space-y-2">
+              <Label htmlFor="email" className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-muted-foreground" />
+                {t("common.email")} *
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="email@exemplo.com"
+                aria-invalid={!!fieldErrors.email}
+              />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+            </div>
 
             {/* Description - Optional (not controlled by templates) */}
             <div className="space-y-2">

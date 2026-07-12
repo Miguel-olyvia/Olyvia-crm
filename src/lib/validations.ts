@@ -350,7 +350,7 @@ export const organizationFiscalAddressSchema = z.object({
 // separately since that depends on isEdit, which Zod alone can't know.
 export const userFormSchema = z.object({
   name: z.string().trim().min(1, "O nome é obrigatório").max(200, "O nome deve ter menos de 200 caracteres"),
-  emails: z.array(z.object({ email: z.string().trim().email("Formato de email inválido") })).min(1, "É necessário pelo menos um email"),
+  email: z.string().trim().min(1, "O email é obrigatório").email("Formato de email inválido").max(255, "O email deve ter menos de 255 caracteres"),
   password: z.string().trim().min(8, "A password deve ter pelo menos 8 caracteres").max(72, "A password deve ter menos de 72 caracteres").optional().or(z.literal("")),
 });
 

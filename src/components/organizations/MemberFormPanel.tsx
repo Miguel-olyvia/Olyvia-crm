@@ -24,7 +24,6 @@ import { cn } from "@/lib/utils";
 import { TemplateTabSelector } from "@/components/users/TemplateTabSelector";
 import { FieldConfig } from "@/components/users/TemplateFieldsConfig";
 import { UserFormEnhanced } from "@/components/users/UserFormEnhanced";
-import { EmailEntry } from "@/components/users/MultiValueEmailInput";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -126,7 +125,6 @@ export function MemberFormPanel({
     position: "",
     location: "",
   });
-  const [emails, setEmails] = useState<EmailEntry[]>([]);
   const [phones, setPhones] = useState<PhoneEntry[]>([]);
   const [socialLinks, setSocialLinks] = useState({ angellist: "", facebook: "", linkedin: "" });
   const [newUserMemberships, setNewUserMemberships] = useState<Array<{ organization_id: string; relationship_type: string; role_id: string }>>([
@@ -511,7 +509,6 @@ export function MemberFormPanel({
       if (socialLinks.linkedin) filteredCustomAttributes['social_linkedin'] = socialLinks.linkedin;
       if (socialLinks.angellist) filteredCustomAttributes['social_angellist'] = socialLinks.angellist;
       
-      const primaryEmail = formData.email.toLowerCase().trim();
       const primaryPhoneKey = formData.phone.replace(/\s+/g, "");
 
       const { data: functionData, error: functionError } = await supabase.functions.invoke('create-user', {
@@ -528,11 +525,9 @@ export function MemberFormPanel({
           position: formData.position || null,
           location: formData.location || null,
           description: formData.description || null,
-          additional_emails: emails.filter(e => e.email && e.email.toLowerCase().trim() !== primaryEmail).map(e => ({
-            email: e.email,
-            email_type: e.email_type,
-            is_primary: false,
-          })),
+          // Internal users have exactly one login email (formData.email) —
+          // there are no additional emails to send here.
+          additional_emails: [],
           additional_phones: phones.filter(p => p.phone_number && `${p.country_code || ""}${p.phone_number || ""}`.replace(/\s+/g, "") !== primaryPhoneKey).map(p => ({
             phone_number: p.phone_number,
             country_code: p.country_code,
@@ -670,7 +665,6 @@ export function MemberFormPanel({
       position: "",
       location: "",
     });
-    setEmails([]);
     setPhones([]);
     setSocialLinks({ angellist: "", facebook: "", linkedin: "" });
     setNewUserMemberships([{ organization_id: organizationId, relationship_type: "BELONGS_TO", role_id: "" }]);
@@ -1005,8 +999,6 @@ export function MemberFormPanel({
             <UserFormEnhanced
               formData={formData}
               setFormData={setFormData}
-              emails={emails}
-              setEmails={setEmails}
               phones={phones}
               setPhones={setPhones}
               socialLinks={socialLinks}
