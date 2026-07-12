@@ -18,6 +18,12 @@ SET xmloption = content;
 SET client_min_messages = warning;
 SET row_security = off;
 
+-- Enabled via the dashboard on the original project rather than a migration,
+-- so a from-scratch replay (e.g. CI) needs them declared explicitly before
+-- the gin_trgm_ops indexes and extensions.unaccent() calls further below.
+CREATE EXTENSION IF NOT EXISTS "pg_trgm" WITH SCHEMA "extensions";
+CREATE EXTENSION IF NOT EXISTS "unaccent" WITH SCHEMA "extensions";
+
 --
 -- Name: SCHEMA "public"; Type: COMMENT; Schema: -; Owner: -
 --
