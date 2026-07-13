@@ -203,14 +203,16 @@ export async function handleNifWriteProxyRequest(
 
   let finalParams: Record<string, unknown> = sanitizedParams;
 
-  const nifProvided = nif !== null && nif !== undefined;
-  const trimmedNif = nifProvided ? nif.trim() : "";
+  // NIF is optional on every RPC this proxy fronts. A blank/whitespace-only
+  // string must be treated the same as null/undefined ("no NIF supplied"),
+  // not rejected as an error — the caller (e.g. UsersNew.tsx saving a User
+  // with no NIF) legitimately has nothing to send here. Previously this
+  // returned a hard 400 "NIF inválido" for any blank string, which blocked
+  // saving entities that simply don't have a NIF filled in.
+  const trimmedNif = nif != null ? nif.trim() : "";
+  const nifProvided = trimmedNif !== "";
 
-  if (nifProvided && trimmedNif === "") {
-    return jsonResponse({ error: "NIF inválido" }, 400);
-  }
-
-  if (nifProvided && trimmedNif !== "") {
+  if (nifProvided) {
     let encKey: NifKey;
     let hmacKey: NifKey;
     try {

@@ -1007,7 +1007,12 @@ export default function UsersNew() {
         const validAddressesForRpc = isAddressVisible() ? prepareValidAddresses(formAddresses) : null;
 
         console.log("[UserEdit] Calling rpc_update_user for", selectedUser.id);
-        const nif = formFiscalData.nif;
+        // NIF is optional for Users: an empty string must be treated as "no
+        // NIF" (null), never sent to nif-write-proxy as a non-empty-but-blank
+        // value — the proxy treats any non-null `nif` as "provided" and
+        // rejects a blank/whitespace-only string with "NIF inválido" 400,
+        // which previously blocked saving ANY user without a NIF.
+        const nif = formFiscalData.nif.trim() ? formFiscalData.nif : null;
         const params = {
           p_user_id: selectedUser.id,
           p_entity_id: selectedUser.entity_id ?? null,
