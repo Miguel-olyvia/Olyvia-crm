@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -92,33 +93,10 @@ interface AutoScheduleResult {
   error?: string;
 }
 
-// --- Rate limiting by API key (10 req/min) ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;
-const RATE_WINDOW = 60_000;
-
-function checkRateLimit(key: string): Response | null {
-  const now = Date.now();
-  const entry = rateLimitMap.get(key);
-  if (entry && now < entry.resetAt) {
-    entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return new Response(
-        JSON.stringify({ error: 'Too many requests' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-  } else {
-    rateLimitMap.set(key, { count: 1, resetAt: now + RATE_WINDOW });
-  }
-  // Cleanup old entries
-  if (rateLimitMap.size > 10000) {
-    for (const [k, v] of rateLimitMap) {
-      if (now > v.resetAt) rateLimitMap.delete(k);
-    }
-  }
-  return null;
-}
+// --- Rate limiting by API key (10 req/min), persistent (DB-backed) ---
+const RATE_LIMIT_BUCKET = 'insert-lead';
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input validation ---
 function validateFieldValues(fields: Record<string, any>): string | null {
@@ -145,13 +123,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Rate limit by API key
-    const rateLimitResponse = checkRateLimit(apiKey);
-    if (rateLimitResponse) return rateLimitResponse;
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Rate limit by API key — persistent, DB-backed
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: apiKey,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, apiKey);
 
     // Validate API token against scoped_api_tokens using organization_id
     const { data: scopedToken, error: scopedError } = await supabase

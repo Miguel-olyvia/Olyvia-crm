@@ -14,8 +14,15 @@ const requestSchema = z.object({
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+// Authenticated, org-scoped internal AI tool — persistent (DB-backed) rate
+// limit per organization, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "suggest-schedule-assignee";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 interface AISchedulingRules {
   buffer_before_minutes: number;
@@ -73,6 +80,18 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per organization.
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: organization_id || caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, organization_id || caller.anewUserId);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 

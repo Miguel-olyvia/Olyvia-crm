@@ -5,8 +5,15 @@ import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+// Authenticated internal AI-parsing tool — persistent (DB-backed) rate limit
+// per user, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "import-contract-pdf";
+const RATE_LIMIT_MAX_ATTEMPTS = 20;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const stripMarkdownCodeFences = (value: string) => value.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
@@ -25,11 +32,24 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
+    let caller;
     try {
-      await resolveCallerIdentity(req, supabase);
+      caller = await resolveCallerIdentity(req, supabase);
     } catch (e) {
       return authErrorResponse(e, corsHeaders);
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per authenticated user.
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, caller.anewUserId);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {

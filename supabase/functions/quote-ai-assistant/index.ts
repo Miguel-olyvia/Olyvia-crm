@@ -5,8 +5,15 @@ import { z } from "npm:zod";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+// Authenticated, org-scoped AI assistant — persistent (DB-backed) rate limit
+// per organization, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "quote-ai-assistant";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const requestSchema = z.object({
   query: z.string(),
@@ -51,6 +58,18 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per organization.
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: effective_org_id || caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
 
     // Fetch historical quote data for context
     const { data: recentQuotes, error: quotesError } = await supabase

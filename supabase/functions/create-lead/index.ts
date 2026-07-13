@@ -38,6 +38,7 @@ import {
   resolveRootOrganizationId,
 } from '../_shared/leadsValidation.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -47,40 +48,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
 
-// --- Rate Limiting (in-memory, per-isolate) ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;       // max requests per window
-const RATE_WINDOW = 60_000;  // 60 seconds
-
-function checkRateLimit(req: Request): Response | null {
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('cf-connecting-ip') ||
-    'unknown';
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (entry && now < entry.resetAt) {
-    entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return new Response(
-        JSON.stringify({ error: 'Too many requests. Please try again later.' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-  } else {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
-  }
-
-  // Cleanup stale entries when map grows large
-  if (rateLimitMap.size > 10_000) {
-    for (const [k, v] of rateLimitMap) {
-      if (now > v.resetAt) rateLimitMap.delete(k);
-    }
-  }
-
-  return null; // not rate-limited
-}
+const RATE_LIMIT_BUCKET = 'create-lead';
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input Validation ---
 const MAX_FIELD_VALUE_LENGTH = 10_000;
@@ -136,14 +106,23 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Rate limiting check
-  const rateLimitResponse = checkRateLimit(req);
-  if (rateLimitResponse) return rateLimitResponse;
-
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Rate limiting check — persistent, DB-backed (survives cold starts / shared across instances)
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const body = await req.json();
     const parsedBody = requestSchema.safeParse(body);

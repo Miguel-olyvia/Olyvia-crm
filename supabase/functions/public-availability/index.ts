@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -9,40 +10,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// --- Rate Limiting (in-memory, per-isolate) ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 30;        // max requests per window
-const RATE_WINDOW = 60_000;   // 1 minute (60 seconds)
-
-function checkRateLimit(req: Request): Response | null {
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('cf-connecting-ip') ||
-    'unknown';
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (entry && now < entry.resetAt) {
-    entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return new Response(
-        JSON.stringify({ error: 'Too many requests.' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-  } else {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
-  }
-
-  // Cleanup stale entries when map grows large
-  if (rateLimitMap.size > 10_000) {
-    for (const [k, v] of rateLimitMap) {
-      if (now > v.resetAt) rateLimitMap.delete(k);
-    }
-  }
-
-  return null; // not rate-limited
-}
+const RATE_LIMIT_BUCKET = 'public-availability';
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 /**
  * Public Availability API
@@ -76,11 +46,24 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Rate limiting check — must come before any DB work
-  const rateLimitResponse = checkRateLimit(req);
-  if (rateLimitResponse) return rateLimitResponse;
-
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Rate limiting check — persistent, DB-backed; must come before any other DB work
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
+
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
     if (!parsed.success) {
@@ -94,10 +77,6 @@ Deno.serve(async (req: Request) => {
       postal_code, board_id: directBoardId, duration_minutes: directDuration,
       include_settings,
     } = parsed.data;
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     let boardId = directBoardId || null;
     let durationMinutes = directDuration || 60;

@@ -19,8 +19,16 @@ const importBodySchema = z.discriminatedUnion("action", [
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+// Authenticated, admin-only internal import tool — persistent (DB-backed)
+// rate limit per admin user, mainly to bound abuse of the external postal
+// code API this function fans out to.
+const RATE_LIMIT_BUCKET = "import-postal-codes";
+const RATE_LIMIT_MAX_ATTEMPTS = 60;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // Portuguese postal code ranges by district
 const POSTAL_CODE_RANGES = [
@@ -134,6 +142,18 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per admin user.
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, caller.anewUserId);
 
     const rawBody = await req.json();
     const parsedBody = importBodySchema.safeParse(rawBody);

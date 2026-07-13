@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -17,22 +18,10 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Simple in-memory rate limiter per caller IP (max 20 requests per minute)
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_MAX = 20;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return true;
-  }
-  if (entry.count >= RATE_LIMIT_MAX) return false;
-  entry.count++;
-  return true;
-}
+// Rate limiter per caller IP (max 20 requests per minute), persistent (DB-backed)
+const RATE_LIMIT_BUCKET = "chat-widget-ai";
+const RATE_LIMIT_MAX_ATTEMPTS = 20;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -59,17 +48,19 @@ serve(async (req) => {
     }
     const { form_id, messages, collected_data, conversation_mode } = parsed.data;
 
-    // Rate limiting per caller IP — keying on form_id (attacker-controlled) is bypassable
-    const callerIp =
-      req.headers.get("cf-connecting-ip") ||
-      req.headers.get("x-forwarded-for") ||
-      "unknown";
-    if (!checkRateLimit(callerIp)) {
-      return new Response(
-        JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Rate limiting per caller IP — keying on form_id (attacker-controlled) is bypassable.
+    // Persistent, DB-backed.
+    const callerIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: callerIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
     }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, callerIp);
 
     // Validate form_id in the DB BEFORE making any AI call
     const { data: formData, error: formError } = await supabase

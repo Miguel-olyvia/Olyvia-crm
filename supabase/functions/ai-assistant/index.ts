@@ -10,10 +10,17 @@ import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
 const MODEL = "google/gemini-2.5-flash";
+
+// Authenticated AI assistant — persistent (DB-backed) rate limit per user, to
+// bound AI-gateway cost/abuse even though the caller is already authenticated.
+const RATE_LIMIT_BUCKET = "ai-assistant";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 type ToolCallView = {
   id: string;
@@ -128,6 +135,19 @@ Deno.serve(async (req) => {
       });
     }
     const ctx = built.ctx;
+
+    // Rate limiting — persistent, DB-backed; scoped per authenticated user.
+    const rateLimitIdentifier = ctx.businessUserId || ctx.organizationId;
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: rateLimitIdentifier,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, rateLimitIdentifier);
 
     // Capabilities block — fonte canónica = TOOLS no registry, gerado em runtime
     // para que o prompt da BD nunca tenha de listar nomes de tools.
