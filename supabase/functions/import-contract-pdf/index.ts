@@ -28,8 +28,21 @@ serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  // Scoped client — carries the caller's own JWT, so identity resolution runs
+  // under the caller's real RLS (anew_users.auth_user_id = auth.uid()).
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  // Residual service-role client — ONLY for the persistent rate-limit table,
+  // which has RLS enabled with zero policies for "authenticated" (by design;
+  // only the rate-limit helper is meant to touch it).
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   try {
     let caller;
@@ -40,7 +53,7 @@ serve(async (req) => {
     }
 
     // Rate limiting — persistent, DB-backed; scoped per authenticated user.
-    const rateLimit = await checkRateLimit(supabase, {
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
       bucket: RATE_LIMIT_BUCKET,
       identifier: caller.anewUserId,
       maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
@@ -49,7 +62,7 @@ serve(async (req) => {
     if (!rateLimit.allowed) {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
-    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, caller.anewUserId);
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, caller.anewUserId);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {

@@ -48,8 +48,22 @@ serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+  // Scoped client — carries the caller's own JWT, so identity resolution,
+  // org-scope validation and every business-data read below run under the
+  // caller's real RLS/permissions (has_scheduling_permission,
+  // get_user_visible_org_ids), exactly as if the frontend had called them directly.
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  // Residual service-role client — ONLY for the persistent rate-limit table
+  // (RLS enabled, zero policies for "authenticated" by design).
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   try {
     // Auth: resolve caller and validate org scope
@@ -82,7 +96,7 @@ serve(async (req) => {
     }
 
     // Rate limiting — persistent, DB-backed; scoped per organization.
-    const rateLimit = await checkRateLimit(supabase, {
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
       bucket: RATE_LIMIT_BUCKET,
       identifier: organization_id || caller.anewUserId,
       maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
@@ -91,7 +105,7 @@ serve(async (req) => {
     if (!rateLimit.allowed) {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
-    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, organization_id || caller.anewUserId);
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, organization_id || caller.anewUserId);
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 

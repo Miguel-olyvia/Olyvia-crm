@@ -24,8 +24,18 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read below run under the
+    // caller's real RLS/permissions (has_anew_permission, get_user_visible_org_ids,
+    // is_entity_in_user_scope), exactly as if the frontend had called them directly.
+    // No rate-limit table use in this function, so no residual service-role
+    // client is needed.
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
 
     let caller;
     try {

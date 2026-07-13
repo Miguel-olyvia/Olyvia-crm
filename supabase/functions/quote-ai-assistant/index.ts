@@ -33,8 +33,26 @@ serve(async (req) => {
     }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read below run under the
+    // caller's real RLS/permissions (has_anew_permission, get_user_visible_org_ids),
+    // exactly as if the frontend had called them directly.
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+    // Residual service-role client — ONLY for:
+    //  - the persistent rate-limit table (RLS enabled, zero policies for
+    //    "authenticated" by design);
+    //  - ai_suggestion_ratings, which also has RLS enabled with zero policies
+    //    (read-only signal used to bias suggestions; failing closed under the
+    //    scoped client would silently and permanently empty out that context).
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
     // Auth: resolve caller identity
     const caller = await resolveCallerIdentity(req, supabase);
@@ -60,7 +78,7 @@ serve(async (req) => {
     }
 
     // Rate limiting — persistent, DB-backed; scoped per organization.
-    const rateLimit = await checkRateLimit(supabase, {
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
       bucket: RATE_LIMIT_BUCKET,
       identifier: effective_org_id || caller.anewUserId,
       maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
@@ -69,7 +87,7 @@ serve(async (req) => {
     if (!rateLimit.allowed) {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
-    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
 
     // Fetch historical quote data for context
     const { data: recentQuotes, error: quotesError } = await supabase
@@ -151,8 +169,11 @@ serve(async (req) => {
       console.error("Error fetching services:", servicesError);
     }
 
-    // Fetch AI ratings to learn from user feedback
-    const { data: ratings } = await supabase
+    // Fetch AI ratings to learn from user feedback.
+    // ai_suggestion_ratings has RLS enabled with zero policies for
+    // "authenticated" — read via the residual service-role client (see note
+    // above); this is a read-only, org-filtered signal, not a privilege escalation.
+    const { data: ratings } = await supabaseAdmin
       .from("ai_suggestion_ratings")
       .select("suggestion_name, suggestion_category, suggestion_type, rating")
       .eq("organization_id", effective_org_id)
