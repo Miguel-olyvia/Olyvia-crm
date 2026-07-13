@@ -101,9 +101,19 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
+    // Scoped client — carries the caller's own JWT, so every business-data
+    // read/write below (quotes, anew_users, anew_memberships, anew_hierarchy,
+    // quote_sends, email_logs, quotes update) runs under the caller's real
+    // RLS instead of bypassing it via service_role. quote_sends already had
+    // an INSERT policy; email_logs' was added specifically for this
+    // (20261107010000_add_insert_policies_email_logs_proposal_sends.sql).
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const rawBody = await req.json();

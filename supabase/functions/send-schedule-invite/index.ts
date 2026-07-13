@@ -164,9 +164,29 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
+    const authHeader = req.headers.get("Authorization") ?? "";
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read/write below
+    // (schedule_invitations insert, notifications insert, schedule_items
+    // read) run under the caller's real RLS. schedule_invitations' INSERT
+    // policy identity-space bug was fixed in
+    // 20261107020000_fix_schedule_invitations_invited_by_identity_space.sql.
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
+    // Residual service-role client — ONLY passed to getUsersFromEntity, which
+    // calls supabase.auth.admin.getUserById() (a GoTrue admin API with no
+    // scoped equivalent) to resolve invitee emails.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
     const caller = await resolveCallerIdentity(req, supabaseClient);
@@ -234,7 +254,7 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (inviteError) throw inviteError;
 
-        const users = await getUsersFromEntity(supabaseClient, invitee.type, invitee.id);
+        const users = await getUsersFromEntity(supabaseAdmin, invitee.type, invitee.id);
 
         for (const user of users) {
           // Create in-app notification only if enabled

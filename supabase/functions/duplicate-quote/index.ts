@@ -33,9 +33,23 @@ serve(async (req) => {
       });
     }
 
+    const authHeader = req.headers.get("Authorization") ?? "";
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation, every read below (quotes, quote_lines,
+    // quote_fees) and the rpc_duplicate_quote_insert call itself run under
+    // the caller's real RLS/authorization instead of a service_role bypass.
+    // rpc_duplicate_quote_insert now validates organization_id and
+    // p_actor_id itself when called with a real auth.uid()
+    // (20261107030000_authorize_rpc_duplicate_quote_insert.sql), so it is
+    // safe to call as `authenticated` here.
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const caller = await resolveCallerIdentity(req, supabaseAdmin);

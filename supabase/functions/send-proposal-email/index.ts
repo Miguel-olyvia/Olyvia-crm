@@ -168,9 +168,28 @@ const handler = async (req: Request): Promise<Response> => {
   }
 
   try {
+    // ── Auth: mandatory JWT — reject immediately without Authorization header ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
+    // Scoped client — carries the caller's own JWT, so every business-data
+    // read/write below (proposals, anew_users, anew_memberships,
+    // anew_hierarchy, proposal_sends, email_logs, proposals update) runs
+    // under the caller's real RLS instead of bypassing it via service_role.
+    // proposal_sends/email_logs INSERT policies were added specifically for
+    // this (20261107010000_add_insert_policies_email_logs_proposal_sends.sql).
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const rawBody = await req.json();
@@ -188,14 +207,6 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
-    // ── Auth: mandatory JWT — reject immediately without Authorization header ──
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Authentication required" }), {
-        status: 401,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
-    }
     const token = authHeader.replace("Bearer ", "");
     const { data: { user: callerUser }, error: authError } = await supabaseClient.auth.getUser(token);
     if (authError || !callerUser) {
