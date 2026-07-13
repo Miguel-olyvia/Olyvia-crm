@@ -282,11 +282,15 @@ const Auth = () => {
 
         if (signUpError) {
           sessionStorage.removeItem("showWelcomeOrg");
+          // Deliberately generic for the "already registered" case: confirming
+          // that an email already has an account lets an attacker enumerate
+          // real accounts one guess at a time. Other errors (weak password,
+          // invalid format) don't reveal account existence, so they pass through.
           if (
             signUpError.message?.toLowerCase().includes("already registered") ||
             signUpError.message?.toLowerCase().includes("already been registered")
           ) {
-            throw new Error("Já existe uma conta com este email.");
+            throw new Error("Não foi possível concluir o registo com os dados fornecidos.");
           }
           throw signUpError;
         }

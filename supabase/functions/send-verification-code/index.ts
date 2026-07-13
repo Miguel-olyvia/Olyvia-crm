@@ -19,6 +19,7 @@ const verifyCodeRequestSchema = z.object({
 
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
 
@@ -204,6 +205,20 @@ const handler = async (req: Request): Promise<Response> => {
       }
       const { proposal_id, code } = parsed.data;
 
+      // Rate-limit by proposal_id (not just IP) — a 6-digit code has only 1M
+      // combinations, brute-forceable well within its 15-minute validity
+      // window if callers could spread attempts across IPs.
+      const verifyRate = await checkRateLimit(supabaseClient, {
+        bucket: "send-verification-code-verify",
+        identifier: proposal_id,
+        maxAttempts: 10,
+        windowMinutes: 15,
+      });
+      if (!verifyRate.allowed) {
+        return rateLimitResponse(verifyRate, corsHeaders);
+      }
+      await recordRateLimitAttempt(supabaseClient, "send-verification-code-verify", proposal_id);
+
       // Find valid code
       const { data: verificationData, error: verifyError } = await supabaseClient
         .from("proposal_verification_codes")
@@ -293,6 +308,29 @@ const handler = async (req: Request): Promise<Response> => {
       }
       const { proposal_id, method, destination, action, rejection_reason_code, rejection_notes } = parsed.data;
 
+      const sendRate = await checkRateLimit(supabaseClient, {
+        bucket: "send-verification-code-send",
+        identifier: getClientIp(req),
+        maxAttempts: 5,
+        windowMinutes: 15,
+      });
+      if (!sendRate.allowed) {
+        return rateLimitResponse(sendRate, corsHeaders);
+      }
+      await recordRateLimitAttempt(supabaseClient, "send-verification-code-send", getClientIp(req));
+
+      // Generic response used for every case where a code should NOT actually
+      // be sent (unknown proposal, destination not on file for this client).
+      // Never distinguish these from the real success case in the response —
+      // otherwise the endpoint becomes an oracle for guessing valid proposal
+      // IDs, and a caller who knows a valid ID could redirect the OTP to an
+      // email address that isn't the real client's.
+      const genericSentResponse = () =>
+        new Response(
+          JSON.stringify({ success: true, message: "Se os dados estiverem corretos, um código foi enviado." }),
+          { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } },
+        );
+
       // Get proposal with template
       const { data: proposal, error: proposalError } = await supabaseClient
         .from("proposals")
@@ -301,7 +339,26 @@ const handler = async (req: Request): Promise<Response> => {
         .single();
 
       if (proposalError || !proposal) {
-        throw new Error("Proposal not found");
+        console.error("send-verification-code: proposal not found", proposal_id);
+        return genericSentResponse();
+      }
+
+      // destination is caller-supplied; never trust it blindly — confirm it's
+      // actually an email on file for this proposal's client before sending
+      // the OTP there, or anyone who knows a valid proposal_id could redirect
+      // the verification code (and the accept/reject action) to their own inbox.
+      if (proposal.client_id) {
+        const { data: clientEmails } = await supabaseClient
+          .from("anew_entity_emails")
+          .select("email")
+          .eq("entity_id", proposal.client_id);
+        const destinationIsKnown = clientEmails?.some(
+          (row: { email: string }) => row.email.toLowerCase() === destination.toLowerCase(),
+        );
+        if (!destinationIsKnown) {
+          console.error("send-verification-code: destination not on file for client", proposal.client_id);
+          return genericSentResponse();
+        }
       }
 
       // Get rejection reason label if rejecting
