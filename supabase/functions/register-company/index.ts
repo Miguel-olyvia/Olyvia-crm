@@ -155,20 +155,15 @@ serve(async (req) => {
 
     console.log(`Checking for duplicates - Email: ${email}, VAT: ${vat}, Company: ${company_name}`);
 
-    // Check if email already exists in auth.users
+    // Check if email, VAT, or company name already exist. Deliberately collapsed
+    // into a single generic response below (no field, no distinct message) —
+    // returning which specific field collided lets an attacker enumerate real
+    // accounts/companies one guess at a time.
     const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
     const emailExists = existingUsers?.users?.some(
       (user) => user.email?.toLowerCase() === email.toLowerCase()
     );
 
-    if (emailExists) {
-      return new Response(
-        JSON.stringify({ success: false, field: "email", message: "Já existe uma conta com este email" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Check if VAT already exists in anew_organizations metadata
     const { data: existingVatOrgs } = await supabaseAdmin
       .from("anew_organizations")
       .select("id, name, metadata")
@@ -179,14 +174,6 @@ serve(async (req) => {
       return meta?.vat === vat;
     });
 
-    if (vatExists) {
-      return new Response(
-        JSON.stringify({ success: false, field: "vat", message: "Já existe uma empresa registada com este NIF/VAT" }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Check if company name already exists
     const { data: existingName } = await supabaseAdmin
       .from("anew_organizations")
       .select("id")
@@ -194,9 +181,9 @@ serve(async (req) => {
       .eq("type", "company")
       .maybeSingle();
 
-    if (existingName) {
+    if (emailExists || vatExists || existingName) {
       return new Response(
-        JSON.stringify({ success: false, field: "company_name", message: "Já existe uma empresa registada com este nome" }),
+        JSON.stringify({ success: false, message: "Não foi possível concluir o registo com os dados fornecidos." }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
