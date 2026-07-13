@@ -52,7 +52,7 @@ CREATE POLICY "category_attributes_update" ON public."category_attributes" AS PE
 DROP POLICY "category_attributes_delete" ON public."category_attributes";
 CREATE POLICY "category_attributes_delete" ON public."category_attributes" AS PERMISSIVE FOR DELETE TO authenticated USING ((is_system_admin_user(( SELECT auth.uid() AS uid)) OR (has_anew_permission(( SELECT auth.uid() AS uid), 'products.manage'::text) AND (EXISTS ( SELECT 1
    FROM product_categories pc
-  WHERE ((pc.id = category_attributes.category_id) AND ((pc.organization_id IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)) OR ((pc.organization_id IS NULL) AND (COALESCE(pc.parent_id, pc.parent_category_id) IS NOT NULL) AND (public.get_product_category_org_id(COALESCE(pc.parent_id, pc.parent_category_id), 0) IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)))))))));
+  WHERE ((pc.id = category_attributes.category_id) AND ((pc.organization_id IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)) OR ((pc.organization_id IS NULL) AND (COALESCE(pc.parent_id, pc.parent_category_id) IS NOT NULL) AND (public.get_product_category_org_id(COALESCE(pc.parent_id, pc.parent_category_id), 0) IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids))))))))));
 
 DROP POLICY "category_attribute_palettes_insert" ON public."category_attribute_palettes";
 CREATE POLICY "category_attribute_palettes_insert" ON public."category_attribute_palettes" AS PERMISSIVE FOR INSERT TO authenticated WITH CHECK ((is_system_admin_user(( SELECT auth.uid() AS uid)) OR (has_anew_permission(( SELECT auth.uid() AS uid), 'products.manage'::text) AND (EXISTS ( SELECT 1
@@ -69,6 +69,6 @@ CREATE POLICY "category_attribute_palettes_update" ON public."category_attribute
 DROP POLICY "category_attribute_palettes_delete" ON public."category_attribute_palettes";
 CREATE POLICY "category_attribute_palettes_delete" ON public."category_attribute_palettes" AS PERMISSIVE FOR DELETE TO authenticated USING ((is_system_admin_user(( SELECT auth.uid() AS uid)) OR (has_anew_permission(( SELECT auth.uid() AS uid), 'products.manage'::text) AND (EXISTS ( SELECT 1
    FROM product_categories pc
-  WHERE ((pc.id = category_attribute_palettes.category_id) AND ((pc.organization_id IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)) OR ((pc.organization_id IS NULL) AND (COALESCE(pc.parent_id, pc.parent_category_id) IS NOT NULL) AND (public.get_product_category_org_id(COALESCE(pc.parent_id, pc.parent_category_id), 0) IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)))))))));
+  WHERE ((pc.id = category_attribute_palettes.category_id) AND ((pc.organization_id IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids)) OR ((pc.organization_id IS NULL) AND (COALESCE(pc.parent_id, pc.parent_category_id) IS NOT NULL) AND (public.get_product_category_org_id(COALESCE(pc.parent_id, pc.parent_category_id), 0) IN ( SELECT get_user_visible_org_ids(( SELECT auth.uid() AS uid)) AS get_user_visible_org_ids))))))))));
 
 DROP FUNCTION IF EXISTS public.get_product_category_org_id(uuid);
