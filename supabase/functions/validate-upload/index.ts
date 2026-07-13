@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
+import { resolveCallerIdentity, authErrorResponse, validateOrgScope } from "../_shared/auth.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -145,8 +145,9 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
+    let caller;
     try {
-      await resolveCallerIdentity(req, supabase);
+      caller = await resolveCallerIdentity(req, supabase);
     } catch (e) {
       return authErrorResponse(e, corsHeaders);
     }
@@ -160,6 +161,19 @@ serve(async (req) => {
     }
 
     const { quarantineBucket, finalBucket, path } = body;
+
+    // Every upload path is namespaced as `${organizationId}/...` (see DocumentsTab,
+    // Gallery, DocumentHeaderSettings, ProposalTemplateEditor, ContractsDocumentsView).
+    // Without this check any authenticated caller who knows/guesses another
+    // organization's quarantined path could promote it into the shared final bucket.
+    const pathOrgId = path.split("/")[0];
+    const hasOrgScope = pathOrgId ? await validateOrgScope(supabase, caller, pathOrgId) : false;
+    if (!hasOrgScope) {
+      return new Response(
+        JSON.stringify({ error: "Não tem permissão para validar este ficheiro." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     let signature: string | null;
     try {

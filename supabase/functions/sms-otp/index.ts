@@ -113,6 +113,64 @@ serve(async (req) => {
           });
         }
 
+        // Authorization: the caller may only trigger an OTP for another anew_user
+        // when that user is an actual contract signatory (active membership in a
+        // role with can_sign_contracts = true) AND the caller has visibility over
+        // at least one of the organizations where the target holds that role.
+        // Mirrors the SignatoriesPanel selection rules and the get_user_visible_org_ids
+        // scoping used elsewhere (see _shared/auth.ts validateOrgScope).
+        const { data: targetMemberships } = await supabase
+          .from("anew_memberships")
+          .select("organization_id, role_id")
+          .eq("user_id", target_user_id)
+          .eq("status", "active");
+
+        const candidateOrgIds = [...new Set((targetMemberships || []).map((m: any) => m.organization_id).filter(Boolean))];
+        const candidateRoleIds = [...new Set((targetMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+
+        let signingOrgIds: string[] = [];
+        if (candidateOrgIds.length > 0 && candidateRoleIds.length > 0) {
+          const { data: signingRoles } = await supabase
+            .from("anew_roles")
+            .select("id")
+            .in("id", candidateRoleIds)
+            .eq("can_sign_contracts", true);
+
+          const signingRoleIds = new Set((signingRoles || []).map((r: any) => r.id));
+          signingOrgIds = [...new Set(
+            (targetMemberships || [])
+              .filter((m: any) => signingRoleIds.has(m.role_id))
+              .map((m: any) => m.organization_id)
+          )];
+        }
+
+        if (signingOrgIds.length === 0) {
+          return new Response(JSON.stringify({ error: "not_a_signatory", message: "Utilizador não é um signatário autorizado." }), {
+            status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const { data: visibleOrgIdsData, error: visibleOrgIdsError } = await supabase.rpc(
+          "get_user_visible_org_ids",
+          { _auth_uid: user.id }
+        );
+
+        if (visibleOrgIdsError) {
+          console.error("[sms-otp] get_user_visible_org_ids failed:", visibleOrgIdsError);
+          return new Response(JSON.stringify({ error: "forbidden", message: "Não foi possível validar a permissão sobre este utilizador." }), {
+            status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        const visibleOrgIds: string[] = Array.isArray(visibleOrgIdsData) ? visibleOrgIdsData : [];
+        const hasSharedOrgVisibility = signingOrgIds.some(orgId => visibleOrgIds.includes(orgId));
+
+        if (!hasSharedOrgVisibility) {
+          return new Response(JSON.stringify({ error: "forbidden", message: "Não tem permissão para solicitar verificação para este utilizador." }), {
+            status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
         callerName = targetUser.name;
         phoneNumber = await resolveAnewUserPhone(targetUser);
       } else {
