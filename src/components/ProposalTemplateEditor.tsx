@@ -64,6 +64,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
@@ -734,8 +735,8 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
     setUploadingLogo(true);
     try {
       const orgId = activeCompany?.id || "general";
-      const ext = file.name.split(".").pop() || "png";
-      const filePath = `${orgId}/proposal-logo-${Date.now()}.${ext}`;
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/proposal-logo-${crypto.randomUUID()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
 

@@ -103,6 +103,13 @@ export async function validateOrgScope(
  * Does NOT fall back to system-wide permissions — the organization_id scope
  * is intentional for the portal RBAC gate.
  *
+ * anew_memberships has no FK constraints (contype='f' returns zero rows in
+ * pg_constraint), so PostgREST cannot resolve an embedded
+ * `anew_role_permissions!inner(permission_code)` select — it fails with
+ * PGRST200 ("Could not find a relationship..."). Resolved with a decoupled
+ * two-step lookup instead, same pattern as create-client-portal-access's
+ * hasNonClientRole() and export-data's authorizeExport().
+ *
  * @returns true if the user has the permission in the org, false otherwise.
  */
 export async function checkUserPermission(
@@ -111,26 +118,39 @@ export async function checkUserPermission(
   permissionCode: string,
   organizationId?: string
 ): Promise<boolean> {
-  let query = supabaseAdmin
+  let membershipQuery = supabaseAdmin
     .from("anew_memberships")
-    .select("anew_role_permissions!inner(permission_code)")
+    .select("role_id")
     .eq("user_id", anewUserId)
-    .eq("status", "active")
-    .eq("anew_role_permissions.permission_code", permissionCode)
-    .limit(1);
+    .eq("status", "active");
 
   if (organizationId) {
-    query = query.eq("organization_id", organizationId);
+    membershipQuery = membershipQuery.eq("organization_id", organizationId);
   }
 
-  const { data, error } = await query;
+  const { data: memberships, error: membershipsError } = await membershipQuery;
 
-  if (error) {
-    console.error("checkUserPermission: query failed", { permissionCode, error });
+  if (membershipsError) {
+    console.error("checkUserPermission: memberships query failed", { permissionCode, error: membershipsError });
     return false;
   }
 
-  return Array.isArray(data) && data.length > 0;
+  const roleIds = [...new Set((memberships || []).map((m: any) => m.role_id).filter(Boolean))];
+  if (roleIds.length === 0) return false;
+
+  const { data: rolePermissions, error: rolePermissionsError } = await supabaseAdmin
+    .from("anew_role_permissions")
+    .select("permission_code")
+    .in("role_id", roleIds)
+    .eq("permission_code", permissionCode)
+    .limit(1);
+
+  if (rolePermissionsError) {
+    console.error("checkUserPermission: role_permissions query failed", { permissionCode, error: rolePermissionsError });
+    return false;
+  }
+
+  return Array.isArray(rolePermissions) && rolePermissions.length > 0;
 }
 
 /**

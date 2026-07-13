@@ -14,6 +14,7 @@ import {
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
+import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 export type DocumentEntityType = "quote" | "proposal" | "contract";
 
@@ -111,7 +112,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
     const validationError = validateFile(file);
     if (validationError) return validationError;
 
-    const filePath = `${organizationId}/${entityType}/${entityId}/${Date.now()}_${file.name}`;
+    const filePath = `${organizationId}/${entityType}/${entityId}/${generateSecureFileName(file)}`;
     const { error: uploadError } = await supabase.storage
       .from("documents-quarantine")
       .upload(filePath, file);

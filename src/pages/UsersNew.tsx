@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { useColumnResize, ColumnWidths } from "@/hooks/useColumnResize";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -75,7 +76,6 @@ import { UsersFAQDialog } from "@/components/users/UsersFAQDialog";
 import UserHistoryDialog from "@/components/users/UserHistoryDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
-import { EmailEntry } from "@/components/users/MultiValueEmailInput";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { UsersTableColumns, UserColumnConfig } from "@/components/users/UsersTableColumns";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -354,8 +354,7 @@ export default function UsersNew() {
     location: "",
   });
   
-  // Multi-value email and phone states
-  const [formEmails, setFormEmails] = useState<EmailEntry[]>([]);
+  // Multi-value phone state (users only ever have one login email — see formData.email)
   const [formPhones, setFormPhones] = useState<PhoneEntry[]>([]);
   const [formSocialLinks, setFormSocialLinks] = useState({
     angellist: "",
@@ -767,7 +766,6 @@ export default function UsersNew() {
       position: "",
       location: "",
     });
-    setFormEmails([]);
     setFormPhones([]);
     setFormSocialLinks({ angellist: "", facebook: "", linkedin: "" });
     setFormMemberships([]);
@@ -827,25 +825,11 @@ export default function UsersNew() {
         }))
     );
     
-    // Load emails from the new table (keyed by entity_id, NOT anew_users.id)
-    const { data: emailsData } = user.entity_id ? await supabase
-      .from("anew_entity_emails")
-      .select("*")
-      .eq("entity_id", user.entity_id) : { data: [] as any[] };
-    
-    setFormEmails(
-      (emailsData || []).map((e: any) => ({
-        email: e.email,
-        email_type: e.email_type || "personal",
-        is_primary: e.is_primary || false,
-      }))
-    );
-    
-    // If no emails in new table, use the main email
-    if (!emailsData || emailsData.length === 0) {
-      setFormEmails([{ email: user.email, email_type: "personal", is_primary: true }]);
-    }
-    
+    // Internal users only ever have one email — the login email stored on
+    // anew_users/auth.users. It was already set into formData.email above.
+    // (Multi-email support via anew_entity_emails is reserved for Contacts/
+    // Clients/Leads — see anew_entities — not for internal Users.)
+
     // Load phones from the new table (keyed by entity_id)
     const { data: phonesData } = user.entity_id ? await supabase
       .from("anew_entity_phones")
@@ -913,15 +897,16 @@ export default function UsersNew() {
     // Load user fiscal entity from unified table
     const { data: fiscalLinks } = await (supabase as any)
       .from("anew_entity_fiscal_entities")
-      .select("*, fiscal_entity:fiscal_entities(*)")
+      .select("*, fiscal_entity:fiscal_entities(id, commercial_name, country_code)")
       .eq("entity_id", user.entity_id)
       .is("valid_to", null)
       .limit(1);
 
     if (fiscalLinks && fiscalLinks.length > 0) {
       const fe = fiscalLinks[0].fiscal_entity;
+      const nif = await callNifRevealSingle(fe?.id);
       setFormFiscalData({
-        nif: fe?.nif || "",
+        nif: nif || "",
         commercial_name: fe?.commercial_name || "",
         country_code: fe?.country_code || "PT",
       });
@@ -949,15 +934,15 @@ export default function UsersNew() {
       return addressField.isVisible !== false;
     };
 
-    // Get primary email or first email for auth
-    const primaryEmail = formEmails.find(e => e.is_primary)?.email || formEmails[0]?.email;
+    // Internal users have a single login email (formData.email).
+    const primaryEmail = formData.email?.trim();
 
     if (!formData.name) {
       toast.error(t("users.requiredFields"));
       return;
     }
 
-    if (formEmails.length === 0 || !primaryEmail) {
+    if (!primaryEmail) {
       toast.error(t("users.atLeastOneEmail"));
       return;
     }
@@ -1022,7 +1007,12 @@ export default function UsersNew() {
         const validAddressesForRpc = isAddressVisible() ? prepareValidAddresses(formAddresses) : null;
 
         console.log("[UserEdit] Calling rpc_update_user for", selectedUser.id);
-        const nif = formFiscalData.nif;
+        // NIF is optional for Users: an empty string must be treated as "no
+        // NIF" (null), never sent to nif-write-proxy as a non-empty-but-blank
+        // value — the proxy treats any non-null `nif` as "provided" and
+        // rejects a blank/whitespace-only string with "NIF inválido" 400,
+        // which previously blocked saving ANY user without a NIF.
+        const nif = formFiscalData.nif.trim() ? formFiscalData.nif : null;
         const params = {
           p_user_id: selectedUser.id,
           p_entity_id: selectedUser.entity_id ?? null,
@@ -1035,11 +1025,13 @@ export default function UsersNew() {
           p_location: formData.location || null,
           p_template_id: formTemplateId || null,
           p_custom_attributes: filteredCustomAttributes,
-          p_emails: formEmails.map((e) => ({
-            email: e.email,
-            email_type: e.email_type,
-            is_primary: e.is_primary,
-          })),
+          // Internal users have exactly one login email. The RPC still expects
+          // p_emails as an array (it syncs anew_entity_emails), so we build a
+          // single-item array from the simple email field rather than
+          // changing the RPC's contract — this keeps the server side untouched.
+          p_emails: [
+            { email: primaryEmail, email_type: "work", is_primary: true },
+          ],
           p_phones: formPhones.map((p) => ({
             phone_number: p.phone_number,
             country_code: p.country_code,
@@ -1086,7 +1078,7 @@ export default function UsersNew() {
         toast.success(t("users.updated"));
         setPendingScopeChanges({});
       } else {
-        const primaryEmailForAuth = formEmails.find(e => e.is_primary)?.email || formEmails[0]?.email;
+        const primaryEmailForAuth = formData.email.trim();
         const primaryPhone = formPhones.find(p => p.is_primary) || formPhones[0];
 
         const validMembershipsForEdge = formMemberships
@@ -1094,10 +1086,10 @@ export default function UsersNew() {
           .map(m => ({ organization_id: m.organization_id, relationship_type: m.relationship_type, role_id: m.role_id }));
 
         const validAddressesForEdge = isAddressVisible() ? prepareValidAddresses(formAddresses) : [];
-        const primaryEmailLower = primaryEmailForAuth.toLowerCase().trim();
-        const additionalEmailsForEdge = formEmails
-          .filter((e) => e.email && e.email.toLowerCase().trim() !== primaryEmailLower)
-          .map((e) => ({ email: e.email, email_type: e.email_type, is_primary: false }));
+        // Internal users have exactly one login email, so there are no
+        // "additional emails" to send — the Edge Function already supports
+        // an empty array here without any server-side changes.
+        const additionalEmailsForEdge: Array<{ email: string; email_type: string; is_primary: boolean }> = [];
         const primaryPhoneKey = primaryPhone
           ? `${primaryPhone.country_code || ""}${primaryPhone.phone_number || ""}`.replace(/\s+/g, "")
           : "";
@@ -1651,8 +1643,6 @@ export default function UsersNew() {
           <UserFormEnhanced
             formData={formData}
             setFormData={setFormData}
-            emails={formEmails}
-            setEmails={setFormEmails}
             phones={formPhones}
             setPhones={setFormPhones}
             socialLinks={formSocialLinks}

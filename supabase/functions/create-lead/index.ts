@@ -26,6 +26,7 @@ import {
   mergeFieldValuesNonDestructive,
   ensureEntityOrgLinkSR,
 } from '../_shared/entityScopedLookup.ts';
+import { deriveKeyFromEnv, hashNif } from '../_shared/nifCrypto.ts';
 import {
   sanitizeEmail,
   sanitizePhone,
@@ -493,6 +494,21 @@ Deno.serve(async (req) => {
       return null;
     })();
 
+    // Compute the NIF hash server-side so the plaintext rawVat never reaches
+    // the entity-matching query — same HMAC-SHA256 pattern used by
+    // search-entities / fiscal-entity-resolve (see _shared/nifCrypto.ts).
+    // Best-effort: a hashing failure (e.g. missing key) must not block the
+    // public form; it just means NIF-based dedup is skipped for this submission.
+    let rawVatHash: string | null = null;
+    if (rawVat) {
+      try {
+        const hmacKey = deriveKeyFromEnv('NIF_HMAC_KEY', 'HMAC');
+        rawVatHash = await hashNif(rawVat, hmacKey);
+      } catch (hashError) {
+        console.error('[create-lead] failed to hash rawVat for entity lookup:', hashError instanceof Error ? hashError.message : hashError);
+      }
+    }
+
     // --- Local-scoped entity lookup (form receiving org ONLY) ---
     // Cross-org identity is intentionally ignored: another org's entity is
     // never silently shared into this org by the public form. Manual UI is
@@ -502,7 +518,7 @@ Deno.serve(async (req) => {
       organizationId: organization_id,
       email: leadEmail,
       phone: leadPhone,
-      nif: rawVat,
+      nifHash: rawVatHash,
     });
 
     // When classifyEntityInOrg resolves the entity to an already-active

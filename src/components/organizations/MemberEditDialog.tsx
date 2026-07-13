@@ -38,6 +38,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PhoneInput } from "@/components/PhoneInput";
 import { memberEditSchema } from "@/lib/validations";
+import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 interface MemberEditDialogProps {
   open: boolean;
@@ -151,16 +153,17 @@ export function MemberEditDialog({
         .from("anew_entity_fiscal_entities")
         .select(`
           id,
-          fiscal_entity:fiscal_entities(id, nif, commercial_name, country_code)
+          fiscal_entity:fiscal_entities(id, commercial_name, country_code)
         `)
         .eq("entity_id", entityId)
         .eq("is_primary", true)
         .maybeSingle() : { data: null };
 
       if (fiscalLink?.fiscal_entity) {
+        const nif = await callNifRevealSingle(fiscalLink.fiscal_entity.id);
         setFiscalData({
           id: fiscalLink.fiscal_entity.id,
-          nif: fiscalLink.fiscal_entity.nif || "",
+          nif: nif || "",
           commercial_name: fiscalLink.fiscal_entity.commercial_name || "",
           country_code: fiscalLink.fiscal_entity.country_code || "PT",
         });
@@ -280,31 +283,21 @@ export function MemberEditDialog({
         }
       }
 
-      // Handle fiscal data
+      // Handle fiscal data — resolved server-side via fiscal-entity-resolve
+      // (the browser must never compute or receive nif_hash/nif_encrypted;
+      // see NIF encryption audit). This replaces the previous direct
+      // insert()/update()/select().eq("nif", ...) against fiscal_entities.
       if (fiscalData.nif) {
-        const { data: existingFiscal } = await (supabase as any)
-          .from("fiscal_entities")
-          .select("id")
-          .eq("nif", fiscalData.nif)
-          .maybeSingle();
+        const { data: resolved, error: resolveError } = await callFiscalEntityResolve({
+          nif: fiscalData.nif,
+          countryCode: fiscalData.country_code,
+          commercialName: fiscalData.commercial_name || null,
+          entityType: "individual",
+        });
+        if (resolveError) throw resolveError;
+        if (!resolved) throw new Error("Failed to resolve fiscal entity");
 
-        let fiscalEntityId = existingFiscal?.id;
-
-        if (!fiscalEntityId) {
-          // Create new fiscal entity
-          const { data: newFiscal, error: fiscalError } = await (supabase as any)
-            .from("fiscal_entities")
-            .insert({
-              nif: fiscalData.nif,
-              commercial_name: fiscalData.commercial_name || null,
-              country_code: fiscalData.country_code,
-            })
-            .select()
-            .single();
-
-          if (fiscalError) throw fiscalError;
-          fiscalEntityId = newFiscal.id;
-        }
+        const fiscalEntityId = resolved.fiscalEntityId;
 
         // Link to entity via unified table
         const { data: userForEntity } = await (supabase as any)

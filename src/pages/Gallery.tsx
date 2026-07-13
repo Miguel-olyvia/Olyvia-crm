@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { HelpButton } from "@/components/HelpButton";
+import { generateSecureFileName, getSafeFileExtension } from "@/utils/secureFileUpload";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -352,8 +353,8 @@ export default function Gallery() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
 
-      const fileExt = selectedFile.name.split(".").pop();
-      const fileName = `${selectedCompanyId}/${Date.now()}-${newAsset.name || selectedFile.name}.${fileExt}`;
+      const fileExt = getSafeFileExtension(selectedFile);
+      const fileName = `${selectedCompanyId}/${generateSecureFileName(selectedFile)}`;
 
       const { error: uploadError } = await supabase.storage
         .from("media-quarantine")

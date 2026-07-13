@@ -19,7 +19,7 @@
  * corsHeaders with "Access-Control-Allow-Origin": "*" and do NOT import from here.
  */
 
-const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
+export const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
 
 function resolveAllowedOrigin(): string {
   const explicit = Deno.env.get("ALLOWED_ORIGIN");

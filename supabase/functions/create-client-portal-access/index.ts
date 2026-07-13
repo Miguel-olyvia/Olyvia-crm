@@ -656,7 +656,11 @@ serve(async (req: Request) => {
     } catch (e) {
       console.error("Error recording send history:", e);
     } finally {
-      await supabase.rpc('clear_audit_context').catch(() => {});
+      try {
+        await supabase.rpc('clear_audit_context');
+      } catch {
+        // best-effort cleanup only
+      }
     }
 
     // 5. Resolve SMTP and send email

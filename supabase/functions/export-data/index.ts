@@ -11,8 +11,12 @@ import {
   type ExportModule,
 } from "./exportConfig.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { decryptNif, deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
 
 initSentry();
+
+/** Raw key (Uint8Array from deriveKeyFromEnv) or an already imported CryptoKey. */
+type NifKey = Uint8Array | CryptoKey;
 
 const exportRequestSchema = z.object({
   module: z.string().min(1),
@@ -239,7 +243,12 @@ function applyOwnerScope(query: any, auth: AuthorizationContext): any {
   return query.or(`created_by.in.(${ids.join(",")}),assigned_to.in.(${ids.join(",")})`);
 }
 
-async function resolveIdentityMaps(admin: any, entityIds: string[], includeSensitive: boolean) {
+async function resolveIdentityMaps(
+  admin: any,
+  entityIds: string[],
+  includeSensitive: boolean,
+  decKey: NifKey | null,
+) {
   const uniqueIds = Array.from(new Set(entityIds.filter(Boolean)));
   const identity = new Map<string, any>();
   const email = new Map<string, string>();
@@ -293,16 +302,27 @@ async function resolveIdentityMaps(admin: any, entityIds: string[], includeSensi
   const fiscalIds = Array.from(
     new Set(fiscalLinks.map((link: any) => link.fiscal_entity_id).filter(Boolean)),
   );
-  if (fiscalIds.length > 0) {
+  if (fiscalIds.length > 0 && decKey) {
     const { data: fiscalEntities, error: fiscalError } = await admin
       .from("fiscal_entities")
-      .select("id, nif")
+      .select("id, nif_encrypted")
       .in("id", fiscalIds);
     if (fiscalError) throw fiscalError;
-    const nifById = new Map((fiscalEntities || []).map((item: any) => [item.id, item.nif]));
+    const nifById = new Map<string, string>();
+    for (const item of fiscalEntities || []) {
+      if (!item.nif_encrypted) continue;
+      try {
+        nifById.set(item.id, await decryptNif(item.nif_encrypted, decKey));
+      } catch (decryptError) {
+        console.error(
+          `export-data: failed to decrypt nif for fiscal_entity ${item.id}`,
+          decryptError instanceof Error ? decryptError.message : decryptError,
+        );
+      }
+    }
     for (const link of fiscalLinks) {
       if (!vat.has(link.entity_id) && nifById.has(link.fiscal_entity_id)) {
-        vat.set(link.entity_id, nifById.get(link.fiscal_entity_id));
+        vat.set(link.entity_id, nifById.get(link.fiscal_entity_id)!);
       }
     }
   }
@@ -315,6 +335,7 @@ async function exportClients(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_clients")
@@ -331,6 +352,7 @@ async function exportClients(
     admin,
     records.map((record: any) => record.entity_id),
     includeSensitive,
+    decKey,
   );
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
@@ -348,6 +370,7 @@ async function exportContacts(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_contacts")
@@ -365,6 +388,7 @@ async function exportContacts(
     admin,
     records.map((record: any) => record.entity_id),
     includeSensitive,
+    decKey,
   );
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
@@ -383,6 +407,7 @@ async function exportLeads(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_leads")
@@ -407,6 +432,7 @@ async function exportLeads(
       admin,
       records.map((r: any) => r.entity_id),
       includeSensitive,
+      decKey,
     ),
     sourceIds.length > 0
       ? admin.from("lead_sources").select("id, name").in("id", sourceIds)
@@ -442,6 +468,7 @@ async function exportQuotes(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("quotes")
@@ -463,6 +490,7 @@ async function exportQuotes(
       admin,
       records.map((record: any) => record.entity_id),
       includeSensitive,
+      decKey,
     ),
     admin
       .from("anew_organizations")
@@ -568,6 +596,23 @@ Deno.serve(async (req: Request) => {
     }
 
     const includeSensitive = request.includeSensitive && auth.canIncludeSensitive;
+
+    // Only derive the NIF decryption key when it will actually be used —
+    // avoids a hard dependency on NIF_ENC_KEY for exports that never touch
+    // sensitive columns.
+    let decKey: NifKey | null = null;
+    if (includeSensitive) {
+      try {
+        decKey = deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM");
+      } catch (keyError) {
+        console.error(
+          "export-data: failed to derive NIF decryption key:",
+          keyError instanceof Error ? keyError.message : keyError,
+        );
+        await captureError(keyError, { function: "export-data", stage: "derive-nif-key" });
+      }
+    }
+
     const columns = getEffectiveColumns(definition, includeSensitive);
     const { data: audit, error: auditError } = await admin
       .from("data_export_audit")
@@ -592,12 +637,12 @@ Deno.serve(async (req: Request) => {
 
     const rows =
       request.module === "clients"
-        ? await exportClients(admin, request, auth, includeSensitive)
+        ? await exportClients(admin, request, auth, includeSensitive, decKey)
         : request.module === "contacts"
-          ? await exportContacts(admin, request, auth, includeSensitive)
+          ? await exportContacts(admin, request, auth, includeSensitive, decKey)
           : request.module === "leads"
-            ? await exportLeads(admin, request, auth, includeSensitive)
-            : await exportQuotes(admin, request, auth, includeSensitive);
+            ? await exportLeads(admin, request, auth, includeSensitive, decKey)
+            : await exportQuotes(admin, request, auth, includeSensitive, decKey);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
