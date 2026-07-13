@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 const DOCUMENT_TYPES = [
@@ -173,8 +174,17 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       const safeFileName = generateSecureFileName(selectedFile);
       const filePath = `${orgId}/contract/${uploadData.contract_id}/${safeFileName}`;
 
-      const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, selectedFile);
+      const { error: uploadError } = await supabase.storage.from("documents-quarantine").upload(filePath, selectedFile);
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "documents-quarantine", finalBucket: "documents", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast.error("Erro ao anexar documento: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
+        return;
+      }
 
       const { error: dbError } = await (supabase as any)
         .from("documents")
@@ -200,8 +210,8 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       setIsUploadOpen(false);
       setSelectedFile(null);
       setUploadData({ contract_id: "", document_type: "other", notes: "" });
-    } catch (err: any) {
-      toast.error("Erro ao anexar documento: " + err.message);
+    } catch (err: unknown) {
+      toast.error("Erro ao anexar documento: " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -229,7 +239,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   };
 
   const handleView = async (doc: any) => {
-    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600);
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600, { download: true });
     if (error || !data?.signedUrl) { toast.error("Erro ao abrir ficheiro"); return; }
     window.open(data.signedUrl, "_blank");
   };

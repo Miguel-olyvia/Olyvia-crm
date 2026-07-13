@@ -67,6 +67,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
@@ -736,13 +737,23 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       const orgId = activeCompany?.id || "general";
       const ext = getSafeFileExtension(file);
       const filePath = `${orgId}/proposal-logo-${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({ title: "Erro ao carregar logotipo", description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
+        return;
+      }
+
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       setConfig(prev => ({ ...prev, logo_url: urlData.publicUrl }));
       toast({ title: "Logotipo carregado com sucesso" });
-    } catch (err: any) {
-      toast({ title: "Erro ao carregar logotipo", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Erro ao carregar logotipo", description: getUploadErrorMessage(err), variant: "destructive" });
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
