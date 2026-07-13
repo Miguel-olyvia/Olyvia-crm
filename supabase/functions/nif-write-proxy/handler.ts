@@ -3,6 +3,7 @@ import { authErrorResponse, resolveCallerIdentity } from "../_shared/auth.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { encryptNif, hashNif, tokenizeNif } from "../_shared/nifCrypto.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 /**
  * Closed allowlist of RPCs this proxy is allowed to invoke.
@@ -264,7 +265,10 @@ export async function handleNifWriteProxyRequest(
 
   const userClient = deps.createUserClient(authHeader);
 
-  const { data, error } = await userClient.rpc(rpc, finalParams);
+  // Transient connection failures (pool exhaustion, 502/503/504) are retried
+  // with backoff; the target RPC's own business/permission errors (returned
+  // in `error`, never thrown) are never retried — see withRetryResult.
+  const { data, error } = await withRetryResult(() => userClient.rpc(rpc, finalParams));
 
   if (error) {
     console.error(`nif-write-proxy: rpc "${rpc}" failed:`, error.message);

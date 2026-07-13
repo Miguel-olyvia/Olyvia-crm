@@ -4,6 +4,7 @@ import { z } from "npm:zod";
 
 import { PRODUCTION_ORIGIN } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { withRetry, withRetryResult } from "../_shared/retry.ts";
 
 /**
  * This is the app's single shared login endpoint (used by internal staff and
@@ -99,14 +100,19 @@ serve(async (req) => {
     const windowStart = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString();
 
     // 1. Check lockout BEFORE attempting authentication.
-    const { data: recentFailures, error: lookupError } = await supabase
-      .from("auth_login_attempts")
-      .select("created_at")
-      .eq("identifier", identifier)
-      .eq("success", false)
-      .gte("created_at", windowStart)
-      .order("created_at", { ascending: false })
-      .limit(MAX_ATTEMPTS);
+    // Transient connection failures are retried with backoff; a lookup
+    // failure otherwise falls through to `lookupError` below exactly as
+    // before (fails open on the rate-limit check, not on the login itself).
+    const { data: recentFailures, error: lookupError } = await withRetryResult(() =>
+      supabase
+        .from("auth_login_attempts")
+        .select("created_at")
+        .eq("identifier", identifier)
+        .eq("success", false)
+        .gte("created_at", windowStart)
+        .order("created_at", { ascending: false })
+        .limit(MAX_ATTEMPTS)
+    );
 
     if (lookupError) {
       console.error("[portal-login] lookup error:", lookupError.message);
@@ -129,13 +135,29 @@ serve(async (req) => {
     }
 
     // 2. Perform the actual authentication against GoTrue's password grant.
-    const tokenRes = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: anonKey,
-      },
-      body: JSON.stringify({ email: identifier, password }),
+    // Raw `fetch` throws only on real network failures (connection reset,
+    // DNS, timeout) — those are safe to retry. It does NOT throw on HTTP
+    // error responses (e.g. 401 for wrong credentials), so a retryable
+    // upstream outage (502/503/504) is detected explicitly below and
+    // re-thrown as an error `withRetry` recognizes; wrong-credentials
+    // responses (401/400) fall through untouched and are never retried.
+    const tokenRes = await withRetry(async () => {
+      const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+        },
+        body: JSON.stringify({ email: identifier, password }),
+      });
+
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        const transientError = new Error(`GoTrue token endpoint returned ${res.status}`);
+        (transientError as Error & { status?: number }).status = res.status;
+        throw transientError;
+      }
+
+      return res;
     });
 
     const tokenBody = await tokenRes.json().catch(() => ({}));
@@ -143,12 +165,15 @@ serve(async (req) => {
 
     // 3. Record the outcome. Awaited so lockout state is consistent for the
     // very next request even if it arrives immediately after this one.
-    const { error: insertError } = await supabase.from("auth_login_attempts").insert({
-      identifier,
-      success,
-      ip_address: clientIp,
-      user_agent: userAgent,
-    });
+    // Transient connection failures are retried with backoff.
+    const { error: insertError } = await withRetryResult(() =>
+      supabase.from("auth_login_attempts").insert({
+        identifier,
+        success,
+        ip_address: clientIp,
+        user_agent: userAgent,
+      })
+    );
     if (insertError) {
       console.error("[portal-login] failed to record attempt:", insertError.message);
     }

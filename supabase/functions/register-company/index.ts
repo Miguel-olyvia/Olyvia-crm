@@ -5,6 +5,7 @@ import { z } from "npm:zod";
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { deriveKeyFromEnv, encryptNif, hashNif, normalizeNif } from "../_shared/nifCrypto.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 initSentry();
 
@@ -70,7 +71,7 @@ async function resolveOrCreateCompanyFiscalEntity(
     hashNif(normalizedNif, hmacKey),
   ]);
 
-  const { data, error } = await supabaseAdmin.rpc("resolve_fiscal_entity", {
+  const { data, error } = await withRetryResult(() => supabaseAdmin.rpc("resolve_fiscal_entity", {
     p_nif: normalizedNif,
     p_nif_hash: nifHash,
     p_nif_encrypted: nifEncrypted,
@@ -78,7 +79,7 @@ async function resolveOrCreateCompanyFiscalEntity(
     p_commercial_name: companyName,
     p_entity_type: "company",
     p_created_by: createdBy,
-  });
+  }));
 
   if (error) throw error;
 
@@ -206,12 +207,12 @@ serve(async (req) => {
     console.log("All duplicate checks passed, proceeding with registration");
 
     // Step 1: Create auth user
-    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
+    const { data: userData, error: userError } = await withRetryResult(() => supabaseAdmin.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
       user_metadata: { full_name },
-    });
+    }));
 
     if (userError) {
       console.error("Error creating user:", userError);
@@ -225,7 +226,7 @@ serve(async (req) => {
 
     try {
       // Step 2: Create anew_users entry
-      const { data: anewUser, error: anewUserError } = await supabaseAdmin
+      const { data: anewUser, error: anewUserError } = await withRetryResult(() => supabaseAdmin
         .from("anew_users")
         .insert({
           auth_user_id: authUserId,
@@ -234,7 +235,7 @@ serve(async (req) => {
           status: "active",
         })
         .select("id")
-        .single();
+        .single());
 
       if (anewUserError) {
         console.error("Error creating anew_users:", anewUserError);
@@ -377,7 +378,7 @@ serve(async (req) => {
 
       // Step 7: Create membership (user → root org, role=super_admin)
       if (superAdminRoleId) {
-        const { error: membershipError } = await supabaseAdmin
+        const { error: membershipError } = await withRetryResult(() => supabaseAdmin
           .from("anew_memberships")
           .insert({
             user_id: anewUser.id,
@@ -387,7 +388,7 @@ serve(async (req) => {
             relationship_type: "member",
             join_method: "registration",
             created_by: anewUser.id,
-          });
+          }));
 
         if (membershipError) {
           console.error("Error creating membership:", membershipError);

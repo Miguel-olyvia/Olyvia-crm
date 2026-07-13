@@ -3,6 +3,7 @@ import { authErrorResponse, AuthError, resolveCallerIdentity } from "../_shared/
 import { corsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { encryptNif, hashNif, normalizeNif } from "../_shared/nifCrypto.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 /**
  * A raw key (Uint8Array, as returned by deriveKeyFromEnv) or an already
@@ -173,14 +174,19 @@ export async function handleFiscalEntityResolveRequest(
     return errorResponse(500, "INTERNAL_ERROR", "Internal error");
   }
 
-  const { data, error } = await supabaseAdmin.rpc("resolve_fiscal_entity", {
-    p_nif: normalizedNif,
-    p_nif_hash: nifHash,
-    p_nif_encrypted: nifEncrypted,
-    p_country_code: countryCode,
-    p_commercial_name: commercialName ?? null,
-    p_entity_type: entityType ?? null,
-  });
+  // Transient connection failures are retried with backoff; conflict/business
+  // errors from resolve_fiscal_entity (returned in `error`, never thrown) are
+  // never retried — see withRetryResult.
+  const { data, error } = await withRetryResult(() =>
+    supabaseAdmin.rpc("resolve_fiscal_entity", {
+      p_nif: normalizedNif,
+      p_nif_hash: nifHash,
+      p_nif_encrypted: nifEncrypted,
+      p_country_code: countryCode,
+      p_commercial_name: commercialName ?? null,
+      p_entity_type: entityType ?? null,
+    })
+  );
 
   if (error) {
     console.error("fiscal-entity-resolve: resolve_fiscal_entity RPC failed:", error.message);

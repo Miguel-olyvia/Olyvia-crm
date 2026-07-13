@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { validateOrgScope, checkUserPermission } from "../_shared/auth.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 const requestSchema = z.object({
   document_type: z.enum(["proposal", "contract", "quote"]),
@@ -433,9 +434,9 @@ serve(async (req: Request) => {
         tempPassword = generateTempPassword();
         isNewAccount = !existingPortalUser;
 
-        const { error: updateErr } = await supabase.auth.admin.updateUserById(authUserId, {
+        const { error: updateErr } = await withRetryResult(() => supabase.auth.admin.updateUserById(authUserId, {
           password: tempPassword,
-        });
+        }));
 
         if (updateErr) {
           console.error("Error setting portal password:", updateErr);
@@ -461,13 +462,13 @@ serve(async (req: Request) => {
           .maybeSingle();
 
         if (!existingMembership) {
-          await supabase.from("anew_memberships").insert({
+          await withRetryResult(() => supabase.from("anew_memberships").insert({
             user_id: anewUser.id,
             organization_id,
             role_id: clientRole.id,
             status: "active",
             relationship_type: "member",
-          });
+          }));
         }
       }
     } else {
@@ -475,12 +476,12 @@ serve(async (req: Request) => {
       isNewAccount = true;
       tempPassword = generateTempPassword();
 
-      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+      const { data: newUser, error: createError } = await withRetryResult(() => supabase.auth.admin.createUser({
         email,
         password: tempPassword,
         email_confirm: true,
         user_metadata: { full_name: entity?.display_name || contactName },
-      });
+      }));
 
       if (createError || !newUser?.user) {
         console.error("Error creating user:", createError);
@@ -515,13 +516,13 @@ serve(async (req: Request) => {
       }
 
       if (anewUser) {
-        await supabase.from("anew_memberships").insert({
+        await withRetryResult(() => supabase.from("anew_memberships").insert({
           user_id: anewUser.id,
           organization_id,
           role_id: clientRole.id,
           status: "active",
           relationship_type: "member",
-        });
+        }));
       }
     }
 
@@ -579,17 +580,17 @@ serve(async (req: Request) => {
         portalUpdatePayload.first_login = true;
       }
 
-      await supabase
+      await withRetryResult(() => supabase
         .from("client_portal_users")
         .update(portalUpdatePayload)
-        .eq("id", existingPortalUser.id);
+        .eq("id", existingPortalUser.id));
       portalUserId = existingPortalUser.id;
     } else {
-      const { data: insertedPortalUser } = await supabase
+      const { data: insertedPortalUser } = await withRetryResult(() => supabase
         .from("client_portal_users")
         .insert(portalUserPayload)
         .select("id")
-        .maybeSingle();
+        .maybeSingle());
       portalUserId = insertedPortalUser?.id || null;
     }
 

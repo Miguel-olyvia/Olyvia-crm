@@ -5,8 +5,14 @@
  * transient failures (failover, pool exhaustion, 502/503/504) are
  * retried transparently instead of surfacing immediately to the caller.
  *
- * Uso: wraps queries críticas
- * const data = await withRetry(() => supabase.from("table").select("*"))
+ * Uso (chamadas que lançam exceção, ex.: falha de rede num fetch cru):
+ *   const data = await withRetry(() => someThrowingCall())
+ *
+ * Uso (supabase-js — a maioria das chamadas NÃO lança exceção, devolve
+ * sempre `{ data, error }`, mesmo em erro de rede/timeout):
+ *   const { data, error } = await withRetryResult(() =>
+ *     supabase.from("table").select("*").eq("id", id).maybeSingle()
+ *   );
  */
 
 export interface RetryOptions {
@@ -24,12 +30,20 @@ const DEFAULT_OPTIONS: Required<RetryOptions> = {
   backoffMultiplier: 2,
 };
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Executes `fn` with exponential backoff, retrying only on retryable errors.
  *
  * Retry schedule (defaults): 100ms → 200ms → gives up
  * Non-retryable errors (403, 404, validation, auth) are rethrown immediately.
  * After exhausting all attempts the original error from the last attempt is rethrown.
+ *
+ * Use this for calls that actually THROW on failure (raw `fetch`, SMTP
+ * clients, etc). Most supabase-js calls do NOT throw — use `withRetryResult`
+ * for those instead.
  *
  * @param fn       Async factory that produces the operation to attempt.
  * @param options  Optional retry configuration.
@@ -59,13 +73,64 @@ export async function withRetry<T>(
 
       // No sleep after the last attempt — just fall through and rethrow.
       if (attempt < maxAttempts) {
-        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        await sleep(delayMs);
         delayMs *= backoffMultiplier;
       }
     }
   }
 
   throw lastError;
+}
+
+/**
+ * Executes `fn` with exponential backoff for calls shaped like the
+ * supabase-js result envelope (`{ data, error }` — any `.from()`, `.rpc()`,
+ * or `auth.admin.*` call). supabase-js swallows network/timeout failures
+ * into `error` instead of throwing, so `withRetry` alone would never see
+ * them. This wrapper inspects `result.error` on each attempt and retries
+ * only when it looks transient (connection reset, timeout, 502/503/504).
+ * Business errors (permission denied, unique violation, FK violation,
+ * validation) are returned immediately so callers keep their existing
+ * `if (error) ...` handling unchanged.
+ *
+ * @param fn       Async factory that produces the supabase-js call.
+ * @param options  Optional retry configuration.
+ */
+export async function withRetryResult<T extends { error: unknown }>(
+  fn: () => PromiseLike<T>,
+  options?: RetryOptions
+): Promise<T> {
+  const { maxAttempts, initialDelayMs, backoffMultiplier } = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+  };
+
+  let lastResult: T | undefined;
+  let delayMs = initialDelayMs;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await fn();
+      lastResult = result;
+
+      if (!result.error || !isRetryableError(result.error)) {
+        return result;
+      }
+
+      if (attempt < maxAttempts) {
+        await sleep(delayMs);
+        delayMs *= backoffMultiplier;
+      }
+    } catch (error: unknown) {
+      // Defensive: a small number of paths still throw (e.g. raw fetch
+      // failures surfacing before supabase-js wraps them).
+      if (!isRetryableError(error) || attempt >= maxAttempts) throw error;
+      await sleep(delayMs);
+      delayMs *= backoffMultiplier;
+    }
+  }
+
+  return lastResult as T;
 }
 
 /**
