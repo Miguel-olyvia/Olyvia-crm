@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
+import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 export type DocumentEntityType = "quote" | "proposal" | "contract";
 
@@ -125,7 +126,8 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         .maybeSingle();
       if (userErr) throw userErr;
 
-      const filePath = `${organizationId}/${entityType}/${entityId}/${Date.now()}_${selectedFile.name}`;
+      const safeFileName = generateSecureFileName(selectedFile);
+      const filePath = `${organizationId}/${entityType}/${entityId}/${safeFileName}`;
       const { error: uploadError } = await supabase.storage
         .from("documents")
         .upload(filePath, selectedFile);

@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
+import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
@@ -169,7 +170,8 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
 
       const contract = contractMap.get(uploadData.contract_id);
       const orgId = contract?.organization_id || activeCompany?.id;
-      const filePath = `${orgId}/contract/${uploadData.contract_id}/${Date.now()}_${selectedFile.name}`;
+      const safeFileName = generateSecureFileName(selectedFile);
+      const filePath = `${orgId}/contract/${uploadData.contract_id}/${safeFileName}`;
 
       const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, selectedFile);
       if (uploadError) throw uploadError;

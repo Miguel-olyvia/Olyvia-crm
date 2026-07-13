@@ -10,6 +10,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
 
 interface Props {
   settings: DocumentSettings;
@@ -58,8 +59,8 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
     uploadingRef.current = true;
     try {
       const orgId = activeCompany?.id || settings.organization_id;
-      const ext = file.name.split(".").pop() || "png";
-      const filePath = `${orgId}/doc-logo-${Date.now()}.${ext}`;
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/doc-logo-${crypto.randomUUID()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
