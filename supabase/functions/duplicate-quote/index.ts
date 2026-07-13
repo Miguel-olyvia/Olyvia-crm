@@ -125,7 +125,6 @@ serve(async (req) => {
     // Build new quote payload — strip identity/state/lifecycle fields
     const newQuote: Record<string, unknown> = {
       cliente_id: src.cliente_id,
-      business_unit_id: src.business_unit_id,
       obra_endereco: src.obra_endereco,
       obra_notas: src.obra_notas,
       modelo_base: src.modelo_base,
