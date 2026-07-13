@@ -1,8 +1,5 @@
 project_id = "tzbfgwpckrfbqcolqxtm"
 
-[functions.fix-converted-contacts]
-verify_jwt = false
-
 [functions.insert-lead]
 verify_jwt = false
 
