@@ -2,8 +2,13 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+const RATE_LIMIT_BUCKET = "track-proposal-view";
+const RATE_LIMIT_MAX_ATTEMPTS = 120;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const requestSchema = z.object({
   proposal_id: z.string().optional(),
@@ -63,6 +68,18 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
+
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabaseClient, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabaseClient, RATE_LIMIT_BUCKET, clientIp);
 
     // Check if it's a pixel request (GET with tracking_token in query)
     const url = new URL(req.url);

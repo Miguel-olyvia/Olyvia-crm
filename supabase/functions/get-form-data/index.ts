@@ -1,8 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+const RATE_LIMIT_BUCKET = "get-form-data";
+const RATE_LIMIT_MAX_ATTEMPTS = 60;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const querySchema = z.object({
   form_id: z.string().uuid().optional(),
@@ -34,6 +39,22 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const supabaseUrlEarly = Deno.env.get("SUPABASE_URL")!;
+    const supabaseKeyEarly = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const rateLimitClient = createClient(supabaseUrlEarly, supabaseKeyEarly);
+
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(rateLimitClient, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(rateLimitClient, RATE_LIMIT_BUCKET, clientIp);
+
     const url = new URL(req.url);
     const parsedQuery = querySchema.safeParse({
       form_id: url.searchParams.get("form_id") || undefined,
@@ -148,9 +169,7 @@ Deno.serve(async (req: Request) => {
       return baseOptions;
     };
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = rateLimitClient;
 
     let form: any = null;
     let resolvedFormId = formId;

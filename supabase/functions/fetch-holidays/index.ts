@@ -2,8 +2,13 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+const RATE_LIMIT_BUCKET = "fetch-holidays";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const requestSchema = z.object({
   countryCode: z.string(),
@@ -61,6 +66,22 @@ serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const rateLimitClient = createClient(supabaseUrl, serviceRoleKey);
+
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(rateLimitClient, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(rateLimitClient, RATE_LIMIT_BUCKET, clientIp);
+
     const rawBody = await req.json();
     const parsed = requestSchema.safeParse(rawBody);
     if (!parsed.success) {

@@ -4,8 +4,15 @@ import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 // Validate the x-api-key header and that the request body is non-empty JSON text.
 // The body is forwarded as-is to insert-lead; structural validation happens there.
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+// Rate-limited by API key (not IP) — partners integrate from shared/rotating
+// server IPs, so the key is the meaningful caller identity here.
+const RATE_LIMIT_BUCKET = "api-proxy";
+const RATE_LIMIT_MAX_ATTEMPTS = 60;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const proxyHeaderSchema = z.object({
   "x-api-key": z.string().min(1, "x-api-key header is required"),
@@ -46,7 +53,21 @@ Deno.serve(async (req) => {
 
       // Forward to insert-lead function
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
       const apiKey = parsedHeaders.data["x-api-key"];
+      const rateLimitClient = createClient(supabaseUrl, serviceRoleKey);
+
+      const rateLimit = await checkRateLimit(rateLimitClient, {
+        bucket: RATE_LIMIT_BUCKET,
+        identifier: apiKey || getClientIp(req),
+        maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+        windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+      });
+      if (!rateLimit.allowed) {
+        return rateLimitResponse(rateLimit, corsHeaders);
+      }
+      await recordRateLimitAttempt(rateLimitClient, RATE_LIMIT_BUCKET, apiKey || getClientIp(req));
+
       const body = await req.text();
 
       const response = await fetch(`${supabaseUrl}/functions/v1/insert-lead`, {

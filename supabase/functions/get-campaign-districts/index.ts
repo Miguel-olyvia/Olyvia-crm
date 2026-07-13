@@ -1,8 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
 initSentry();
+
+const RATE_LIMIT_BUCKET = "get-campaign-districts";
+const RATE_LIMIT_MAX_ATTEMPTS = 60;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const querySchema = z.object({
   campaign_id: z.string().uuid(),
@@ -44,6 +49,22 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
+
     const url = new URL(req.url);
     const parsed = querySchema.safeParse({ campaign_id: url.searchParams.get('campaign_id') });
     if (!parsed.success) {
@@ -53,10 +74,6 @@ Deno.serve(async (req) => {
       );
     }
     const { campaign_id: campaignId } = parsed.data;
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Get campaign info
     const { data: campaign, error: campaignError } = await supabase
