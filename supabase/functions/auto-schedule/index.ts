@@ -361,7 +361,8 @@ Deno.serve(async (req) => {
               .rpc('get_resource_available_slots', {
                 p_resource_id: resource.id,
                 p_date: date,
-                p_duration_minutes: duration
+                p_duration_minutes: duration,
+                p_organization_id: companyId
               });
 
             return {
@@ -401,11 +402,26 @@ Deno.serve(async (req) => {
       }
       const { resource_id: resourceId, date, duration } = slotsParsed.data;
 
+      const { data: ownedResource, error: ownedResourceError } = await supabase
+        .from('schedule_resources')
+        .select('id')
+        .eq('id', resourceId)
+        .eq('organization_id', companyId)
+        .maybeSingle();
+
+      if (ownedResourceError || !ownedResource) {
+        return new Response(
+          JSON.stringify({ error: 'Resource not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       const { data: slots, error: slotsError } = await supabase
         .rpc('get_resource_available_slots', {
           p_resource_id: resourceId,
           p_date: date,
-          p_duration_minutes: duration
+          p_duration_minutes: duration,
+          p_organization_id: companyId
         });
 
       if (slotsError) {
@@ -461,6 +477,7 @@ async function processScheduleRequest(
         .from('campaigns')
         .select('has_scheduling')
         .eq('id', request.campaign_id)
+        .eq('organization_id', effectiveCompanyId)
         .single();
 
       if (campaignError) {
@@ -498,6 +515,7 @@ async function processScheduleRequest(
           .from('schedule_boards')
           .select('id')
           .eq('is_active', true)
+          .eq('organization_id', effectiveCompanyId)
           .limit(1);
         boardId = boards?.[0]?.id;
       }
@@ -515,7 +533,8 @@ async function processScheduleRequest(
         durationMinutes,
         request.preferred_time_start,
         request.preferred_time_end,
-        rule
+        rule,
+        effectiveCompanyId
       );
 
       if (!result) {
@@ -595,14 +614,15 @@ async function processScheduleRequest(
     }
 
     // Original non-proximity based scheduling
+    if (!effectiveCompanyId) {
+      return { success: false, error: 'organization_id is required for scheduling' };
+    }
+
     let resourceQuery = supabase
       .from('schedule_resources')
       .select('*')
-      .eq('is_active', true);
-    
-    if (effectiveCompanyId) {
-      resourceQuery = resourceQuery.eq('organization_id', effectiveCompanyId);
-    }
+      .eq('is_active', true)
+      .eq('organization_id', effectiveCompanyId);
 
     if (request.preferred_resource_ids && request.preferred_resource_ids.length > 0) {
       resourceQuery = resourceQuery.in('id', request.preferred_resource_ids);
@@ -626,7 +646,8 @@ async function processScheduleRequest(
       request.preferred_date,
       request.preferred_time_start,
       request.preferred_time_end,
-      rule
+      rule,
+      effectiveCompanyId
     );
 
     if (!slot) {
@@ -707,8 +728,9 @@ async function processScheduleRequest(
         .from('schedule_boards')
         .select('id')
         .eq('is_active', true)
+        .eq('organization_id', effectiveCompanyId)
         .limit(1);
-      
+
       boardId = boards?.[0]?.id;
     }
 
@@ -775,9 +797,10 @@ async function findNearestAvailableSlot(
   durationMinutes: number,
   preferredTimeStart?: string,
   preferredTimeEnd?: string,
-  rule?: any
+  rule?: any,
+  organizationId?: string | null
 ): Promise<{ resource: { id: string; name: string }; slot: { start: string; end: string }; distance_km: number; travel_time_minutes: number } | null> {
-  
+
   const maxDaysToSearch = 14; // Search up to 2 weeks ahead
 
   // Get all active resources with their service areas
@@ -787,7 +810,8 @@ async function findNearestAvailableSlot(
       *,
       service_areas:resource_service_areas(postal_code_prefix, priority, max_distance_km)
     `)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .eq('organization_id', organizationId);
 
   if (resourcesError || !allResources || allResources.length === 0) {
     console.error('Error fetching resources:', resourcesError);
@@ -869,7 +893,8 @@ async function findNearestAvailableSlot(
         .rpc('get_resource_available_slots', {
           p_resource_id: resource.id,
           p_date: dateStr,
-          p_duration_minutes: durationMinutes
+          p_duration_minutes: durationMinutes,
+          p_organization_id: organizationId
         });
 
       if (slotsError || !slots || slots.length === 0) {
@@ -943,9 +968,10 @@ async function findAvailableSlot(
   preferredDate?: string,
   preferredTimeStart?: string,
   preferredTimeEnd?: string,
-  rule?: any
+  rule?: any,
+  organizationId?: string | null
 ): Promise<{ start: string; end: string; resourceId: string; boardId?: string } | null> {
-  
+
   const searchDate = preferredDate || new Date().toISOString().split('T')[0];
   const maxDaysToSearch = 14;
 
@@ -954,8 +980,9 @@ async function findAvailableSlot(
     .from('schedule_boards')
     .select('id')
     .eq('is_active', true)
+    .eq('organization_id', organizationId)
     .limit(1);
-  
+
   const defaultBoardId = boards?.[0]?.id;
 
   for (let dayOffset = 0; dayOffset < maxDaysToSearch; dayOffset++) {
@@ -1005,7 +1032,8 @@ async function findAvailableSlot(
         .rpc('get_resource_available_slots', {
           p_resource_id: resource.id,
           p_date: dateStr,
-          p_duration_minutes: durationMinutes
+          p_duration_minutes: durationMinutes,
+          p_organization_id: organizationId
         });
 
       if (slotsError || !slots || slots.length === 0) {
