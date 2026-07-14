@@ -30,6 +30,7 @@ const requestSchema = z.object({
   title: z.string(),
   board_id: z.string().optional(),
   description: z.string().optional(),
+  lead_id: z.string().optional(),
   client_id: z.string().optional(),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
@@ -128,6 +129,7 @@ interface ScheduleRequest {
   board_id?: string;
   title: string;
   description?: string;
+  lead_id?: string;
   client_id?: string;
   contact_id?: string;
   deal_id?: string;
@@ -461,10 +463,7 @@ async function processScheduleRequest(
   userId: string | null
 ): Promise<AutoScheduleResult> {
   const durationMinutes = request.duration_minutes || 60;
-  const businessUserId = userId ? await resolveBusinessUserId(supabase, userId) : null;
-  if (!businessUserId) {
-    return { success: false, error: 'Business user could not be resolved for scheduling' };
-  }
+  let businessUserId = userId ? await resolveBusinessUserId(supabase, userId) : null;
 
   // SECURITY: companyId comes from a trusted source (validated API key token,
   // or the insert-lead internally-trusted service-role call) and must always
@@ -481,6 +480,28 @@ async function processScheduleRequest(
   );
   if (!effectiveCompanyId) {
     return { success: false, error: 'organization_id is required and must belong to the authenticated user' };
+  }
+
+  // Machine-triggered calls (X-API-Key from ScheduleTestForm, or insert-lead's
+  // internally-trusted call right after a public form submission) have no
+  // plain-JWT userId and therefore no businessUserId yet. Inherit created_by
+  // from the lead this schedule request originated from — insert-lead already
+  // resolves a real org-admin anew_users.id as the lead's created_by when it
+  // creates the lead (no human caller there either), so this reuses that same
+  // resolved actor instead of requiring a JWT that these callers don't have.
+  // Mirrors pipeline-automation's resolveCreatedByForAction fallback pattern.
+  if (!businessUserId && request.lead_id) {
+    const { data: lead } = await supabase
+      .from('anew_leads')
+      .select('created_by')
+      .eq('id', request.lead_id)
+      .eq('organization_id', effectiveCompanyId)
+      .maybeSingle();
+    businessUserId = lead?.created_by || null;
+  }
+
+  if (!businessUserId) {
+    return { success: false, error: 'Business user could not be resolved for scheduling' };
   }
 
   // If auto_assign is true, find the best slot using rules
