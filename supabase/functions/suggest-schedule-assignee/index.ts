@@ -185,7 +185,8 @@ serve(async (req) => {
       .from("anew_memberships")
       .select("user_id")
       .eq("organization_id", organization_id)
-      .eq("status", "active");
+      .eq("status", "active")
+      .limit(500);
     
     if (membershipsError) {
       console.error("Error fetching memberships:", membershipsError);
@@ -207,7 +208,8 @@ serve(async (req) => {
       .from("schedule_resources")
       .select("id, user_id, name, metadata")
       .eq("is_active", true)
-      .eq("organization_id", organization_id);
+      .eq("organization_id", organization_id)
+      .limit(500);
 
     // Combine and deduplicate (priority: resources > memberships)
     // schedule_resources.user_id now stores anew_users.id directly (no auth UUID resolution needed)

@@ -146,7 +146,8 @@ serve(async (req: Request): Promise<Response> => {
         .from("anew_memberships")
         .select("user_id")
         .eq("status", "active")
-        .in("role_id", systemAdminRoleIds);
+        .in("role_id", systemAdminRoleIds)
+        .limit(200);
 
       if (membershipsError) {
         console.error("[request-support-access] error fetching system_admin memberships:", membershipsError);

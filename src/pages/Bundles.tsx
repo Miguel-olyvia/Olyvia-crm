@@ -54,6 +54,8 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 
+const MAX_BUNDLES = 2000;
+
 interface Bundle {
   id: string;
   sku: string;
@@ -139,8 +141,15 @@ const Bundles = () => {
         query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,description.ilike.%${searchLower}%`);
       }
 
-      const { data, error } = await query.order("created_at", { ascending: false });
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(MAX_BUNDLES);
       if (error) throw error;
+
+      if ((data?.length ?? 0) >= MAX_BUNDLES) {
+        toast({
+          title: "Aviso",
+          description: `A lista pode estar incompleta (limite de ${MAX_BUNDLES} pacotes atingido). Use os filtros para refinar a pesquisa.`,
+        });
+      }
 
       const bundlesRaw = data || [];
       const bundleIds = bundlesRaw.map((b: any) => b.id);

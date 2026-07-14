@@ -81,6 +81,8 @@ interface Category {
 }
 
 type SortField = 'sku' | 'name' | 'category_name' | 'brand_name' | 'retail_price' | 'is_active';
+
+const MAX_CATALOG_ITEMS = 2000;
 type SortDirection = 'asc' | 'desc' | null;
 
 const CatalogItems = () => {
@@ -167,9 +169,17 @@ const CatalogItems = () => {
       }
 
       const { data: productsData, error: productsError } = await productsQuery
-        .order("name");
+        .order("name")
+        .limit(MAX_CATALOG_ITEMS);
 
       if (productsError) throw productsError;
+
+      if ((productsData?.length ?? 0) >= MAX_CATALOG_ITEMS) {
+        toast({
+          title: "Aviso",
+          description: `A lista pode estar incompleta (limite de ${MAX_CATALOG_ITEMS} itens atingido). Use os filtros para refinar a pesquisa.`,
+        });
+      }
 
       // Map to CatalogItem format - find retail price from prices array
       const mappedItems: CatalogItem[] = (productsData || []).map((product: CatalogProduct) => {
