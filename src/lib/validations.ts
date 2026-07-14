@@ -390,6 +390,50 @@ export const authSignupSchema = z.object({
   password: z.string().min(8, "A password deve ter pelo menos 8 caracteres").max(72, "A password deve ter menos de 72 caracteres"),
 });
 
+// Post-signup onboarding profile (WelcomeOrgDialog). Every field is optional
+// and skippable; length constraints and enum values mirror the signup_profile
+// CHECK constraints in supabase/migrations/20261024010000_create_signup_profile_table.sql.
+// Exported so WelcomeOrgDialog renders its <Select> options from the same
+// list instead of hand-copying a third parallel list.
+export const SIGNUP_INDUSTRY_OPTIONS = [
+  "technology",
+  "financial_services",
+  "real_estate",
+  "healthcare",
+  "education",
+  "retail_ecommerce",
+  "manufacturing",
+  "construction",
+  "professional_services",
+  "media_marketing",
+  "hospitality_tourism",
+  "nonprofit",
+  "government",
+  "other",
+] as const;
+
+export const SIGNUP_EMPLOYEE_COUNT_OPTIONS = ["1", "2-10", "11-50", "51-200", "201-500", "501-1000", "1000+"] as const;
+
+// Trims the raw input before deciding whether it's "empty" (skippable) or a
+// real value that must satisfy the length bounds — a plain
+// `.trim().min(1).optional().or(z.literal(""))` chain rejects whitespace-only
+// input, because the min(1) check runs on the trimmed value while the
+// z.literal("") fallback still matches against the raw (untrimmed) input.
+const trimmedOptionalString = (max: number, message: string) =>
+  z.preprocess(
+    (val) => (typeof val === "string" ? val.trim() : val),
+    z.union([z.literal(""), z.string().min(1, message).max(max, message)])
+  );
+
+export const signupProfileSchema = z.object({
+  companyName: trimmedOptionalString(200, "O nome da empresa deve ter entre 1 e 200 caracteres"),
+  industry: z.enum(SIGNUP_INDUSTRY_OPTIONS).optional().or(z.literal("")),
+  employeeCountRange: z.enum(SIGNUP_EMPLOYEE_COUNT_OPTIONS).optional().or(z.literal("")),
+  jobTitle: trimmedOptionalString(150, "O cargo deve ter entre 1 e 150 caracteres"),
+});
+
+export type SignupProfileFormData = z.infer<typeof signupProfileSchema>;
+
 // Warehouse validation schema
 export const warehouseSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(200, "Name must be less than 200 characters"),
