@@ -42,7 +42,6 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { supabase } from "@/integrations/supabase/client";
-import { withAuditContext } from "@/utils/auditContext";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -1208,13 +1207,16 @@ export default function UsersNew() {
         if (deleteInvoke.error) throw deleteInvoke.error;
       }
 
-      await withAuditContext(supabase, deletedBy, async () => {
-        const { error } = await supabase
-          .from("anew_users")
-          .delete()
-          .eq("id", deleteUserId);
-        if (error) throw error;
+      // rpc_delete_user runs the DELETE + audit-log write in a single
+      // transaction (see supabase/migrations/20261107080000_rpc_delete_user_audit_source_fix.sql).
+      // withAuditContext's set_audit_context() + a separate .from().delete()
+      // call never worked here: each is its own PostgREST transaction, so the
+      // SET LOCAL GUC from set_audit_context was always gone by the time the
+      // delete ran, leaving entity_audit_log.source NULL for every user delete.
+      const { error: deleteUserError } = await supabase.rpc("rpc_delete_user", {
+        p_user_id: deleteUserId,
       });
+      if (deleteUserError) throw deleteUserError;
 
       toast.success(t("users.deleted"));
       setDeleteUserId(null);
