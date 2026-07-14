@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Pencil, Trash2, Info } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Info, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -59,6 +59,7 @@ interface ServiceSubcategory {
   path: string;
   description: string;
   is_active: boolean;
+  is_deleted?: boolean;
   sort_order: number;
   parent_id: string;
   organization_id: string | null;
@@ -81,6 +82,7 @@ interface SubRow {
   path: string | null;
   description: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
   sort_order: number;
   parent_id: string;
   organization_id: string | null;
@@ -94,6 +96,7 @@ export default function ServiceSubcategories() {
   const [parentCategories, setParentCategories] = useState<ParentCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [open, setOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [subcategoryToDelete, setSubcategoryToDelete] = useState<string | null>(null);
@@ -115,6 +118,7 @@ export default function ServiceSubcategories() {
         .select("id, name, organization_id, anew_organizations!organization_id(name)")
         .is("parent_id", null)
         .eq("is_active", true)
+        .eq("is_deleted", false)
         .order("name");
 
       // ALWAYS filter by activeCompany - this applies to ALL users including admins
@@ -149,6 +153,7 @@ export default function ServiceSubcategories() {
           organization_id
         `)
         .not("parent_id", "is", null)
+        .eq("is_deleted", showDeleted)
         .order("path");
 
       // ALWAYS filter by activeCompany - this applies to ALL users including admins
@@ -187,7 +192,7 @@ export default function ServiceSubcategories() {
     } finally {
       setLoading(false);
     }
-  }, [activeCompany?.id, t, toast]);
+  }, [activeCompany?.id, showDeleted, t, toast]);
 
   useEffect(() => {
     // Esperar que o contexto carregue antes de buscar dados
@@ -348,6 +353,31 @@ export default function ServiceSubcategories() {
     }
   };
 
+  const handleRestore = async (id: string) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_restore_service_category", {
+        p_id: id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: t('serviceSubcategories.toast.restoreSuccess') || "Subcategoria restaurada com sucesso.",
+      });
+
+      await loadData();
+    } catch (error: unknown) {
+      toast({
+        title: t('serviceSubcategories.toast.deleteError'),
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+        variant: "destructive",
+      });
+    }
+  };
+
   const openEditDialog = (subcategory: ServiceSubcategory) => {
     setEditingSubcategory(subcategory);
     setFormData({
@@ -398,12 +428,23 @@ export default function ServiceSubcategories() {
             <h1 className="text-3xl font-bold">{t('serviceSubcategories.title')}</h1>
             <p className="text-muted-foreground">{t('serviceSubcategories.subtitle')}</p>
           </div>
-          <PermissionGate permission="service_subcategories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('serviceSubcategories.addSubcategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="service_subcategories.delete">
+              <Button
+                variant={showDeleted ? "secondary" : "outline"}
+                onClick={() => setShowDeleted((prev) => !prev)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="service_subcategories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('serviceSubcategories.addSubcategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogContent>
               <DialogHeader>
@@ -562,25 +603,38 @@ export default function ServiceSubcategories() {
                     <TableCell>{sub.sort_order}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="service_subcategories.edit">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={t('common.edit')}
-                            onClick={() => openEditDialog(sub)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {!showDeleted && (
+                          <PermissionGate permission="service_subcategories.edit">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('common.edit')}
+                              onClick={() => openEditDialog(sub)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
                         <PermissionGate permission="service_subcategories.delete">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={t('common.delete')}
-                            onClick={() => openDeleteDialog(sub.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {showDeleted ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label="Restaurar"
+                              onClick={() => handleRestore(sub.id)}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={t('common.delete')}
+                              onClick={() => openDeleteDialog(sub.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </PermissionGate>
                       </div>
                     </TableCell>

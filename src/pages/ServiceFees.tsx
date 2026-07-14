@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -63,6 +63,7 @@ interface ServiceFeeType {
   application_mode: "SUBTOTAL" | "LINE_PERCENTAGE";
   apply_vat: boolean;
   vat_rate: number;
+  is_deleted?: boolean;
   anew_organizations?: { name: string };
   services?: { name: string };
 }
@@ -82,6 +83,7 @@ export default function ServiceFees() {
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
@@ -109,7 +111,7 @@ export default function ServiceFees() {
     if (isSystemAdmin) {
       fetchAllCompanies();
     }
-  }, [isSystemAdmin, userCompanies, activeCompany?.id]);
+  }, [isSystemAdmin, userCompanies, activeCompany?.id, showDeleted]);
 
   // Load services when company changes
   useEffect(() => {
@@ -169,6 +171,7 @@ export default function ServiceFees() {
           services(name)
         `)
         .in("organization_id", orgIds)
+        .eq("is_deleted", showDeleted)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -375,14 +378,11 @@ export default function ServiceFees() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Sessão inválida.");
 
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("service_fee_types")
-          .delete()
-          .eq("id", deleteId);
-
-        if (error) throw error;
+      const { error } = await supabase.rpc("rpc_delete_service_fee_type", {
+        p_id: deleteId,
       });
+
+      if (error) throw error;
 
       toast({
         title: t('serviceFees.toast.deleteSuccess'),
@@ -401,6 +401,31 @@ export default function ServiceFees() {
     }
   };
 
+  const handleRestore = async (id: string) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_restore_service_fee_type", {
+        p_id: id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Taxa de serviço restaurada com sucesso.",
+      });
+
+      fetchFeeTypes();
+    } catch (error: any) {
+      toast({
+        title: t('serviceFees.toast.deleteError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <>
       <div className="container mx-auto p-6 space-y-6">
@@ -411,15 +436,24 @@ export default function ServiceFees() {
               {t('serviceFees.subtitle')}
             </p>
           </div>
-          <Button
-            onClick={() => {
-              resetForm();
-              setShowDialog(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            {t('serviceFees.newFee')}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "secondary" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+            </Button>
+            <Button
+              onClick={() => {
+                resetForm();
+                setShowDialog(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              {t('serviceFees.newFee')}
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -495,20 +529,33 @@ export default function ServiceFees() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(fee)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteId(fee.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {!showDeleted && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(fee)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {showDeleted ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Restaurar"
+                            onClick={() => handleRestore(fee.id)}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteId(fee.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

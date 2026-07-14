@@ -3,7 +3,7 @@ import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload } from "lucide-react";
+import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload, RotateCcw } from "lucide-react";
 import { exportServicesToCSV, parseServicesCSV, downloadServicesTemplate, type ImportReport } from "@/utils/servicesExportImport";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
@@ -68,6 +68,7 @@ interface Service {
   short_desc: string | null;
   long_desc: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
   service_type: string;
   organization_id?: string | null;
   root_organization_id?: string | null;
@@ -111,6 +112,7 @@ export default function Services() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
@@ -177,7 +179,7 @@ export default function Services() {
     setSupplierFilter("all");
     setSearchTerm("");
     loadData();
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const loadData = async () => {
     setLoading(true);
@@ -236,7 +238,8 @@ export default function Services() {
           subcategory:service_categories!service_subcategory_id(name),
           anew_organizations!organization_id(name)
         `)
-        .in("organization_id", allOrgIds);
+        .in("organization_id", allOrgIds)
+        .eq("is_deleted", showDeleted);
 
       const categoriesQuery = supabase
         .from("service_categories")
@@ -439,6 +442,26 @@ export default function Services() {
     } finally {
       setDeleteDialogOpen(false);
       setServiceToDelete(null);
+    }
+  };
+
+  const handleRestore = async (service: Service) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_service", { p_id: service.id });
+      if (error) throw error;
+
+      toast({
+        title: t("services.toast.success") || "Sucesso",
+        description: t("services.toast.restoreSuccess") || "Serviço restaurado com sucesso.",
+      });
+
+      loadData();
+    } catch (error: any) {
+      toast({
+        title: t("services.toast.error") || "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -686,6 +709,7 @@ export default function Services() {
           *,
           service_organizations(organization_id)
         `)
+        .eq("is_deleted", false)
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -806,6 +830,15 @@ export default function Services() {
             <PageFAQSheet pageKey="catalog.services" />
           </div>
           <div className="flex gap-2">
+            <PermissionGate permission="services.delete">
+              <Button
+                variant={showDeleted ? "secondary" : "outline"}
+                onClick={() => setShowDeleted((prev) => !prev)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                {showDeleted ? "Ver ativos" : "Ver eliminados"}
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="services.view">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> Exportar
@@ -1257,23 +1290,36 @@ export default function Services() {
                             <History className="w-4 h-4" />
                           </Button>
                         </PermissionGate>
-                        <PermissionGate permission="services.edit">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditDialog(service)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {!showDeleted && (
+                          <PermissionGate permission="services.edit">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEditDialog(service)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
                         <PermissionGate permission="services.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeleteDialog(service)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {showDeleted ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRestore(service)}
+                              title="Restaurar"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openDeleteDialog(service)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </PermissionGate>
                       </div>
                     </TableCell>

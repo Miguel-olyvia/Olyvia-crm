@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, FolderTree, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, FolderTree, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -55,6 +55,7 @@ interface ServiceCategory {
   
   organization_id: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
   sort_order: number;
   parent_category?: { name: string };
   anew_organizations?: { name: string };
@@ -71,6 +72,7 @@ export default function ServiceCategories() {
   const [allCompanies, setAllCompanies] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ServiceCategory | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -133,6 +135,7 @@ export default function ServiceCategories() {
           anew_organizations!organization_id(name)
         `)
         .is("parent_id", null)
+        .eq("is_deleted", showDeleted)
         .order("name");
 
       // ALWAYS filter by activeCompany - this applies to ALL users including admins
@@ -158,7 +161,7 @@ export default function ServiceCategories() {
     } finally {
       setLoading(false);
     }
-  }, [activeCompany?.id, t, toast]);
+  }, [activeCompany?.id, showDeleted, t, toast]);
 
   useEffect(() => {
     loadCategories();
@@ -284,6 +287,32 @@ export default function ServiceCategories() {
     }
   };
 
+  const handleRestore = async (category: ServiceCategory) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_restore_service_category", {
+        p_id: category.id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: t('serviceCategories.toast.success') || "Sucesso",
+        description: t('serviceCategories.toast.restoreSuccess') || "Categoria restaurada com sucesso.",
+      });
+
+      await loadCategories();
+    } catch (error: unknown) {
+      toast({
+        title: t('serviceCategories.toast.error'),
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+        variant: "destructive",
+      });
+    }
+  };
+
   const openEditDialog = (category: ServiceCategory) => {
     setEditingCategory(category);
     setFormData({
@@ -336,12 +365,23 @@ export default function ServiceCategories() {
               )}
             </div>
           </div>
-          <PermissionGate permission="service_categories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('serviceCategories.addCategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="service_categories.delete">
+              <Button
+                variant={showDeleted ? "secondary" : "outline"}
+                onClick={() => setShowDeleted((prev) => !prev)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="service_categories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('serviceCategories.addCategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
             <DialogContent>
               <DialogHeader>
@@ -476,25 +516,38 @@ export default function ServiceCategories() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="service_categories.edit">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('common.edit')}
-                            onClick={() => openEditDialog(category)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {!showDeleted && (
+                          <PermissionGate permission="service_categories.edit">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t('common.edit')}
+                              onClick={() => openEditDialog(category)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
                         <PermissionGate permission="service_categories.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('common.delete')}
-                            onClick={() => openDeleteDialog(category)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {showDeleted ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="Restaurar"
+                              onClick={() => handleRestore(category)}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t('common.delete')}
+                              onClick={() => openDeleteDialog(category)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </PermissionGate>
                       </div>
                     </TableCell>
