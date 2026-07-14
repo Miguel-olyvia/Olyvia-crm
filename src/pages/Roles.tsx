@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Search, Shield, ShieldCheck, Pencil, Trash2, Lock, AlertTriangle, Users, Copy } from "lucide-react";
+import { Plus, Search, Shield, ShieldCheck, Pencil, Trash2, Lock, AlertTriangle, Users, Copy, RotateCcw } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -44,6 +44,8 @@ interface Role {
   can_sign_contracts: boolean;
   created_at: string;
   created_by?: string | null;
+  status?: string | null;
+  deleted_at?: string | null;
 }
 
 interface Permission {
@@ -82,10 +84,12 @@ export default function Roles() {
   const [formData, setFormData] = useState({ code: "", name: "", description: "", can_sign_contracts: false });
   const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
   const [roleToDelete, setRoleToDelete] = useState<string | null>(null);
+  const [roleToRestore, setRoleToRestore] = useState<string | null>(null);
+  const [showDeletedRoles, setShowDeletedRoles] = useState(false);
   // Fetch roles - system roles + active organization roles + ancestor org roles (inherited)
   // Roles are organizational resources - having a membership = view access
   const { data: roles = [], isLoading: rolesLoading } = useQuery({
-    queryKey: ["anew_roles", activeCompany?.id, anewRoleCode],
+    queryKey: ["anew_roles", activeCompany?.id, anewRoleCode, showDeletedRoles],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
 
@@ -103,10 +107,12 @@ export default function Roles() {
         currentId = parentLink.parent_org_id;
       }
 
-      const { data, error } = await supabase
+      let rolesQuery = supabase
         .from("anew_roles")
         .select("*, created_by")
         .order("name");
+      rolesQuery = showDeletedRoles ? rolesQuery.not("deleted_at", "is", null) : rolesQuery.is("deleted_at", null);
+      const { data, error } = await rolesQuery;
 
       if (error) throw error;
 
@@ -481,6 +487,22 @@ export default function Roles() {
     },
   });
 
+  // Restore role mutation
+  const restoreMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.rpc("rpc_restore_role", { p_id: id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
+      queryClient.invalidateQueries({ queryKey: ["anew_role_permissions"] });
+      toast.success("Role restaurada com sucesso");
+    },
+    onError: (error: Error) => {
+      toast.error("Erro ao restaurar role: " + error.message);
+    },
+  });
+
   // Generate slug from name (e.g., "Gestor de Vendas" → "gestor_de_vendas")
   const generateCodeFromName = (name: string): string => {
     return name
@@ -646,14 +668,25 @@ export default function Roles() {
         </div>
 
         {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Pesquisar roles..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar roles..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Button
+            variant={showDeletedRoles ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowDeletedRoles((v) => !v)}
+            className="gap-1 whitespace-nowrap"
+          >
+            <Trash2 className="h-4 w-4" />
+            {showDeletedRoles ? "Ver ativas" : "Ver eliminadas"}
+          </Button>
         </div>
 
         {/* Roles Table */}
@@ -711,7 +744,9 @@ export default function Roles() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {role.is_system ? (
+                        {role.deleted_at ? (
+                          <Badge variant="destructive">Eliminada</Badge>
+                        ) : role.is_system ? (
                           <Badge variant="outline" className="gap-1">
                             <Lock className="h-3 w-3" />
                             Sistema
@@ -722,25 +757,40 @@ export default function Roles() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {canEditRole(role) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEditDialog(role)}
-                              title="Editar permissões"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {canDeleteRole(role) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setRoleToDelete(role.id)}
-                              title="Eliminar"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          {role.deleted_at ? (
+                            (canDelete && !role.is_system) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setRoleToRestore(role.id)}
+                                title="Restaurar"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            )
+                          ) : (
+                            <>
+                              {canEditRole(role) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openEditDialog(role)}
+                                  title="Editar permissões"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canDeleteRole(role) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setRoleToDelete(role.id)}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       </TableCell>
@@ -1046,7 +1096,7 @@ export default function Roles() {
             <AlertDialogHeader>
               <AlertDialogTitle>Eliminar Role</AlertDialogTitle>
               <AlertDialogDescription>
-                Tem a certeza que pretende eliminar esta role? Esta acção não pode ser desfeita.
+                Tem a certeza que pretende eliminar esta role? A role fica inativa e pode ser restaurada mais tarde, com as mesmas permissões.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1061,6 +1111,31 @@ export default function Roles() {
                 }}
               >
                 Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Restore confirmation */}
+        <AlertDialog open={!!roleToRestore} onOpenChange={(open) => { if (!open) setRoleToRestore(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Restaurar Role</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem a certeza que pretende restaurar esta role? Volta a ficar ativa com as mesmas permissões que tinha antes de ser eliminada.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (roleToRestore) {
+                    restoreMutation.mutate(roleToRestore);
+                    setRoleToRestore(null);
+                  }
+                }}
+              >
+                Restaurar
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

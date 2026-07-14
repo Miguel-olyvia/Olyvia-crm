@@ -36,6 +36,7 @@ interface Organization {
   type: string;
   description: string | null;
   status: string;
+  deleted_at?: string | null;
   created_at: string;
   created_by?: string | null;
   member_count?: number;
@@ -98,6 +99,9 @@ export default function Organizations() {
   const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
   const [sortField, setSortField] = useState<'name' | 'type' | 'members' | 'status'>('type');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [orgToRestore, setOrgToRestore] = useState<Organization | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [panelMode, setPanelMode] = useState<'closed' | 'create' | 'edit'>('closed');
   
@@ -127,7 +131,7 @@ export default function Organizations() {
       }
     };
     fetchUserName();
-  }, [activeCompany?.id, scopeLoading, viewScope, anewUserId, refreshCounter]);
+  }, [activeCompany?.id, scopeLoading, viewScope, anewUserId, refreshCounter, showDeleted]);
 
   // Auto-open create panel when navigated with ?action=new
   useEffect(() => {
@@ -177,7 +181,8 @@ export default function Organizations() {
         scopedOrgIds = Array.from(scopeSet);
       }
 
-      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
+      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, deleted_at, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
+      orgsQuery = showDeleted ? orgsQuery.not("deleted_at", "is", null) : orgsQuery.is("deleted_at", null);
       const isGlobalAdmin = userType === "system_admin";
       if (isGlobalAdmin) {
         // Fetch all orgs (RLS handles security), then post-filter
@@ -473,6 +478,27 @@ export default function Organizations() {
       if (selectedOrg?.id === orgToDelete.id || descendantIds.includes(selectedOrg?.id || "")) {
         setPanelMode('closed'); setSelectedOrg(null);
       }
+      await refreshCompanies(); setRefreshCounter(c => c + 1);
+    } catch (error: any) {
+      toast.error(error.message);
+    }
+  };
+
+  const handleRestoreClick = (org: Organization) => { setOrgToRestore(org); setRestoreDialogOpen(true); };
+
+  const handleConfirmRestore = async () => {
+    if (!orgToRestore) return;
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_restore_organization", {
+          p_root_org_id: orgToRestore.id,
+        })
+      );
+      if (error) throw error;
+      toast.success(t("common.restored") !== "common.restored" ? t("common.restored") : "Organização restaurada");
+      setRestoreDialogOpen(false); setOrgToRestore(null);
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
       toast.error(error.message);
@@ -857,6 +883,15 @@ export default function Organizations() {
                   <Building className="h-4 w-4" />{t("organizations.flatView")}
                 </Button>
               </div>
+              <Button
+                variant={showDeleted ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowDeleted(v => !v)}
+                className="gap-1 whitespace-nowrap"
+              >
+                <Trash2 className="h-4 w-4" />
+                {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+              </Button>
             </div>
 
             <Card className="flex-1 overflow-hidden">
@@ -884,8 +919,8 @@ export default function Organizations() {
                       <TableRow><TableCell colSpan={5} className="text-center py-8">{t("common.noResults")}</TableCell></TableRow>
                     ) : (
                       (viewMode === 'tree' ? filteredHierarchicalOrgs : filteredOrganizations).map(org => (
-                        <TableRow key={org.id} className={`group hover:bg-muted/50 cursor-pointer ${selectedOrg?.id === org.id ? 'bg-muted' : ''}`}
-                          onClick={() => canEditOrg(org) ? openEditPanel(org) : navigate(`/organizations/${org.id}`)}>
+                        <TableRow key={org.id} className={`group hover:bg-muted/50 ${org.deleted_at ? '' : 'cursor-pointer'} ${selectedOrg?.id === org.id ? 'bg-muted' : ''}`}
+                          onClick={() => { if (org.deleted_at) return; canEditOrg(org) ? openEditPanel(org) : navigate(`/organizations/${org.id}`); }}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2" style={{ paddingLeft: viewMode === 'tree' ? `${(org.depth || 0) * 24}px` : 0 }}>
                               {viewMode === 'tree' && (org.children_count || 0) > 0 ? (
@@ -909,9 +944,13 @@ export default function Organizations() {
                             </button>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={org.status === "active" ? "default" : org.status === "draft" ? "outline" : "secondary"}>
-                              {org.status === "active" ? t("common.active") : org.status === "draft" ? t("common.draft") : t("common.inactive")}
-                            </Badge>
+                            {org.deleted_at ? (
+                              <Badge variant="destructive">Eliminada</Badge>
+                            ) : (
+                              <Badge variant={org.status === "active" ? "default" : org.status === "draft" ? "outline" : "secondary"}>
+                                {org.status === "active" ? t("common.active") : org.status === "draft" ? t("common.draft") : t("common.inactive")}
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
@@ -919,33 +958,43 @@ export default function Organizations() {
                                 <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={e => { e.stopPropagation(); navigate(`/organizations/${org.id}`); }}>
-                                  <Eye className="w-4 h-4 mr-2" />{t("common.view")}
-                                </DropdownMenuItem>
-                                {canEditOrg(org) && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); openEditPanel(org); }}>
-                                    <Pencil className="w-4 h-4 mr-2" />{t("common.edit")}
-                                  </DropdownMenuItem>
-                                )}
-                                {canCreate && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); openCreatePanel(org.id); }}>
-                                    <Plus className="w-4 h-4 mr-2" />{t("organizations.addChild")}
-                                  </DropdownMenuItem>
-                                )}
-                                {canEditOrg(org) && org.parent_id && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleUnlinkClick(org); }} className="text-orange-600">
-                                    <Link2Off className="w-4 h-4 mr-2" />{t("organizations.unlink") !== "organizations.unlink" ? t("organizations.unlink") : "Desassociar"}
-                                  </DropdownMenuItem>
-                                )}
-                                {canEditOrg(org) && !org.parent_id && org.id !== activeCompany?.id && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleLinkClick(org); }} className="text-primary">
-                                    <Link2 className="w-4 h-4 mr-2" />Associar a grupo
-                                  </DropdownMenuItem>
-                                )}
-                                {canDeleteOrg(org) && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleDeleteClick(org); }} className="text-destructive">
-                                    <Trash2 className="w-4 h-4 mr-2" />{t("common.delete")}
-                                  </DropdownMenuItem>
+                                {org.deleted_at ? (
+                                  canDeleteOrg(org) && (
+                                    <DropdownMenuItem onClick={e => { e.stopPropagation(); handleRestoreClick(org); }} className="text-primary">
+                                      <Link2 className="w-4 h-4 mr-2" />Restaurar
+                                    </DropdownMenuItem>
+                                  )
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem onClick={e => { e.stopPropagation(); navigate(`/organizations/${org.id}`); }}>
+                                      <Eye className="w-4 h-4 mr-2" />{t("common.view")}
+                                    </DropdownMenuItem>
+                                    {canEditOrg(org) && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); openEditPanel(org); }}>
+                                        <Pencil className="w-4 h-4 mr-2" />{t("common.edit")}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canCreate && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); openCreatePanel(org.id); }}>
+                                        <Plus className="w-4 h-4 mr-2" />{t("organizations.addChild")}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canEditOrg(org) && org.parent_id && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleUnlinkClick(org); }} className="text-orange-600">
+                                        <Link2Off className="w-4 h-4 mr-2" />{t("organizations.unlink") !== "organizations.unlink" ? t("organizations.unlink") : "Desassociar"}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canEditOrg(org) && !org.parent_id && org.id !== activeCompany?.id && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleLinkClick(org); }} className="text-primary">
+                                        <Link2 className="w-4 h-4 mr-2" />Associar a grupo
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canDeleteOrg(org) && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleDeleteClick(org); }} className="text-destructive">
+                                        <Trash2 className="w-4 h-4 mr-2" />{t("common.delete")}
+                                      </DropdownMenuItem>
+                                    )}
+                                  </>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -987,6 +1036,21 @@ export default function Organizations() {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setOrgToDelete(null)}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t("common.delete")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restaurar organização</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem a certeza que deseja restaurar <strong>{orgToRestore?.name}</strong>? A organização e toda a sua subárvore (sub-organizações/departamentos) voltarão a ficar ativas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setOrgToRestore(null)}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmRestore}>Restaurar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
