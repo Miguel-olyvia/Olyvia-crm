@@ -51,6 +51,7 @@ import {
   Search,
   Pencil,
   Trash2,
+  RotateCcw,
   User,
   Loader2,
   MoreHorizontal,
@@ -293,7 +294,10 @@ export default function UsersNew() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  // Defaults to "active": deactivated ("inactive") users are recoverable via
+  // rpc_restore_user but must not clutter the normal list — the "Inactive"
+  // filter option still lets an admin find and restore them.
+  const [statusFilter, setStatusFilter] = useState("active");
   const [userTab, setUserTab] = useState<"users" | "clients">("users");
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<AnewUser | null>(null);
@@ -1200,6 +1204,10 @@ export default function UsersNew() {
         throw new Error("Não foi possível resolver o utilizador de negócio do operador.");
       }
 
+      // "Delete" is a recoverable deactivation (mirrors HubSpot): it revokes
+      // login access but keeps the user's profile and everything they
+      // created/own completely untouched — see
+      // supabase/migrations/20261107090000_rpc_delete_user_soft_delete_and_restore.sql.
       if (user?.auth_user_id) {
         const deleteInvoke = await supabase.functions.invoke("delete-user", {
           body: { userId: user.auth_user_id },
@@ -1207,12 +1215,10 @@ export default function UsersNew() {
         if (deleteInvoke.error) throw deleteInvoke.error;
       }
 
-      // rpc_delete_user runs the DELETE + audit-log write in a single
-      // transaction (see supabase/migrations/20261107080000_rpc_delete_user_audit_source_fix.sql).
-      // withAuditContext's set_audit_context() + a separate .from().delete()
-      // call never worked here: each is its own PostgREST transaction, so the
-      // SET LOCAL GUC from set_audit_context was always gone by the time the
-      // delete ran, leaving entity_audit_log.source NULL for every user delete.
+      // rpc_delete_user runs the soft-deactivation UPDATE + audit-log write
+      // in a single transaction. It no longer removes the anew_users row —
+      // it marks status='inactive'/deleted_at=now(), fully reversible via
+      // rpc_restore_user (see handleRestore below).
       const { error: deleteUserError } = await supabase.rpc("rpc_delete_user", {
         p_user_id: deleteUserId,
       });
@@ -1223,6 +1229,28 @@ export default function UsersNew() {
       fetchData();
     } catch (error: any) {
       console.error("Error deleting:", error);
+      toast.error(error.message || t("common.error"));
+    }
+  };
+
+  const handleRestore = async (targetUser: AnewUser) => {
+    try {
+      if (targetUser.auth_user_id) {
+        const restoreInvoke = await supabase.functions.invoke("restore-user", {
+          body: { userId: targetUser.auth_user_id },
+        });
+        if (restoreInvoke.error) throw restoreInvoke.error;
+      }
+
+      const { error: restoreUserError } = await supabase.rpc("rpc_restore_user", {
+        p_user_id: targetUser.id,
+      });
+      if (restoreUserError) throw restoreUserError;
+
+      toast.success(t("users.restored"));
+      fetchData();
+    } catch (error: any) {
+      console.error("Error restoring:", error);
       toast.error(error.message || t("common.error"));
     }
   };
@@ -1607,7 +1635,7 @@ export default function UsersNew() {
                               {t("common.history")}
                             </DropdownMenuItem>
                             )}
-                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && (
+                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && user.status !== "inactive" && (
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1617,6 +1645,17 @@ export default function UsersNew() {
                               >
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 {t("common.delete")}
+                              </DropdownMenuItem>
+                            )}
+                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && user.status === "inactive" && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRestore(user);
+                                }}
+                              >
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                                {t("users.restore.action")}
                               </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
