@@ -392,7 +392,7 @@ export const authSignupSchema = z.object({
 
 // Post-signup onboarding profile (WelcomeOrgDialog). Every field is optional
 // and skippable; length constraints and enum values mirror the signup_profile
-// CHECK constraints in supabase/migrations/20261024010000_create_signup_profile_table.sql.
+// CHECK constraints in supabase/migrations/20261110060000_create_signup_profile_table.sql.
 // Exported so WelcomeOrgDialog renders its <Select> options from the same
 // list instead of hand-copying a third parallel list.
 export const SIGNUP_INDUSTRY_OPTIONS = [

@@ -1,5 +1,5 @@
 -- pgTAP integration tests for:
---   supabase/migrations/20261024010000_create_signup_profile_table.sql
+--   supabase/migrations/20261110060000_create_signup_profile_table.sql
 --
 -- Covers:
 --   1. A user can upsert their own signup_profile (first insert).
