@@ -5,7 +5,8 @@
  * is never invoked in the test process. The Supabase clients and the
  * encryption/HMAC key providers are injected via NifWriteProxyDeps,
  * following the same "extract logic, inject dependencies" pattern used
- * elsewhere in this repo's *.test.ts files (see update-lead/index.test.ts).
+ * elsewhere in this repo's *.test.ts files (see nif-backfill/index.test.ts,
+ * update-lead/index.test.ts).
  */
 
 import {

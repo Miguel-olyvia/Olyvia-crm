@@ -62,6 +62,9 @@ verify_jwt = false
 [functions.send-quote-email]
 verify_jwt = true
 
+[functions.backfill-entity-names]
+verify_jwt = false
+
 [functions.process-scheduled-emails]
 verify_jwt = false
 

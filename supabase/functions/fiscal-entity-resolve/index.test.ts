@@ -5,7 +5,8 @@
  * is never invoked in the test process. The Supabase service-role client and
  * the encryption/HMAC key providers are injected via FiscalEntityResolveDeps,
  * following the same "extract logic, inject dependencies" pattern used
- * elsewhere in this repo's *.test.ts files (see nif-write-proxy/index.test.ts).
+ * elsewhere in this repo's *.test.ts files (see nif-write-proxy/index.test.ts,
+ * nif-backfill/index.test.ts).
  */
 
 import {
