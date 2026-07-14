@@ -84,6 +84,7 @@ serve(async (req) => {
       if (!enabled) return;
       await supabase.from("notifications").insert({
         user_id: triggered_by,
+        organization_id,
         type,
         kind: "notification",
         ...payload,

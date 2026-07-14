@@ -204,6 +204,7 @@ serve(async (req) => {
             .from("proposals")
             .select("id, title, status, value, created_at, valid_until, stage_id, proposal_workflow_stages(stage_name)")
             .eq("client_id", matchedClientId)
+            .eq("organization_id", companyId)
             .order("created_at", { ascending: false })
             .limit(5);
           proposals = proposalData || [];
@@ -214,6 +215,7 @@ serve(async (req) => {
             .from("schedule_items")
             .select("id, title, start_datetime, end_datetime, status, notes")
             .eq("client_id", matchedClientId)
+            .eq("organization_id", companyId)
             .gte("start_datetime", new Date().toISOString())
             .order("start_datetime", { ascending: true })
             .limit(3);

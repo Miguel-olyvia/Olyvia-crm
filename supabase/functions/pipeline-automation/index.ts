@@ -268,8 +268,13 @@ serve(async (req) => {
     if (action === "create_deal_from_lead") {
       const { lead_id, title, organization_id, root_organization_id, created_by, entity_id } = payload;
 
-      // 1. Load the lead to check entity_id
-      const { data: lead } = await supabase.from("anew_leads").select("*").eq("id", lead_id).single();
+      // 1. Load the lead to check entity_id (scoped to the caller's organization)
+      const { data: lead } = await supabase
+        .from("anew_leads")
+        .select("*")
+        .eq("id", lead_id)
+        .eq("organization_id", organization_id)
+        .single();
       if (!lead) throw new Error("Lead not found");
 
       const resolvedCreatedBy = await resolveCreatedByForAction("create_deal_from_lead", created_by, [
@@ -403,6 +408,16 @@ serve(async (req) => {
     // ─── ACTION: Create Quote from Deal ─────────────────────
     if (action === "create_quote_from_deal") {
       const { deal_id, organization_id, root_organization_id, created_by, title } = payload;
+
+      // Ensure the deal actually belongs to the caller's organization before
+      // touching it or anything linked to it (deal_id is user-supplied).
+      const { data: dealScopeCheck } = await supabase
+        .from("deals")
+        .select("id")
+        .eq("id", deal_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+      if (!dealScopeCheck) throw new Error("Deal not found in this organization");
 
       const existingQuoteId = await findExistingQuoteForDeal(deal_id);
       if (existingQuoteId) {
@@ -602,6 +617,26 @@ serve(async (req) => {
     if (action === "create_proposal_from_quote") {
       const { quote_id, deal_id, organization_id, root_organization_id, created_by, title } = payload;
 
+      // Ensure the quote (and optional deal) belong to the caller's organization
+      // before reading/linking anything (both ids are user-supplied).
+      const { data: quoteScopeCheck } = await supabase
+        .from("quotes")
+        .select("id")
+        .eq("id", quote_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+      if (!quoteScopeCheck) throw new Error("Quote not found in this organization");
+
+      if (deal_id) {
+        const { data: dealScopeCheck } = await supabase
+          .from("deals")
+          .select("id")
+          .eq("id", deal_id)
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!dealScopeCheck) throw new Error("Deal not found in this organization");
+      }
+
       const existingProposalId = await findExistingProposalForQuote(quote_id);
       if (existingProposalId) {
         await upsertPipelineLink("quote_id", quote_id, {
@@ -699,6 +734,16 @@ serve(async (req) => {
     if (action === "create_proposal_from_deal") {
       const { deal_id, organization_id, root_organization_id, created_by, entity_id, title } = payload;
 
+      // Ensure the deal belongs to the caller's organization before touching it
+      // or anything linked to it (deal_id is user-supplied).
+      const { data: dealScopeCheck } = await supabase
+        .from("deals")
+        .select("id")
+        .eq("id", deal_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+      if (!dealScopeCheck) throw new Error("Deal not found in this organization");
+
       const existingProposalId = await findExistingProposalForDeal(deal_id);
       if (existingProposalId) {
         await upsertPipelineLink("deal_id", deal_id, {
@@ -775,6 +820,26 @@ serve(async (req) => {
     // ─── ACTION: Create Quote from Proposal ──────────────────
     if (action === "create_quote_from_proposal") {
       const { proposal_id, organization_id, root_organization_id, created_by, deal_id } = payload;
+
+      // Ensure the proposal (and optional deal) belong to the caller's
+      // organization before reading/linking anything (both ids are user-supplied).
+      const { data: proposalScopeCheck } = await supabase
+        .from("proposals")
+        .select("id")
+        .eq("id", proposal_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+      if (!proposalScopeCheck) throw new Error("Proposal not found in this organization");
+
+      if (deal_id) {
+        const { data: dealScopeCheck } = await supabase
+          .from("deals")
+          .select("id")
+          .eq("id", deal_id)
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!dealScopeCheck) throw new Error("Deal not found in this organization");
+      }
 
       const existingQuoteId = await findExistingQuoteForProposal(proposal_id);
       if (existingQuoteId) {
@@ -853,6 +918,37 @@ serve(async (req) => {
     if (action === "create_contract_from_quote") {
       const { quote_id, proposal_id, organization_id, root_organization_id, created_by, client_id } = payload;
 
+      // Ensure any provided proposal/quote/client ids belong to the caller's
+      // organization before reading from them or basing a contract on them
+      // (all are user-supplied and otherwise unchecked here).
+      if (proposal_id) {
+        const { data: proposalScopeCheck } = await supabase
+          .from("proposals")
+          .select("id")
+          .eq("id", proposal_id)
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!proposalScopeCheck) throw new Error("Proposal not found in this organization");
+      }
+      if (quote_id) {
+        const { data: quoteScopeCheck } = await supabase
+          .from("quotes")
+          .select("id")
+          .eq("id", quote_id)
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!quoteScopeCheck) throw new Error("Quote not found in this organization");
+      }
+      if (client_id) {
+        const { data: clientScopeCheck } = await supabase
+          .from("anew_clients")
+          .select("id")
+          .eq("id", client_id)
+          .eq("organization_id", organization_id)
+          .maybeSingle();
+        if (!clientScopeCheck) throw new Error("Client not found in this organization");
+      }
+
       const inheritedContractActors: ActorSource[] = [];
       if (proposal_id) {
         const { data: proposalSource } = await supabase
@@ -873,7 +969,7 @@ serve(async (req) => {
       const resolvedCreatedBy = await resolveCreatedByForAction("create_contract_from_quote", created_by, inheritedContractActors);
 
       // Check if a contract already exists for this proposal/quote to avoid duplicates
-      let existingQuery = supabase.from("client_contracts").select("id").limit(1);
+      let existingQuery = supabase.from("client_contracts").select("id").eq("organization_id", organization_id).limit(1);
       if (proposal_id) existingQuery = existingQuery.eq("proposal_id", proposal_id);
       else if (quote_id) existingQuery = existingQuery.eq("quote_id", quote_id);
       const { data: existingContracts } = await existingQuery;
@@ -939,6 +1035,17 @@ serve(async (req) => {
 
       if (contractErr || !contract) throw new Error("Contract not found");
 
+      // This action's payload has no organization_id (contract_id is the only
+      // identifier), so the top-level scope check never runs. Validate here
+      // that the caller actually has access to the contract's organization.
+      const contractHasOrgAccess = await validateOrgScope(supabase, caller, contract.organization_id);
+      if (!contractHasOrgAccess) {
+        return new Response(
+          JSON.stringify({ success: false, message: "Sem permissão para esta organização" }),
+          { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+
       // Update contract status to signed
       if (caller.anewUserId) {
         await supabase.rpc('set_audit_context', { p_user_id: caller.anewUserId, p_source: 'pipeline' });
@@ -1000,6 +1107,17 @@ serve(async (req) => {
         .maybeSingle();
 
       if (link) {
+        // This action's payload has no organization_id (entity_type/entity_id are
+        // the only identifiers), so the top-level scope check never runs.
+        // Validate here that the caller actually has access to the link's organization.
+        const linkHasOrgAccess = await validateOrgScope(supabase, caller, link.organization_id);
+        if (!linkHasOrgAccess) {
+          return new Response(
+            JSON.stringify({ success: false, message: "Sem permissão para esta organização" }),
+            { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+          );
+        }
+
         // Propagate rejection backwards
         if (entity_type === "contract" && link.quote_id) {
           await supabase.from("quotes").update({ estado: "perdido" }).eq("id", link.quote_id);

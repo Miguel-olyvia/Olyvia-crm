@@ -460,11 +460,27 @@ async function processScheduleRequest(
   companyId: string | null,
   userId: string | null
 ): Promise<AutoScheduleResult> {
-  const effectiveCompanyId = request.organization_id || companyId;
   const durationMinutes = request.duration_minutes || 60;
   const businessUserId = userId ? await resolveBusinessUserId(supabase, userId) : null;
   if (!businessUserId) {
     return { success: false, error: 'Business user could not be resolved for scheduling' };
+  }
+
+  // SECURITY: companyId comes from a trusted source (validated API key token,
+  // or the insert-lead internally-trusted service-role call) and must always
+  // win over a body-supplied organization_id. Never let an attacker pick an
+  // arbitrary organization by sending organization_id in the request body.
+  // A body-supplied organization_id is only honored when there is no trusted
+  // companyId (plain JWT auth), and only after confirming the caller actually
+  // holds an active membership in that organization.
+  const effectiveCompanyId = await resolveEffectiveOrganizationId(
+    supabase,
+    request.organization_id,
+    companyId,
+    businessUserId
+  );
+  if (!effectiveCompanyId) {
+    return { success: false, error: 'organization_id is required and must belong to the authenticated user' };
   }
 
   // If auto_assign is true, find the best slot using rules
@@ -614,10 +630,6 @@ async function processScheduleRequest(
     }
 
     // Original non-proximity based scheduling
-    if (!effectiveCompanyId) {
-      return { success: false, error: 'organization_id is required for scheduling' };
-    }
-
     let resourceQuery = supabase
       .from('schedule_resources')
       .select('*')
@@ -771,6 +783,48 @@ async function processScheduleRequest(
       message: 'Schedule item created (manual mode - no auto-assignment)'
     };
   }
+}
+
+// SECURITY: Determines which organization_id is safe to use as the tenant
+// filter for the rest of the request. A trusted companyId (resolved from a
+// validated API key token, or from the insert-lead internally-trusted
+// service-role call) always wins. A body-supplied organization_id is only
+// used as a fallback (plain JWT auth, no trusted companyId), and only after
+// confirming the authenticated business user actually holds an active
+// membership in that organization — otherwise a caller could pass an
+// arbitrary organization_id in the request body and read/write another
+// tenant's schedule data.
+async function resolveEffectiveOrganizationId(
+  supabase: any,
+  requestedOrganizationId: string | undefined,
+  trustedCompanyId: string | null,
+  businessUserId: string | null
+): Promise<string | null> {
+  if (trustedCompanyId) {
+    return trustedCompanyId;
+  }
+
+  if (!requestedOrganizationId || !businessUserId) {
+    return null;
+  }
+
+  const { data: membership, error } = await supabase
+    .from('anew_memberships')
+    .select('organization_id')
+    .eq('user_id', businessUserId)
+    .eq('organization_id', requestedOrganizationId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (error || !membership) {
+    console.error('resolveEffectiveOrganizationId: membership check failed or not found', error);
+    return null;
+  }
+
+  // Return the DB-verified value (not the raw body string) so downstream
+  // consumers (e.g. the auto_schedule_rules .or() filter) never interpolate
+  // unvalidated user input.
+  return membership.organization_id;
 }
 
 async function resolveBusinessUserId(supabase: any, authUserId: string): Promise<string | null> {

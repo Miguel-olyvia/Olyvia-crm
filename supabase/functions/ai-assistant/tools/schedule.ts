@@ -165,6 +165,37 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
     }
   }
 
+  // Validate client_id/contact_id/deal_id belong to the active org before linking
+  // them to the schedule item — these are user/model-supplied UUIDs and must not
+  // be trusted across tenants just because they pass the UUID format check.
+  if (args.client_id) {
+    const { data: c } = await supabase
+      .from("anew_clients")
+      .select("id")
+      .eq("id", args.client_id)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (!c) return { success: false, message: "client_id não encontrado nesta organização." };
+  }
+  if (args.contact_id) {
+    const { data: c } = await supabase
+      .from("anew_contacts")
+      .select("id")
+      .eq("id", args.contact_id)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (!c) return { success: false, message: "contact_id não encontrado nesta organização." };
+  }
+  if (args.deal_id) {
+    const { data: d } = await supabase
+      .from("deals")
+      .select("id")
+      .eq("id", args.deal_id)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (!d) return { success: false, message: "deal_id não encontrado nesta organização." };
+  }
+
   const metadata: Record<string, any> = {};
   if (args.item_type) metadata.item_type = args.item_type;
 
