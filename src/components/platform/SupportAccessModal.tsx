@@ -117,7 +117,7 @@ export function SupportAccessModal({ open, onOpenChange }: SupportAccessModalPro
             <DialogTitle>Pedir Acesso de Suporte</DialogTitle>
           </div>
           <DialogDescription>
-            Este pedido ficará registado na auditoria e requer aprovação de um administrador da organização.
+            Este pedido ficará registado na auditoria e requer aprovação de outro system admin do Olyvia. A organização é notificada por transparência.
           </DialogDescription>
         </DialogHeader>
 

@@ -67,7 +67,9 @@ function timeRemainingLabel(expiresAt: string | null): string {
   return `${mins}m`;
 }
 
-// Sysadmin view: all own requests across all orgs
+// Sysadmin view: all requests across all orgs — pending ones from peers can be
+// approved/rejected here (approval stays internal to Olyvia, see
+// approve-support-access). The backend rejects self-approval regardless.
 function SysadminRequestsTable() {
   const queryClient = useQueryClient();
 
@@ -91,6 +93,26 @@ function SysadminRequestsTable() {
         requested_at: row.requested_at,
         requested_by_name: null,
       }));
+    },
+  });
+
+  const actionMutation = useMutation({
+    mutationFn: async ({ accessId, action }: { accessId: string; action: "approved" | "rejected" }) => {
+      const { data, error } = await supabase.functions.invoke("approve-support-access", {
+        body: { request_id: accessId, action },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: (_data, variables) => {
+      const label = variables.action === "approved" ? "aprovado" : "rejeitado";
+      toast.success(`Pedido de acesso ${label}.`);
+      queryClient.invalidateQueries({ queryKey: ["support_access_requests"] });
+      queryClient.invalidateQueries({ queryKey: ["support_access_active"] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Erro ao processar pedido.";
+      toast.error(message);
     },
   });
 
@@ -121,7 +143,7 @@ function SysadminRequestsTable() {
           <CardTitle>Pedidos de Acesso de Suporte</CardTitle>
         </div>
         <CardDescription>
-          Histórico de todos os pedidos de acesso de suporte efectuados.
+          Todos os pedidos de acesso de suporte. Pedidos pendentes de outros system admins podem ser aprovados ou rejeitados aqui — não podes aprovar o teu próprio pedido.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -147,7 +169,7 @@ function SysadminRequestsTable() {
                   <TableHead>Duração</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Tempo restante</TableHead>
-                  <TableHead />
+                  <TableHead className="text-right">Acções</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -169,7 +191,28 @@ function SysadminRequestsTable() {
                         ? timeRemainingLabel(req.expires_at)
                         : "—"}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-right">
+                      {req.status === "pending" && (
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => actionMutation.mutate({ accessId: req.id, action: "rejected" })}
+                            disabled={actionMutation.isPending}
+                          >
+                            <X className="mr-1.5 h-3.5 w-3.5" />
+                            Rejeitar
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => actionMutation.mutate({ accessId: req.id, action: "approved" })}
+                            disabled={actionMutation.isPending}
+                          >
+                            <Check className="mr-1.5 h-3.5 w-3.5" />
+                            Aprovar
+                          </Button>
+                        </div>
+                      )}
                       {req.status === "approved" && req.expires_at && new Date(req.expires_at) > new Date() && (
                         <Button
                           variant="outline"
@@ -193,21 +236,22 @@ function SysadminRequestsTable() {
   );
 }
 
-// Super-admin view: pending requests for own org
+// Super-admin view: read-only notice of support access to their own org.
+// Approval is internal to Olyvia (see SysadminRequestsTable) — the super_admin
+// is informed for transparency but has no approve/reject action.
 function SuperAdminRequestsTable() {
   const { activeCompany } = useCompany();
-  const queryClient = useQueryClient();
 
   const { data: requests = [], isLoading } = useQuery<AccessRequest[]>({
-    queryKey: ["support_access_pending_org", activeCompany?.id],
+    queryKey: ["support_access_notice_org", activeCompany?.id],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
       const { data, error } = await (supabase as any)
         .from("support_access_log")
         .select("id, target_org_id, reason, status, duration_hours, expires_at, requested_at, anew_organizations(name)")
         .eq("target_org_id", activeCompany.id)
-        .eq("status", "pending")
-        .order("requested_at", { ascending: false });
+        .order("requested_at", { ascending: false })
+        .limit(20);
       if (error) throw error;
       return ((data ?? []) as any[]).map((row) => ({
         id: row.id,
@@ -224,35 +268,15 @@ function SuperAdminRequestsTable() {
     enabled: !!activeCompany?.id,
   });
 
-  const actionMutation = useMutation({
-    mutationFn: async ({ accessId, action }: { accessId: string; action: "approved" | "rejected" }) => {
-      const { data, error } = await supabase.functions.invoke("approve-support-access", {
-        body: { request_id: accessId, action },
-      });
-      if (error) throw error;
-      return data;
-    },
-    onSuccess: (_data, variables) => {
-      const label = variables.action === "approved" ? "aprovado" : "rejeitado";
-      toast.success(`Pedido de acesso ${label}.`);
-      queryClient.invalidateQueries({ queryKey: ["support_access_pending_org"] });
-      queryClient.invalidateQueries({ queryKey: ["support_access_active"] });
-    },
-    onError: (error: unknown) => {
-      const message = error instanceof Error ? error.message : "Erro ao processar pedido.";
-      toast.error(message);
-    },
-  });
-
   return (
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-muted-foreground" />
-          <CardTitle>Pedidos de Acesso Pendentes</CardTitle>
+          <CardTitle>Acesso de Suporte à Sua Organização</CardTitle>
         </div>
         <CardDescription>
-          Pedidos de acesso de suporte à sua organização aguardando decisão.
+          Aprovação de acesso de suporte é interna ao Olyvia. Esta lista é apenas informativa — não requer nenhuma ação da sua parte.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -265,7 +289,7 @@ function SuperAdminRequestsTable() {
         ) : requests.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
             <ShieldAlert className="h-10 w-10 opacity-40" />
-            <p className="text-sm">Sem pedidos de acesso pendentes.</p>
+            <p className="text-sm">Sem pedidos de acesso registados.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -274,8 +298,9 @@ function SuperAdminRequestsTable() {
                 <TableRow>
                   <TableHead>Data</TableHead>
                   <TableHead>Motivo</TableHead>
-                  <TableHead>Duração pedida</TableHead>
-                  <TableHead className="text-right">Acções</TableHead>
+                  <TableHead>Duração</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Tempo restante</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -288,26 +313,11 @@ function SuperAdminRequestsTable() {
                       {req.reason}
                     </TableCell>
                     <TableCell className="text-sm">{req.duration_hours}h</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => actionMutation.mutate({ accessId: req.id, action: "rejected" })}
-                          disabled={actionMutation.isPending}
-                        >
-                          <X className="mr-1.5 h-3.5 w-3.5" />
-                          Rejeitar
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => actionMutation.mutate({ accessId: req.id, action: "approved" })}
-                          disabled={actionMutation.isPending}
-                        >
-                          <Check className="mr-1.5 h-3.5 w-3.5" />
-                          Aprovar
-                        </Button>
-                      </div>
+                    <TableCell>{statusBadge(req.status)}</TableCell>
+                    <TableCell className="text-sm tabular-nums">
+                      {req.status === "approved" && req.expires_at
+                        ? timeRemainingLabel(req.expires_at)
+                        : "—"}
                     </TableCell>
                   </TableRow>
                 ))}
