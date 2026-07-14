@@ -735,6 +735,13 @@ export type Database = {
             referencedRelation: "anew_leads"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "anew_contacts_source_lead_id_fkey"
+            columns: ["source_lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
+            referencedColumns: ["id"]
+          },
         ]
       }
       anew_entities: {
@@ -1601,10 +1608,12 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           entity_id: string | null
           id: string
           is_fiscal: boolean | null
+          is_work_org: boolean
           logo_url: string | null
           metadata: Json | null
           name: string
@@ -1617,10 +1626,12 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          deleted_at?: string | null
           description?: string | null
           entity_id?: string | null
           id?: string
           is_fiscal?: boolean | null
+          is_work_org?: boolean
           logo_url?: string | null
           metadata?: Json | null
           name: string
@@ -1633,10 +1644,12 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          deleted_at?: string | null
           description?: string | null
           entity_id?: string | null
           id?: string
           is_fiscal?: boolean | null
+          is_work_org?: boolean
           logo_url?: string | null
           metadata?: Json | null
           name?: string
@@ -1770,12 +1783,14 @@ export type Database = {
           code: string
           created_at: string | null
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           id: string
           is_default: boolean | null
           is_system: boolean | null
           name: string
           organization_id: string | null
+          status: string
           updated_at: string | null
         }
         Insert: {
@@ -1783,12 +1798,14 @@ export type Database = {
           code: string
           created_at?: string | null
           created_by?: string | null
+          deleted_at?: string | null
           description?: string | null
           id?: string
           is_default?: boolean | null
           is_system?: boolean | null
           name: string
           organization_id?: string | null
+          status?: string
           updated_at?: string | null
         }
         Update: {
@@ -1796,12 +1813,14 @@ export type Database = {
           code?: string
           created_at?: string | null
           created_by?: string | null
+          deleted_at?: string | null
           description?: string | null
           id?: string
           is_default?: boolean | null
           is_system?: boolean | null
           name?: string
           organization_id?: string | null
+          status?: string
           updated_at?: string | null
         }
         Relationships: []
@@ -1813,6 +1832,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           custom_attributes: Json | null
+          deleted_at: string | null
           description: string | null
           email: string
           email_signature: string | null
@@ -1834,6 +1854,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           custom_attributes?: Json | null
+          deleted_at?: string | null
           description?: string | null
           email: string
           email_signature?: string | null
@@ -1855,6 +1876,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           custom_attributes?: Json | null
+          deleted_at?: string | null
           description?: string | null
           email?: string
           email_signature?: string | null
@@ -2020,6 +2042,33 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      auth_login_attempts: {
+        Row: {
+          created_at: string
+          id: string
+          identifier: string
+          ip_address: string | null
+          success: boolean
+          user_agent: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          identifier: string
+          ip_address?: string | null
+          success: boolean
+          user_agent?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          identifier?: string
+          ip_address?: string | null
+          success?: boolean
+          user_agent?: string | null
+        }
+        Relationships: []
       }
       auth_to_business_user_map: {
         Row: {
@@ -2262,6 +2311,8 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           is_active: boolean | null
@@ -2275,6 +2326,8 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
@@ -2288,6 +2341,8 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
@@ -3199,6 +3254,13 @@ export type Database = {
             columns: ["anew_lead_id"]
             isOneToOne: false
             referencedRelation: "anew_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_leads_anew_lead_id_fkey"
+            columns: ["anew_lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
             referencedColumns: ["id"]
           },
           {
@@ -5241,6 +5303,89 @@ export type Database = {
           },
         ]
       }
+      data_erasure_requests: {
+        Row: {
+          decision_mode: string | null
+          entity_id: string | null
+          entity_snapshot: Json
+          error_message: string | null
+          executed_at: string | null
+          id: string
+          organization_id: string
+          reason: string
+          rejection_reason: string | null
+          requested_at: string
+          requested_by: string
+          result: Json | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+        }
+        Insert: {
+          decision_mode?: string | null
+          entity_id?: string | null
+          entity_snapshot?: Json
+          error_message?: string | null
+          executed_at?: string | null
+          id?: string
+          organization_id: string
+          reason: string
+          rejection_reason?: string | null
+          requested_at?: string
+          requested_by: string
+          result?: Json | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Update: {
+          decision_mode?: string | null
+          entity_id?: string | null
+          entity_snapshot?: Json
+          error_message?: string | null
+          executed_at?: string | null
+          id?: string
+          organization_id?: string
+          reason?: string
+          rejection_reason?: string | null
+          requested_at?: string
+          requested_by?: string
+          result?: Json | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "data_erasure_requests_entity_fk"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "anew_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_erasure_requests_org_fk"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_erasure_requests_requested_by_fk"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_erasure_requests_reviewed_by_fk"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       data_export_audit: {
         Row: {
           auth_user_id: string
@@ -5654,6 +5799,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "deals_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "deals_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
@@ -5690,6 +5842,7 @@ export type Database = {
           notes: string | null
           organization_id: string
           uploaded_by: string | null
+          validation_status: string
         }
         Insert: {
           created_at?: string
@@ -5704,6 +5857,7 @@ export type Database = {
           notes?: string | null
           organization_id: string
           uploaded_by?: string | null
+          validation_status?: string
         }
         Update: {
           created_at?: string
@@ -5718,6 +5872,7 @@ export type Database = {
           notes?: string | null
           organization_id?: string
           uploaded_by?: string | null
+          validation_status?: string
         }
         Relationships: []
       }
@@ -5856,6 +6011,7 @@ export type Database = {
           id: string
           operation: string
           organization_id: string
+          record_id: string | null
           source: string | null
           table_name: string
         }
@@ -5868,6 +6024,7 @@ export type Database = {
           id?: string
           operation: string
           organization_id: string
+          record_id?: string | null
           source?: string | null
           table_name: string
         }
@@ -5880,6 +6037,7 @@ export type Database = {
           id?: string
           operation?: string
           organization_id?: string
+          record_id?: string | null
           source?: string | null
           table_name?: string
         }
@@ -6031,6 +6189,8 @@ export type Database = {
           legal_name: string | null
           metadata: Json | null
           nif: string
+          nif_encrypted: string | null
+          nif_hash: string | null
           updated_at: string | null
           verified_at: string | null
           verified_by: string | null
@@ -6045,6 +6205,8 @@ export type Database = {
           legal_name?: string | null
           metadata?: Json | null
           nif: string
+          nif_encrypted?: string | null
+          nif_hash?: string | null
           updated_at?: string | null
           verified_at?: string | null
           verified_by?: string | null
@@ -6059,6 +6221,8 @@ export type Database = {
           legal_name?: string | null
           metadata?: Json | null
           nif?: string
+          nif_encrypted?: string | null
+          nif_hash?: string | null
           updated_at?: string | null
           verified_at?: string | null
           verified_by?: string | null
@@ -6069,6 +6233,29 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fiscal_entity_nif_tokens: {
+        Row: {
+          fiscal_entity_id: string
+          token_hash: string
+        }
+        Insert: {
+          fiscal_entity_id: string
+          token_hash: string
+        }
+        Update: {
+          fiscal_entity_id?: string
+          token_hash?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fiscal_entity_nif_tokens_fiscal_entity_id_fkey"
+            columns: ["fiscal_entity_id"]
+            isOneToOne: false
+            referencedRelation: "fiscal_entities"
             referencedColumns: ["id"]
           },
         ]
@@ -7412,6 +7599,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "lead_contact_history_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "lead_contact_history_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
@@ -8012,6 +8206,7 @@ export type Database = {
           name: string
           tags: string[] | null
           updated_at: string
+          validation_status: string
         }
         Insert: {
           category?: string | null
@@ -8027,6 +8222,7 @@ export type Database = {
           name: string
           tags?: string[] | null
           updated_at?: string
+          validation_status?: string
         }
         Update: {
           category?: string | null
@@ -8042,6 +8238,7 @@ export type Database = {
           name?: string
           tags?: string[] | null
           updated_at?: string
+          validation_status?: string
         }
         Relationships: []
       }
@@ -9103,6 +9300,8 @@ export type Database = {
           code: string
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           has_hex_color: boolean | null
           id: string
           is_filterable: boolean | null
@@ -9130,6 +9329,8 @@ export type Database = {
           code: string
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           has_hex_color?: boolean | null
           id?: string
           is_filterable?: boolean | null
@@ -9157,6 +9358,8 @@ export type Database = {
           code?: string
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           has_hex_color?: boolean | null
           id?: string
           is_filterable?: boolean | null
@@ -9200,6 +9403,8 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           image_url: string | null
@@ -9217,6 +9422,8 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           id?: string
           image_url?: string | null
@@ -9234,6 +9441,8 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           id?: string
           image_url?: string | null
@@ -10831,6 +11040,8 @@ export type Database = {
           business_unit_id: string | null
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           expected_delivery: string | null
           id: string
           notes: string | null
@@ -10846,6 +11057,8 @@ export type Database = {
           business_unit_id?: string | null
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           expected_delivery?: string | null
           id?: string
           notes?: string | null
@@ -10861,6 +11074,8 @@ export type Database = {
           business_unit_id?: string | null
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           expected_delivery?: string | null
           id?: string
           notes?: string | null
@@ -11534,6 +11749,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      rate_limit_attempts: {
+        Row: {
+          bucket: string
+          created_at: string
+          id: string
+          identifier: string
+          success: boolean
+        }
+        Insert: {
+          bucket: string
+          created_at?: string
+          id?: string
+          identifier: string
+          success?: boolean
+        }
+        Update: {
+          bucket?: string
+          created_at?: string
+          id?: string
+          identifier?: string
+          success?: boolean
+        }
+        Relationships: []
       }
       resource_availability_rules: {
         Row: {
@@ -12415,10 +12654,13 @@ export type Database = {
         Row: {
           created_at: string | null
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           description: string | null
           id: string
           is_active: boolean | null
+          is_deleted: boolean
           name: string
           organization_id: string | null
           parent_id: string | null
@@ -12430,10 +12672,13 @@ export type Database = {
         Insert: {
           created_at?: string | null
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           department_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
+          is_deleted?: boolean
           name: string
           organization_id?: string | null
           parent_id?: string | null
@@ -12445,10 +12690,13 @@ export type Database = {
         Update: {
           created_at?: string | null
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           department_id?: string | null
           description?: string | null
           id?: string
           is_active?: boolean | null
+          is_deleted?: boolean
           name?: string
           organization_id?: string | null
           parent_id?: string | null
@@ -12488,10 +12736,13 @@ export type Database = {
           calculation_type: string
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           fixed_amount: number | null
           id: string
           is_active: boolean
+          is_deleted: boolean
           name: string
           organization_id: string | null
           percentage: number | null
@@ -12505,10 +12756,13 @@ export type Database = {
           calculation_type: string
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           fixed_amount?: number | null
           id?: string
           is_active?: boolean
+          is_deleted?: boolean
           name: string
           organization_id?: string | null
           percentage?: number | null
@@ -12522,10 +12776,13 @@ export type Database = {
           calculation_type?: string
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           description?: string | null
           fixed_amount?: number | null
           id?: string
           is_active?: boolean
+          is_deleted?: boolean
           name?: string
           organization_id?: string | null
           percentage?: number | null
@@ -12873,6 +13130,8 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           id: string
           last_counted: string | null
           location: string | null
@@ -12888,6 +13147,8 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           id?: string
           last_counted?: string | null
           location?: string | null
@@ -12903,6 +13164,8 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           id?: string
           last_counted?: string | null
           location?: string | null
@@ -13012,6 +13275,8 @@ export type Database = {
           country: string | null
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           email: string | null
           id: string
@@ -13041,6 +13306,8 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -13070,6 +13337,8 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -13578,6 +13847,8 @@ export type Database = {
           country: string | null
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           email: string | null
           id: string
           is_active: boolean
@@ -13598,6 +13869,8 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           email?: string | null
           id?: string
           is_active?: boolean
@@ -13618,6 +13891,8 @@ export type Database = {
           country?: string | null
           created_at?: string
           created_by?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
           email?: string | null
           id?: string
           is_active?: boolean
@@ -13768,6 +14043,67 @@ export type Database = {
       }
     }
     Views: {
+      leads_pending_retention_review: {
+        Row: {
+          assigned_to: string | null
+          converted_at: string | null
+          created_at: string | null
+          entity_id: string | null
+          id: string | null
+          last_activity_at: string | null
+          last_contact_at: string | null
+          organization_id: string | null
+          source: string | null
+          status: string | null
+        }
+        Insert: {
+          assigned_to?: string | null
+          converted_at?: string | null
+          created_at?: string | null
+          entity_id?: string | null
+          id?: string | null
+          last_activity_at?: never
+          last_contact_at?: string | null
+          organization_id?: string | null
+          source?: string | null
+          status?: string | null
+        }
+        Update: {
+          assigned_to?: string | null
+          converted_at?: string | null
+          created_at?: string | null
+          entity_id?: string | null
+          id?: string | null
+          last_activity_at?: never
+          last_contact_at?: string | null
+          organization_id?: string | null
+          source?: string | null
+          status?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anew_leads_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anew_leads_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "anew_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anew_leads_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       v_channel_lead_facts: {
         Row: {
           anew_lead_id: string | null
@@ -13797,6 +14133,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "campaign_leads_anew_lead_id_fkey"
+            columns: ["anew_lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "campaign_leads_campaign_id_fkey"
             columns: ["campaign_id"]
             isOneToOne: false
@@ -13814,6 +14157,35 @@ export type Database = {
       }
     }
     Functions: {
+      _bundle_children_authorize: {
+        Args: { p_bundle_id: string }
+        Returns: {
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          description: string | null
+          discount_fixed: number | null
+          discount_percent: number | null
+          fixed_price: number | null
+          id: string
+          image_url: string | null
+          is_active: boolean
+          name: string
+          organization_id: string | null
+          pricing_type: Database["public"]["Enums"]["bundle_pricing_type"]
+          sku: string
+          status: string
+          updated_at: string
+          valid_from: string | null
+          valid_to: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bundles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       _configurator_can_access_product: {
         Args: { p_organization_id: string; p_product_id: string }
         Returns: boolean
@@ -13921,6 +14293,10 @@ export type Database = {
         Args: { p_auth_uid: string; p_entity_id: string }
         Returns: boolean
       }
+      can_write_proposal_row: {
+        Args: { p_created_by: string; p_org_id: string }
+        Returns: boolean
+      }
       check_schedule_conflict: {
         Args: {
           p_end: string
@@ -13941,7 +14317,15 @@ export type Database = {
         Args: { _company_id: string; _created_by: string }
         Returns: undefined
       }
-      create_contact_with_role: { Args: { p_payload: Json }; Returns: Json }
+      create_contact_with_role: {
+        Args: {
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
+          p_payload: Json
+        }
+        Returns: Json
+      }
       create_entity_with_contacts_and_roles: {
         Args: {
           p_addresses?: Json
@@ -14007,24 +14391,51 @@ export type Database = {
         }
         Returns: undefined
       }
-      find_entity_matches: {
-        Args: {
-          p_country_code?: string
-          p_email?: string
-          p_nif?: string
-          p_org_id: string
-          p_phone?: string
-        }
+      execute_entity_erasure: { Args: { p_request_id: string }; Returns: Json }
+      filter_visible_entity_ids: {
+        Args: { p_auth_uid: string; p_entity_ids: string[] }
         Returns: {
-          display_name: string
           entity_id: string
-          match_field: string
-          owner_org_accessible: boolean
-          primary_org_id: string
-          primary_org_name: string
-          scope: string
         }[]
       }
+      find_entity_matches:
+        | {
+            Args: {
+              p_country_code?: string
+              p_email?: string
+              p_nif?: string
+              p_org_id: string
+              p_phone?: string
+            }
+            Returns: {
+              display_name: string
+              entity_id: string
+              match_field: string
+              owner_org_accessible: boolean
+              primary_org_id: string
+              primary_org_name: string
+              scope: string
+            }[]
+          }
+        | {
+            Args: {
+              p_country_code?: string
+              p_email?: string
+              p_nif?: string
+              p_nif_hash?: string
+              p_org_id: string
+              p_phone?: string
+            }
+            Returns: {
+              display_name: string
+              entity_id: string
+              match_field: string
+              owner_org_accessible: boolean
+              primary_org_id: string
+              primary_org_name: string
+              scope: string
+            }[]
+          }
       find_nearest_resources: {
         Args: {
           p_board_id: string
@@ -14061,6 +14472,10 @@ export type Database = {
           contract_date: string
           contract_id: string
         }[]
+      }
+      fn_check_email_unique_within_org: {
+        Args: { p_email: string; p_entity_id: string }
+        Returns: undefined
       }
       fn_deal_org_in_scope: { Args: { p_org_id: string }; Returns: boolean }
       fn_lead_org_in_scope: {
@@ -14296,9 +14711,14 @@ export type Database = {
         }[]
       }
       get_org_group_ids: { Args: { p_org_id: string }; Returns: string[] }
-      get_product_category_org_id:
-        | { Args: { cat_id: string }; Returns: string }
-        | { Args: { cat_id: string; depth?: number }; Returns: string }
+      get_product_category_org_id: {
+        Args: { cat_id: string; depth?: number }
+        Returns: string
+      }
+      get_proposal_edit_scope: {
+        Args: { _auth_uid: string; _org_id: string }
+        Returns: string
+      }
       get_quotes_kpi_stats: {
         Args: {
           p_filters?: Json
@@ -14358,14 +14778,27 @@ export type Database = {
           status: string
         }[]
       }
-      get_service_category_org_id:
-        | { Args: { cat_id: string }; Returns: string }
-        | { Args: { cat_id: string; depth?: number }; Returns: string }
+      get_service_category_org_id: {
+        Args: { cat_id: string; depth?: number }
+        Returns: string
+      }
       get_system_admin_dashboard_stats: { Args: never; Returns: Json }
       get_user_context: { Args: { _auth_user_id?: string }; Returns: Json }
+      get_user_crm_org_ids: { Args: { _auth_uid: string }; Returns: string[] }
       get_user_visible_org_ids: {
         Args: { _auth_uid: string }
         Returns: string[]
+      }
+      get_user_work_orgs: {
+        Args: never
+        Returns: {
+          id: string
+          membership_type: string
+          name: string
+          roles: string[]
+          via_org_id: string
+          via_org_name: string
+        }[]
       }
       has_active_support_access: {
         Args: { p_org_id: string }
@@ -14429,6 +14862,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      preview_entity_erasure: { Args: { p_entity_id: string }; Returns: Json }
       purge_business_entity: {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
@@ -14437,6 +14871,9 @@ export type Database = {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
       }
+      purge_old_login_attempts: { Args: never; Returns: undefined }
+      purge_old_otp_codes: { Args: never; Returns: undefined }
+      purge_old_rate_limit_attempts: { Args: never; Returns: undefined }
       reject_proposal_atomic: {
         Args: {
           p_proposal_id: string
@@ -14465,6 +14902,30 @@ export type Database = {
           requested_scope: string
           team_user_ids: string[]
           visible_org_ids: string[]
+        }[]
+      }
+      resolve_effective_work_org: {
+        Args: { org_id: string }
+        Returns: {
+          original_org_id: string
+          resolved_from: string
+          work_org_id: string
+          work_org_name: string
+        }[]
+      }
+      resolve_fiscal_entity: {
+        Args: {
+          p_commercial_name?: string
+          p_country_code: string
+          p_created_by?: string
+          p_entity_type?: string
+          p_nif: string
+          p_nif_encrypted: string
+          p_nif_hash: string
+        }
+        Returns: {
+          existed: boolean
+          fiscal_entity_id: string
         }[]
       }
       resolve_lead_access_context: {
@@ -14533,6 +14994,10 @@ export type Database = {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
       }
+      restore_organization_subtree: {
+        Args: { p_root_org_id: string }
+        Returns: string[]
+      }
       revert_contact_to_client: {
         Args: { p_client_id: string }
         Returns: boolean
@@ -14548,6 +15013,31 @@ export type Database = {
       revert_lead_to_contact_conversion: {
         Args: { p_contact_id: string }
         Returns: boolean
+      }
+      rpc_add_bundle_components: {
+        Args: { p_bundle_id: string; p_items: Json }
+        Returns: {
+          bundle_id: string
+          choice_group_id: string | null
+          created_at: string
+          custom_discount_fixed: number | null
+          custom_discount_percent: number | null
+          custom_price: number | null
+          id: string
+          is_optional: boolean
+          pricing_mode: Database["public"]["Enums"]["component_pricing_mode"]
+          product_id: string | null
+          quantity: number
+          service_id: string | null
+          sort_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "bundle_components"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       rpc_bulk_delete_brand: {
         Args: { p_ids: string[]; p_organization_id: string }
@@ -14581,6 +15071,7 @@ export type Database = {
         Args: { p_ids: string[]; p_organization_id: string }
         Returns: number
       }
+      rpc_bulk_delete_supplier: { Args: { p_ids: string[] }; Returns: number }
       rpc_bulk_import_bundles: {
         Args: { p_bundles: Json; p_org_id: string }
         Returns: Json
@@ -14627,6 +15118,26 @@ export type Database = {
           p_new_org_id: string
           p_organization_id: string
         }
+        Returns: number
+      }
+      rpc_bulk_restore_brand: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_restore_bundle: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_restore_product: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_restore_product_attribute: {
+        Args: { p_ids: string[]; p_organization_id: string }
+        Returns: number
+      }
+      rpc_bulk_restore_product_category: {
+        Args: { p_ids: string[]; p_organization_id: string }
         Returns: number
       }
       rpc_bulk_status_brand: {
@@ -14764,6 +15275,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           is_active: boolean | null
@@ -14824,6 +15337,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_create_bundle_choice_group: {
+        Args: { p_bundle_id: string; p_group: Json }
+        Returns: {
+          bundle_id: string
+          created_at: string
+          description: string | null
+          id: string
+          is_required: boolean
+          max_selections: number
+          min_selections: number
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bundle_choice_groups"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_create_client_contract: {
         Args: {
           p_client_id: string
@@ -14843,6 +15377,57 @@ export type Database = {
           p_total_value: number
         }
         Returns: string
+      }
+      rpc_create_client_manual: {
+        Args: {
+          p_address_city: string
+          p_address_district: string
+          p_address_floor: string
+          p_address_number: string
+          p_address_postal_code: string
+          p_address_street: string
+          p_client_type: string
+          p_display_name?: string
+          p_email?: string
+          p_entity_id: string
+          p_first_name?: string
+          p_last_name?: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
+          p_organization_id: string
+          p_phone?: string
+          p_phone_country_code?: string
+          p_root_organization_id: string
+          p_status: string
+          p_vat?: string
+        }
+        Returns: {
+          assigned_to: string | null
+          client_type: string | null
+          created_at: string | null
+          created_by: string | null
+          custom_fields: Json | null
+          deleted_at: string | null
+          deleted_by: string | null
+          entity_id: string
+          id: string
+          last_interaction_at: string | null
+          notes: string | null
+          organization_id: string
+          root_organization_id: string
+          source_id: string | null
+          source_type: string | null
+          status: string | null
+          tags: string[] | null
+          updated_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "anew_clients"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       rpc_create_deal: {
         Args: {
@@ -14997,6 +15582,9 @@ export type Database = {
           p_is_fiscal: boolean
           p_name: string
           p_nif: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_parent_id: string
           p_phone: string
           p_sector: string
@@ -15006,10 +15594,12 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           entity_id: string | null
           id: string
           is_fiscal: boolean | null
+          is_work_org: boolean
           logo_url: string | null
           metadata: Json | null
           name: string
@@ -15037,6 +15627,9 @@ export type Database = {
           p_is_fiscal: boolean
           p_name: string
           p_nif: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_sector: string
           p_status: string
           p_type: string
@@ -15044,10 +15637,12 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           entity_id: string | null
           id: string
           is_fiscal: boolean | null
+          is_work_org: boolean
           logo_url: string | null
           metadata: Json | null
           name: string
@@ -15109,6 +15704,8 @@ export type Database = {
           code: string
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           has_hex_color: boolean | null
           id: string
           is_filterable: boolean | null
@@ -15151,6 +15748,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           image_url: string | null
@@ -15185,6 +15784,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           image_url: string | null
@@ -15274,6 +15875,8 @@ export type Database = {
           business_unit_id: string | null
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           expected_delivery: string | null
           id: string
           notes: string | null
@@ -15306,12 +15909,14 @@ export type Database = {
           code: string
           created_at: string | null
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           id: string
           is_default: boolean | null
           is_system: boolean | null
           name: string
           organization_id: string | null
+          status: string
           updated_at: string | null
         }
         SetofOptions: {
@@ -15448,10 +16053,13 @@ export type Database = {
         Returns: {
           created_at: string | null
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           description: string | null
           id: string
           is_active: boolean | null
+          is_deleted: boolean
           name: string
           organization_id: string | null
           parent_id: string | null
@@ -15479,10 +16087,13 @@ export type Database = {
         Returns: {
           created_at: string | null
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           description: string | null
           id: string
           is_active: boolean | null
+          is_deleted: boolean
           name: string
           organization_id: string | null
           parent_id: string | null
@@ -15506,9 +16117,25 @@ export type Database = {
         Args: { p_id: string; p_organization_id: string }
         Returns: undefined
       }
+      rpc_delete_bundle_choice_group: {
+        Args: { p_bundle_id: string; p_group_id: string }
+        Returns: undefined
+      }
+      rpc_delete_bundle_component: {
+        Args: { p_bundle_id: string; p_id: string }
+        Returns: undefined
+      }
+      rpc_delete_lead_workflow_automation: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
       rpc_delete_organization: {
         Args: { p_root_org_id: string }
         Returns: string[]
+      }
+      rpc_delete_product: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
       }
       rpc_delete_product_attribute: {
         Args: { p_id: string; p_organization_id: string }
@@ -15522,6 +16149,7 @@ export type Database = {
         Args: { p_id: string; p_organization_id: string }
         Returns: undefined
       }
+      rpc_delete_purchase_order: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_role: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_schedule_item: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_service: { Args: { p_id: string }; Returns: undefined }
@@ -15529,6 +16157,14 @@ export type Database = {
         Args: { p_id: string }
         Returns: undefined
       }
+      rpc_delete_service_fee_type: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      rpc_delete_stock: { Args: { p_id: string }; Returns: undefined }
+      rpc_delete_supplier: { Args: { p_id: string }; Returns: undefined }
+      rpc_delete_user: { Args: { p_user_id: string }; Returns: undefined }
+      rpc_delete_warehouse: { Args: { p_id: string }; Returns: undefined }
       rpc_duplicate_deal: {
         Args: {
           p_organization_id: string
@@ -15572,6 +16208,8 @@ export type Database = {
           code: string
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           has_hex_color: boolean | null
           id: string
           is_filterable: boolean | null
@@ -15601,6 +16239,57 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_duplicate_quote_insert: {
+        Args: {
+          p_actor_id: string
+          p_fees: Json
+          p_lines: Json
+          p_quote: Json
+          p_source: string
+        }
+        Returns: {
+          accepted_at: string | null
+          assigned_to: string | null
+          client_notes: string | null
+          cliente_id: string | null
+          conditions: string | null
+          created_at: string
+          created_by: string
+          deal_id: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          delivered_at: string | null
+          delivery_time_hours: number | null
+          desconto_global_percent: number | null
+          entity_id: string | null
+          estado: string | null
+          id: string
+          iva_rate: number | null
+          modelo_base: string
+          moeda: string | null
+          obra_endereco: string | null
+          obra_notas: string | null
+          organization_id: string | null
+          proposal_id: string | null
+          quote_number: string | null
+          request_date: string | null
+          root_organization_id: string | null
+          site_address_id: string | null
+          subtotal: number | null
+          template_id: string | null
+          title: string | null
+          total: number | null
+          total_fees: number | null
+          updated_at: string
+          validade_dias: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quotes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_finalize_user_profile: {
         Args: {
           p_actor_id: string
@@ -15621,6 +16310,58 @@ export type Database = {
           created_at: string
           created_by: string | null
           custom_attributes: Json | null
+          deleted_at: string | null
+          description: string | null
+          email: string
+          email_signature: string | null
+          entity_id: string | null
+          has_completed_welcome: boolean | null
+          id: string
+          location: string | null
+          name: string
+          phone: string | null
+          position: string | null
+          registration_origin: string
+          status: string
+          template_id: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "anew_users"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rpc_finalize_user_profile_full: {
+        Args: {
+          p_actor_id: string
+          p_additional_emails?: Json
+          p_additional_phones?: Json
+          p_addresses?: Json
+          p_auth_user_id: string
+          p_custom_attributes: Json
+          p_description: string
+          p_email: string
+          p_fiscal?: Json
+          p_location: string
+          p_memberships?: Json
+          p_name: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
+          p_phone: string
+          p_position: string
+          p_status: string
+          p_template_id: string
+        }
+        Returns: {
+          auth_user_id: string | null
+          avatar_url: string | null
+          created_at: string
+          created_by: string | null
+          custom_attributes: Json | null
+          deleted_at: string | null
           description: string | null
           email: string
           email_signature: string | null
@@ -15694,6 +16435,133 @@ export type Database = {
         }
         Returns: string
       }
+      rpc_manage_contact_tag: {
+        Args: {
+          p_action: string
+          p_color: string
+          p_entity_id: string
+          p_organization_id: string
+          p_tag: string
+          p_tag_id: string
+        }
+        Returns: Json
+      }
+      rpc_reassign_client_contract: {
+        Args: { p_id: string; p_new_owner_id: string }
+        Returns: string
+      }
+      rpc_restore_brand: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_bundle: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_organization: {
+        Args: { p_root_org_id: string }
+        Returns: string[]
+      }
+      rpc_restore_product: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_product_attribute: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_product_category: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_product_subcategory: {
+        Args: { p_id: string; p_organization_id: string }
+        Returns: undefined
+      }
+      rpc_restore_purchase_order: { Args: { p_id: string }; Returns: undefined }
+      rpc_restore_role: { Args: { p_id: string }; Returns: undefined }
+      rpc_restore_service: { Args: { p_id: string }; Returns: undefined }
+      rpc_restore_service_category: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      rpc_restore_service_fee_type: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
+      rpc_restore_stock: { Args: { p_id: string }; Returns: undefined }
+      rpc_restore_supplier: { Args: { p_id: string }; Returns: undefined }
+      rpc_restore_user: { Args: { p_user_id: string }; Returns: undefined }
+      rpc_restore_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_save_lead_workflow_automation: {
+        Args: {
+          p_action_stage_id: string
+          p_action_type: string
+          p_description: string
+          p_execution_order: number
+          p_id: string
+          p_is_active: boolean
+          p_name: string
+          p_organization_id: string
+          p_relationship_field: string
+          p_source_entity: string
+          p_target_entity: string
+          p_trigger_stage_id: string
+          p_trigger_type: string
+        }
+        Returns: {
+          action_config: Json | null
+          action_stage_id: string | null
+          action_type: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          execution_order: number | null
+          id: string
+          is_active: boolean | null
+          name: string
+          organization_id: string | null
+          relationship_field: string | null
+          source_entity: string
+          stop_on_error: boolean | null
+          target_entity: string
+          trigger_conditions: Json | null
+          trigger_stage_id: string | null
+          trigger_type: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "workflow_automation_rules"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rpc_save_lead_workflow_stages: {
+        Args: { p_organization_id: string; p_stages: Json }
+        Returns: {
+          color: string | null
+          created_at: string
+          created_by: string
+          default_status: string | null
+          id: string
+          is_active: boolean | null
+          is_conversion: boolean | null
+          is_final: boolean | null
+          is_rejection: boolean | null
+          label: string
+          name: string
+          organization_id: string | null
+          stage_order: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "lead_workflow_stages"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       rpc_save_quote: {
         Args: {
           p_fees: Json
@@ -15746,6 +16614,75 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_schedule_client_meeting: {
+        Args: {
+          p_channel: string
+          p_entity_id: string
+          p_notes: string
+          p_organization_id: string
+          p_root_organization_id: string
+          p_scheduled_at: string
+          p_subject: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          duration_minutes: number | null
+          entity_id: string
+          id: string
+          interaction_at: string
+          interaction_type: string
+          next_action_channel: string | null
+          next_action_date: string | null
+          next_action_type: string | null
+          notes: string | null
+          organization_id: string | null
+          result: string | null
+          root_organization_id: string | null
+          sentiment: string | null
+          subject: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "entity_interactions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rpc_toggle_client_vip: {
+        Args: {
+          p_client_id: string
+          p_is_vip: boolean
+          p_organization_id: string
+        }
+        Returns: {
+          assigned_to: string | null
+          client_type: string | null
+          created_at: string | null
+          created_by: string | null
+          custom_fields: Json | null
+          deleted_at: string | null
+          deleted_by: string | null
+          entity_id: string
+          id: string
+          last_interaction_at: string | null
+          notes: string | null
+          organization_id: string
+          root_organization_id: string
+          source_id: string | null
+          source_type: string | null
+          status: string | null
+          tags: string[] | null
+          updated_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "anew_clients"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_update_brand: {
         Args: {
           p_description: string
@@ -15760,6 +16697,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           is_active: boolean | null
@@ -15819,13 +16758,46 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_update_bundle_component: {
+        Args: { p_bundle_id: string; p_id: string; p_updates: Json }
+        Returns: {
+          bundle_id: string
+          choice_group_id: string | null
+          created_at: string
+          custom_discount_fixed: number | null
+          custom_discount_percent: number | null
+          custom_price: number | null
+          id: string
+          is_optional: boolean
+          pricing_mode: Database["public"]["Enums"]["component_pricing_mode"]
+          product_id: string | null
+          quantity: number
+          service_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "bundle_components"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_update_client: {
         Args: {
+          p_address_city?: string
+          p_address_number?: string
+          p_address_postal_code?: string
+          p_address_street?: string
           p_assigned_to: string
+          p_clear_nif?: boolean
           p_client_id: string
           p_display_name: string
           p_email: string
           p_entity_id: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_norm_first: string
           p_norm_last: string
           p_notes: string
@@ -15887,6 +16859,9 @@ export type Database = {
           p_email: string
           p_entity_id: string
           p_entity_type: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_norm_first: string
           p_norm_last: string
           p_notes: string
@@ -16109,6 +17084,9 @@ export type Database = {
           p_is_fiscal: boolean
           p_name: string
           p_nif: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_parent_id: string
           p_phone: string
           p_sector: string
@@ -16118,10 +17096,12 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           entity_id: string | null
           id: string
           is_fiscal: boolean | null
+          is_work_org: boolean
           logo_url: string | null
           metadata: Json | null
           name: string
@@ -16187,6 +17167,8 @@ export type Database = {
           code: string
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           has_hex_color: boolean | null
           id: string
           is_filterable: boolean | null
@@ -16227,6 +17209,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           image_url: string | null
@@ -16260,6 +17244,8 @@ export type Database = {
         Returns: {
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           description: string | null
           id: string
           image_url: string | null
@@ -16350,6 +17336,8 @@ export type Database = {
           business_unit_id: string | null
           created_at: string
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           expected_delivery: string | null
           id: string
           notes: string | null
@@ -16382,12 +17370,14 @@ export type Database = {
           code: string
           created_at: string | null
           created_by: string | null
+          deleted_at: string | null
           description: string | null
           id: string
           is_default: boolean | null
           is_system: boolean | null
           name: string
           organization_id: string | null
+          status: string
           updated_at: string | null
         }
         SetofOptions: {
@@ -16541,10 +17531,13 @@ export type Database = {
         Returns: {
           created_at: string | null
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           description: string | null
           id: string
           is_active: boolean | null
+          is_deleted: boolean
           name: string
           organization_id: string | null
           parent_id: string | null
@@ -16573,10 +17566,13 @@ export type Database = {
         Returns: {
           created_at: string | null
           created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
           department_id: string | null
           description: string | null
           id: string
           is_active: boolean | null
+          is_deleted: boolean
           name: string
           organization_id: string | null
           parent_id: string | null
@@ -16605,6 +17601,9 @@ export type Database = {
           p_location: string
           p_memberships: Json
           p_name: string
+          p_nif_encrypted?: string
+          p_nif_hash?: string
+          p_nif_tokens?: string[]
           p_pending_scopes: Json
           p_phone: string
           p_phones: Json
@@ -16619,6 +17618,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           custom_attributes: Json | null
+          deleted_at: string | null
           description: string | null
           email: string
           email_signature: string | null
@@ -16680,12 +17680,14 @@ export type Database = {
         Args: { p_source: string; p_user_id: string }
         Returns: undefined
       }
-      soft_delete_business_entity:
-        | { Args: { p_id: string; p_kind: string }; Returns: boolean }
-        | {
-            Args: { p_actor_id?: string; p_id: string; p_kind: string }
-            Returns: boolean
-          }
+      set_organization_work_scope: {
+        Args: { is_work_org: boolean; organization_id: string }
+        Returns: Json
+      }
+      soft_delete_business_entity: {
+        Args: { p_actor_id?: string; p_id: string; p_kind: string }
+        Returns: boolean
+      }
       soft_delete_entity_facet: {
         Args: { p_id: string; p_kind: string }
         Returns: boolean

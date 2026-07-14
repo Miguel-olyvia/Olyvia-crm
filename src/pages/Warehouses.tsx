@@ -50,6 +50,7 @@ const Warehouses = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     code: "",
@@ -68,17 +69,22 @@ const Warehouses = () => {
     if (activeCompany?.id) {
       fetchWarehouses();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("warehouses")
         .select("*")
         .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false });
+
+      // Soft-deleted warehouses are hidden from the normal list by default.
+      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setWarehouses(data as WarehouseData[] || []);
@@ -175,17 +181,29 @@ const Warehouses = () => {
     if (!confirm(t("warehouses.delete.confirm"))) return;
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
-
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase.from("warehouses").delete().eq("id", id);
-        if (error) throw error;
-      });
+      const { error } = await supabase.rpc("rpc_delete_warehouse", { p_id: id });
+      if (error) throw error;
 
       toast({
         title: t("warehouses.toast.deleteSuccess"),
       });
+
+      fetchWarehouses();
+    } catch (error: any) {
+      toast({
+        title: t("warehouses.toast.error"),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_warehouse", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t("warehouses.toast.restoreSuccess") || "Armazém restaurado" });
 
       fetchWarehouses();
     } catch (error: any) {
@@ -363,6 +381,13 @@ const Warehouses = () => {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {showDeleted ? (t("warehouses.hideDeleted") || "Ocultar eliminados") : (t("warehouses.showDeleted") || "Ver eliminados")}
+            </Button>
             <PermissionGate permission="warehouses.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
@@ -633,24 +658,38 @@ const Warehouses = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="warehouses.edit">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(warehouse)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="warehouses.delete">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(warehouse.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="warehouses.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(warehouse.id)}
+                            >
+                              {t("warehouses.restore") || "Restaurar"}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <PermissionGate permission="warehouses.edit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditDialog(warehouse)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="warehouses.delete">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(warehouse.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

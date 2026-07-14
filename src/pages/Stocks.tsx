@@ -79,6 +79,7 @@ const Stocks = () => {
     location: "",
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -86,13 +87,13 @@ const Stocks = () => {
       fetchProducts();
       fetchWarehouses();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const fetchStocks = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("stocks")
         .select(`
           *,
@@ -101,6 +102,11 @@ const Stocks = () => {
         `)
         .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false });
+
+      // Soft-deleted stocks are hidden from the normal list by default.
+      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setStocks(data as Stock[] || []);
@@ -144,6 +150,7 @@ const Stocks = () => {
         .from("warehouses")
         .select("id, name")
         .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null)
         .order("name");
 
       if (error) throw error;
@@ -233,18 +240,30 @@ const Stocks = () => {
     if (!confirm(t('stocks.delete.confirm'))) return;
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
-
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase.from("stocks").delete().eq("id", id);
-        if (error) throw error;
-      });
+      const { error } = await supabase.rpc("rpc_delete_stock", { p_id: id });
+      if (error) throw error;
 
       toast({
         title: t('stocks.toast.deleteSuccess'),
         description: t('stocks.toast.deleteSuccessDesc'),
       });
+
+      fetchStocks();
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_stock", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t('stocks.toast.restoreSuccess') || "Stock restaurado" });
 
       fetchStocks();
     } catch (error: any) {
@@ -429,6 +448,13 @@ const Stocks = () => {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {showDeleted ? (t('stocks.hideDeleted') || 'Ocultar eliminados') : (t('stocks.showDeleted') || 'Ver eliminados')}
+            </Button>
             <PermissionGate permission="stocks.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('stocks.export')}
@@ -668,24 +694,38 @@ const Stocks = () => {
                     <TableCell>{getStockStatus(stock)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="stocks.edit">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(stock)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="stocks.delete">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(stock.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="stocks.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(stock.id)}
+                            >
+                              {t('stocks.restore') || 'Restaurar'}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <PermissionGate permission="stocks.edit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditDialog(stock)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="stocks.delete">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(stock.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

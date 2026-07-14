@@ -74,6 +74,7 @@ const Suppliers = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   // Filter data
   const [filterOrganizations, setFilterOrganizations] = useState<FilterOrganization[]>([]);
@@ -168,6 +169,11 @@ const Suppliers = () => {
         countQuery = countQuery.eq("organization_id", activeCompany.id);
       }
 
+      // Soft-deleted suppliers are hidden from the normal list by default.
+      countQuery = showDeleted
+        ? countQuery.not("deleted_at", "is", null)
+        : countQuery.is("deleted_at", null);
+
       // Apply status filter
       if (statusFilter !== "all") {
         countQuery = countQuery.eq("is_active", statusFilter === "active");
@@ -194,6 +200,11 @@ const Suppliers = () => {
       } else if (userType !== "system_admin" && activeCompany?.id) {
         dataQuery = dataQuery.eq("organization_id", activeCompany.id);
       }
+
+      // Soft-deleted suppliers are hidden from the normal list by default.
+      dataQuery = showDeleted
+        ? dataQuery.not("deleted_at", "is", null)
+        : dataQuery.is("deleted_at", null);
 
       // Apply status filter
       if (statusFilter !== "all") {
@@ -226,12 +237,12 @@ const Suppliers = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [companyFilter, statusFilter, searchQuery, userType, t, toast]);
+  }, [companyFilter, statusFilter, searchQuery, showDeleted, userType, t, toast]);
 
   // Debounce search
   useEffect(() => {
     if (!activeCompany?.id && userType !== 'system_admin') return;
-    
+
     const timer = setTimeout(() => {
       setSuppliers([]);
       setHasMore(true);
@@ -239,7 +250,7 @@ const Suppliers = () => {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, statusFilter, companyFilter]);
+  }, [searchQuery, statusFilter, companyFilter, showDeleted]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -309,15 +320,7 @@ const Suppliers = () => {
     if (!supplierToDelete) return;
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) {
-        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-        return;
-      }
-
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase.from("suppliers").delete().eq("id", supplierToDelete.id)
-      );
+      const { error } = await supabase.rpc("rpc_delete_supplier", { p_id: supplierToDelete.id });
 
       if (error) throw error;
 
@@ -333,6 +336,26 @@ const Suppliers = () => {
     } catch (error: any) {
       toast({
         title: t("suppliers.toast.deleteError"),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (supplier: Supplier) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_supplier", { p_id: supplier.id });
+
+      if (error) throw error;
+
+      toast({ title: t("suppliers.toast.restoreSuccess") || "Fornecedor restaurado" });
+
+      setSuppliers([]);
+      setHasMore(true);
+      loadSuppliers(0, true);
+    } catch (error: any) {
+      toast({
+        title: t("suppliers.toast.restoreError") || "Erro ao restaurar",
         description: error.message,
         variant: "destructive",
       });
@@ -509,18 +532,9 @@ const Suppliers = () => {
     if (selectedIds.size === 0) return;
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) {
-        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-        return;
-      }
-
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase
-          .from("suppliers")
-          .delete()
-          .in("id", Array.from(selectedIds))
-      );
+      const { error } = await supabase.rpc("rpc_bulk_delete_supplier", {
+        p_ids: Array.from(selectedIds),
+      });
 
       if (error) throw error;
 
@@ -861,6 +875,18 @@ const Suppliers = () => {
                   </SelectContent>
                 </Select>
 
+                {/* Deleted toggle */}
+                <Button
+                  variant={showDeleted ? "default" : "outline"}
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setShowDeleted((prev) => !prev);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  {showDeleted ? (t('suppliers.hideDeleted') || 'Ocultar eliminados') : (t('suppliers.showDeleted') || 'Ver eliminados')}
+                </Button>
+
                 {/* Clear Filters */}
                 {hasActiveFilters && (
                   <Button variant="outline" onClick={clearFilters}>
@@ -883,17 +909,19 @@ const Suppliers = () => {
         {/* Table Card */}
         <Card>
           <CardContent className="p-6">
-            {/* Bulk Actions Bar */}
-            <BulkActionsBar
-              selectedCount={selectedIds.size}
-              onStatusClick={() => setBulkStatusDialogOpen(true)}
-              onDeleteClick={() => setBulkDeleteDialogOpen(true)}
-              onOrgClick={() => setBulkCompanyDialogOpen(true)}
-              onClearSelection={() => setSelectedIds(new Set())}
-              showOrgAction={true}
-              statusPermission="suppliers.edit"
-              deletePermission="suppliers.delete"
-            />
+            {/* Bulk Actions Bar — not shown while viewing the deleted list */}
+            {!showDeleted && (
+              <BulkActionsBar
+                selectedCount={selectedIds.size}
+                onStatusClick={() => setBulkStatusDialogOpen(true)}
+                onDeleteClick={() => setBulkDeleteDialogOpen(true)}
+                onOrgClick={() => setBulkCompanyDialogOpen(true)}
+                onClearSelection={() => setSelectedIds(new Set())}
+                showOrgAction={true}
+                statusPermission="suppliers.edit"
+                deletePermission="suppliers.delete"
+              />
+            )}
 
             {loading ? (
               <div className="text-center py-8">{t('common.loading')}</div>
@@ -968,34 +996,48 @@ const Suppliers = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {supplier.website && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => window.open(supplier.website!, '_blank')}
-                              title={t('suppliers.form.website')}
-                            >
-                              <Globe className="h-4 w-4" />
-                            </Button>
+                          {showDeleted ? (
+                            <PermissionGate permission="suppliers.delete">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleRestore(supplier)}
+                              >
+                                {t('suppliers.restore') || 'Restaurar'}
+                              </Button>
+                            </PermissionGate>
+                          ) : (
+                            <>
+                              {supplier.website && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(supplier.website!, '_blank')}
+                                  title={t('suppliers.form.website')}
+                                >
+                                  <Globe className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <PermissionGate permission="suppliers.edit">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleEdit(supplier)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </PermissionGate>
+                              <PermissionGate permission="suppliers.delete">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => handleDeleteClick(supplier, e)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </PermissionGate>
+                            </>
                           )}
-                          <PermissionGate permission="suppliers.edit">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(supplier)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </PermissionGate>
-                          <PermissionGate permission="suppliers.delete">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => handleDeleteClick(supplier, e)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </PermissionGate>
                         </div>
                       </TableCell>
                     </TableRow>

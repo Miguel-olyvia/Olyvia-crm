@@ -88,6 +88,7 @@ const PurchaseOrders = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
@@ -268,7 +269,7 @@ const PurchaseOrders = () => {
       setLoading(true);
       loadData();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const loadData = async () => {
     if (!activeCompany?.id) {
@@ -287,12 +288,20 @@ const PurchaseOrders = () => {
         directProductsRes,
         servicesRes,
       ] = await Promise.all([
-        supabase
-          .from("purchase_orders")
-          .select("*, suppliers(name)")
-          .eq("organization_id", companyId)
-          .order("created_at", { ascending: false }),
-        supabase.from("suppliers").select("id, name").eq("organization_id", companyId),
+        (showDeleted
+          ? supabase
+              .from("purchase_orders")
+              .select("*, suppliers(name)")
+              .eq("organization_id", companyId)
+              .not("deleted_at", "is", null)
+              .order("created_at", { ascending: false })
+          : supabase
+              .from("purchase_orders")
+              .select("*, suppliers(name)")
+              .eq("organization_id", companyId)
+              .is("deleted_at", null)
+              .order("created_at", { ascending: false })),
+        supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
         supabase.from("product_organizations").select("product_id").eq("organization_id", companyId),
         supabase.from("products").select("id").eq("organization_id", companyId).is("deleted_at", null),
         supabase
@@ -532,18 +541,30 @@ const PurchaseOrders = () => {
     if (!confirm(t('purchaseOrders.delete.confirm'))) return;
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
-
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase.from("purchase_orders").delete().eq("id", id)
-      );
+      const { error } = await supabase.rpc("rpc_delete_purchase_order", { p_id: id });
 
       if (error) throw error;
 
       toast({
         title: t('purchaseOrders.toast.deleteSuccess'),
       });
+
+      loadData();
+    } catch (error: any) {
+      toast({
+        title: t('purchaseOrders.toast.deleteError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_purchase_order", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t('purchaseOrders.toast.restoreSuccess') || "Encomenda restaurada" });
 
       loadData();
     } catch (error: any) {
@@ -1045,6 +1066,13 @@ const PurchaseOrders = () => {
             <PageFAQSheet pageKey="operations.purchaseOrders" />
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {showDeleted ? (t('purchaseOrders.hideDeleted') || 'Ocultar eliminados') : (t('purchaseOrders.showDeleted') || 'Ver eliminados')}
+            </Button>
             <PermissionGate permission="purchase_orders.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
@@ -1365,23 +1393,37 @@ const PurchaseOrders = () => {
                     <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
-                          <FileDown className="w-4 h-4" />
-                        </Button>
-                        <PermissionGate permission="purchase_orders.edit">
-                          <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="purchase_orders.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(order.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="purchase_orders.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(order.id)}
+                            >
+                              {t('purchaseOrders.restore') || 'Restaurar'}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
+                              <FileDown className="w-4 h-4" />
+                            </Button>
+                            <PermissionGate permission="purchase_orders.edit">
+                              <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="purchase_orders.delete">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDelete(order.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
