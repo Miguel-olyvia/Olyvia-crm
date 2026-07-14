@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Settings2, Pencil, Trash2, Shield, Copy } from "lucide-react";
+import { Plus, Search, Settings2, Pencil, Trash2, Shield, Copy, RotateCcw } from "lucide-react";
 import AttributeOptionPalettesDialog from "@/components/AttributeOptionPalettesDialog";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -126,6 +127,9 @@ export default function ProductAttributes() {
 
   // Delete confirmation dialog state (replaces window.confirm)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // "Eliminados" (soft-deleted) restore dialog state
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
 
   // Valorization-type change confirmation dialog state (replaces window.confirm)
   const [valorizationConfirm, setValorizationConfirm] = useState<{ count: number } | null>(null);
@@ -575,12 +579,19 @@ export default function ProductAttributes() {
             <Settings2 className="w-8 h-8 text-primary" />
             <h1 className="text-3xl font-bold">{t('productAttributes.title')}</h1>
           </div>
-          <PermissionGate permission="product_attributes.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('productAttributes.addAttribute')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="product_attributes.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminados
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="product_attributes.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('productAttributes.addAttribute')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
             <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
               <DialogHeader>
@@ -1040,6 +1051,16 @@ export default function ProductAttributes() {
         onConfirm={() => bulkActions.handleBulkCompanyChange("organization_id")}
         processing={bulkActions.processing}
         companies={[]}
+      />
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="product_attributes"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product_attribute"
+        labelColumns={["label", "code"]}
+        onRestored={() => loadData()}
       />
 
       {palettesAttribute && (
