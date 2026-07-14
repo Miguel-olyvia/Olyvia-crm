@@ -252,7 +252,7 @@ async function resolveEntityData(
   }
 
   if (entityType === "leads") {
-    const { data: lead } = await supabase.from("anew_leads").select("*").eq("id", entityId).single();
+    const { data: lead } = await supabase.from("anew_leads").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (lead) {
       if (lead.entity_id) {
         const ent = await resolveEntity(lead.entity_id);
@@ -267,7 +267,7 @@ async function resolveEntityData(
       vars.lead_source = lead.source || "";
     }
   } else if (entityType === "proposals") {
-    const { data: p } = await supabase.from("proposals").select("*").eq("id", entityId).single();
+    const { data: p } = await supabase.from("proposals").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (p) {
       vars.proposal_title = p.title || "";
       vars.proposal_value = p.value ? `€${Number(p.value).toLocaleString("pt-PT")}` : "";
@@ -280,7 +280,7 @@ async function resolveEntityData(
       }
     }
   } else if (entityType === "quotes") {
-    const { data: q } = await supabase.from("quotes").select("*").eq("id", entityId).single();
+    const { data: q } = await supabase.from("quotes").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (q) {
       vars.quote_number = q.quote_number || "";
       vars.quote_value = q.total ? `€${Number(q.total).toLocaleString("pt-PT")}` : "";
@@ -298,7 +298,7 @@ async function resolveEntityData(
       }
     }
   } else if (entityType === "contracts") {
-    const { data: c } = await supabase.from("client_contracts").select("*").eq("id", entityId).single();
+    const { data: c } = await supabase.from("client_contracts").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (c) {
       vars.contract_number = c.contract_number || "";
       vars.contract_value = c.total_value ? `€${Number(c.total_value).toLocaleString("pt-PT")}` : "";
