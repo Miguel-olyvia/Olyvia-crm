@@ -117,7 +117,7 @@ export async function resolveSmtpForAuthenticatedUser(
       return { smtp: userSmtp, source: "user", metadata: safeSmtpMetadata(userSmtp, "user", { auth_user_id: authUserId, organization_id: organizationId }) };
     }
     const { data: orgSmtp } = await supabase.from("organization_smtp_settings").select("*").eq("id", smtpId).eq("is_active", true).maybeSingle();
-    if (orgSmtp) {
+    if (orgSmtp && (!organizationId || orgSmtp.organization_id === organizationId)) {
       return { smtp: orgSmtp, source: "organization", metadata: safeSmtpMetadata(orgSmtp, "organization", { organization_id: organizationId }) };
     }
   }

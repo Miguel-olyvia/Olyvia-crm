@@ -118,6 +118,7 @@ serve(async (req) => {
         .from("lead_ai_scheduling_rules")
         .select("*")
         .eq("campaign_id", campaign_id)
+        .eq("organization_id", organization_id)
         .eq("is_active", true)
         .order("priority", { ascending: false })
         .limit(1)

@@ -254,6 +254,20 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (inviteError) throw inviteError;
 
+        // For org-scoped invitee types, invitee.id is an organization id
+        // (company/business_unit/business_area) chosen client-side from a
+        // dropdown — it is never re-validated to be within the caller's own
+        // scope. Without this check, a caller could target any organization
+        // id and have this function (via the residual service_role admin
+        // client) resolve and notify all of that organization's members.
+        if (invitee.type === "company" || invitee.type === "business_unit" || invitee.type === "business_area") {
+          const inviteeOrgInScope = await validateOrgScope(supabaseClient, caller, invitee.id);
+          if (!inviteeOrgInScope) {
+            results.push({ invitee_id: invitee.id, status: "error", error: "Organization out of scope" });
+            continue;
+          }
+        }
+
         const users = await getUsersFromEntity(supabaseAdmin, invitee.type, invitee.id);
 
         for (const user of users) {

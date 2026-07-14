@@ -374,11 +374,30 @@ serve(async (req: Request) => {
     // function directly, so never allow a user to be created with zero
     // organization memberships. Checked here, before the auth user is created,
     // so a rejected request never leaves behind an orphaned auth.users row.
-    if (normalizeMemberships(memberships, membership).length === 0) {
+    const normalizedMembershipsForScopeCheck = normalizeMemberships(memberships, membership);
+    if (normalizedMembershipsForScopeCheck.length === 0) {
       return jsonError(
         "membership_required",
         "At least one valid organization membership is required to create a user.",
       );
+    }
+
+    // Scope check: a non-system_admin admin (super_admin/org_admin) may only
+    // grant memberships in organizations they themselves administer. Without
+    // this, an org_admin of org A could create a user with a membership in
+    // org B by simply passing org B's id in the request body.
+    if (!caller.roleCodes.includes("system_admin")) {
+      const requestedOrgIds = new Set(
+        normalizedMembershipsForScopeCheck.map((m: any) => m.organization_id),
+      );
+      const outOfScopeOrgId = [...requestedOrgIds].find((orgId) => !caller.orgIds.includes(orgId));
+      if (outOfScopeOrgId) {
+        return jsonError(
+          "organization_out_of_scope",
+          "You do not have permission to create a user in one or more of the requested organizations.",
+          403,
+        );
+      }
     }
 
     const preparedAddressResult = prepareAddresses(addresses);

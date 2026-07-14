@@ -137,7 +137,14 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    const campaignId = campaignData?.id || 'bbbb2222-2222-2222-2222-222222222222';
+    if (!campaignData?.id) {
+      console.error("No campaign configured for organization:", companyId);
+      return new Response(
+        JSON.stringify({ error: "No campaign configured for this organization" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const campaignId = campaignData.id;
 
     // Check if we need to look up client data
     let clientLookupResult: any = null;

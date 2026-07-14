@@ -46,12 +46,20 @@ serve(async (req) => {
     const { entity_type, entity_id, new_phase, organization_id, triggered_by } = parsed.data;
     console.log("Template trigger:", { entity_type, entity_id, new_phase, organization_id, triggered_by });
 
+    if (!organization_id) {
+      return new Response(JSON.stringify({ error: "organization_id is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: templates } = await supabase
       .from("email_templates")
       .select("*")
       .eq("module", entity_type)
       .eq("trigger_phase", new_phase)
       .eq("is_active", true)
+      .eq("organization_id", organization_id)
       .in("trigger_type", ["automatic", "semi_automatic"]);
 
     if (!templates || templates.length === 0) {

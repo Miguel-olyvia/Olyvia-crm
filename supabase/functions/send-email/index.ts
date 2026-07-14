@@ -143,12 +143,17 @@ const handler = async (req: Request): Promise<Response> => {
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
     // ── Scope check: validate organization access (skip for service role & test mode) ──
-    if (!isServiceRole && !test && organization_id) {
+    // Validates company_id too, not just organization_id: resolveSmtpForAuthenticatedUser
+    // below is called with `organization_id || company_id`, so leaving company_id
+    // unchecked would let a caller bypass this entire block by sending company_id
+    // instead of organization_id.
+    const effectiveOrgIdForScopeCheck = organization_id || company_id;
+    if (!isServiceRole && !test && effectiveOrgIdForScopeCheck) {
       const { data: membership } = await supabaseClient
         .from("anew_memberships")
         .select("id")
         .eq("user_id", callerAnewUserId)
-        .eq("organization_id", organization_id)
+        .eq("organization_id", effectiveOrgIdForScopeCheck)
         .eq("status", "active")
         .maybeSingle();
 
@@ -164,7 +169,7 @@ const handler = async (req: Request): Promise<Response> => {
         const { data: hierarchyMatch } = await supabaseClient
           .from("anew_hierarchy")
           .select("id")
-          .eq("child_org_id", organization_id)
+          .eq("child_org_id", effectiveOrgIdForScopeCheck)
           .in("parent_org_id", userOrgIds)
           .maybeSingle();
 
