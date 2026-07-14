@@ -5,7 +5,7 @@
  * is never invoked in the test process. The Supabase admin client and the
  * decryption key provider are injected via NifRevealDeps, following the same
  * "extract logic, inject dependencies" pattern used elsewhere in this repo's
- * *.test.ts files (see nif-write-proxy/index.test.ts, nif-backfill/index.test.ts).
+ * *.test.ts files (see nif-write-proxy/index.test.ts).
  */
 
 import {
