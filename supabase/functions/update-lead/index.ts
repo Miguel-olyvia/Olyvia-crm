@@ -400,7 +400,8 @@ Deno.serve(async (req) => {
           .select("id")
           .eq("campaign_id", campaignId)
           .neq("id", targetId)
-          .filter(`field_values->>${field.field_key}`, "eq", candidate);
+          .filter(`field_values->>${field.field_key}`, "eq", candidate)
+          .limit(1);
 
         if (existingLeads && existingLeads.length > 0) {
           return new Response(

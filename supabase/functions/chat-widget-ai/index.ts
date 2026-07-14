@@ -157,7 +157,8 @@ serve(async (req) => {
         .from("anew_leads")
         .select("id, field_values, client_id, entity_id")
         .eq("organization_id", companyId)
-        .or(`field_values->>phone.ilike.%${phoneClean}%,field_values->>phone.ilike.%${clientPhone}%`);
+        .or(`field_values->>phone.ilike.%${phoneClean}%,field_values->>phone.ilike.%${clientPhone}%`)
+        .limit(1);
 
       let matchedLead = leads?.[0];
       let matchedClientId = matchedLead?.client_id;
