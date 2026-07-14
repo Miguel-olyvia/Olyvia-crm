@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, FolderTree, Pencil, Trash2, Tag } from "lucide-react";
+import { Plus, Search, FolderTree, Pencil, Trash2, Tag, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import CategoryAttributePricesDialog from "@/components/CategoryAttributePricesDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -65,6 +66,7 @@ export default function ProductCategories() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [catPricesOpen, setCatPricesOpen] = useState(false);
@@ -135,6 +137,7 @@ export default function ProductCategories() {
         .from("product_categories")
         .select("*")
         .is("parent_id", null)
+        .is("deleted_at", null)
         .order("path")
         .range(from, to);
 
@@ -535,12 +538,19 @@ export default function ProductCategories() {
               )}
             </div>
           </div>
-          <PermissionGate permission="product_categories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('productCategories.addCategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="product_categories.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminados
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="product_categories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('productCategories.addCategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
             <DialogContent>
               <DialogHeader>
@@ -788,6 +798,16 @@ export default function ProductCategories() {
           companyId={activeCompany?.id || ''}
         />
       )}
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="product_categories"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product_category"
+        labelColumns={["name", "path"]}
+        onRestored={() => loadData(true)}
+      />
     </>
   );
 }

@@ -44,7 +44,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Search, Package, Edit, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload, Loader2 } from "lucide-react";
+import { Plus, Search, Package, Edit, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload, Loader2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialogs";
 import BundleFormDialog from "@/components/bundles/BundleFormDialog";
@@ -99,6 +100,7 @@ const Bundles = () => {
   
   // Import/Export state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const importAbortRef = useRef<AbortController | null>(null);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
@@ -701,6 +703,11 @@ const Bundles = () => {
           </div>
           
           <div className="flex gap-2">
+            <PermissionGate permission="products.manage">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Eliminados
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="products.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('common.export') || 'Exportar'}
@@ -1021,6 +1028,16 @@ const Bundles = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="bundles"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_bundle"
+        labelColumns={["sku", "name"]}
+        onRestored={loadBundles}
+      />
     </>
   );
 };

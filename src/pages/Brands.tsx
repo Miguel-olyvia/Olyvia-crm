@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Tags, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, Tags, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -68,6 +69,7 @@ export default function Brands() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -130,6 +132,7 @@ export default function Brands() {
         .from("brands")
         .select("id, name, slug, description, logo_url, website, organization_id, is_active")
         .in("id", brandIdsToFilter)
+        .is("deleted_at", null)
         .order("name");
 
       if (filterStatus !== "all") {
@@ -408,12 +411,19 @@ export default function Brands() {
             <Tags className="w-8 h-8 text-primary" />
             <h1 className="text-3xl font-bold">{t('brands.title')}</h1>
           </div>
-          <PermissionGate permission="brands.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('brands.addBrand')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="brands.edit">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminadas
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="brands.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('brands.addBrand')}
+              </Button>
+            </PermissionGate>
+          </div>
         </div>
 
         <Dialog open={open} onOpenChange={handleCloseDialog}>
@@ -682,6 +692,16 @@ export default function Brands() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="brands"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_brand"
+        labelColumns={["name"]}
+        onRestored={loadData}
+      />
     </>
   );
 }

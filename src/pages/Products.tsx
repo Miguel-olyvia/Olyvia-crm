@@ -3,7 +3,8 @@ import { z } from "zod";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2 } from "lucide-react";
+import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
 import ProductPricesDialog from "@/components/ProductPricesDialog";
@@ -146,6 +147,7 @@ export default function Products() {
   } | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [editingCell, setEditingCell] = useState<{productId: string; field: string} | null>(null);
   const [editingValue, setEditingValue] = useState<string>("");
   const [pricesDialogOpen, setPricesDialogOpen] = useState(false);
@@ -797,32 +799,17 @@ export default function Products() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
-      // Soft delete - mark as deleted instead of removing
-      // .select("id") lets us detect the no-op case: if the row's organization_id
-      // doesn't match activeCompany.id (e.g. mis-scoped via the org combobox bug),
-      // the .eq filters match 0 rows and Supabase returns { data: [], error: null }
-      // — a false success would otherwise be reported with no audit log written.
-      const { data: updatedRows, error } = await withAuditContext(supabase, businessUserId, () =>
-        supabase
-          .from("products")
-          .update({
-            is_deleted: true,
-            deleted_at: new Date().toISOString(),
-            deleted_by: businessUserId,
-          })
-          .eq("id", id)
-          .eq("organization_id", activeCompany.id)
-          .select("id")
-      );
+      // Soft delete via a single-transaction RPC (rpc_delete_product) instead of
+      // withAuditContext's two separate PostgREST calls — the same audit-source
+      // bug already found and fixed for user delete (set_audit_context does not
+      // survive across two independent transactions).
+      const { error } = await supabase.rpc("rpc_delete_product", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
+      });
 
       if (error) throw error;
-
-      if (!updatedRows || updatedRows.length === 0) {
-        throw new Error(t('products.toast.deleteNotFound') || "Produto não encontrado ou fora do âmbito.");
-      }
 
       toast({
         title: t('products.toast.success'),
@@ -1694,6 +1681,11 @@ export default function Products() {
             <PageFAQSheet pageKey="catalog.products" />
           </div>
           <div className="flex gap-2">
+            <PermissionGate permission="products.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Eliminados
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="products.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('products.export')}
@@ -2743,6 +2735,16 @@ export default function Products() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="products"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product"
+        labelColumns={["sku", "name"]}
+        onRestored={loadData}
+      />
     </>
   );
 }

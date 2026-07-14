@@ -160,6 +160,7 @@ export default function ProductAttributes() {
         .from("product_attributes")
         .select("*")
         .eq("organization_id", companyIdToFilter)
+        .is("deleted_at", null)
         .order("sort_order");
 
       if (error) throw error;
@@ -342,17 +343,13 @@ export default function ProductAttributes() {
     }
 
     try {
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
-
-      await withAuditContext(supabase, businessUserId, async () => {
-        const { error } = await supabase
-          .from("product_attributes")
-          .delete()
-          .eq("id", id)
-          .eq("organization_id", activeCompany.id);
-        if (error) throw error;
+      // Soft delete via a single-transaction RPC (rpc_delete_product_attribute)
+      // instead of a raw hard DELETE — nothing in the app may be irreversible.
+      const { error } = await supabase.rpc("rpc_delete_product_attribute", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
       });
+      if (error) throw error;
 
       toast({
         title: t('productAttributes.toast.success'),

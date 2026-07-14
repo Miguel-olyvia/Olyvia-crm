@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Pencil, Trash2, Tag } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Tag, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import CategoryAttributePricesDialog from "@/components/CategoryAttributePricesDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -93,6 +94,7 @@ export default function ProductSubcategories() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [subcategoryToDelete, setSubcategoryToDelete] = useState<string | null>(null);
   const [editingSubcategory, setEditingSubcategory] = useState<ProductSubcategory | null>(null);
@@ -287,6 +289,7 @@ export default function ProductSubcategories() {
           parent:parent_id(name)
         `)
         .not("parent_id", "is", null)
+        .is("deleted_at", null)
         .order("path")
         .range(from, to);
 
@@ -654,12 +657,19 @@ export default function ProductSubcategories() {
             <h1 className="text-3xl font-bold">{t('productSubcategories.title')}</h1>
             <p className="text-muted-foreground">{t('productSubcategories.subtitle')}</p>
           </div>
-          <PermissionGate permission="product_subcategories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('productSubcategories.addSubcategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="product_subcategories.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminados
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="product_subcategories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('productSubcategories.addSubcategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogContent>
               <DialogHeader>
@@ -986,6 +996,16 @@ export default function ProductSubcategories() {
           companyId={activeCompany?.id || ''}
         />
       )}
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="product_categories"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product_subcategory"
+        labelColumns={["name", "path"]}
+        onRestored={() => loadData(true)}
+      />
     </>
   );
 }
