@@ -53,10 +53,6 @@ verify_jwt = false
 [functions.send-proposal-email]
 verify_jwt = true
 
-[functions.send-verification-code]
-verify_jwt = false
-
-
 [functions.generate-proposal-ai]
 verify_jwt = true
 
