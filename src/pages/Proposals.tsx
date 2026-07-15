@@ -901,7 +901,7 @@ const Proposals = () => {
         ]);
         if (entRes.data) {
           setSelectedEntity({
-            type: "contact",
+            type: entRes.data.type === "client" ? "client" : "lead",
             id: propEntityId,
             entityId: propEntityId,
             name: entRes.data.display_name,
@@ -2516,15 +2516,15 @@ const Proposals = () => {
                       {/* Entity (contact/client) — only shown when no Deal is selected */}
                       {!selectedDeal && !formData.deal_id && (
                         <div className="col-span-2 space-y-2">
-                          <Label>Contacto ou Cliente</Label>
+                          <Label>Lead ou Cliente</Label>
                           <EntitySearchInput
                             value={selectedEntity}
                             onChange={handleEntityChange}
-                            searchTypes={["contact", "client"]}
-                            placeholder="Pesquisar contacto ou cliente para associar..."
+                            searchTypes={["lead", "client"]}
+                            placeholder="Pesquisar lead ou cliente para associar..."
                           />
                           <p className="text-xs text-muted-foreground">
-                            Opcional — associe um contacto ou cliente diretamente quando não existe Pedido de Proposta.
+                            Opcional — associe um lead ou cliente diretamente quando não existe Pedido de Proposta.
                           </p>
                         </div>
                       )}

@@ -1,13 +1,13 @@
 // Fase 4.E — search_entities (pesquisa global cross-kind)
-// Devolve uma mistura de leads/contacts/clients/deals/quotes/proposals/contracts
+// Devolve uma mistura de leads/clients/deals/quotes/proposals/contracts
 // num único payload, evitando ter de chamar 7 tools distintas.
 // Read-only; RLS controla visibilidade. Org-scoping via <table>.organization_id directo.
 
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
-type Kind = "lead" | "contact" | "client" | "deal" | "quote" | "proposal" | "contract";
+type Kind = "lead" | "client" | "deal" | "quote" | "proposal" | "contract";
 
-const ALL_KINDS: Kind[] = ["lead", "contact", "client", "deal", "quote", "proposal", "contract"];
+const ALL_KINDS: Kind[] = ["lead", "client", "deal", "quote", "proposal", "contract"];
 
 type Item = {
   kind: Kind;
@@ -22,7 +22,7 @@ export const searchEntitiesDef: ToolDef = {
   function: {
     name: "search_entities",
     description:
-      "Pesquisa global numa organização: devolve leads, contactos, clientes, PPs (deals), orçamentos, propostas e contratos que combinem com `query` (nome, título ou número canónico tipo Q-/P-/C-). Mínimo 2 caracteres. Use isto quando o utilizador disser 'abre/encontra/onde está X' sem indicar o tipo exacto. Para listar sem termo de pesquisa, usar as tools list_* dedicadas.",
+      "Pesquisa global numa organização: devolve leads, clientes, PPs (deals), orçamentos, propostas e contratos que combinem com `query` (nome, título ou número canónico tipo Q-/P-/C-). Mínimo 2 caracteres. Use isto quando o utilizador disser 'abre/encontra/onde está X' sem indicar o tipo exacto. Para listar sem termo de pesquisa, usar as tools list_* dedicadas.",
     parameters: {
       type: "object",
       properties: {
@@ -89,27 +89,6 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
             label: row.anew_entities?.display_name ?? "(sem nome)",
             secondary: row.status ?? null,
             link: `/leads?open=${row.id}`,
-          })),
-        ),
-    );
-  }
-
-  if (kinds.includes("contact")) {
-    tasks.push(
-      supabase
-        .from("anew_contacts")
-        .select("id, position, anew_entities!inner(display_name)")
-        .eq("organization_id", organizationId)
-        .is("deleted_at", null)
-        .ilike("anew_entities.display_name", pattern)
-        .limit(PER)
-        .then((r: any) =>
-          (r.data ?? []).map((row: any): Item => ({
-            kind: "contact",
-            id: row.id,
-            label: row.anew_entities?.display_name ?? "(sem nome)",
-            secondary: row.position ?? null,
-            link: `/contacts?open=${row.id}`,
           })),
         ),
     );
@@ -241,7 +220,7 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
     .map((x) => x.it);
 
   const counts: Record<Kind, number> = {
-    lead: 0, contact: 0, client: 0, deal: 0, quote: 0, proposal: 0, contract: 0,
+    lead: 0, client: 0, deal: 0, quote: 0, proposal: 0, contract: 0,
   };
   for (const it of items) counts[it.kind] += 1;
 
