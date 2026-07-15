@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 
 initSentry();
 
@@ -29,10 +30,7 @@ serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
+    getAiGatewayKey();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -137,7 +135,14 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    const campaignId = campaignData?.id || 'bbbb2222-2222-2222-2222-222222222222';
+    if (!campaignData?.id) {
+      console.error("No campaign configured for organization:", companyId);
+      return new Response(
+        JSON.stringify({ error: "No campaign configured for this organization" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const campaignId = campaignData.id;
 
     // Check if we need to look up client data
     let clientLookupResult: any = null;
@@ -197,6 +202,7 @@ serve(async (req) => {
             .from("proposals")
             .select("id, title, status, value, created_at, valid_until, stage_id, proposal_workflow_stages(stage_name)")
             .eq("client_id", matchedClientId)
+            .eq("organization_id", companyId)
             .order("created_at", { ascending: false })
             .limit(5);
           proposals = proposalData || [];
@@ -207,6 +213,7 @@ serve(async (req) => {
             .from("schedule_items")
             .select("id, title, start_datetime, end_datetime, status, notes")
             .eq("client_id", matchedClientId)
+            .eq("organization_id", companyId)
             .gte("start_datetime", new Date().toISOString())
             .order("start_datetime", { ascending: true })
             .limit(3);
@@ -501,20 +508,13 @@ IMPORTANTE:
 - is_complete=true APENAS quando todos os campos obrigatórios estiverem preenchidos (modo lead_capture) OU quando já mostrou as informações do cliente (modo client_lookup)
 - Se o cliente foi encontrado e já viu as suas propostas/visitas, marca is_complete=true`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages
-        ],
-        temperature: 0.7,
-      }),
+    const response = await callAiGateway({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages
+      ],
+      temperature: 0.7,
     });
 
     if (!response.ok) {

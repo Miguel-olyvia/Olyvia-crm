@@ -725,6 +725,7 @@ Deno.serve(async (req) => {
         .from('anew_entity_roles')
         .select('role, status')
         .eq('entity_id', entityId)
+        .eq('organization_id', organization_id)
         .in('role', ['contact', 'client'])
         .eq('status', 'active');
       existingRoles = (roles || []).map(r => r.role);

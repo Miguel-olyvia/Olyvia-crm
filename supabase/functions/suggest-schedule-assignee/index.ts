@@ -15,6 +15,7 @@ const requestSchema = z.object({
 import { corsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway } from "../_shared/aiGateway.ts";
 
 initSentry();
 
@@ -107,8 +108,6 @@ serve(async (req) => {
     }
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, organization_id || caller.anewUserId);
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-
     // 1. Load AI Scheduling Rules (campaign-specific, then organization, then template)
     let rules: AISchedulingRules;
     
@@ -118,6 +117,7 @@ serve(async (req) => {
         .from("lead_ai_scheduling_rules")
         .select("*")
         .eq("campaign_id", campaign_id)
+        .eq("organization_id", organization_id)
         .eq("is_active", true)
         .order("priority", { ascending: false })
         .limit(1)
@@ -385,7 +385,7 @@ serve(async (req) => {
     });
 
     // 6. Use AI to analyze and suggest best assignees
-    if (!LOVABLE_API_KEY) {
+    if (!Deno.env.get("GEMINI_API_KEY")) {
       // Fallback without AI
       const availableAssignees = assigneeSchedules
         .filter(assignee => {
@@ -496,20 +496,13 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
   }
 ]`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.3
-      }),
+    const aiResponse = await callAiGateway({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.3
     });
 
     if (!aiResponse.ok) {

@@ -30,6 +30,7 @@ const requestSchema = z.object({
   title: z.string(),
   board_id: z.string().optional(),
   description: z.string().optional(),
+  lead_id: z.string().optional(),
   client_id: z.string().optional(),
   contact_id: z.string().optional(),
   deal_id: z.string().optional(),
@@ -128,6 +129,7 @@ interface ScheduleRequest {
   board_id?: string;
   title: string;
   description?: string;
+  lead_id?: string;
   client_id?: string;
   contact_id?: string;
   deal_id?: string;
@@ -361,7 +363,8 @@ Deno.serve(async (req) => {
               .rpc('get_resource_available_slots', {
                 p_resource_id: resource.id,
                 p_date: date,
-                p_duration_minutes: duration
+                p_duration_minutes: duration,
+                p_organization_id: companyId
               });
 
             return {
@@ -401,11 +404,26 @@ Deno.serve(async (req) => {
       }
       const { resource_id: resourceId, date, duration } = slotsParsed.data;
 
+      const { data: ownedResource, error: ownedResourceError } = await supabase
+        .from('schedule_resources')
+        .select('id')
+        .eq('id', resourceId)
+        .eq('organization_id', companyId)
+        .maybeSingle();
+
+      if (ownedResourceError || !ownedResource) {
+        return new Response(
+          JSON.stringify({ error: 'Resource not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
       const { data: slots, error: slotsError } = await supabase
         .rpc('get_resource_available_slots', {
           p_resource_id: resourceId,
           p_date: date,
-          p_duration_minutes: duration
+          p_duration_minutes: duration,
+          p_organization_id: companyId
         });
 
       if (slotsError) {
@@ -444,9 +462,44 @@ async function processScheduleRequest(
   companyId: string | null,
   userId: string | null
 ): Promise<AutoScheduleResult> {
-  const effectiveCompanyId = request.organization_id || companyId;
   const durationMinutes = request.duration_minutes || 60;
-  const businessUserId = userId ? await resolveBusinessUserId(supabase, userId) : null;
+  let businessUserId = userId ? await resolveBusinessUserId(supabase, userId) : null;
+
+  // SECURITY: companyId comes from a trusted source (validated API key token,
+  // or the insert-lead internally-trusted service-role call) and must always
+  // win over a body-supplied organization_id. Never let an attacker pick an
+  // arbitrary organization by sending organization_id in the request body.
+  // A body-supplied organization_id is only honored when there is no trusted
+  // companyId (plain JWT auth), and only after confirming the caller actually
+  // holds an active membership in that organization.
+  const effectiveCompanyId = await resolveEffectiveOrganizationId(
+    supabase,
+    request.organization_id,
+    companyId,
+    businessUserId
+  );
+  if (!effectiveCompanyId) {
+    return { success: false, error: 'organization_id is required and must belong to the authenticated user' };
+  }
+
+  // Machine-triggered calls (X-API-Key from ScheduleTestForm, or insert-lead's
+  // internally-trusted call right after a public form submission) have no
+  // plain-JWT userId and therefore no businessUserId yet. Inherit created_by
+  // from the lead this schedule request originated from — insert-lead already
+  // resolves a real org-admin anew_users.id as the lead's created_by when it
+  // creates the lead (no human caller there either), so this reuses that same
+  // resolved actor instead of requiring a JWT that these callers don't have.
+  // Mirrors pipeline-automation's resolveCreatedByForAction fallback pattern.
+  if (!businessUserId && request.lead_id) {
+    const { data: lead } = await supabase
+      .from('anew_leads')
+      .select('created_by')
+      .eq('id', request.lead_id)
+      .eq('organization_id', effectiveCompanyId)
+      .maybeSingle();
+    businessUserId = lead?.created_by || null;
+  }
+
   if (!businessUserId) {
     return { success: false, error: 'Business user could not be resolved for scheduling' };
   }
@@ -461,6 +514,7 @@ async function processScheduleRequest(
         .from('campaigns')
         .select('has_scheduling')
         .eq('id', request.campaign_id)
+        .eq('organization_id', effectiveCompanyId)
         .single();
 
       if (campaignError) {
@@ -498,6 +552,7 @@ async function processScheduleRequest(
           .from('schedule_boards')
           .select('id')
           .eq('is_active', true)
+          .eq('organization_id', effectiveCompanyId)
           .limit(1);
         boardId = boards?.[0]?.id;
       }
@@ -515,7 +570,8 @@ async function processScheduleRequest(
         durationMinutes,
         request.preferred_time_start,
         request.preferred_time_end,
-        rule
+        rule,
+        effectiveCompanyId
       );
 
       if (!result) {
@@ -598,11 +654,8 @@ async function processScheduleRequest(
     let resourceQuery = supabase
       .from('schedule_resources')
       .select('*')
-      .eq('is_active', true);
-    
-    if (effectiveCompanyId) {
-      resourceQuery = resourceQuery.eq('organization_id', effectiveCompanyId);
-    }
+      .eq('is_active', true)
+      .eq('organization_id', effectiveCompanyId);
 
     if (request.preferred_resource_ids && request.preferred_resource_ids.length > 0) {
       resourceQuery = resourceQuery.in('id', request.preferred_resource_ids);
@@ -626,7 +679,8 @@ async function processScheduleRequest(
       request.preferred_date,
       request.preferred_time_start,
       request.preferred_time_end,
-      rule
+      rule,
+      effectiveCompanyId
     );
 
     if (!slot) {
@@ -707,8 +761,9 @@ async function processScheduleRequest(
         .from('schedule_boards')
         .select('id')
         .eq('is_active', true)
+        .eq('organization_id', effectiveCompanyId)
         .limit(1);
-      
+
       boardId = boards?.[0]?.id;
     }
 
@@ -751,6 +806,48 @@ async function processScheduleRequest(
   }
 }
 
+// SECURITY: Determines which organization_id is safe to use as the tenant
+// filter for the rest of the request. A trusted companyId (resolved from a
+// validated API key token, or from the insert-lead internally-trusted
+// service-role call) always wins. A body-supplied organization_id is only
+// used as a fallback (plain JWT auth, no trusted companyId), and only after
+// confirming the authenticated business user actually holds an active
+// membership in that organization — otherwise a caller could pass an
+// arbitrary organization_id in the request body and read/write another
+// tenant's schedule data.
+async function resolveEffectiveOrganizationId(
+  supabase: any,
+  requestedOrganizationId: string | undefined,
+  trustedCompanyId: string | null,
+  businessUserId: string | null
+): Promise<string | null> {
+  if (trustedCompanyId) {
+    return trustedCompanyId;
+  }
+
+  if (!requestedOrganizationId || !businessUserId) {
+    return null;
+  }
+
+  const { data: membership, error } = await supabase
+    .from('anew_memberships')
+    .select('organization_id')
+    .eq('user_id', businessUserId)
+    .eq('organization_id', requestedOrganizationId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (error || !membership) {
+    console.error('resolveEffectiveOrganizationId: membership check failed or not found', error);
+    return null;
+  }
+
+  // Return the DB-verified value (not the raw body string) so downstream
+  // consumers (e.g. the auto_schedule_rules .or() filter) never interpolate
+  // unvalidated user input.
+  return membership.organization_id;
+}
+
 async function resolveBusinessUserId(supabase: any, authUserId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from('anew_users')
@@ -775,9 +872,10 @@ async function findNearestAvailableSlot(
   durationMinutes: number,
   preferredTimeStart?: string,
   preferredTimeEnd?: string,
-  rule?: any
+  rule?: any,
+  organizationId?: string | null
 ): Promise<{ resource: { id: string; name: string }; slot: { start: string; end: string }; distance_km: number; travel_time_minutes: number } | null> {
-  
+
   const maxDaysToSearch = 14; // Search up to 2 weeks ahead
 
   // Get all active resources with their service areas
@@ -787,7 +885,8 @@ async function findNearestAvailableSlot(
       *,
       service_areas:resource_service_areas(postal_code_prefix, priority, max_distance_km)
     `)
-    .eq('is_active', true);
+    .eq('is_active', true)
+    .eq('organization_id', organizationId);
 
   if (resourcesError || !allResources || allResources.length === 0) {
     console.error('Error fetching resources:', resourcesError);
@@ -869,7 +968,8 @@ async function findNearestAvailableSlot(
         .rpc('get_resource_available_slots', {
           p_resource_id: resource.id,
           p_date: dateStr,
-          p_duration_minutes: durationMinutes
+          p_duration_minutes: durationMinutes,
+          p_organization_id: organizationId
         });
 
       if (slotsError || !slots || slots.length === 0) {
@@ -943,9 +1043,10 @@ async function findAvailableSlot(
   preferredDate?: string,
   preferredTimeStart?: string,
   preferredTimeEnd?: string,
-  rule?: any
+  rule?: any,
+  organizationId?: string | null
 ): Promise<{ start: string; end: string; resourceId: string; boardId?: string } | null> {
-  
+
   const searchDate = preferredDate || new Date().toISOString().split('T')[0];
   const maxDaysToSearch = 14;
 
@@ -954,8 +1055,9 @@ async function findAvailableSlot(
     .from('schedule_boards')
     .select('id')
     .eq('is_active', true)
+    .eq('organization_id', organizationId)
     .limit(1);
-  
+
   const defaultBoardId = boards?.[0]?.id;
 
   for (let dayOffset = 0; dayOffset < maxDaysToSearch; dayOffset++) {
@@ -1005,7 +1107,8 @@ async function findAvailableSlot(
         .rpc('get_resource_available_slots', {
           p_resource_id: resource.id,
           p_date: dateStr,
-          p_duration_minutes: durationMinutes
+          p_duration_minutes: durationMinutes,
+          p_organization_id: organizationId
         });
 
       if (slotsError || !slots || slots.length === 0) {

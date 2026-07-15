@@ -164,6 +164,30 @@ const CollapsedSection = memo(function CollapsedSection({
     setPopoverPos({ top, left, maxHeight });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setPopoverPos(null);
+      return;
+    }
+
+    updatePopoverPos();
+
+    const handle = () => updatePopoverPos();
+    window.addEventListener("resize", handle);
+    window.addEventListener("scroll", handle, true);
+
+    return () => {
+      window.removeEventListener("resize", handle);
+      window.removeEventListener("scroll", handle, true);
+    };
+  }, [isOpen, updatePopoverPos]);
+
   const Icon = section.icon;
   const visibleItems = section.items.filter(canViewItem);
   const visibleSubSections = section.subSections
@@ -190,30 +214,6 @@ const CollapsedSection = memo(function CollapsedSection({
     setIsOpen(false);
     navigate(to);
   };
-
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setPopoverPos(null);
-      return;
-    }
-
-    updatePopoverPos();
-
-    const handle = () => updatePopoverPos();
-    window.addEventListener("resize", handle);
-    window.addEventListener("scroll", handle, true);
-
-    return () => {
-      window.removeEventListener("resize", handle);
-      window.removeEventListener("scroll", handle, true);
-    };
-  }, [isOpen, updatePopoverPos]);
 
   return (
     <div

@@ -143,6 +143,7 @@ serve(async (req: Request) => {
         .from("proposals")
         .select("id, title, entity_id, deal_id, client_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!proposal) {
@@ -179,6 +180,7 @@ serve(async (req: Request) => {
         .from("quotes")
         .select("id, quote_number, title, entity_id, cliente_id, deal_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!quote) {
@@ -210,6 +212,7 @@ serve(async (req: Request) => {
         .from("client_contracts")
         .select("id, contract_number, entity_id, client_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!contract) {

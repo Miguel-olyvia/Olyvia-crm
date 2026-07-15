@@ -554,13 +554,17 @@ serve(async (req) => {
           const resolvedOrgId = proposal.organization_id || orgId;
           const resolvedRootOrgId = proposal.root_organization_id || resolvedOrgId;
 
-          // Resolve client_id from anew_clients via entity_id
+          // Resolve client_id from anew_clients via entity_id (scoped to this
+          // proposal's organization — an entity can have anew_clients rows in
+          // more than one org, so an unscoped lookup could pick another
+          // tenant's client id here).
           let clientId = null;
           if (resolvedEntityId) {
             const { data: anewClient } = await supabase
               .from("anew_clients")
               .select("id")
               .eq("entity_id", resolvedEntityId)
+              .eq("organization_id", resolvedOrgId)
               .maybeSingle();
             clientId = anewClient?.id || null;
           }

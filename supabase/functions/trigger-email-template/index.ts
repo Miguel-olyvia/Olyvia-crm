@@ -46,12 +46,20 @@ serve(async (req) => {
     const { entity_type, entity_id, new_phase, organization_id, triggered_by } = parsed.data;
     console.log("Template trigger:", { entity_type, entity_id, new_phase, organization_id, triggered_by });
 
+    if (!organization_id) {
+      return new Response(JSON.stringify({ error: "organization_id is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: templates } = await supabase
       .from("email_templates")
       .select("*")
       .eq("module", entity_type)
       .eq("trigger_phase", new_phase)
       .eq("is_active", true)
+      .eq("organization_id", organization_id)
       .in("trigger_type", ["automatic", "semi_automatic"]);
 
     if (!templates || templates.length === 0) {
@@ -76,6 +84,7 @@ serve(async (req) => {
       if (!enabled) return;
       await supabase.from("notifications").insert({
         user_id: triggered_by,
+        organization_id,
         type,
         kind: "notification",
         ...payload,
@@ -244,7 +253,7 @@ async function resolveEntityData(
   }
 
   if (entityType === "leads") {
-    const { data: lead } = await supabase.from("anew_leads").select("*").eq("id", entityId).single();
+    const { data: lead } = await supabase.from("anew_leads").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (lead) {
       if (lead.entity_id) {
         const ent = await resolveEntity(lead.entity_id);
@@ -259,7 +268,7 @@ async function resolveEntityData(
       vars.lead_source = lead.source || "";
     }
   } else if (entityType === "proposals") {
-    const { data: p } = await supabase.from("proposals").select("*").eq("id", entityId).single();
+    const { data: p } = await supabase.from("proposals").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (p) {
       vars.proposal_title = p.title || "";
       vars.proposal_value = p.value ? `€${Number(p.value).toLocaleString("pt-PT")}` : "";
@@ -272,7 +281,7 @@ async function resolveEntityData(
       }
     }
   } else if (entityType === "quotes") {
-    const { data: q } = await supabase.from("quotes").select("*").eq("id", entityId).single();
+    const { data: q } = await supabase.from("quotes").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (q) {
       vars.quote_number = q.quote_number || "";
       vars.quote_value = q.total ? `€${Number(q.total).toLocaleString("pt-PT")}` : "";
@@ -290,7 +299,7 @@ async function resolveEntityData(
       }
     }
   } else if (entityType === "contracts") {
-    const { data: c } = await supabase.from("client_contracts").select("*").eq("id", entityId).single();
+    const { data: c } = await supabase.from("client_contracts").select("*").eq("id", entityId).eq("organization_id", organizationId).single();
     if (c) {
       vars.contract_number = c.contract_number || "";
       vars.contract_value = c.total_value ? `€${Number(c.total_value).toLocaleString("pt-PT")}` : "";
