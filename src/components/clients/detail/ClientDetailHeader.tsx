@@ -138,7 +138,7 @@ export function ClientDetailHeader({
               <PermissionGate permission="clients.edit">
                 <DropdownMenuItem onClick={onRevertToContact}>
                   <Undo2 className="w-3.5 h-3.5 mr-2" />
-                  Reverter para Contacto
+                  Reverter para Lead
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </PermissionGate>

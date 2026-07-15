@@ -2188,7 +2188,7 @@ const AnewClients = () => {
                                       <DropdownMenuSeparator />
                                       <PermissionGate permission="clients.edit">
                                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setClientToRevert(client); setRevertDialogOpen(true); }}>
-                                          <Undo2 className="w-3.5 h-3.5 mr-2" />Reverter para Contacto
+                                          <Undo2 className="w-3.5 h-3.5 mr-2" />Reverter para Lead
                                         </DropdownMenuItem>
                                       </PermissionGate>
                                     </>
@@ -2457,10 +2457,10 @@ const AnewClients = () => {
                 <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Undo2 className="h-4 w-4 text-primary" />
                 </div>
-                Reverter para Contacto
+                Reverter para Lead
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Esta acção vai reverter este cliente para contacto. O registo de cliente será desactivado e o contacto original será restaurado.
+                Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
