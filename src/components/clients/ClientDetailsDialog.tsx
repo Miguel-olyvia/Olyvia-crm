@@ -1272,10 +1272,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                 <Undo2 className="h-4 w-4 text-primary" />
               </div>
-              Reverter para Contacto
+              Reverter para Lead
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acção vai reverter este cliente para contacto. O registo de cliente será desactivado e o contacto original será restaurado.
+              Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

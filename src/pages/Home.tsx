@@ -156,7 +156,6 @@ const createDefaultMenuGroups = (): MenuGroup[] => [
     expanded: false,
     items: [
       { id: "clients", to: "/clients", icon: Users, label: "Clients", permission: "clients.view", visible: true },
-      { id: "contacts", to: "/contacts", icon: Users, label: "Contacts", permission: "contacts.view", visible: true },
       { id: "leads", to: "/leads", icon: Inbox, label: "Leads", permission: "leads.view", visible: true },
       { id: "calendar", to: "/calendar", icon: Calendar, label: "Calendar", permission: "calendar.view_company", visible: true },
       { id: "call-center", to: "/call-center", icon: Headphones, label: "Call Center", permission: "call_center.view", visible: true },

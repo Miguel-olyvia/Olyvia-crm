@@ -50,8 +50,8 @@ export function ContactMentionInput({
     const loadSelectedContact = async () => {
       if (selectedContactId) {
         const { data } = await supabase
-          .from('anew_contacts')
-          .select('id, entity_id, entity:anew_entities!anew_contacts_entity_id_fkey(display_name, type)')
+          .from('anew_leads')
+          .select('id, entity_id, entity:anew_entities!anew_leads_entity_id_fkey(display_name, type)')
           .eq('id', selectedContactId)
           .single();
 
@@ -96,10 +96,14 @@ export function ContactMentionInput({
 
       const entityIds = matchingEntities.map(e => e.id);
 
+      // Only leads that have progressed enough to be scheduling-relevant
+      // (qualified or in negotiation) can be mentioned in appointments.
       let contactQuery = supabase
-        .from('anew_contacts')
+        .from('anew_leads')
         .select('id, entity_id')
         .in('entity_id', entityIds)
+        .in('status', ['qualified', 'negotiating'])
+        .is('deleted_at', null)
         .limit(10);
 
       if (organizationId) {
@@ -241,7 +245,7 @@ export function ContactMentionInput({
       >
         <Command shouldFilter={false}>
           <CommandInput
-            placeholder={t('scheduling.contact.searchPlaceholder') || 'Pesquisar contacto...'}
+            placeholder={t('scheduling.contact.searchPlaceholder') || 'Pesquisar lead...'}
             value={searchQuery}
             onValueChange={setSearchQuery}
             className="h-9"
@@ -256,9 +260,9 @@ export function ContactMentionInput({
                 {t('scheduling.contact.typeToSearch') || 'Escreva @ para pesquisar...'}
               </div>
             ) : contacts.length === 0 ? (
-              <CommandEmpty>{t('scheduling.contact.noResults') || 'Nenhum contacto encontrado'}</CommandEmpty>
+              <CommandEmpty>{t('scheduling.contact.noResults') || 'Nenhuma lead encontrada'}</CommandEmpty>
             ) : (
-              <CommandGroup heading={t('scheduling.contact.heading') || 'Contactos'}>
+              <CommandGroup heading={t('scheduling.contact.heading') || 'Leads'}>
                 {contacts.map(contact => (
                   <CommandItem
                     key={contact.id}

@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { X, Search, User, Building, Crosshair, Loader2 } from "lucide-react";
+import { X, Search, Building, Crosshair, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -34,8 +34,13 @@ interface EntitySearchInputProps {
 const typeConfig = {
   lead: { label: "Lead", icon: Crosshair, color: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
   client: { label: "Cliente", icon: Building, color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" },
-  contact: { label: "Contacto", icon: User, color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
 };
+
+// "contact" is a legacy entity type still returned by fallback queries against
+// anew_contacts (used by callers not yet migrated off that table). It is no
+// longer a visible search category, so any lookup for it falls back to the
+// Lead styling instead of crashing on a missing typeConfig entry.
+const getTypeConfig = (type: string) => typeConfig[type as keyof typeof typeConfig] || typeConfig.lead;
 
 export function EntitySearchInput({
   value,
@@ -118,7 +123,7 @@ export function EntitySearchInput({
               allResults.push({
                 type: row.type,
                 id: row.id,
-                name: row.name || `${typeConfig[row.type as keyof typeof typeConfig]?.label || "Contacto"} #${String(row.id).slice(0, 8)}`,
+                name: row.name || `${getTypeConfig(row.type).label} #${String(row.id).slice(0, 8)}`,
                 email: row.email || undefined,
                 phone: row.phone || undefined,
                 entityId: row.entity_id || undefined,
@@ -259,7 +264,7 @@ export function EntitySearchInput({
             .eq("status", "active")
             .eq("organization_id", orgId)
             .limit(50);
-          await collectFromRows(contacts, "contact", "Contacto");
+          await collectFromRows(contacts, "contact", "Lead");
         }
 
         // Dedupe by type+id (RPC + fallback could overlap in rare cases)
@@ -310,7 +315,7 @@ export function EntitySearchInput({
   }, {});
 
   if (value) {
-    const cfg = typeConfig[value.type];
+    const cfg = getTypeConfig(value.type);
     const Icon = cfg.icon;
     return (
       <div className={cn("flex items-center gap-2 p-3 border rounded-lg bg-muted/20 transition-colors", error && "border-destructive")}>
@@ -343,7 +348,7 @@ export function EntitySearchInput({
         {loading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />}
         <Input
           ref={inputRef}
-          placeholder={placeholder || t("deals.form.searchEntityPlaceholder") || "Pesquisar lead, cliente ou contacto..."}
+          placeholder={placeholder || t("deals.form.searchEntityPlaceholder") || "Pesquisar lead ou cliente..."}
           value={query}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => results.length > 0 && setOpen(true)}
@@ -356,7 +361,7 @@ export function EntitySearchInput({
         <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-lg shadow-xl z-50 animate-in fade-in-0 zoom-in-95 duration-150">
           <div className="max-h-[320px] overflow-y-auto">
             {Object.entries(grouped).map(([type, items]) => {
-              const cfg = typeConfig[type as keyof typeof typeConfig];
+              const cfg = getTypeConfig(type);
               const Icon = cfg.icon;
               return (
                 <div key={type}>
@@ -404,7 +409,7 @@ export function EntitySearchInput({
 
       {error && <p className="text-sm text-destructive mt-1">{error}</p>}
       <p className="text-xs text-muted-foreground mt-1">
-        {t("deals.form.searchEntityHint") || "Digite pelo menos 2 caracteres para pesquisar em leads, clientes e contactos"}
+        {t("deals.form.searchEntityHint") || "Digite pelo menos 2 caracteres para pesquisar em leads e clientes"}
       </p>
     </div>
   );

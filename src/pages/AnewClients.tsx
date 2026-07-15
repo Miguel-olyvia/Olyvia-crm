@@ -1255,7 +1255,7 @@ const AnewClients = () => {
     if (match.type === "lead") {
       navigate(`/leads?open=${match.id}`);
     } else if (match.type === "contact") {
-      navigate(`/contacts?open=${match.id}`);
+      navigate(`/leads?open=${match.id}`);
     } else {
       // Client — try to open detail on current page
       const existingClient = clients.find(c => c.id === match.id);
@@ -1562,7 +1562,7 @@ const AnewClients = () => {
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
               if (contactRow) {
-                navigate(`/contacts?open=${contactRow.id}`);
+                navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
               toast({ title: "Cliente não encontrado", variant: "destructive" });
@@ -1610,7 +1610,7 @@ const AnewClients = () => {
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
               if (contactRow) {
-                navigate(`/contacts?open=${contactRow.id}`);
+                navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
               toast({ title: "Cliente não encontrado", variant: "destructive" });

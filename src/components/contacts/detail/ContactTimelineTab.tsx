@@ -91,6 +91,11 @@ export function ContactTimelineTab({ events, onRegisterCall, contactId, entityId
   const [statusEvents, setStatusEvents] = useState<TimelineEvent[]>([]);
   const [entityEvents, setEntityEvents] = useState<TimelineEvent[]>([]);
 
+  // NOTE: contact_status_history reads from the legacy anew_contacts table.
+  // This becomes obsolete once anew_contacts is removed in the final phase
+  // (the "contact" concept was merged into the leads lifecycle). Kept for now
+  // as a non-critical additional event source — safe to remove alongside the
+  // table drop.
   useEffect(() => {
     if (!contactId) {
       setStatusEvents([]);
@@ -174,7 +179,7 @@ export function ContactTimelineTab({ events, onRegisterCall, contactId, entityId
         let description: string | null = null;
         if (isCreated) {
           const kind = d.metadata?.kind;
-          title = kind === "contact" ? "Contacto criado" : kind === "client" ? "Cliente criado" : "Lead criada";
+          title = kind === "contact" ? "Lead qualificada" : kind === "client" ? "Cliente criado" : "Lead criada";
         } else if (isRoleStatus) {
           title = "Estado do ciclo de vida alterado";
           description = d.old_value && d.new_value

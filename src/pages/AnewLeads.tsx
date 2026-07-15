@@ -3659,7 +3659,7 @@ export default function AnewLeads() {
     setPendingLeadData(null);
     setDuplicateMatches([]);
     if (match.type === "contact") {
-      navigate(`/contacts?open=${match.id}`);
+      navigate(`/leads?open=${match.id}`);
       return;
     }
     if (match.type === "client") {
@@ -5595,9 +5595,7 @@ export default function AnewLeads() {
                     <TabsContent value="journey" className="mt-4">
                       <LeadJourneyTab
                         lead={selectedLead}
-                        hasContact={!!selectedLead.contacts}
                         hasClient={!!selectedLead.clients}
-                        contactCreatedAt={null}
                         clientCreatedAt={null}
                         interactionCount={leadInteractionCounts[selectedEntityId] || 0}
                         dealCount={0}

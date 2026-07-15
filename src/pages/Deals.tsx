@@ -520,12 +520,12 @@ const Deals = () => {
     lost_reason: "",
   });
 
-   // Search states for lead/client/contact mention
-  const [entityType, setEntityType] = useState<'lead' | 'client' | 'contact'>('lead');
+   // Search states for lead/client mention
+  const [entityType, setEntityType] = useState<'lead' | 'client'>('lead');
   const [entitySearch, setEntitySearch] = useState("");
-  const [searchResults, setSearchResults] = useState<{ type: 'lead' | 'client' | 'contact'; id: string; name: string; email?: string; phone?: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ type: 'lead' | 'client'; id: string; name: string; email?: string; phone?: string }[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const [selectedEntity, setSelectedEntity] = useState<{ type: 'lead' | 'client' | 'contact'; id: string; name: string; email?: string; phone?: string; entityId?: string } | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<{ type: 'lead' | 'client'; id: string; name: string; email?: string; phone?: string; entityId?: string } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Helper: check if user can act on a specific deal based on scope
@@ -1094,9 +1094,12 @@ const Deals = () => {
         lost_reason: "",
       });
 
-      setEntityType('contact');
+      // Contact merged into Lead: this legacy entity is resolved as a lead
+      // reference (only entityId is known upfront; handleSubmit falls back to
+      // anew_contacts by entity_id to keep contact_id populated for history).
+      setEntityType('lead');
       setSelectedEntity({
-        type: 'contact',
+        type: 'lead',
         id: "",
         name: newDealEntityName || "",
         entityId: newDealEntityId,
@@ -1331,9 +1334,11 @@ const Deals = () => {
       const name = deal.entity_name || `Cliente #${deal.client_id.slice(0, 8)}`;
       setSelectedEntity({ type: 'client', id: deal.client_id, name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id || undefined });
     } else if (deal.contact_id && deal.entity_id && deal.entity_name) {
-      // Deal has a modern contact FK but no lead/client — use the actual contact id
-      setEntityType('contact');
-      setSelectedEntity({ type: 'contact', id: deal.contact_id, name: deal.entity_name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id });
+      // Deal only has a legacy contact_id (no lead/client) — Contact merged into
+      // Lead, so display/resolve it as a lead reference; handleSubmit still
+      // falls back to anew_contacts by id to preserve the historical contact_id.
+      setEntityType('lead');
+      setSelectedEntity({ type: 'lead', id: deal.contact_id, name: deal.entity_name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id });
     } else {
       setEntityType('lead');
       setSelectedEntity(null);
@@ -1493,12 +1498,12 @@ const Deals = () => {
     e.preventDefault();
     if (submitLockRef.current) return;
 
-    // Validate that either lead, client, or contact is selected
+    // Validate that either a lead or a client is selected
     if (!formData.lead_id && !formData.client_id && !selectedEntity?.entityId) {
-      setFieldErrors({ entity: t('deals.form.leadOrClientRequired') || 'Selecione uma lead, contacto ou cliente' });
+      setFieldErrors({ entity: t('deals.form.leadOrClientRequired') || 'Selecione uma lead ou cliente' });
       toast({
         title: t('deals.toast.validationError'),
-        description: t('deals.form.leadOrClientRequired') || 'Selecione uma lead, contacto ou cliente',
+        description: t('deals.form.leadOrClientRequired') || 'Selecione uma lead ou cliente',
         variant: "destructive",
       });
       return;
@@ -1551,7 +1556,11 @@ const Deals = () => {
       let resolvedContactId: string | null = null;
 
       if (selectedEntity) {
-        if (selectedEntity.type === 'contact') {
+        if (selectedEntity.type === 'lead') {
+          // Contact merged into Lead: still probe the legacy anew_contacts table
+          // (by direct id, then by entity_id) so contact_id keeps being populated
+          // as history for entities that used to be tracked there. This is a
+          // no-op for genuinely new leads with no matching legacy contact row.
           const candidateContactId = selectedEntity.id || null;
           if (candidateContactId) {
             const { data: directContact } = await (supabase as any)
@@ -1985,12 +1994,12 @@ const Deals = () => {
                           onChange={(e) => setFormData({ ...formData, expected_close_date: e.target.value })}
                         />
                       </div>
-                      {/* Lead / Client / Contact selection */}
+                      {/* Lead / Client selection */}
                       <div className="col-span-2 space-y-2">
                         <Label>{t('deals.form.leadOrClient')} <span className="text-destructive">*</span></Label>
                         <EntitySearchInput
                           value={selectedEntity ? {
-                            type: selectedEntity.type as "lead" | "client" | "contact",
+                            type: selectedEntity.type,
                             id: selectedEntity.id,
                             name: selectedEntity.name,
                             email: selectedEntity.email,
@@ -1998,52 +2007,13 @@ const Deals = () => {
                           } : null}
                           onChange={(entity) => {
                             if (entity) {
-                              setSelectedEntity({ type: entity.type, id: entity.id, name: entity.name, email: entity.email, phone: entity.phone, entityId: entity.entityId });
-                              setEntityType(entity.type);
-                              // Contacts are treated as leads for deals (use entity_id to resolve the lead).
-                              // Both lookups run in parallel; errors are caught and logged so the form
-                              // can still proceed with entity_id only (no silent swallowing).
-                              if (entity.type === 'contact' && entity.entityId) {
-                                const resolveContactEntity = async () => {
-                                  const orgId = activeCompany?.id || "";
-                                  try {
-                                    const [leadRes, clientRes] = await Promise.all([
-                                      (supabase.from("anew_leads") as any)
-                                        .select("id")
-                                        .eq("entity_id", entity.entityId)
-                                        .eq("organization_id", orgId)
-                                        .maybeSingle(),
-                                      (supabase as any)
-                                        .from("anew_clients")
-                                        .select("id")
-                                        .eq("entity_id", entity.entityId)
-                                        .eq("organization_id", orgId)
-                                        .maybeSingle(),
-                                    ]);
-                                    if (leadRes.error) throw leadRes.error;
-                                    if (clientRes.error) throw clientRes.error;
-                                    if (leadRes.data) {
-                                      setFormData(prev => ({ ...prev, lead_id: leadRes.data.id, client_id: "" }));
-                                    } else if (clientRes.data) {
-                                      setFormData(prev => ({ ...prev, lead_id: "", client_id: clientRes.data.id }));
-                                    } else {
-                                      // No lead or client found — use entity_id only
-                                      setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
-                                    }
-                                  } catch (err) {
-                                    console.error("Error resolving contact entity for deal form:", err);
-                                    toast({ title: "Erro", description: "Não foi possível resolver a entidade do contacto.", variant: "destructive" });
-                                    setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
-                                  }
-                                };
-                                resolveContactEntity();
-                              } else {
-                                setFormData({
-                                  ...formData,
-                                  lead_id: entity.type === 'lead' ? entity.id : "",
-                                  client_id: entity.type === 'client' ? entity.id : "",
-                                });
-                              }
+                              setSelectedEntity({ type: entity.type as "lead" | "client", id: entity.id, name: entity.name, email: entity.email, phone: entity.phone, entityId: entity.entityId });
+                              setEntityType(entity.type as "lead" | "client");
+                              setFormData({
+                                ...formData,
+                                lead_id: entity.type === 'lead' ? entity.id : "",
+                                client_id: entity.type === 'client' ? entity.id : "",
+                              });
                             } else {
                               setSelectedEntity(null);
                               setFormData({ ...formData, lead_id: "", client_id: "" });
@@ -2051,7 +2021,7 @@ const Deals = () => {
                             setFieldErrors(prev => ({ ...prev, entity: "" }));
                           }}
                           error={fieldErrors.entity}
-                          searchTypes={["lead", "client", "contact"]}
+                          searchTypes={["lead", "client"]}
                         />
                       </div>
 
@@ -2376,7 +2346,7 @@ const Deals = () => {
                               {getSortIcon('title')}
                             </div>
                           </TableHead>
-                          <TableHead className="hidden md:table-cell">Contacto</TableHead>
+                          <TableHead className="hidden md:table-cell">Lead/Cliente</TableHead>
                           <TableHead className="hidden lg:table-cell">Comercial</TableHead>
                           <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('value')}>
                             <div className="flex items-center">
@@ -2475,7 +2445,7 @@ const Deals = () => {
                                       </div>
                                     </>
                                   ) : (
-                                    <span className="text-sm text-muted-foreground">— Sem contacto associado</span>
+                                    <span className="text-sm text-muted-foreground">— Sem lead associado</span>
                                   )}
                                 </div>
                               </TableCell>

@@ -11,7 +11,7 @@ import { Building2, Users, Target, DollarSign, FileText, Calendar, Briefcase, Us
 interface Stats {
   companies: number;
   employees: number;
-  contacts: number;
+  qualifiedLeads: number;
   clients: number;
   deals: number;
   dealsValue: number;
@@ -27,7 +27,7 @@ const CompanyAdminDashboard = () => {
   const [stats, setStats] = useState<Stats>({
     companies: 0,
     employees: 0,
-    contacts: 0,
+    qualifiedLeads: 0,
     clients: 0,
     deals: 0,
     dealsValue: 0,
@@ -53,14 +53,14 @@ const CompanyAdminDashboard = () => {
 
         const [
           membershipsResult,
-          contactsResult,
+          qualifiedLeadsResult,
           clientsResult,
           dealsResult,
           quotesResult,
           activitiesResult,
         ] = await Promise.all([
           client.from("anew_memberships").select("id").in("organization_id", companyIds).eq("status", "active"),
-          client.from("anew_contacts").select("id").in("organization_id", companyIds),
+          client.from("anew_leads").select("id").in("organization_id", companyIds).in("status", ["qualified", "negotiating"]).is("deleted_at", null),
           client.from("anew_clients").select("id").in("organization_id", companyIds).is("deleted_at", null),
           client.from("deals").select("id, value").in("organization_id", companyIds),
           client.from("quotes").select("id").in("organization_id", companyIds),
@@ -72,7 +72,7 @@ const CompanyAdminDashboard = () => {
         setStats({
           companies: companyIds.length,
           employees: membershipsResult.data?.length ?? 0,
-          contacts: contactsResult.data?.length ?? 0,
+          qualifiedLeads: qualifiedLeadsResult.data?.length ?? 0,
           clients: clientsResult.data?.length ?? 0,
           deals: dealsResult.data?.length ?? 0,
           dealsValue: totalValue,
@@ -111,8 +111,8 @@ const CompanyAdminDashboard = () => {
       bgColor: "bg-info/10",
     },
     {
-      title: t('dashboard.cards.contacts'),
-      value: stats.contacts,
+      title: t('dashboard.cards.leads'),
+      value: stats.qualifiedLeads,
       icon: Users,
       color: "text-accent",
       bgColor: "bg-accent/10",

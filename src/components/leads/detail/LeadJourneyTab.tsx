@@ -4,9 +4,7 @@ import { Check, Star, HelpCircle } from "lucide-react";
 
 interface LeadJourneyTabProps {
   lead: any;
-  hasContact: boolean;
   hasClient: boolean;
-  contactCreatedAt: string | null;
   clientCreatedAt: string | null;
   interactionCount: number;
   dealCount: number;
@@ -14,16 +12,18 @@ interface LeadJourneyTabProps {
 }
 
 export function LeadJourneyTab({
-  lead, hasContact, hasClient, contactCreatedAt, clientCreatedAt,
+  lead, hasClient, clientCreatedAt,
   interactionCount, dealCount, dealValue,
 }: LeadJourneyTabProps) {
+  const isNegotiatingOrLater = lead.status === "negotiating" || lead.status === "converted";
+
   const steps = [
     {
       key: "lead",
       label: "Lead",
       date: lead.created_at,
       completed: true,
-      current: !hasContact && !hasClient,
+      current: !isNegotiatingOrLater && !hasClient,
     },
     {
       key: "contacted",
@@ -35,16 +35,16 @@ export function LeadJourneyTab({
     {
       key: "qualified",
       label: "Qualificado",
-      date: lead.status === "qualified" || lead.status === "converted" ? lead.updated_at : null,
-      completed: lead.status === "qualified" || lead.status === "converted" || hasContact,
-      current: lead.status === "qualified" && !hasContact,
+      date: lead.status === "qualified" || isNegotiatingOrLater ? lead.updated_at : null,
+      completed: lead.status === "qualified" || isNegotiatingOrLater || hasClient,
+      current: lead.status === "qualified" && !isNegotiatingOrLater && !hasClient,
     },
     {
-      key: "contact",
-      label: "Contacto",
-      date: contactCreatedAt,
-      completed: hasContact,
-      current: hasContact && !hasClient,
+      key: "negotiating",
+      label: "Em Negociação",
+      date: isNegotiatingOrLater ? lead.updated_at : null,
+      completed: isNegotiatingOrLater,
+      current: lead.status === "negotiating" && !hasClient,
     },
     {
       key: "client",
@@ -55,8 +55,8 @@ export function LeadJourneyTab({
     },
   ];
 
-  const leadToContactDays = hasContact && contactCreatedAt
-    ? differenceInDays(new Date(contactCreatedAt), new Date(lead.created_at))
+  const leadToContactDays = isNegotiatingOrLater
+    ? differenceInDays(new Date(lead.updated_at), new Date(lead.created_at))
     : null;
 
   return (
@@ -103,7 +103,7 @@ export function LeadJourneyTab({
         <div className="rounded-lg bg-gradient-to-r from-primary/5 to-purple-500/5 border p-4 text-center">
           <p className="text-sm text-muted-foreground">
             {leadToContactDays !== null && (
-              <><strong className="text-foreground">{leadToContactDays} dias</strong> de Lead a Contacto · </>
+              <><strong className="text-foreground">{leadToContactDays} dias</strong> de Lead a Negociação · </>
             )}
             <strong className="text-foreground">{interactionCount} interacções</strong> registadas
             {dealCount > 0 && (

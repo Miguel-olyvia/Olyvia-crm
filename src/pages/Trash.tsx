@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, RotateCcw, User, Users, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck } from "lucide-react";
+import { Trash2, RotateCcw, User, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-type Kind = "clients" | "contacts" | "leads" | "deals" | "quotes" | "proposals" | "contracts";
+type Kind = "clients" | "leads" | "deals" | "quotes" | "proposals" | "contracts";
 
 type Row = {
   id: string;
@@ -25,8 +25,8 @@ type Row = {
   created_at: string;
 };
 
-const ENTITY_KINDS: Record<"clients" | "contacts" | "leads", "client" | "contact" | "lead"> = {
-  clients: "client", contacts: "contact", leads: "lead",
+const ENTITY_KINDS: Record<"clients" | "leads", "client" | "lead"> = {
+  clients: "client", leads: "lead",
 };
 const BUSINESS_KINDS: Record<"deals" | "quotes" | "proposals" | "contracts", "deal" | "quote" | "proposal" | "contract"> = {
   deals: "deal", quotes: "quote", proposals: "proposal", contracts: "contract",
@@ -34,7 +34,7 @@ const BUSINESS_KINDS: Record<"deals" | "quotes" | "proposals" | "contracts", "de
 const isBusiness = (k: Kind): k is keyof typeof BUSINESS_KINDS => k in BUSINESS_KINDS;
 
 type DataState = Record<Kind, Row[]>;
-const EMPTY_DATA: DataState = { clients: [], contacts: [], leads: [], deals: [], quotes: [], proposals: [], contracts: [] };
+const EMPTY_DATA: DataState = { clients: [], leads: [], deals: [], quotes: [], proposals: [], contracts: [] };
 
 export default function Trash() {
   const navigate = useNavigate();
@@ -52,9 +52,8 @@ export default function Trash() {
     setLoading(true);
     try {
       const facetSelect = "id, entity_id, deleted_at, deleted_by, created_at";
-      const [c, ct, l, d, q, p, k] = await Promise.all([
+      const [c, l, d, q, p, k] = await Promise.all([
         (supabase as any).from("anew_clients").select(facetSelect).eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
-        (supabase as any).from("anew_contacts").select(facetSelect).eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
         (supabase as any).from("anew_leads").select(facetSelect).eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
         (supabase as any).from("deals").select("id, title, deleted_at, deleted_by, created_at").eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
         (supabase as any).from("quotes").select("id, title, quote_number, deleted_at, deleted_by, created_at").eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
@@ -62,7 +61,7 @@ export default function Trash() {
         (supabase as any).from("client_contracts").select("id, contract_number, deleted_at, deleted_by, created_at").eq("organization_id", orgId).not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500),
       ]);
 
-      const facetRows = [...(c.data || []), ...(ct.data || []), ...(l.data || [])];
+      const facetRows = [...(c.data || []), ...(l.data || [])];
       const businessRows = [...(d.data || []), ...(q.data || []), ...(p.data || []), ...(k.data || [])];
 
       const allEntityIds = Array.from(new Set(facetRows.map((r: any) => r.entity_id).filter(Boolean)));
@@ -117,7 +116,6 @@ export default function Trash() {
 
       setData({
         clients: mapFacet(c.data || []),
-        contacts: mapFacet(ct.data || []),
         leads: mapFacet(l.data || []),
         deals: mapBusiness(d.data || []),
         quotes: mapBusiness(q.data || []),
@@ -137,7 +135,7 @@ export default function Trash() {
     try {
       const { error } = isBusiness(kind)
         ? await (supabase as any).rpc("restore_business_entity", { p_kind: BUSINESS_KINDS[kind], p_id: id })
-        : await (supabase as any).rpc("restore_entity_facet", { p_kind: ENTITY_KINDS[kind as "clients" | "contacts" | "leads"], p_id: id });
+        : await (supabase as any).rpc("restore_entity_facet", { p_kind: ENTITY_KINDS[kind as "clients" | "leads"], p_id: id });
       if (error) throw error;
       toast({ title: "Restaurado", description: "Registo restaurado com sucesso." });
       load();
@@ -152,7 +150,7 @@ export default function Trash() {
     try {
       const { error } = isBusiness(kind)
         ? await (supabase as any).rpc("purge_business_entity", { p_kind: BUSINESS_KINDS[kind], p_id: id })
-        : await (supabase as any).rpc("purge_entity_facet", { p_kind: ENTITY_KINDS[kind as "clients" | "contacts" | "leads"], p_id: id });
+        : await (supabase as any).rpc("purge_entity_facet", { p_kind: ENTITY_KINDS[kind as "clients" | "leads"], p_id: id });
       if (error) throw error;
       toast({ title: "Eliminado definitivamente" });
       setPurgeTarget(null);
@@ -220,7 +218,6 @@ export default function Trash() {
                 <p className="text-xs uppercase tracking-wide text-muted-foreground mb-1">CRM</p>
                 <TabsList>
                   <TabsTrigger value="clients"><Briefcase className="h-3.5 w-3.5 mr-1" />Clientes <Badge variant="secondary" className="ml-2">{data.clients.length}</Badge></TabsTrigger>
-                  <TabsTrigger value="contacts"><Users className="h-3.5 w-3.5 mr-1" />Contactos <Badge variant="secondary" className="ml-2">{data.contacts.length}</Badge></TabsTrigger>
                   <TabsTrigger value="leads"><User className="h-3.5 w-3.5 mr-1" />Leads <Badge variant="secondary" className="ml-2">{data.leads.length}</Badge></TabsTrigger>
                 </TabsList>
               </div>
@@ -235,7 +232,7 @@ export default function Trash() {
               </div>
             </div>
 
-            {(["clients", "contacts", "leads"] as const).map((k) => (
+            {(["clients", "leads"] as const).map((k) => (
               <TabsContent key={k} value={k} className="mt-4">
                 {loading ? <div className="text-center py-8 text-muted-foreground">A carregar…</div> : renderTable(k, data[k])}
               </TabsContent>

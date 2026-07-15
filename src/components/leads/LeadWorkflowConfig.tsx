@@ -197,7 +197,7 @@ function SortableStageRow({
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Conversão: Lead → Contacto</p>
+                  <p>Conversão: Lead → Cliente</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -975,7 +975,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 flex-1 mb-2">
                       <p className="font-semibold text-purple-700 dark:text-purple-400 text-sm">✅ Lead Qualificada</p>
                       <p className="text-muted-foreground text-xs mt-1">
-                        A lead tem interesse real e capacidade de compra. O sistema pode <strong>converter automaticamente a lead em Contacto</strong>.
+                        A lead tem interesse real e capacidade de compra. Fica marcada como <strong>"Qualificada"</strong>, ainda sem orçamento ou proposta associados.
                       </p>
                     </div>
                   </div>
@@ -988,7 +988,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3 flex-1 mb-2">
                       <p className="font-semibold text-orange-700 dark:text-orange-400 text-sm">📄 Proposta Enviada</p>
                       <p className="text-muted-foreground text-xs mt-1">
-                        Envia um orçamento ou proposta comercial ao cliente.
+                        Envia um orçamento ou proposta comercial à lead. O sistema associa o orçamento/proposta e o status muda automaticamente para <strong>"Em Negociação"</strong>.
                       </p>
                     </div>
                   </div>
@@ -1001,7 +1001,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
                         <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-sm">🎉 Ganho!</p>
                         <p className="text-muted-foreground text-xs mt-1">
-                          O negócio é fechado! O sistema converte automaticamente o <strong>Contacto em Cliente</strong>.
+                          O negócio é fechado! O sistema converte automaticamente a <strong>Lead em Cliente</strong>.
                         </p>
                         <div className="mt-2 flex items-center gap-1">
                           <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px]">Win</Badge>
@@ -1023,16 +1023,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                 </div>
 
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 mt-3">
-                  <p className="font-semibold text-sm mb-2">🔄 Conversões Automáticas do Sistema</p>
+                  <p className="font-semibold text-sm mb-2">🔄 Conversão Automática do Sistema</p>
                   <div className="space-y-1.5 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="bg-blue-500/20 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded font-medium">Lead</span>
-                      <ArrowRight className="w-3 h-3" />
-                      <span className="bg-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded font-medium">Contacto</span>
-                      <span>— Quando a lead é qualificada</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="bg-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded font-medium">Contacto</span>
+                      <span className="text-[10px] text-muted-foreground">(Qualificada / Em Negociação)</span>
                       <ArrowRight className="w-3 h-3" />
                       <span className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded font-medium">Cliente</span>
                       <span>— Quando o negócio é ganho</span>
@@ -1047,7 +1042,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   O que é um Workflow?
                 </h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Um <strong>workflow</strong> é o caminho que cada potencial cliente (lead) percorre desde o primeiro contacto até se tornar cliente.
+                  Um <strong>workflow</strong> é o caminho que cada potencial cliente (lead) percorre desde o primeiro contacto até se tornar cliente. A lead evolui pelos estados "Qualificada" e "Em Negociação" sem passar por nenhuma etapa intermédia de "Contacto" — é a mesma entidade do início ao fim.
                 </p>
               </div>
 

@@ -3186,9 +3186,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               <CardTitle className="flex items-center gap-2">📋 Detalhes do Orçamento</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Deal / Contact / Client Search */}
+              {/* Deal / Lead / Client Search */}
               <div className="space-y-2">
-                <Label>Pedido / Contacto / Cliente</Label>
+                <Label>Pedido / Lead / Cliente</Label>
                 {selectedDeal ? (
                   <QuoteDealCard
                     deal={{
@@ -3214,7 +3214,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm text-primary truncate">{selectedSource.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Contacto"} ligado ao orçamento</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Lead"} ligado ao orçamento</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <Badge variant="default" className="bg-green-600 text-xs">✅ Ligado</Badge>
@@ -3236,7 +3236,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 ) : (
                   <div className="relative">
                     <Input
-                      placeholder="Digite @ para pesquisar pedidos, contactos ou clientes..."
+                      placeholder="Digite @ para pesquisar pedidos, leads ou clientes..."
                       value={dealSearch}
                       onChange={async (e) => {
                         const value = e.target.value;
@@ -3351,7 +3351,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                           ...contactsData.map((c: any) => ({
                             kind: "contact" as const,
                             id: c.id,
-                            name: entityMap[c.entity_id]?.display_name || "Contacto",
+                            name: entityMap[c.entity_id]?.display_name || "Lead",
                             entity_id: c.entity_id,
                             organization_id: c.organization_id,
                             assigned_to: c.assigned_to,
@@ -3424,7 +3424,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                               setDealSearch(""); setShowDealDropdown(false); setDealSearchResults([]);
                             }}>
                             <Badge variant="secondary" className="text-xs">
-                              {r.kind === "deal" ? "Pedido" : r.kind === "client" ? "Cliente" : "Contacto"}
+                              {r.kind === "deal" ? "Pedido" : r.kind === "client" ? "Cliente" : "Lead"}
                             </Badge>
                             <div className="flex flex-col min-w-0">
                               <span className="text-sm truncate">{r.kind === "deal" ? r.title : r.name}</span>
@@ -3436,7 +3436,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta, contactos ou clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta, leads ou clientes</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
