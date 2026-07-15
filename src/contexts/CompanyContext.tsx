@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { identifyUser, resetAnalytics } from "@/lib/analytics/posthog";
 
 // Cache user type per company to reduce queries
 const userTypeCache = new Map<string, { tipo: string; roleName: string; timestamp: number }>();
@@ -96,6 +97,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT" || (event === "TOKEN_REFRESHED" && !session)) {
+        if (event === "SIGNED_OUT") resetAnalytics();
         requestVersionRef.current += 1;
         loadedUserIdRef.current = null;
         initialLoadDoneRef.current = false;
@@ -107,6 +109,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       } else if (event === "SIGNED_IN") {
         if (!session) return;
+        identifyUser(session.user.id);
         // Skip if same user already fully loaded (tab refocus revalidation)
         if (
           session.user.id === loadedUserIdRef.current &&

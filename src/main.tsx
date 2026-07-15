@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import * as Sentry from "@sentry/react";
 import "./index.css";
 import { LanguageProvider } from "./contexts/LanguageContext";
+import { initAnalytics } from "./lib/analytics/posthog";
 
 // Field names that must never leave this browser in a Sentry event — leads/
 // contacts/clients PII (email, phone, NIF, names, addresses) that can end up
@@ -61,6 +62,8 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     beforeSend,
   });
 }
+
+initAnalytics();
 
 const root = createRoot(document.getElementById("root")!);
 
