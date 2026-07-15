@@ -48,7 +48,7 @@ import {
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
   LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
   Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
-  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload
+  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload, Columns3
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -66,6 +66,7 @@ import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkfl
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
+import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
 import { LeadsTableColumns, ColumnConfig } from "@/components/leads/LeadsTableColumns";
 import { LeadsAIOrganization } from "@/components/leads/LeadsAIOrganization";
 import { LeadsAIConfig } from "@/components/leads/LeadsAIConfig";
@@ -226,6 +227,111 @@ interface Campaign {
   form_id?: string | null;
 }
 
+// Canonical column list for a leads list/kanban fetch — shared so both call sites
+// always request (and therefore can filter/display) the exact same shape.
+const LEADS_LIST_COLUMNS = `
+  id, entity_id, campaign_id,
+  status, workflow_stage_id, assigned_to, created_by,
+  organization_id, root_organization_id,
+  created_at, updated_at, converted_at,
+  converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
+  field_values, notes, source, source_id,
+  last_contact_at, last_contact_result, contact_attempts,
+  callback_scheduled_at, callback_notes,
+  tags, search_text,
+  campaigns(id, name)
+`;
+
+interface LeadsQueryFilters {
+  statusFilter: string;
+  campaignFilter: string;
+  assignedToFilter: string;
+  contactResultFilter: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  effectiveSearch: string;
+  sourceFilter: string;
+}
+
+// Single source of truth for the filter clauses applied to anew_leads —
+// used by the list query, the kanban query, and nothing else builds its own
+// version of these .eq/.in/.ilike clauses. Keeps list and kanban guaranteed
+// in sync: a new filter added here applies to both automatically.
+function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
+  const {
+    statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+    dateFrom, dateTo, effectiveSearch, sourceFilter,
+  } = filters;
+
+  if (statusFilter !== "all") {
+    if (statusFilter === "lost") {
+      q = q.in("status", ["lost", "rejected"]);
+    } else if (statusFilter === "visit_scheduled") {
+      q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
+    } else if (statusFilter === "new") {
+      q = q.eq("status", "new").is("scheduled_visit_id", null);
+    } else {
+      q = q.eq("status", statusFilter);
+    }
+  }
+  if (campaignFilter !== "all") q = q.eq("campaign_id", campaignFilter);
+  if (assignedToFilter !== "all") {
+    if (assignedToFilter === "unassigned") {
+      q = q.is("assigned_to", null);
+    } else {
+      q = q.eq("assigned_to", assignedToFilter);
+    }
+  }
+  if (contactResultFilter !== "all") {
+    if (contactResultFilter === "none") {
+      q = q.is("last_contact_result", null);
+    } else {
+      q = q.eq("last_contact_result", contactResultFilter);
+    }
+  }
+  if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
+  if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
+  if (effectiveSearch) q = q.ilike("search_text", `%${effectiveSearch}%`);
+  if (sourceFilter === "none") {
+    q = q.is("source", null);
+  } else if (sourceFilter !== "all") {
+    q = q.eq("source", sourceFilter);
+  }
+  return q;
+}
+
+// Base anew_leads query (visibility scope + filters), shared by list + kanban.
+// Callers add their own .order()/.range()/.limit() on top.
+function buildLeadsBaseQuery(params: {
+  organizationId: string;
+  requestedScope: string;
+  scopeAnewUserId?: string | null;
+  scopeAuthUserId?: string | null;
+  teamMemberIds?: string[];
+  filters: LeadsQueryFilters;
+  columns?: string;
+}) {
+  let query = supabase
+    .from("anew_leads")
+    .select(params.columns ?? LEADS_LIST_COLUMNS)
+    .is("deleted_at", null)
+    .neq("status", "converted")
+    .is("converted_to_contact_id", null)
+    .is("converted_at", null);
+
+  query = query.eq("organization_id", params.organizationId);
+
+  if (params.requestedScope === "OWNED" && params.scopeAnewUserId) {
+    const ownerIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId);
+    query = query.or(`assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`);
+  } else if (params.requestedScope === "TEAM" && params.scopeAnewUserId) {
+    const visibleUserIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId, params.teamMemberIds);
+    query = query.or(`assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`);
+  }
+
+  return applyLeadsServerFilters(query, params.filters);
+}
+
 export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -249,6 +355,9 @@ export default function AnewLeads() {
   const { hasPermission } = usePermissions();
   
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
+  const [kanbanLoading, setKanbanLoading] = useState(false);
+  const [kanbanTruncated, setKanbanTruncated] = useState(false);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
@@ -440,7 +549,7 @@ export default function AnewLeads() {
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<import("@/components/shared/DuplicateEntityDialog").DuplicateMatch[]>([]);
   const [pendingLeadData, setPendingLeadData] = useState<{ entityId: string; fieldValues: Record<string, any>; assignedTo: string | null; resolvedRootOrgId: string | null; createdBy: string; displayName: string; emailValue: string; phoneValue: string; allFieldDefs: any[] } | null>(null);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "list">("list");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "list" | "kanban">("list");
   const [detailTab, setDetailTab] = useState("info");
   const [showFilters, setShowFilters] = useState(true);
   
@@ -1520,89 +1629,21 @@ export default function AnewLeads() {
       return;
     }
     
-    // Build server-side filters helper
-    const applyServerFilters = (q: any) => {
-      if (statusFilter !== "all") {
-        if (statusFilter === "lost") {
-          q = q.in("status", ["lost", "rejected"]);
-        } else if (statusFilter === "visit_scheduled") {
-          // Include raw visit_scheduled OR leads that are effectively visit_scheduled
-          // (status=new but have scheduled_visit_id or last_contact_result = Visita Agendada)
-          // We filter server-side for status=visit_scheduled, then also include new+signal client-side
-          q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
-        } else if (statusFilter === "new") {
-          // Exclude leads that are effectively visit_scheduled even though raw status is new
-          q = q.eq("status", "new").is("scheduled_visit_id", null);
-        } else {
-          q = q.eq("status", statusFilter);
-        }
-      }
-      if (campaignFilter !== "all") q = q.eq("campaign_id", campaignFilter);
-      if (assignedToFilter !== "all") {
-        if (assignedToFilter === "unassigned") {
-          q = q.is("assigned_to", null);
-        } else {
-          q = q.eq("assigned_to", assignedToFilter);
-        }
-      }
-      if (contactResultFilter !== "all") {
-        if (contactResultFilter === "none") {
-          q = q.is("last_contact_result", null);
-        } else {
-          q = q.eq("last_contact_result", contactResultFilter);
-        }
-      }
-      if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
-      if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
-      if (effectiveSearch) {
-        q = q.ilike("search_text", `%${effectiveSearch}%`);
-      }
-      if (sourceFilter === "none") {
-        q = q.is("source", null);
-      } else if (sourceFilter !== "all") {
-        q = q.eq("source", sourceFilter);
-      }
-      return q;
-    };
-
     // Total count is now derived from statusCounts (loaded via RPC) — no separate count query needed
-    
-    let query = supabase
-      .from("anew_leads")
-      .select(`
-        id, entity_id, campaign_id,
-        status, workflow_stage_id, assigned_to, created_by,
-        organization_id, root_organization_id,
-        created_at, updated_at, converted_at,
-        converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-        field_values, notes, source, source_id,
-        last_contact_at, last_contact_result, contact_attempts,
-        callback_scheduled_at, callback_notes,
-        tags, search_text,
-        campaigns(id, name)
-      `)
-      .is("deleted_at", null)
-      .neq("status", "converted")
-      .is("converted_to_contact_id", null)
-      .is("converted_at", null);
-    
-    query = query.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(viewScope, onlyMine);
-    if (requestedScope === "OWNED" && scopeAnewUserId) {
-      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-      query = query.or(
-        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-      );
-    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-      query = query.or(
-        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-      );
-    }
+    const query = buildLeadsBaseQuery({
+      organizationId: activeCompanyId,
+      requestedScope,
+      scopeAnewUserId,
+      scopeAuthUserId,
+      teamMemberIds,
+      filters: {
+        statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+        dateFrom, dateTo, effectiveSearch, sourceFilter,
+      },
+    });
 
-    query = applyServerFilters(query);
-    
     const { data, error } = await query
       .order("created_at", { ascending: false })
       .range(from, to);
@@ -1732,6 +1773,160 @@ export default function AnewLeads() {
     setLoading(false);
     setLoadingMore(false);
   }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+
+  const KANBAN_LEADS_LIMIT = 500;
+
+  // Load ALL leads matching the current filters (unpaginated, capped) to feed
+  // the kanban board. Uses the exact same buildLeadsBaseQuery/filters as
+  // loadLeads above — list and kanban can never drift out of sync because
+  // they share this one query-building function.
+  const loadKanbanLeads = useCallback(async () => {
+    if (!activeCompanyId) return;
+
+    const viewScope = getPermissionScope("leads.view");
+    if (viewScope === "NONE") {
+      setKanbanLeads([]);
+      setKanbanTruncated(false);
+      return;
+    }
+
+    setKanbanLoading(true);
+    try {
+      const requestedScope = normalizeLeadScope(viewScope, onlyMine);
+      const query = buildLeadsBaseQuery({
+        organizationId: activeCompanyId,
+        requestedScope,
+        scopeAnewUserId,
+        scopeAuthUserId,
+        teamMemberIds,
+        filters: {
+          statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+          dateFrom, dateTo, effectiveSearch, sourceFilter,
+        },
+      });
+
+      const { data, error } = await query
+        .order("created_at", { ascending: false })
+        .limit(KANBAN_LEADS_LIMIT);
+
+      if (error) {
+        toast({ title: "Erro ao carregar kanban", description: error.message, variant: "destructive" });
+        return;
+      }
+
+      const allUserIds = new Set<string>();
+      for (const d of (data || [])) {
+        if (d.assigned_to) allUserIds.add(d.assigned_to as string);
+      }
+
+      const userMap = new Map<string, { id: string; name: string }>();
+      if (allUserIds.size > 0) {
+        const { data: usersData } = await supabase
+          .from("anew_users")
+          .select("id, name")
+          .in("id", Array.from(allUserIds));
+        for (const u of (usersData || [])) userMap.set(u.id, u);
+      }
+
+      const mappedLeads = (data || []).map((d) => {
+        let assigned_user = null;
+        if (d.assigned_to) {
+          const u = userMap.get(d.assigned_to as string);
+          assigned_user = u ? { id: u.id, name: u.name } : null;
+        }
+        return {
+          ...d,
+          field_values: (d.field_values && typeof d.field_values === 'object' && !Array.isArray(d.field_values))
+            ? d.field_values as Record<string, any>
+            : {},
+          campaigns: d.campaigns as { id: string; name: string } | null,
+          profiles: null,
+          assigned_user,
+          assigned_to: d.assigned_to as string | null,
+          last_contact_at: d.last_contact_at as string | null,
+          callback_scheduled_at: d.callback_scheduled_at as string | null,
+          callback_notes: d.callback_notes as string | null,
+        };
+      }) as Lead[];
+
+      const entityIds = mappedLeads.map(l => l.entity_id).filter(Boolean) as string[];
+      if (entityIds.length > 0) {
+        await resolveEntities(entityIds);
+      }
+
+      setKanbanLeads(mappedLeads);
+      setKanbanTruncated(mappedLeads.length === KANBAN_LEADS_LIMIT);
+    } finally {
+      setKanbanLoading(false);
+    }
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+
+  // Persist a kanban drag: same status + workflow_stage_id update and
+  // execute-workflow automation trigger as handleBulkStatusChange, for a
+  // single lead moved between kanban columns instead of a bulk selection.
+  const handleKanbanStageDrop = useCallback(async (leadId: string, newStageId: string) => {
+    const newStage = workflowStages.find(s => s.id === newStageId);
+    if (!newStage) return;
+
+    if (newStage.is_conversion) {
+      toast({
+        title: "Não é possível mover diretamente para esta fase",
+        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" no lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updatePayload = { status: newStage.name, workflow_stage_id: newStage.id };
+
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updatePayload).eq("id", leadId)
+      );
+
+      if (error) {
+        toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+        return;
+      }
+
+      if (activeCompanyId) {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: {
+            source_entity: 'lead',
+            entity_id: leadId,
+            new_stage_id: newStage.id,
+            organization_id: activeCompanyId,
+            triggered_by: scopeAuthUserId,
+          },
+        });
+        if (workflowError) {
+          console.error("Kanban stage-drop workflow execution failed:", workflowError);
+          toast({
+            title: "Status atualizado com automações incompletas",
+            description: "O workflow associado a esta fase falhou e deve ser revisto.",
+            variant: "destructive",
+          });
+        }
+      }
+
+      loadKanbanLeads();
+      loadStatusCounts();
+      loadLeads();
+    } catch (error: any) {
+      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+    }
+  }, [workflowStages, scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads]);
+
+  // Fetch kanban data only while that tab is visible, but keep it in sync
+  // with every filter change made anywhere on the page (same dependency list
+  // as the list/status-counts effect above), so switching to the kanban tab
+  // always shows the same filtered set as the list and the dashboard.
+  useEffect(() => {
+    if (activeTab !== "kanban" || !activeCompanyId || scopeLoading) return;
+    loadKanbanLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -4298,9 +4493,9 @@ export default function AnewLeads() {
         )}
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list")} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list" | "kanban")} className="space-y-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <TabsList className="grid w-full max-w-xs grid-cols-2">
+            <TabsList className="grid w-full max-w-sm grid-cols-3">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" />
                 {t('leads.tabs.dashboard')}
@@ -4308,6 +4503,10 @@ export default function AnewLeads() {
               <TabsTrigger value="list" className="flex items-center gap-2">
                 <List className="h-4 w-4" />
                 {t('leads.tabs.list')}
+              </TabsTrigger>
+              <TabsTrigger value="kanban" className="flex items-center gap-2">
+                <Columns3 className="h-4 w-4" />
+                {t('leads.tabs.kanban')}
               </TabsTrigger>
             </TabsList>
             
@@ -4407,6 +4606,56 @@ export default function AnewLeads() {
               companyId={activeCompanyId}
               query={dashboardQuery}
             />
+          </TabsContent>
+
+          {/* Kanban Tab */}
+          <TabsContent value="kanban" className="space-y-4 mt-6">
+            {kanbanTruncated && (
+              <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md px-3 py-2">
+                A mostrar as {KANBAN_LEADS_LIMIT} leads mais recentes que correspondem aos filtros atuais. Refina os filtros para ver leads mais antigas.
+              </div>
+            )}
+            {kanbanLoading ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                A carregar kanban...
+              </div>
+            ) : workflowStages.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                Configura as fases do workflow de leads para usar o kanban.
+              </div>
+            ) : (
+              <LeadsKanbanView
+                leads={kanbanLeads.map(lead => {
+                  const phone = extractPhoneFromLead(lead.field_values);
+                  const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+                  const name = identity?.first_name && identity?.last_name
+                    ? `${identity.first_name} ${identity.last_name}`
+                    : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+                  const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                  return {
+                    id: lead.id,
+                    created_at: lead.created_at,
+                    campaigns: lead.campaigns,
+                    assigned_user: lead.assigned_user,
+                    name,
+                    phone,
+                    email: email || null,
+                  };
+                })}
+                stages={workflowStages.filter(s => s.is_active !== false)}
+                getStageIdForLead={(leadId) => {
+                  const lead = kanbanLeads.find(l => l.id === leadId);
+                  if (!lead) return undefined;
+                  const effectiveStatus = getEffectiveStatus(lead);
+                  return workflowStages.find(s => s.name === effectiveStatus)?.id;
+                }}
+                onStageDrop={handleKanbanStageDrop}
+                onViewDetails={(leadId) => {
+                  const lead = kanbanLeads.find(l => l.id === leadId);
+                  if (lead) handleRowViewDetails(lead);
+                }}
+              />
+            )}
           </TabsContent>
 
           {/* List Tab */}
