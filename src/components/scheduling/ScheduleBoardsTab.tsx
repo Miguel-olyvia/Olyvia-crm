@@ -477,7 +477,7 @@ export function ScheduleBoardsTab({
           <Button size="icon" variant={viewMode === 'grid' ? 'default' : 'ghost'} className="h-8 w-8" onClick={() => setViewMode('grid')}><LayoutGrid className="h-4 w-4" /></Button>
           <Button size="icon" variant={viewMode === 'list' ? 'default' : 'ghost'} className="h-8 w-8" onClick={() => setViewMode('list')}><List className="h-4 w-4" /></Button>
         </div>
-        <PermissionGate permission="scheduling.create">
+        <PermissionGate permission="scheduling.boards.create">
           <Button onClick={onNewBoard}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newBoard')}</Button>
         </PermissionGate>
       </div>
@@ -494,11 +494,11 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}
-          <PermissionGate permission="scheduling.create">
+          <PermissionGate permission="scheduling.boards.create">
             <Card className="border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 cursor-pointer transition-colors flex items-center justify-center min-h-[280px]" onClick={onNewBoard}>
               <div className="text-center space-y-2">
                 <Plus className="h-10 w-10 mx-auto text-muted-foreground/50" />
@@ -528,7 +528,7 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}
