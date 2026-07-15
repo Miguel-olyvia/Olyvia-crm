@@ -314,7 +314,7 @@ export default function Scheduling() {
             </PermissionGate>
             <Button variant="ghost" size="icon" asChild><Link to="/docs/auto-scheduling"><HelpCircle className="h-5 w-5" /></Link></Button>
             <PageFAQSheet pageKey="operations.scheduling" />
-            <PermissionGate permission="scheduling.create">
+            <PermissionGate permission="scheduling.items.create">
               <Button variant="outline" onClick={() => handleAddClick()}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newSchedule')}</Button>
             </PermissionGate>
           </div>
@@ -454,7 +454,7 @@ export default function Scheduling() {
 
           <TabsContent value="resources" className="space-y-4">
             <div className="flex justify-end">
-              <PermissionGate permission="scheduling.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
+              <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {resources.map(resource => (
@@ -465,7 +465,7 @@ export default function Scheduling() {
                         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
                         <CardTitle className="text-lg">{resource.name}</CardTitle>
                       </div>
-                      {hasPermission('scheduling.delete') && (
+                      {hasPermission('scheduling.resources.delete') && (
                         <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
                       )}
                     </div>
@@ -501,7 +501,7 @@ export default function Scheduling() {
                   <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">{t('scheduling.noResources')}</h3>
                   <p className="text-muted-foreground mb-4">{t('scheduling.createResourcesPrompt')}</p>
-                  <PermissionGate permission="scheduling.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.createResource')}</Button></PermissionGate>
+                  <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.createResource')}</Button></PermissionGate>
                 </Card>
               )}
             </div>
