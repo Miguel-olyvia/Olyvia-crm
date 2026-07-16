@@ -161,6 +161,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   const { getIdentity, resolveEntities } = useEntityIdentity();
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
+  const [dashboardView, setDashboardView] = useState<"leads" | "pipeline">("leads");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [comparisonStats, setComparisonStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -311,7 +312,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
 
       return { rows, totalCount: count ?? rows.length, deals: dealsByLead };
     },
-    enabled: !!query,
+    enabled: !!query && dashboardView === "pipeline",
     staleTime: 60_000,
   });
 
@@ -496,6 +497,25 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </CardContent>
       </Card>
 
+      <div className="flex items-center gap-1">
+        <Button
+          variant={dashboardView === "leads" ? "default" : "outline"}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setDashboardView("leads")}
+        >
+          Leads
+        </Button>
+        <Button
+          variant={dashboardView === "pipeline" ? "default" : "outline"}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setDashboardView("pipeline")}
+        >
+          Pipeline
+        </Button>
+      </div>
+
       {renderState === "missing_query" &&
         renderPlaceholderCard(
           "Configuração do dashboard em falta",
@@ -527,7 +547,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </Card>
       )}
 
-      {renderState === "ready" && (
+      {renderState === "ready" && dashboardView === "leads" && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
             <KPICard
@@ -831,7 +851,11 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               </CardContent>
             </Card>
           </div>
+        </>
+      )}
 
+      {renderState === "ready" && dashboardView === "pipeline" && (
+        <>
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Pipeline</CardTitle>
