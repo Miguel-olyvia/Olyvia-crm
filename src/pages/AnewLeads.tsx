@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
-  Search, Plus, RefreshCw, UserPlus, Eye, Trash2, Pencil, GripVertical,
+  Search, Plus, RefreshCw, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
   LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
   Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
@@ -587,7 +587,7 @@ export default function AnewLeads() {
   // Conversion dialog state
   const [showConversionDialog, setShowConversionDialog] = useState(false);
   const [conversionLead, setConversionLead] = useState<Lead | null>(null);
-  const [conversionType, setConversionType] = useState<'contact' | 'client'>('contact');
+  const [conversionType, setConversionType] = useState<'client'>('client');
   const [conversionCampaignId, setConversionCampaignId] = useState<string>("");
   const [isConverting, setIsConverting] = useState(false);
   const conversionLockRef = useRef(false);
@@ -2380,155 +2380,29 @@ export default function AnewLeads() {
   };
 
   // Opens the conversion dialog to ask about campaign association
-  const openConversionDialog = (lead: Lead, type: 'contact' | 'client') => {
+  const openConversionDialog = (lead: Lead, type: 'client') => {
     setConversionLead(lead);
     setConversionType(type);
     setConversionCampaignId(lead.campaign_id || "");
     setShowConversionDialog(true);
   };
 
-  // Execute the actual conversion (contact or client)
+  // Execute the actual conversion to client (converting to "contact" no longer
+  // exists -- Contacts were merged into the Lead lifecycle, see the
+  // 2026-07-15 contacts-to-leads merge).
   const executeConversion = async () => {
     if (!conversionLead || conversionLockRef.current) return;
 
     conversionLockRef.current = true;
     setIsConverting(true);
     try {
-      if (conversionType === 'contact') {
-        await doConvertToContact(conversionLead, conversionCampaignId || null);
-      } else {
-        await doConvertToClient(conversionLead, conversionCampaignId || null);
-      }
+      await doConvertToClient(conversionLead, conversionCampaignId || null);
       setShowConversionDialog(false);
       setConversionLead(null);
     } finally {
       conversionLockRef.current = false;
       setIsConverting(false);
     }
-  };
-
-  const doConvertToContact = async (lead: Lead, selectedCampaignId: string | null) => {
-    let contactData: Record<string, any> = {};
-    let usedAutoMapping = false;
-
-    // Try campaign-based mapping first if campaign exists
-    const campaignToUse = selectedCampaignId || lead.campaign_id;
-    if (campaignToUse) {
-      const { data: fieldDefsForConvert } = await supabase
-        .from("lead_field_definitions")
-        .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
-        .eq("campaign_id", campaignToUse)
-        .eq("is_active", true);
-
-      const fieldsWithMapping = (fieldDefsForConvert || []).filter(f => f.contact_field_mapping);
-      
-      if (fieldsWithMapping.length > 0) {
-        for (const field of fieldsWithMapping) {
-          const leadValue = lead.field_values?.[field.field_key];
-          if (leadValue && field.contact_field_mapping) {
-            contactData[field.contact_field_mapping] = leadValue;
-          }
-        }
-      } else {
-        contactData = extractFieldsWithAutoMapping(lead.field_values, 'contact');
-        usedAutoMapping = true;
-      }
-    } else {
-      contactData = extractFieldsWithAutoMapping(lead.field_values, 'contact');
-      usedAutoMapping = true;
-    }
-
-    // Entity data (name, email, phone, address, NIF) already lives in anew_entity_* tables
-    // via the lead's entity_id — no need to duplicate. Only extract name for the contact record.
-    const firstName = contactData.first_name || null;
-    const lastName = contactData.last_name || null;
-
-    const authUserId = scopeAuthUserId;
-    if (!authUserId) throw new Error('Utilizador não autenticado');
-    const convertedByUserId = scopeAnewUserId || authUserId;
-
-    // Garantir que a entidade tem link na org local antes de qualquer
-    // acesso a anew_contacts / anew_entity_roles (caso contrário RLS bloqueia silenciosamente).
-    if (lead.entity_id) {
-      try {
-        await ensureEntityOrgLink({
-          entityId: lead.entity_id,
-          organizationId: lead.organization_id,
-          isPrimary: false,
-        });
-      } catch (linkErr: any) {
-        console.error('[convertToContact] ensureEntityOrgLink failed', linkErr);
-        toast({
-          title: t('leads.toast.convertError'),
-          description: `Não foi possível associar a entidade à organização: ${linkErr?.message || linkErr}`,
-          variant: 'destructive',
-        });
-        return;
-      }
-    }
-
-    // Determine root_organization_id (still resolved client-side; passed into the RPC)
-    let rootOrgId = lead.organization_id;
-    const { data: hierarchyData } = await supabase
-      .from("anew_hierarchy")
-      .select("parent_org_id")
-      .eq("child_org_id", lead.organization_id)
-      .limit(1)
-      .maybeSingle();
-    if (hierarchyData?.parent_org_id) {
-      const { data: parentH } = await supabase
-        .from("anew_hierarchy")
-        .select("parent_org_id")
-        .eq("child_org_id", hierarchyData.parent_org_id)
-        .maybeSingle();
-      rootOrgId = parentH?.parent_org_id || hierarchyData.parent_org_id;
-    }
-
-    const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
-
-    let newContact: any = null;
-    try {
-      const { data, error: convertError } = await withAuditContext(supabase, convertedByUserId, async () =>
-        await supabase.rpc("rpc_convert_lead_to_contact", {
-          p_lead_id: lead.id,
-          p_contact_data: contactData,
-          p_root_organization_id: rootOrgId,
-          p_campaign_id: newCampaignId,
-        })
-      );
-
-      if (convertError) {
-        toast({ title: t('leads.toast.updateLeadError'), description: convertError.message, variant: "destructive" });
-        return;
-      }
-      newContact = data;
-    } catch (error: any) {
-      toast({ title: t('leads.toast.updateLeadError'), description: error?.message || String(error), variant: "destructive" });
-      return;
-    }
-
-    // Sync primary address from lead.field_values (safe orchestrator)
-    if (lead.entity_id && lead.field_values) {
-      try {
-        const syncRes = await syncEntityPrimaryAddressFromLead({
-          supabase,
-          entityId: lead.entity_id,
-          fieldValues: lead.field_values as Record<string, any>,
-          actorId: convertedByUserId,
-          allowOverwriteValid: true, // explicit user-driven conversion
-        });
-        console.log("[address-sync/convert]", syncRes);
-      } catch (e) {
-        console.error("[address-sync/convert] failed", e);
-      }
-    }
-
-    // Entity status stays 'active' — role transition handled by sync_contact_entity_role trigger
-
-    toast({ title: t('leads.toast.convertedToContact'), description: t('leads.toast.newContactCreated') });
-    setShowDetails(false);
-    loadLeads();
-    loadStatusCounts();
   };
 
   const doConvertToClient = async (lead: Lead, selectedCampaignId: string | null) => {
@@ -4254,10 +4128,6 @@ export default function AnewLeads() {
     setShowWhatsAppDialog(true);
   }, [extractSmartField]);
 
-  const handleRowConvertToContact = useCallback((lead: any) => {
-    openConversionDialog(lead, 'contact');
-  }, [openConversionDialog]);
-
   const handleRowConvertToClient = useCallback((lead: any) => {
     openConversionDialog(lead, 'client');
   }, [openConversionDialog]);
@@ -5205,7 +5075,6 @@ export default function AnewLeads() {
                               onContact={handleRowContact}
                               onEdit={handleRowEdit}
                               onCreateDeal={handleCreateDealFromLead}
-                              onConvertToContact={handleRowConvertToContact}
                               onConvertToClient={handleRowConvertToClient}
                               onDuplicate={handleRowDuplicate}
                               onDelete={handleDeleteLead}
@@ -5615,11 +5484,8 @@ export default function AnewLeads() {
                     {selectedLead.status !== "converted" && (
                       <div className="flex items-center gap-2">
                         <PermissionGate permission="leads.convert">
-                          <Button size="sm" variant="outline" onClick={() => openConversionDialog(selectedLead, 'client')}>
+                          <Button size="sm" onClick={() => openConversionDialog(selectedLead, 'client')} className="bg-primary">
                             <Building2 className="w-3.5 h-3.5 mr-1" /> Converter para Cliente
-                          </Button>
-                          <Button size="sm" onClick={() => openConversionDialog(selectedLead, 'contact')} className="bg-primary">
-                            <UserPlus className="w-3.5 h-3.5 mr-1" /> Converter para Contacto
                           </Button>
                         </PermissionGate>
                       </div>
@@ -5641,9 +5507,7 @@ export default function AnewLeads() {
         }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>
-                {conversionType === 'contact' ? 'Converter para Contacto' : 'Converter para Cliente'}
-              </DialogTitle>
+              <DialogTitle>Converter para Cliente</DialogTitle>
             </DialogHeader>
             
             <div className="space-y-4 py-4">
@@ -5750,7 +5614,7 @@ export default function AnewLeads() {
                   </>
                 ) : (
                   <>
-                    {conversionType === 'contact' ? <UserPlus className="w-4 h-4 mr-2" /> : <Building2 className="w-4 h-4 mr-2" />}
+                    <Building2 className="w-4 h-4 mr-2" />
                     Confirmar
                   </>
                 )}

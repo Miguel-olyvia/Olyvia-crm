@@ -178,7 +178,6 @@ async function filterVisibleEntityIds(
     const orgScopedTables = [
       "anew_entity_org_links",
       "anew_leads",
-      "anew_contacts",
       "anew_clients",
       "quotes",
       "deals",

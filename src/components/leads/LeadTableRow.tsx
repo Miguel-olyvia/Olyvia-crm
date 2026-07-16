@@ -15,7 +15,7 @@ import {
 import { PermissionGate } from "@/components/PermissionGate";
 import {
   Phone, Eye, Pencil, FileText, Mail, MessageCircle,
-  MoreHorizontal, Star, Copy, Trash2, UserPlus, User, CalendarIcon,
+  MoreHorizontal, Star, Copy, Trash2, User, CalendarIcon,
 } from "lucide-react";
 import { PhoneCallDropdown } from "@/components/shared/PhoneCallDropdown";
 import { format, formatDistanceToNow } from "date-fns";
@@ -42,7 +42,6 @@ export interface LeadTableRowProps {
   onContact: (lead: any) => void;
   onEdit: (lead: any) => void;
   onCreateDeal: (lead: any) => void;
-  onConvertToContact: (lead: any) => void;
   onConvertToClient: (lead: any) => void;
   onDuplicate: (lead: any) => void;
   onDelete: (leadId: string) => void;
@@ -71,7 +70,6 @@ export const LeadTableRow = memo(function LeadTableRow({
   onContact,
   onEdit,
   onCreateDeal,
-  onConvertToContact,
   onConvertToClient,
   onDuplicate,
   onDelete,
@@ -335,12 +333,6 @@ export const LeadTableRow = memo(function LeadTableRow({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuLabel className="text-xs text-muted-foreground">Conversão</DropdownMenuLabel>
-                  <PermissionGate permission="leads.convert">
-                    <DropdownMenuItem onClick={() => onConvertToContact(lead)}>
-                      <UserPlus className="w-3.5 h-3.5 mr-2" />
-                      Converter para contacto
-                    </DropdownMenuItem>
-                  </PermissionGate>
                   <PermissionGate permission="leads.convert">
                     <DropdownMenuItem onClick={() => onConvertToClient(lead)}>
                       <Star className="w-3.5 h-3.5 mr-2" />
