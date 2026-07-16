@@ -8,12 +8,13 @@ import { requireAdminRole, resolveCallerIdentity, authErrorResponse } from "../_
 // Body is not parsed; validation confirms no unexpected payload is required.
 const _noInputSchema = z.object({});
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const supabase = createClient(

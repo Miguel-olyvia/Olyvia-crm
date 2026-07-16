@@ -3,7 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { z } from "npm:zod";
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -88,6 +88,7 @@ ${logoHtml}
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

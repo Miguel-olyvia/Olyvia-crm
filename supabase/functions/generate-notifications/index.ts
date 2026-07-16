@@ -11,7 +11,7 @@ const querySchema = z.object({
   mode: z.enum(["fast", "daily"]).optional().default("fast"),
 });
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 // ─── Default thresholds ───
 const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> = {
@@ -120,6 +120,7 @@ async function fetchAll<T>(
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

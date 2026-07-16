@@ -12,12 +12,13 @@ const requestSchema = z.object({
 });
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

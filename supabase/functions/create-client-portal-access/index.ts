@@ -13,7 +13,7 @@ const requestSchema = z.object({
   force_new_password: z.boolean().optional(),
 });
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -75,6 +75,7 @@ function escapeHtml(str: string): string {
 }
 
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

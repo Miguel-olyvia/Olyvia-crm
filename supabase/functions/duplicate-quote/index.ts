@@ -9,7 +9,7 @@ const requestSchema = z.object({
   apply_discount_percent: z.number().optional(),
 });
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -21,6 +21,7 @@ interface DuplicateRequest {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
