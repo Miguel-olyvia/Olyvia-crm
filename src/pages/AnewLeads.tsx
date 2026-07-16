@@ -5332,8 +5332,8 @@ export default function AnewLeads() {
                         <TabsTrigger value="info">Info</TabsTrigger>
                         <TabsTrigger value="edit">Editar</TabsTrigger>
                         <TabsTrigger value="deals">Negócios</TabsTrigger>
-                        <TabsTrigger value="proposals">Propostas</TabsTrigger>
                         <TabsTrigger value="quotes">Orçamentos</TabsTrigger>
+                        <TabsTrigger value="proposals">Propostas</TabsTrigger>
                         <TabsTrigger value="contracts">Contratos</TabsTrigger>
                         <TabsTrigger value="emails">Emails</TabsTrigger>
                         <TabsTrigger value="notes">📝 Notas</TabsTrigger>
