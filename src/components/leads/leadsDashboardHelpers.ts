@@ -1,4 +1,5 @@
 import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays } from "date-fns";
+import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 
 export type LeadsDashboardScope = "ORG" | "TEAM" | "OWNED";
 
@@ -358,4 +359,76 @@ export function deriveCampaignDistribution(stats: DashboardStats | null) {
       leads: campaign.count,
     }))
     .slice(0, 5);
+}
+
+export interface WorkflowStageLike {
+  id: string;
+  name: string;
+  label: string;
+  color: string;
+  stage_order: number;
+}
+
+export interface StageFunnelItem {
+  id: string;
+  name: string;
+  label: string;
+  color: string;
+  count: number;
+}
+
+// Same underlying stats.status_counts data used by deriveStatusDistribution,
+// but ordered by the org's actual configured workflow stage_order instead of
+// by count — needed to render a real pipeline funnel (new -> ... -> converted).
+export function deriveStageFunnel(
+  stats: DashboardStats | null,
+  workflowStages: readonly WorkflowStageLike[],
+): StageFunnelItem[] {
+  const counts = stats?.status_counts ?? {};
+  return [...workflowStages]
+    .sort((left, right) => left.stage_order - right.stage_order)
+    .map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      label: stage.label,
+      color: stage.color,
+      count: counts[stage.name] ?? 0,
+    }));
+}
+
+export interface NegotiationLeadRow {
+  id: string;
+  entity_id: string | null;
+  assigned_to: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+// Mirrors the ORG/TEAM/OWNED visibility narrowing applied to the scoped RPC
+// (buildDashboardScopedRpcParams) and to AnewLeads.tsx's buildLeadsBaseQuery,
+// but returns a plain PostgREST .or() filter string for a direct anew_leads
+// row query (the RPC only returns aggregates, not rows). Returns null for
+// ORG scope, where no assignee/creator narrowing beyond organization_id applies.
+export function buildNegotiationScopeFilter(
+  query: LeadsDashboardQuery,
+  teamMemberIds: readonly string[] = [],
+): string | null {
+  const scope = resolveDashboardScope(query);
+  if (scope === "ORG" || !query.anewUserId) return null;
+
+  const ids =
+    scope === "OWNED"
+      ? getLeadScopeUserIds(query.anewUserId, query.authUserId ?? null)
+      : getLeadScopeUserIds(query.anewUserId, query.authUserId ?? null, teamMemberIds);
+
+  return `assigned_to.in.(${ids.join(",")}),created_by.in.(${ids.join(",")})`;
+}
+
+// "Days in stage" approximation: anew_leads has no dedicated
+// status_changed_at column, so updated_at is the closest available signal
+// (bumped whenever the lead row changes, not exclusively on status change).
+export function daysBetween(from: string | Date, now: Date = new Date()): number {
+  const start = typeof from === "string" ? parseISO(from) : from;
+  if (!isValid(start)) return 0;
+  return Math.max(0, differenceInDays(startOfDay(now), startOfDay(start)));
 }

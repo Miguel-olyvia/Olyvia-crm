@@ -4502,6 +4502,7 @@ export default function AnewLeads() {
               campaigns={campaigns}
               companyId={activeCompanyId}
               query={dashboardQuery}
+              teamMemberIds={teamMemberIds}
             />
           </TabsContent>
 

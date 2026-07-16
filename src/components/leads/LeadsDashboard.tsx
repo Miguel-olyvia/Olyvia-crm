@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { format, startOfDay, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
@@ -32,6 +33,7 @@ import {
   Zap,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useEntityIdentity } from "@/hooks/useEntityIdentity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -40,18 +42,27 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   buildDashboardScopedRpcParams,
+  buildNegotiationScopeFilter,
+  daysBetween,
   deriveCampaignDistribution,
   deriveDashboardKpis,
   deriveLeadsOverTime,
   deriveSourceDistribution,
+  deriveStageFunnel,
   deriveStatusDistribution,
   getAssigneeIds,
   getComparisonPeriod,
   getDashboardRenderState,
   resolveDashboardDateRange,
+  resolveDashboardScope,
   type DashboardStats,
   type LeadsDashboardQuery,
+  type NegotiationLeadRow,
 } from "./leadsDashboardHelpers";
+
+const NEGOTIATION_LIST_LIMIT = 20;
+
+const currencyFormatter = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" });
 
 interface WorkflowStage {
   id: string;
@@ -77,6 +88,8 @@ interface LeadsDashboardProps {
   campaigns: Campaign[];
   companyId?: string | null;
   query?: LeadsDashboardQuery | null;
+  /** Visible-team user ids for the current viewer, required to replicate TEAM-scope narrowing on the direct negotiation-leads query (the scoped RPC only returns aggregates, not rows). */
+  teamMemberIds?: string[];
 }
 
 function formatMetricValue(value: number | string | null, suffix = ""): string {
@@ -144,7 +157,8 @@ function KPICard({
 }
 
 export function LeadsDashboard(props: LeadsDashboardProps) {
-  const { query } = props;
+  const { query, workflowStages, teamMemberIds } = props;
+  const { getIdentity, resolveEntities } = useEntityIdentity();
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -236,8 +250,91 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     return () => clearInterval(interval);
   }, [query]);
 
+  const negotiationScope = query ? resolveDashboardScope(query) : null;
+  const teamMemberIdsKey = (teamMemberIds ?? []).join(",");
+
+  const {
+    data: negotiationData,
+    isLoading: negotiationLoading,
+    error: negotiationQueryError,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-negotiation",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+    ],
+    queryFn: async () => {
+      if (!query) return { rows: [] as NegotiationLeadRow[], totalCount: 0, deals: new Map<string, number>() };
+
+      let negotiationQuery = supabase
+        .from("anew_leads")
+        .select("id, entity_id, assigned_to, updated_at, created_at", { count: "exact" })
+        .eq("organization_id", query.orgId)
+        .eq("status", "negotiation")
+        .is("deleted_at", null)
+        .order("updated_at", { ascending: true })
+        .range(0, NEGOTIATION_LIST_LIMIT - 1);
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        negotiationQuery = negotiationQuery.or(scopeFilter);
+      }
+
+      const { data, error: negotiationError, count } = await negotiationQuery;
+      if (negotiationError) throw new Error(negotiationError.message || "Erro ao carregar leads em negociação.");
+
+      const rows = (data ?? []) as NegotiationLeadRow[];
+      const leadIds = rows.map((row) => row.id);
+      const dealsByLead = new Map<string, number>();
+
+      if (leadIds.length > 0) {
+        const { data: dealsData, error: dealsError } = await supabase
+          .from("deals")
+          .select("lead_id, value, created_at")
+          .in("lead_id", leadIds)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false });
+
+        if (dealsError) {
+          console.error("Error loading negotiation deal values:", dealsError);
+        } else {
+          (dealsData ?? []).forEach((deal: { lead_id: string | null; value: number | null }) => {
+            if (deal.lead_id && !dealsByLead.has(deal.lead_id)) {
+              dealsByLead.set(deal.lead_id, deal.value ?? 0);
+            }
+          });
+        }
+      }
+
+      return { rows, totalCount: count ?? rows.length, deals: dealsByLead };
+    },
+    enabled: !!query,
+    staleTime: 60_000,
+  });
+
+  const negotiationRows = negotiationData?.rows ?? [];
+  const negotiationTotalCount = negotiationData?.totalCount ?? 0;
+
   useEffect(() => {
-    const assigneeIds = getAssigneeIds(stats);
+    const entityIds = negotiationRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
+    if (entityIds.length > 0) {
+      resolveEntities(entityIds);
+    }
+    // resolveEntities is stable-ish (memoized on identityMap) but must not be
+    // re-run on every identityMap change, only when the negotiation rows change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [negotiationRows]);
+
+  useEffect(() => {
+    const statsAssigneeIds = getAssigneeIds(stats);
+    const negotiationAssigneeIds = negotiationRows
+      .map((row) => row.assigned_to)
+      .filter((id): id is string => Boolean(id));
+    const assigneeIds = Array.from(new Set([...statsAssigneeIds, ...negotiationAssigneeIds]));
+
     if (!query || assigneeIds.length === 0) {
       setUsers([]);
       return;
@@ -264,7 +361,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     return () => {
       cancelled = true;
     };
-  }, [query, stats]);
+  }, [query, stats, negotiationRows]);
 
   const renderState = getDashboardRenderState({
     query,
@@ -299,6 +396,11 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   const sourceDistribution = useMemo(() => deriveSourceDistribution(stats), [stats]);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
   const comparisonPeriod = useMemo(() => getComparisonPeriod(dateRange), [dateRange]);
+  const stageFunnel = useMemo(() => deriveStageFunnel(stats, workflowStages), [stats, workflowStages]);
+  const maxFunnelCount = useMemo(
+    () => Math.max(1, ...stageFunnel.map((stage) => stage.count)),
+    [stageFunnel],
+  );
 
   return (
     <div className="space-y-6">
@@ -729,6 +831,94 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Pipeline</CardTitle>
+              <CardDescription>Leads por fase do funil, na ordem configurada da organização</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stageFunnel.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Sem fases de funil configuradas.</div>
+              ) : (
+                <div className="space-y-3">
+                  {stageFunnel.map((stage) => {
+                    const widthPercent = Math.max(4, Math.round((stage.count / maxFunnelCount) * 100));
+                    return (
+                      <div key={stage.id} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">{stage.label}</span>
+                          <span className="text-muted-foreground">{stage.count}</span>
+                        </div>
+                        <div className="h-3 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${widthPercent}%`, backgroundColor: stage.color }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Leads em Negociação</CardTitle>
+              <CardDescription>
+                {negotiationTotalCount > 0
+                  ? `${negotiationTotalCount} lead${negotiationTotalCount === 1 ? "" : "s"} atualmente na fase de negociação`
+                  : "Fase de negociação"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {negotiationLoading && negotiationRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">A carregar leads em negociação…</div>
+              ) : negotiationQueryError ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Não foi possível carregar os leads em negociação.
+                </div>
+              ) : negotiationRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Sem leads em negociação de momento.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {negotiationRows.map((row) => {
+                    const identity = getIdentity(row.entity_id);
+                    const assignee = row.assigned_to ? userMap.get(row.assigned_to) : null;
+                    const dealValue = negotiationData?.deals.get(row.id);
+                    const days = daysBetween(row.updated_at);
+                    return (
+                      <div
+                        key={row.id}
+                        className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{identity?.display_name || "Lead sem nome"}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {assignee?.name || "Sem responsável"} · há {days} {days === 1 ? "dia" : "dias"} nesta fase
+                          </p>
+                        </div>
+                        {dealValue !== undefined && dealValue !== null && (
+                          <Badge variant="secondary" className="shrink-0 font-normal">
+                            {currencyFormatter.format(dealValue)}
+                          </Badge>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {negotiationTotalCount > negotiationRows.length && (
+                    <p className="text-xs text-muted-foreground text-center pt-2">
+                      +{negotiationTotalCount - negotiationRows.length} mais
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>
