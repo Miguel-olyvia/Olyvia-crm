@@ -553,10 +553,15 @@ export const teamFormSchema = z.object({
 });
 
 // Shared time-of-day (HH:mm) validator used by scheduling schemas below.
+// Accepts an optional trailing :ss because Postgres `time` columns are
+// serialized as "HH:mm:ss" (e.g. auto_schedule_rules.earliest_time,
+// schedule_settings.working_hours_start) and dialogs load that value
+// straight into form state -- rejecting seconds here made it impossible to
+// ever re-save an existing rule/settings row without first stripping them.
 const timeOfDaySchema = z
   .string()
   .trim()
-  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido (use HH:mm)");
+  .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, "Formato de hora inválido (use HH:mm)");
 
 // Shared hex color validator used by scheduling schemas below.
 const scheduleHexColor = z
