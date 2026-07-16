@@ -112,6 +112,7 @@ import { LeadInfoTab } from "@/components/leads/detail/LeadInfoTab";
 import { LeadTimelineTab } from "@/components/leads/detail/LeadTimelineTab";
 import { LeadJourneyTab } from "@/components/leads/detail/LeadJourneyTab";
 import { ClientNotesTab } from "@/components/clients/detail/ClientNotesTab";
+import { ClientContractsTab } from "@/components/clients/detail/ClientContractsTab";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
@@ -643,6 +644,70 @@ export default function AnewLeads() {
       document.body.style.pointerEvents = '';
     };
   }, []);
+
+  // Deals / proposals / quotes for the lead detail drawer (Negócios, Propostas,
+  // Orçamentos tabs) — scoped by entity_id, following the same
+  // deal-first-then-merge-direct pattern used for clients in
+  // ClientDetailsDialog.loadClientDetails.
+  const leadDetailEntityId = selectedLead?.entity_id || null;
+  const leadDetailOrganizationId = selectedLead?.organization_id || null;
+  const { data: leadDetailFinanceData, isLoading: leadDetailFinanceLoading } = useQuery({
+    queryKey: ["lead-detail-deals-proposals-quotes", leadDetailEntityId, leadDetailOrganizationId],
+    queryFn: async () => {
+      const entityId = leadDetailEntityId as string;
+      const organizationId = leadDetailOrganizationId as string;
+
+      const { data: dealsData } = await supabase
+        .from("deals")
+        .select("id, title, value, stage_id, probability, created_at, assigned_to, stages:deal_stages(name, color)")
+        .eq("entity_id", entityId)
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false });
+      const deals = dealsData || [];
+      const dealIds = deals.map((d) => d.id);
+
+      const dedupeByIdSortedByDate = (a: any[], b: any[]) =>
+        Array.from(new Map([...(a || []), ...(b || [])].map((row: any) => [row.id, row])).values())
+          .sort((x: any, y: any) => new Date(y.created_at || 0).getTime() - new Date(x.created_at || 0).getTime());
+
+      const [dealProposalsRes, directProposalsRes, dealQuotesRes, directQuotesRes] = await Promise.all([
+        dealIds.length > 0
+          ? supabase
+              .from("proposals")
+              .select("id, title, value, status, valid_until, created_at, deal_id")
+              .in("deal_id", dealIds)
+              .eq("organization_id", organizationId)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase
+          .from("proposals")
+          .select("id, title, value, status, valid_until, created_at, deal_id")
+          .eq("entity_id", entityId)
+          .eq("organization_id", organizationId),
+        dealIds.length > 0
+          ? supabase
+              .from("quotes")
+              .select("id, title, quote_number, total, estado, created_at, deal_id")
+              .in("deal_id", dealIds)
+              .eq("organization_id", organizationId)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase
+          .from("quotes")
+          .select("id, title, quote_number, total, estado, created_at, deal_id")
+          .eq("entity_id", entityId)
+          .eq("organization_id", organizationId),
+      ]);
+
+      return {
+        deals,
+        proposals: dedupeByIdSortedByDate(dealProposalsRes.data || [], directProposalsRes.data || []),
+        quotes: dedupeByIdSortedByDate(dealQuotesRes.data || [], directQuotesRes.data || []),
+      };
+    },
+    enabled: showDetails && !!leadDetailEntityId && !!leadDetailOrganizationId,
+  });
+  const leadDetailDeals = leadDetailFinanceData?.deals || [];
+  const leadDetailProposals = leadDetailFinanceData?.proposals || [];
+  const leadDetailQuotes = leadDetailFinanceData?.quotes || [];
 
   // Dedicated query for today's callbacks (independent of pagination/filters).
   // Ensures the banner reflects ALL callbacks scheduled for today, not only the page rows.
@@ -5261,6 +5326,8 @@ export default function AnewLeads() {
                         <TabsTrigger value="edit">Editar</TabsTrigger>
                         <TabsTrigger value="deals">Negócios</TabsTrigger>
                         <TabsTrigger value="proposals">Propostas</TabsTrigger>
+                        <TabsTrigger value="quotes">Orçamentos</TabsTrigger>
+                        <TabsTrigger value="contracts">Contratos</TabsTrigger>
                         <TabsTrigger value="emails">Emails</TabsTrigger>
                         <TabsTrigger value="notes">📝 Notas</TabsTrigger>
                         <TabsTrigger value="timeline">📜 Timeline</TabsTrigger>
@@ -5283,7 +5350,7 @@ export default function AnewLeads() {
                         source={selectedLead.source}
                         assignedUserName={assignedUserName}
                         resolveFieldValue={resolveFieldValue}
-                        deals={[]}
+                        deals={leadDetailDeals}
                         nextAction={nextAction}
                         contactAssociation={selectedLead.contacts}
                         clientAssociation={selectedLead.clients}
@@ -5334,8 +5401,33 @@ export default function AnewLeads() {
                     {/* TAB: DEALS */}
                     <TabsContent value="deals" className="mt-4">
                       <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground text-center py-4">Pedidos de proposta associados a esta lead</p>
-                        <button 
+                        {leadDetailFinanceLoading ? (
+                          <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                        ) : leadDetailDeals.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-4">Sem pedidos de proposta associados a esta lead</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {leadDetailDeals.map((deal: any) => (
+                              <Card key={deal.id} className="border-l-4" style={{ borderLeftColor: deal.stages?.color || "hsl(var(--primary))" }}>
+                                <CardContent className="py-3 px-4 flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium">{deal.title}</p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      {deal.stages && (
+                                        <Badge variant="outline" className="text-[10px]" style={{ borderColor: deal.stages.color, color: deal.stages.color }}>
+                                          {deal.stages.name}
+                                        </Badge>
+                                      )}
+                                      {deal.probability != null && <span className="text-[10px] text-amber-600">{deal.probability}%</span>}
+                                    </div>
+                                  </div>
+                                  <p className="text-sm font-bold text-green-600">€{Number(deal.value || 0).toLocaleString("pt-PT")}</p>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                        <button
                           onClick={async () => {
                             if (!selectedLead || !activeCompanyId) return;
                             const result = await createDealFromLead({
@@ -5359,7 +5451,70 @@ export default function AnewLeads() {
 
                     {/* TAB: PROPOSALS */}
                     <TabsContent value="proposals" className="mt-4">
-                      <p className="text-sm text-muted-foreground text-center py-8">Propostas associadas a esta lead</p>
+                      {leadDetailFinanceLoading ? (
+                        <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                      ) : leadDetailProposals.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem propostas associadas a esta lead</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {leadDetailProposals.map((p: any) => (
+                            <Card key={p.id}>
+                              <CardContent className="py-3 px-4 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium">{p.title}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {p.status === "sent" ? "Enviada" : p.status === "accepted" ? "Aceite" : p.status === "draft" ? "Rascunho" : p.status}
+                                    </Badge>
+                                    {p.created_at && <span className="text-[10px] text-muted-foreground">{new Date(p.created_at).toLocaleDateString("pt-PT")}</span>}
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold">€{Number(p.value || 0).toLocaleString("pt-PT")}</p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    {/* TAB: QUOTES */}
+                    <TabsContent value="quotes" className="mt-4">
+                      {leadDetailFinanceLoading ? (
+                        <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                      ) : leadDetailQuotes.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem orçamentos associados a esta lead</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {leadDetailQuotes.map((q: any) => (
+                            <Card key={q.id}>
+                              <CardContent className="py-3 px-4 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium">{q.title || q.quote_number || "Orçamento"}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    {q.quote_number && <span className="text-[10px] text-muted-foreground">{q.quote_number}</span>}
+                                    {q.estado && <Badge variant="outline" className="text-[10px]">{q.estado}</Badge>}
+                                    {q.created_at && <span className="text-[10px] text-muted-foreground">{new Date(q.created_at).toLocaleDateString("pt-PT")}</span>}
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold">€{Number(q.total || 0).toLocaleString("pt-PT")}</p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    {/* TAB: CONTRACTS */}
+                    <TabsContent value="contracts" className="mt-4">
+                      {selectedLead.entity_id && selectedLead.organization_id ? (
+                        <ClientContractsTab
+                          entityId={selectedLead.entity_id}
+                          clientId=""
+                          organizationId={selectedLead.organization_id}
+                        />
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem contratos associados a esta lead</p>
+                      )}
                     </TabsContent>
 
                     {/* TAB: EMAILS */}
