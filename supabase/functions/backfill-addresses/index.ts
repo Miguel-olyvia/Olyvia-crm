@@ -9,7 +9,7 @@ import {
   type AddressRow,
 } from "../_shared/addressSanitization.ts";
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -56,6 +56,7 @@ function mergeSources(sources: SanitizedAddress[]): { merged: SanitizedAddress; 
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   if (!requireServiceRole(req)) {

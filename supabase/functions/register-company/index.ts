@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { deriveKeyFromEnv, encryptNif, hashNif, normalizeNif } from "../_shared/nifCrypto.ts";
 import { withRetryResult } from "../_shared/retry.ts";
@@ -118,6 +118,7 @@ const RATE_LIMIT_MAX_ATTEMPTS = 3;
 const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

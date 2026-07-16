@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
 import { handleSearchEntitiesRequest } from "./handler.ts";
@@ -16,6 +16,7 @@ initSentry();
  * require service_role), plus the env-derived NIF encryption/HMAC keys.
  */
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

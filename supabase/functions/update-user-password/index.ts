@@ -10,7 +10,7 @@ const requestSchema = z.object({
   message: "newPassword or newEmail is required",
 });
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -27,6 +27,7 @@ function handleUpdateError(error: any) {
 }
 
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
-import { corsHeaders as _corsBase } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -51,13 +51,15 @@ const requestSchema = z.object({
 });
 
 // Extend the shared safe CORS headers with the extra headers this function needs.
-// Never use "?? *" as a fallback — _corsBase resolves the origin securely.
-const corsHeaders = {
-  ..._corsBase,
-  "Access-Control-Allow-Headers":
-    _corsBase["Access-Control-Allow-Headers"] +
-    ", x-api-key, x-internal-source",
-};
+// Never fall back to "*" — getCorsHeaders resolves the origin securely per request.
+function getExtendedCorsHeaders(req: Request): Record<string, string> {
+  const base = getCorsHeaders(req);
+  return {
+    ...base,
+    "Access-Control-Allow-Headers":
+      base["Access-Control-Allow-Headers"] + ", x-api-key, x-internal-source",
+  };
+}
 
 const GOOGLE_MAPS_API_KEY = Deno.env.get('GOOGLE_MAPS_API_KEY');
 
@@ -166,6 +168,7 @@ interface AutoScheduleResult {
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getExtendedCorsHeaders(req);
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });

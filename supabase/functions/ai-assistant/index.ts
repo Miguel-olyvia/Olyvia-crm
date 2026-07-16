@@ -8,7 +8,7 @@ import { TOOLS, HANDLERS } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
@@ -95,6 +95,7 @@ async function executeTool(ctx: ExecCtx, toolName: string, args: any): Promise<T
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

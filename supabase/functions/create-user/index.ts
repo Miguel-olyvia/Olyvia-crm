@@ -31,7 +31,7 @@ const requestSchema = z.object({
   additional_phones: z.array(z.unknown()).optional(),
 });
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import {
   deriveKeyFromEnv,
@@ -157,7 +157,12 @@ function normalizeMemberships(memberships: any, membership: any) {
     });
 }
 
-function jsonError(error: string, message: string, status = 400) {
+function jsonError(
+  corsHeaders: Record<string, string>,
+  error: string,
+  message: string,
+  status = 400,
+) {
   return new Response(JSON.stringify({ error, message }), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -278,6 +283,7 @@ async function findAuthUserByEmail(supabaseClient: any, email: string) {
 }
 
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -368,7 +374,7 @@ serve(async (req: Request) => {
     }
 
     const membershipValidationError = validateRawMemberships(memberships, membership);
-    if (membershipValidationError) return jsonError("membership_role_required", membershipValidationError);
+    if (membershipValidationError) return jsonError(corsHeaders, "membership_role_required", membershipValidationError);
 
     // Defense-in-depth: client-side validation can be bypassed by calling this
     // function directly, so never allow a user to be created with zero
@@ -377,6 +383,7 @@ serve(async (req: Request) => {
     const normalizedMembershipsForScopeCheck = normalizeMemberships(memberships, membership);
     if (normalizedMembershipsForScopeCheck.length === 0) {
       return jsonError(
+        corsHeaders,
         "membership_required",
         "At least one valid organization membership is required to create a user.",
       );
@@ -401,19 +408,19 @@ serve(async (req: Request) => {
     }
 
     const preparedAddressResult = prepareAddresses(addresses);
-    if (preparedAddressResult.error) return jsonError("address_incomplete", preparedAddressResult.error);
+    if (preparedAddressResult.error) return jsonError(corsHeaders, "address_incomplete", preparedAddressResult.error);
     const preparedAddresses = preparedAddressResult.addresses;
 
     const fiscalResult = normalizeFiscal({ fiscal, nif, nif_country });
-    if (fiscalResult.error) return jsonError("invalid_fiscal_data", fiscalResult.error);
+    if (fiscalResult.error) return jsonError(corsHeaders, "invalid_fiscal_data", fiscalResult.error);
     const normalizedFiscal = fiscalResult.fiscal;
 
     const emailResult = prepareAdditionalEmails(additional_emails, email);
-    if (emailResult.error) return jsonError("duplicate_email", emailResult.error);
+    if (emailResult.error) return jsonError(corsHeaders, "duplicate_email", emailResult.error);
     const preparedAdditionalEmails = emailResult.emails;
 
     const phoneResult = prepareAdditionalPhones(additional_phones, phone || null);
-    if (phoneResult.error) return jsonError("duplicate_phone", phoneResult.error);
+    if (phoneResult.error) return jsonError(corsHeaders, "duplicate_phone", phoneResult.error);
     const preparedAdditionalPhones = phoneResult.phones;
 
     console.log("Creating user:", email, "by admin:", caller.anewUserId);

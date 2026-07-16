@@ -4,7 +4,7 @@ import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmai
 import { requireServiceRole } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -80,6 +80,7 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

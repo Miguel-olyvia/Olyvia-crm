@@ -28,6 +28,9 @@ verify_jwt = false
 verify_jwt = false
 
 
+[functions.portal-login]
+verify_jwt = false
+
 [functions.create-lead]
 verify_jwt = false
 

@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, authErrorResponse, AuthError } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
@@ -14,6 +14,7 @@ const requestSchema = z.object({
 });
 
 serve(async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

@@ -5,7 +5,7 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { z } from "npm:zod";
 
-import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -159,6 +159,7 @@ function generateInviteEmailHtml(
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

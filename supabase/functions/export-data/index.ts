@@ -2,7 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 import { resolveCallerIdentity } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import {
   getEffectiveColumns,
   getExportDefinition,
@@ -49,13 +49,6 @@ interface AuthorizationContext {
   exportOrgIds: string[];
   scopedUserIds: string[];
   canIncludeSensitive: boolean;
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
-  });
 }
 
 function parseRequest(input: unknown): ExportRequest {
@@ -528,6 +521,13 @@ async function updateAudit(admin: any, auditId: string | null, values: Record<st
 }
 
 Deno.serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+    });
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
