@@ -190,6 +190,32 @@ serve(async (req) => {
       console.error("[portal-login] failed to record attempt:", insertError.message);
     }
 
+    // 3b. Enforce the lockout at the GoTrue level itself, not just in this
+    // function. Without this, the lockout above only ever gated portal-login
+    // — GoTrue's own password-grant endpoint has no CORS restriction and
+    // accepts the same public anon key from any origin, so an attacker who
+    // calls it directly (skipping portal-login entirely) would bypass the
+    // lockout completely. Banning the account via the admin API makes GoTrue
+    // itself reject the login on every endpoint/origin until the ban expires.
+    if (!success) {
+      const failureCountIncludingThisOne = (recentFailures?.length || 0) + 1;
+      if (failureCountIncludingThisOne >= MAX_ATTEMPTS) {
+        const { data: userIdToBan, error: lookupUserError } = await withRetryResult(() =>
+          supabase.rpc("get_auth_user_id_by_email", { p_email: identifier })
+        );
+        if (lookupUserError) {
+          console.error("[portal-login] failed to resolve user for ban:", lookupUserError.message);
+        } else if (userIdToBan) {
+          const { error: banError } = await supabase.auth.admin.updateUserById(userIdToBan, {
+            ban_duration: `${LOCKOUT_MINUTES}m`,
+          });
+          if (banError) {
+            console.error("[portal-login] failed to apply lockout ban:", banError.message);
+          }
+        }
+      }
+    }
+
     if (!success) {
       return new Response(JSON.stringify({
         error: "invalid_credentials",
