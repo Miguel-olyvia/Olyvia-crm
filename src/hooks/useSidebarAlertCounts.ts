@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedAuthUser } from '@/lib/cachedAuth';
 import { resolveOrgSubtree } from '@/lib/orgSubtree';
@@ -24,78 +25,98 @@ const emptyCounts: AlertCounts = {
   email_tracking: 0,
 };
 
+interface SidebarAlertData {
+  counts: AlertCounts;
+  totalUnread: number;
+}
+
+const emptySidebarAlertData: SidebarAlertData = { counts: emptyCounts, totalUnread: 0 };
+
+const POLL_INTERVAL_MS = 180000;
+
+/**
+ * Fetches the raw notifications-derived counts for the sidebar. Kept as the
+ * shared, cacheable input for this hook — separate from useModuleAlerts'
+ * per-module alert list, since the two hooks need different derived shapes
+ * from the same underlying notifications table.
+ */
+async function fetchSidebarAlertData(activeOrgId?: string): Promise<SidebarAlertData> {
+  const { data: user } = await getCachedAuthUser();
+  if (!user.user) {
+    return emptySidebarAlertData;
+  }
+
+  // Resolve org subtree for filtering
+  let subtreeIds: string[] | null = null;
+  if (activeOrgId) {
+    subtreeIds = await resolveOrgSubtree(activeOrgId);
+  }
+
+  const applyOrgFilter = (query: any) => {
+    if (subtreeIds && subtreeIds.length > 0) {
+      return query.in('organization_id', subtreeIds);
+    }
+    return query;
+  };
+
+  // Query 1: Bell unread count (kind = 'notification', is_read = false)
+  let bellQuery = supabase
+    .from('notifications')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.user.id)
+    .eq('kind', 'notification')
+    .eq('is_read', false)
+    .eq('is_dismissed', false)
+    .eq('is_resolved', false);
+  bellQuery = applyOrgFilter(bellQuery);
+
+  // Query 2: Alert badges (kind = 'alert', group by entity_type)
+  let alertQuery = supabase
+    .from('notifications')
+    .select('entity_type')
+    .eq('user_id', user.user.id)
+    .eq('kind', 'alert')
+    .eq('is_dismissed', false)
+    .eq('is_resolved', false);
+  alertQuery = applyOrgFilter(alertQuery);
+
+  const [bellResult, alertResult] = await Promise.all([bellQuery, alertQuery]);
+
+  let totalUnread = 0;
+  if (!bellResult.error && bellResult.count !== null) {
+    totalUnread = bellResult.count;
+  }
+
+  let counts = emptyCounts;
+  if (!alertResult.error && alertResult.data) {
+    const result: AlertCounts = { ...emptyCounts };
+    for (const n of alertResult.data) {
+      const et = n.entity_type as string;
+      if (et && et in result) {
+        result[et as keyof AlertCounts]++;
+      }
+    }
+    counts = result;
+  }
+
+  return { counts, totalUnread };
+}
+
 export function useSidebarAlertCounts(activeOrgId?: string) {
-  const [counts, setCounts] = useState<AlertCounts>(emptyCounts);
-  const [totalUnread, setTotalUnread] = useState(0);
+  const queryClient = useQueryClient();
+  const queryKey = ['notifications', 'sidebar-counts', activeOrgId ?? null];
 
-  const fetchCounts = useCallback(async () => {
-    const { data: user } = await getCachedAuthUser();
-    if (!user.user) {
-      setCounts(emptyCounts);
-      setTotalUnread(0);
-      return;
-    }
-
-    // Resolve org subtree for filtering
-    let subtreeIds: string[] | null = null;
-    if (activeOrgId) {
-      subtreeIds = await resolveOrgSubtree(activeOrgId);
-    }
-
-    const applyOrgFilter = (query: any) => {
-      if (subtreeIds && subtreeIds.length > 0) {
-        return query.in('organization_id', subtreeIds);
-      }
-      return query;
-    };
-
-    // Query 1: Bell unread count (kind = 'notification', is_read = false)
-    let bellQuery = supabase
-      .from('notifications')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.user.id)
-      .eq('kind', 'notification')
-      .eq('is_read', false)
-      .eq('is_dismissed', false)
-      .eq('is_resolved', false);
-    bellQuery = applyOrgFilter(bellQuery);
-
-    // Query 2: Alert badges (kind = 'alert', group by entity_type)
-    let alertQuery = supabase
-      .from('notifications')
-      .select('entity_type')
-      .eq('user_id', user.user.id)
-      .eq('kind', 'alert')
-      .eq('is_dismissed', false)
-      .eq('is_resolved', false);
-    alertQuery = applyOrgFilter(alertQuery);
-
-    const [bellResult, alertResult] = await Promise.all([bellQuery, alertQuery]);
-
-    // Bell count
-    if (!bellResult.error && bellResult.count !== null) {
-      setTotalUnread(bellResult.count);
-    }
-
-    // Alert badges by entity_type
-    if (!alertResult.error && alertResult.data) {
-      const result: AlertCounts = { ...emptyCounts };
-      for (const n of alertResult.data) {
-        const et = n.entity_type as string;
-        if (et && et in result) {
-          result[et as keyof AlertCounts]++;
-        }
-      }
-      setCounts(result);
-    }
-  }, [activeOrgId]);
+  const { data } = useQuery({
+    queryKey,
+    queryFn: () => fetchSidebarAlertData(activeOrgId),
+    refetchInterval: POLL_INTERVAL_MS,
+    initialData: emptySidebarAlertData,
+  });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-
-    fetchCounts();
 
     const setupRealtimeSubscription = async () => {
       const { data: user } = await getCachedAuthUser();
@@ -118,7 +139,10 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
             filter: `user_id=eq.${user.user.id}`,
           },
           () => {
-            fetchCounts();
+            // The realtime callback only ever triggered a re-fetch/re-count in
+            // the previous implementation (no direct/optimistic local state
+            // patching), so invalidating the shared cached query is safe here.
+            queryClient.invalidateQueries({ queryKey });
           }
         )
         .subscribe();
@@ -128,17 +152,18 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
 
     setupRealtimeSubscription();
 
-    const interval = setInterval(fetchCounts, 180000);
-
     return () => {
       cancelled = true;
-      clearInterval(interval);
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-  }, [fetchCounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrgId, queryClient]);
+
+  const counts = data?.counts ?? emptyCounts;
+  const totalUnread = data?.totalUnread ?? 0;
 
   const sectionCounts = {
     crm: counts.contact + counts.client + counts.lead,

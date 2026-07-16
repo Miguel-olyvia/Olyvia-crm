@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
@@ -354,8 +355,6 @@ export default function AnewLeads() {
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [kanbanTruncated, setKanbanTruncated] = useState(false);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
   const [contactResults, setContactResults] = useState<ContactResultConfig[]>([]);
   const [referenceData, setReferenceData] = useState<Record<string, Record<string, string>>>({});
   const [loading, setLoading] = useState(true);
@@ -494,10 +493,7 @@ export default function AnewLeads() {
     return statusCounts[statusFilter] || 0;
   }, [statusFilter, statusCounts, globalTotal]);
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
-  const [companyUsers, setCompanyUsers] = useState<{ id: string; name: string }[]>([]);
-  const [comercialUsers, setComercialUsers] = useState<{ id: string; name: string; districts: string[]; org_ids: string[] }[]>([]);
   const [assignOrgFilter, setAssignOrgFilter] = useState<string>("all");
-  const [assignOrgTree, setAssignOrgTree] = useState<{ id: string; name: string; type: string; depth: number }[]>([]);
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
   // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
   // teamMemberIds is session-global and must never be used outside the TEAM branch.
@@ -536,8 +532,6 @@ export default function AnewLeads() {
   const [extraCampaignFieldDefs, setExtraCampaignFieldDefs] = useState<FieldDefinition[]>([]);
   const [newLeadValues, setNewLeadValues] = useState<Record<string, any>>({});
   const [creatingLead, setCreatingLead] = useState(false);
-  const [availableForms, setAvailableForms] = useState<{id: string; name: string; is_primary: boolean; form_id?: string}[]>([]);
-  const [leadSources, setLeadSources] = useState<{id: string; name: string; icon: string | null; color: string | null}[]>([]);
   const [createLeadSourceId, setCreateLeadSourceId] = useState<string>("");
 
   // Duplicate detection state
@@ -568,7 +562,6 @@ export default function AnewLeads() {
   const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>([]);
 
   // Callbacks state
-  const [todayCallbacks, setTodayCallbacks] = useState<Lead[]>([]);
   const [callbacksChecked, setCallbacksChecked] = useState(false);
   const [showCallbackAlert, setShowCallbackAlert] = useState(true);
   const [showAISchedulingConfig, setShowAISchedulingConfig] = useState(false);
@@ -653,10 +646,11 @@ export default function AnewLeads() {
 
   // Dedicated query for today's callbacks (independent of pagination/filters).
   // Ensures the banner reflects ALL callbacks scheduled for today, not only the page rows.
-  useEffect(() => {
-    if (!activeCompanyId) return;
-    let cancelled = false;
-    (async () => {
+  const callbacksScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+  const teamMemberIdsKey = (teamMemberIds || []).join(",");
+  const { data: todayCallbacks = [], isFetched: todayCallbacksIsFetched } = useQuery({
+    queryKey: ["lead-todays-callbacks", activeCompanyId, callbacksScope, scopeAnewUserId, scopeAuthUserId, teamMemberIdsKey],
+    queryFn: async () => {
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
       let callbacksQuery = supabase
@@ -666,15 +660,14 @@ export default function AnewLeads() {
         .neq("status", "converted")
         .gte("callback_scheduled_at", todayStart.toISOString())
         .lte("callback_scheduled_at", todayEnd.toISOString());
-      callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId);
+      callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId as string);
 
-      const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-      if (requestedScope === "OWNED" && scopeAnewUserId) {
+      if (callbacksScope === "OWNED" && scopeAnewUserId) {
         const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
         callbacksQuery = callbacksQuery.or(
           `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
         );
-      } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+      } else if (callbacksScope === "TEAM" && scopeAnewUserId) {
         const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
         callbacksQuery = callbacksQuery.or(
           `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
@@ -682,25 +675,26 @@ export default function AnewLeads() {
       }
 
       const { data } = await callbacksQuery;
-      if (cancelled) return;
-      const list = (data || []) as any[];
-      setTodayCallbacks(list as Lead[]);
-      if (!callbacksChecked) {
-        setCallbacksChecked(true);
-        if (list.length === 0) {
-          toast({
-            title: `📅 ${t('leads.noCallbacksToday')}`,
-            description: t('leads.noCallbacksTodayDesc'),
-          });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // toast is stable (useToast ref) and callbacksChecked is intentionally excluded:
-    // including it would re-fire the effect after it sets callbacksChecked=true,
-    // causing an infinite loop. The one-shot toast pattern is intentional.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId, getPermissionScope, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
+      return (data || []) as unknown as Lead[];
+    },
+    enabled: !!activeCompanyId,
+  });
+
+  // One-shot toast when today's callbacks resolve to an empty list. Kept as a
+  // separate effect (not inside the queryFn above) so React Query can safely
+  // dedupe/retry/cache the fetch without ever double-firing the toast.
+  useEffect(() => {
+    if (!activeCompanyId || callbacksChecked) return;
+    if (todayCallbacks.length === 0 && todayCallbacksIsFetched) {
+      setCallbacksChecked(true);
+      toast({
+        title: `📅 ${t('leads.noCallbacksToday')}`,
+        description: t('leads.noCallbacksTodayDesc'),
+      });
+    } else if (todayCallbacksIsFetched) {
+      setCallbacksChecked(true);
+    }
+  }, [activeCompanyId, callbacksChecked, todayCallbacks, todayCallbacksIsFetched, toast, t]);
 
   // Single consolidated effect for initial load + filter/search changes
   const initialLoadDoneRef = useRef(false);
@@ -716,20 +710,17 @@ export default function AnewLeads() {
     if (!activeCompanyId || scopeLoading) return;
     
     if (!initialLoadDoneRef.current) {
-      // First mount: load everything, defer secondary data
+      // First mount: load everything, defer secondary data.
+      // campaigns, lead sources, workflow stages, forms, company users, and
+      // comercial users are fetched via useQuery (see below) and no longer
+      // orchestrated from here.
       initialLoadDoneRef.current = true;
       loadStatusCounts();
       loadLeads();
-      loadWorkflowStages();
-      
+
       // Defer secondary loads so critical path renders first
       const timer = setTimeout(() => {
-        loadCampaigns();
-        loadLeadSources();
         loadContactResults();
-        loadForms();
-        loadCompanyUsers();
-        loadComercialUsers();
       }, 200);
       return () => clearTimeout(timer);
     } else {
@@ -737,14 +728,12 @@ export default function AnewLeads() {
       loadLeads();
       loadStatusCounts();
     }
-    // The secondary loader functions (loadCampaigns, loadLeadSources, loadContactResults,
-    // loadForms, loadCompanyUsers, loadComercialUsers, loadWorkflowStages) are intentionally
-    // excluded from the dep array. This effect is a one-shot initialiser guarded by
-    // initialLoadDoneRef — adding those functions would cause them to re-run on every
-    // render that touches their closure values. loadCampaigns is useCallback-wrapped but
-    // the rest are plain async functions that recreate on every render; they are safe here
-    // because initialLoadDoneRef.current prevents re-entry, and the org-change path resets
-    // that ref via the effect above.
+    // loadContactResults is intentionally excluded from the dep array. This
+    // effect is a one-shot initialiser guarded by initialLoadDoneRef — adding
+    // it would cause it to re-run on every render that touches its closure
+    // values. It is a plain async function that recreates on every render; it
+    // is safe here because initialLoadDoneRef.current prevents re-entry, and
+    // the org-change path resets that ref via the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
 
@@ -912,243 +901,241 @@ export default function AnewLeads() {
     return root;
   };
 
-  const loadCompanyUsers = async () => {
-    if (!activeCompanyId) return;
-    
-    // Get all descendant org IDs (company + children)
-    const orgIds = await getDescendantOrgIds(activeCompanyId);
-    
-    // Get active members of this organization and all descendants
-    const { data: memberships } = await supabase
-      .from("anew_memberships")
-      .select("user_id, role_id")
-      .in("organization_id", orgIds)
-      .eq("status", "active");
-    
-    if (!memberships || memberships.length === 0) {
-      setCompanyUsers([]);
-      return;
-    }
+  const { data: companyUsers = [] } = useQuery({
+    queryKey: ["company-users", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string }[]> => {
+      // Get all descendant org IDs (company + children)
+      const orgIds = await getDescendantOrgIds(activeCompanyId as string);
 
-    // Filter out client/portal/contact/lead roles so they don't appear in
-    // internal assignment dropdowns (e.g. "Atribuído a" in Leads).
-    const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
-    const roleCodeMap: Record<string, string> = {};
-    if (roleIds.length > 0) {
-      const { data: rolesData } = await supabase
-        .from("anew_roles")
-        .select("id, code")
-        .in("id", roleIds);
-      (rolesData || []).forEach((r: any) => {
-        roleCodeMap[r.id] = (r.code || "").toLowerCase();
+      // Get active members of this organization and all descendants
+      const { data: memberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, role_id")
+        .in("organization_id", orgIds)
+        .eq("status", "active");
+
+      if (!memberships || memberships.length === 0) {
+        return [];
+      }
+
+      // Filter out client/portal/contact/lead roles so they don't appear in
+      // internal assignment dropdowns (e.g. "Atribuído a" in Leads).
+      const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => {
+          roleCodeMap[r.id] = (r.code || "").toLowerCase();
+        });
+      }
+      const filteredMemberships = memberships.filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
       });
-    }
-    const filteredMemberships = memberships.filter((m: any) => {
-      const code = roleCodeMap[m.role_id];
-      return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
-    });
 
-    const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
-    
-    const { data: usersData } = await supabase
-      .from("anew_users")
-      .select("id, name")
-      .in("id", userIds);
-    
-    if (usersData) {
-      setCompanyUsers(
-        usersData.map(u => ({
-          id: u.id,
-          name: u.name || "Utilizador"
-        }))
-      );
-    }
-  };
+      const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
+
+      const { data: usersData } = await supabase
+        .from("anew_users")
+        .select("id, name")
+        .in("id", userIds);
+
+      return (usersData || []).map(u => ({
+        id: u.id,
+        name: u.name || "Utilizador",
+      }));
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Load members from the "Comercial" department with their address districts
   // Now searches the entire descendant tree for Comercial departments
-  const loadComercialUsers = async () => {
-    if (!activeCompanyId) return;
+  interface ComercialUser { id: string; name: string; districts: string[]; org_ids: string[] }
+  interface AssignOrgTreeNode { id: string; name: string; type: string; depth: number }
+  const { data: comercialUsersData } = useQuery({
+    queryKey: ["comercial-users", activeCompanyId],
+    queryFn: async (): Promise<{ users: ComercialUser[]; tree: AssignOrgTreeNode[] }> => {
+      const orgId = activeCompanyId as string;
 
-    // Get all descendant org IDs from activeCompany (uses cache)
-    const allOrgIds = await getDescendantOrgIds(activeCompanyId);
+      // Get all descendant org IDs from activeCompany (uses cache)
+      const allOrgIds = await getDescendantOrgIds(orgId);
 
-    // Fetch orgs and reuse cached hierarchy in parallel
-    const [orgsResult] = await Promise.all([
-      supabase
+      // Fetch orgs and reuse cached hierarchy in parallel
+      const [orgsResult] = await Promise.all([
+        supabase
+          .from("anew_organizations")
+          .select("id, name, type")
+          .in("id", allOrgIds),
+      ]);
+      const allOrgs = orgsResult.data;
+
+      // Reuse hierarchy from cache instead of fetching again
+      const allHierarchy = descendantCacheRef.current?.hierarchy || [];
+
+      const comercialDeptIds = (allOrgs || [])
+        .filter((o: any) => o.name?.toLowerCase() === 'comercial' && o.type === 'departamento')
+        .map((o: any) => o.id);
+
+      // Build BFS tree for the assignment org filter
+      const orgMap = new Map((allOrgs || []).map(o => [o.id, { name: o.name, type: o.type || '' }]));
+      const childrenMap = new Map<string, string[]>();
+      (allHierarchy || []).forEach(h => {
+        const children = childrenMap.get(h.parent_org_id) || [];
+        children.push(h.child_org_id);
+        childrenMap.set(h.parent_org_id, children);
+      });
+
+      const tree: AssignOrgTreeNode[] = [];
+      const bfsQueue: { id: string; depth: number }[] = [{ id: orgId, depth: 0 }];
+      const visited = new Set<string>();
+      while (bfsQueue.length > 0) {
+        const current = bfsQueue.shift()!;
+        if (visited.has(current.id)) continue;
+        visited.add(current.id);
+        const orgInfo = orgMap.get(current.id);
+        if (orgInfo) {
+          tree.push({ id: current.id, name: orgInfo.name, type: orgInfo.type, depth: current.depth });
+        }
+        const children = childrenMap.get(current.id) || [];
+        for (const childId of children) {
+          if (!visited.has(childId)) {
+            bfsQueue.push({ id: childId, depth: current.depth + 1 });
+          }
+        }
+      }
+
+      // Fallback: if no "Comercial" department found, load all active members from org tree
+      const membershipOrgIds = comercialDeptIds.length > 0 ? comercialDeptIds : allOrgIds;
+
+      // Get active members
+      const { data: rawMemberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, organization_id, role_id")
+        .in("organization_id", membershipOrgIds)
+        .eq("status", "active");
+
+      const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+      const memberships = (rawMemberships || []).filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+
+      if (memberships.length === 0) {
+        return { users: [], tree };
+      }
+
+      const userIds = [...new Set(memberships.map(m => m.user_id))];
+
+      // Get user info
+      const { data: usersData } = await supabase
+        .from("anew_users")
+        .select("id, name, entity_id, status")
+        .in("id", userIds)
+        .eq("status", "active");
+
+      if (!usersData) {
+        return { users: [], tree };
+      }
+
+      // Build user -> department mapping
+      const userDeptMap: Record<string, string[]> = {};
+      memberships.forEach(m => {
+        if (!userDeptMap[m.user_id]) userDeptMap[m.user_id] = [];
+        if (!userDeptMap[m.user_id].includes(m.organization_id)) {
+          userDeptMap[m.user_id].push(m.organization_id);
+        }
+      });
+
+      // Map dept -> parent org (to know which company/loja the comercial dept belongs to)
+      const deptParentMap = new Map<string, string>();
+      (allHierarchy || []).forEach(h => {
+        if (comercialDeptIds.includes(h.child_org_id)) {
+          deptParentMap.set(h.child_org_id, h.parent_org_id);
+        }
+      });
+
+      // Build user -> org_ids (parent orgs of their comercial depts)
+      const userOrgMap: Record<string, string[]> = {};
+      memberships.forEach(m => {
+        const parentOrg = deptParentMap.get(m.organization_id) || m.organization_id;
+        if (!userOrgMap[m.user_id]) userOrgMap[m.user_id] = [];
+        if (!userOrgMap[m.user_id].includes(parentOrg)) {
+          userOrgMap[m.user_id].push(parentOrg);
+        }
+        // Also include the dept itself
+        if (!userOrgMap[m.user_id].includes(m.organization_id)) {
+          userOrgMap[m.user_id].push(m.organization_id);
+        }
+      });
+
+      // 1. Get personal addresses (work addresses) for users
+      const entityIds = usersData.map(u => u.entity_id).filter(Boolean) as string[];
+      const userPersonalDistricts: Record<string, string[]> = {};
+
+      if (entityIds.length > 0) {
+        const { data: userAddresses } = await (supabase as any)
+          .from("anew_entity_addresses")
+          .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
+          .in("entity_id", entityIds)
+          .is("valid_to", null);
+
+        (userAddresses || []).forEach((ea: any) => {
+          const district = ea.address?.district || ea.address?.city;
+          if (district && ea.entity_id) {
+            if (!userPersonalDistricts[ea.entity_id]) userPersonalDistricts[ea.entity_id] = [];
+            if (!userPersonalDistricts[ea.entity_id].includes(district)) {
+              userPersonalDistricts[ea.entity_id].push(district);
+            }
+          }
+        });
+      }
+
+      // 2. Get department addresses as fallback
+      const { data: deptOrgs } = await (supabase as any)
         .from("anew_organizations")
-        .select("id, name, type")
-        .in("id", allOrgIds),
-    ]);
-    const allOrgs = orgsResult.data;
+        .select("id, entity_id")
+        .in("id", comercialDeptIds);
 
-    // Reuse hierarchy from cache instead of fetching again
-    const allHierarchy = descendantCacheRef.current?.hierarchy || [];
-
-    const comercialDeptIds = (allOrgs || [])
-      .filter((o: any) => o.name?.toLowerCase() === 'comercial' && o.type === 'departamento')
-      .map((o: any) => o.id);
-
-    // Build BFS tree for the assignment org filter
-    const orgMap = new Map((allOrgs || []).map(o => [o.id, { name: o.name, type: o.type || '' }]));
-    const childrenMap = new Map<string, string[]>();
-    (allHierarchy || []).forEach(h => {
-      const children = childrenMap.get(h.parent_org_id) || [];
-      children.push(h.child_org_id);
-      childrenMap.set(h.parent_org_id, children);
-    });
-
-    const tree: { id: string; name: string; type: string; depth: number }[] = [];
-    const bfsQueue: { id: string; depth: number }[] = [{ id: activeCompanyId, depth: 0 }];
-    const visited = new Set<string>();
-    while (bfsQueue.length > 0) {
-      const current = bfsQueue.shift()!;
-      if (visited.has(current.id)) continue;
-      visited.add(current.id);
-      const orgInfo = orgMap.get(current.id);
-      if (orgInfo) {
-        tree.push({ id: current.id, name: orgInfo.name, type: orgInfo.type, depth: current.depth });
-      }
-      const children = childrenMap.get(current.id) || [];
-      for (const childId of children) {
-        if (!visited.has(childId)) {
-          bfsQueue.push({ id: childId, depth: current.depth + 1 });
-        }
-      }
-    }
-    setAssignOrgTree(tree);
-
-    // Fallback: if no "Comercial" department found, load all active members from org tree
-    const membershipOrgIds = comercialDeptIds.length > 0 ? comercialDeptIds : allOrgIds;
-
-    // Get active members
-    const { data: rawMemberships } = await supabase
-      .from("anew_memberships")
-      .select("user_id, organization_id, role_id")
-      .in("organization_id", membershipOrgIds)
-      .eq("status", "active");
-
-    const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
-    const roleCodeMap: Record<string, string> = {};
-    if (roleIds.length > 0) {
-      const { data: rolesData } = await supabase
-        .from("anew_roles")
-        .select("id, code")
-        .in("id", roleIds);
-      (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
-    }
-    const memberships = (rawMemberships || []).filter((m: any) => {
-      const code = roleCodeMap[m.role_id];
-      return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
-    });
-
-    if (memberships.length === 0) {
-      setComercialUsers([]);
-      return;
-    }
-
-    const userIds = [...new Set(memberships.map(m => m.user_id))];
-
-    // Get user info
-    const { data: usersData } = await supabase
-      .from("anew_users")
-      .select("id, name, entity_id, status")
-      .in("id", userIds)
-      .eq("status", "active");
-
-    if (!usersData) {
-      setComercialUsers([]);
-      return;
-    }
-
-    // Build user -> department mapping
-    const userDeptMap: Record<string, string[]> = {};
-    memberships.forEach(m => {
-      if (!userDeptMap[m.user_id]) userDeptMap[m.user_id] = [];
-      if (!userDeptMap[m.user_id].includes(m.organization_id)) {
-        userDeptMap[m.user_id].push(m.organization_id);
-      }
-    });
-
-    // Map dept -> parent org (to know which company/loja the comercial dept belongs to)
-    const deptParentMap = new Map<string, string>();
-    (allHierarchy || []).forEach(h => {
-      if (comercialDeptIds.includes(h.child_org_id)) {
-        deptParentMap.set(h.child_org_id, h.parent_org_id);
-      }
-    });
-
-    // Build user -> org_ids (parent orgs of their comercial depts)
-    const userOrgMap: Record<string, string[]> = {};
-    memberships.forEach(m => {
-      const parentOrg = deptParentMap.get(m.organization_id) || m.organization_id;
-      if (!userOrgMap[m.user_id]) userOrgMap[m.user_id] = [];
-      if (!userOrgMap[m.user_id].includes(parentOrg)) {
-        userOrgMap[m.user_id].push(parentOrg);
-      }
-      // Also include the dept itself
-      if (!userOrgMap[m.user_id].includes(m.organization_id)) {
-        userOrgMap[m.user_id].push(m.organization_id);
-      }
-    });
-
-    // 1. Get personal addresses (work addresses) for users
-    const entityIds = usersData.map(u => u.entity_id).filter(Boolean) as string[];
-    const userPersonalDistricts: Record<string, string[]> = {};
-
-    if (entityIds.length > 0) {
-      const { data: userAddresses } = await (supabase as any)
-        .from("anew_entity_addresses")
-        .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
-        .in("entity_id", entityIds)
-        .is("valid_to", null);
-
-      (userAddresses || []).forEach((ea: any) => {
-        const district = ea.address?.district || ea.address?.city;
-        if (district && ea.entity_id) {
-          if (!userPersonalDistricts[ea.entity_id]) userPersonalDistricts[ea.entity_id] = [];
-          if (!userPersonalDistricts[ea.entity_id].includes(district)) {
-            userPersonalDistricts[ea.entity_id].push(district);
-          }
-        }
+      const deptEntityMap: Record<string, string> = {};
+      (deptOrgs || []).forEach((o: any) => {
+        if (o.entity_id) deptEntityMap[o.id] = o.entity_id;
       });
-    }
 
-    // 2. Get department addresses as fallback
-    const { data: deptOrgs } = await (supabase as any)
-      .from("anew_organizations")
-      .select("id, entity_id")
-      .in("id", comercialDeptIds);
+      const deptEntityIds = Object.values(deptEntityMap).filter(Boolean);
+      const deptDistricts: Record<string, string[]> = {};
 
-    const deptEntityMap: Record<string, string> = {};
-    (deptOrgs || []).forEach((o: any) => {
-      if (o.entity_id) deptEntityMap[o.id] = o.entity_id;
-    });
+      if (deptEntityIds.length > 0) {
+        const { data: deptAddresses } = await (supabase as any)
+          .from("anew_entity_addresses")
+          .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
+          .in("entity_id", deptEntityIds)
+          .is("valid_to", null);
 
-    const deptEntityIds = Object.values(deptEntityMap).filter(Boolean);
-    const deptDistricts: Record<string, string[]> = {};
-
-    if (deptEntityIds.length > 0) {
-      const { data: deptAddresses } = await (supabase as any)
-        .from("anew_entity_addresses")
-        .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
-        .in("entity_id", deptEntityIds)
-        .is("valid_to", null);
-
-      (deptAddresses || []).forEach((ea: any) => {
-        const district = ea.address?.district || ea.address?.city;
-        if (district && ea.entity_id) {
-          if (!deptDistricts[ea.entity_id]) deptDistricts[ea.entity_id] = [];
-          if (!deptDistricts[ea.entity_id].includes(district)) {
-            deptDistricts[ea.entity_id].push(district);
+        (deptAddresses || []).forEach((ea: any) => {
+          const district = ea.address?.district || ea.address?.city;
+          if (district && ea.entity_id) {
+            if (!deptDistricts[ea.entity_id]) deptDistricts[ea.entity_id] = [];
+            if (!deptDistricts[ea.entity_id].includes(district)) {
+              deptDistricts[ea.entity_id].push(district);
+            }
           }
-        }
-      });
-    }
+        });
+      }
 
-    // Assign districts: prefer user's personal address, fallback to department's
-    setComercialUsers(
-      usersData.map(u => {
+      // Assign districts: prefer user's personal address, fallback to department's
+      const users = usersData.map(u => {
         // First check user's own addresses
         let districts: string[] = [];
         if (u.entity_id && userPersonalDistricts[u.entity_id]?.length > 0) {
@@ -1171,41 +1158,50 @@ export default function AnewLeads() {
           districts,
           org_ids: userOrgMap[u.id] || [],
         };
-      })
-    );
-  };
+      });
+
+      return { users, tree };
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const comercialUsers = comercialUsersData?.users ?? [];
+  const assignOrgTree = comercialUsersData?.tree ?? [];
 
 
-  const loadForms = async () => {
-    if (!activeCompanyId) return;
-    
-    // Load forms and campaign forms in parallel
-    const [formsResult, campaignFormsResult] = await Promise.all([
-      supabase
-        .from("forms")
-        .select("id, name, is_primary")
-        .eq("organization_id", activeCompanyId)
-        .eq("is_active", true)
-        .eq("form_type", "lead")
-        .order("is_primary", { ascending: false }),
-      supabase
-        .from("campaigns")
-        .select("form_id, forms!campaigns_form_id_fkey(id, name, is_primary)")
-        .eq("organization_id", activeCompanyId)
-        .not("form_id", "is", null),
-    ]);
-    
-    // Merge forms, avoiding duplicates
-    const allForms = [...(formsResult.data || [])];
-    (campaignFormsResult.data || []).forEach(cf => {
-      const form = cf.forms as unknown as { id: string; name: string; is_primary: boolean } | null;
-      if (form && !allForms.find(f => f.id === form.id)) {
-        allForms.push(form);
-      }
-    });
-    
-    setAvailableForms(allForms);
-  };
+  const { data: availableForms = [] } = useQuery({
+    queryKey: ["lead-forms", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string; is_primary: boolean; form_id?: string }[]> => {
+      // Load forms and campaign forms in parallel
+      const [formsResult, campaignFormsResult] = await Promise.all([
+        supabase
+          .from("forms")
+          .select("id, name, is_primary")
+          .eq("organization_id", activeCompanyId as string)
+          .eq("is_active", true)
+          .eq("form_type", "lead")
+          .order("is_primary", { ascending: false }),
+        supabase
+          .from("campaigns")
+          .select("form_id, forms!campaigns_form_id_fkey(id, name, is_primary)")
+          .eq("organization_id", activeCompanyId as string)
+          .not("form_id", "is", null),
+      ]);
+
+      // Merge forms, avoiding duplicates
+      const allForms = [...(formsResult.data || [])];
+      (campaignFormsResult.data || []).forEach(cf => {
+        const form = cf.forms as unknown as { id: string; name: string; is_primary: boolean } | null;
+        if (form && !allForms.find(f => f.id === form.id)) {
+          allForms.push(form);
+        }
+      });
+
+      return allForms;
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const loadContactResults = async () => {
     if (!activeCompanyId) return;
@@ -1360,30 +1356,32 @@ export default function AnewLeads() {
     }
   };
 
-  const loadWorkflowStages = async () => {
-    if (!activeCompanyId) return;
-    
-    const { data: allStages, error } = await supabase
-      .from("lead_workflow_stages")
-      .select("id, name, label, color, stage_order, is_active, is_conversion, is_rejection, is_final, organization_id, default_status")
-      .or(`organization_id.eq.${activeCompanyId},organization_id.is.null`)
-      .eq("is_active", true)
-      .order("stage_order");
+  const { data: workflowStages = [] } = useQuery({
+    queryKey: ["lead-workflow-stages", activeCompanyId],
+    queryFn: async (): Promise<WorkflowStage[]> => {
+      const { data: allStages, error } = await supabase
+        .from("lead_workflow_stages")
+        .select("id, name, label, color, stage_order, is_active, is_conversion, is_rejection, is_final, organization_id, default_status")
+        .or(`organization_id.eq.${activeCompanyId},organization_id.is.null`)
+        .eq("is_active", true)
+        .order("stage_order");
 
-    const mapStage = (s: any): WorkflowStage => ({
-      ...s,
-      organization_id: s.organization_id ?? null,
-      default_status: s.default_status ?? null,
-    });
+      const mapStage = (s: any): WorkflowStage => ({
+        ...s,
+        organization_id: s.organization_id ?? null,
+        default_status: s.default_status ?? null,
+      });
 
-    if (!error && allStages) {
-      const orgStages = allStages.filter(s => s.organization_id === activeCompanyId);
-      const globalStages = allStages.filter(s => !s.organization_id);
-      setWorkflowStages((orgStages.length > 0 ? orgStages : globalStages).map(mapStage));
-    } else {
-      setWorkflowStages([]);
-    }
-  };
+      if (!error && allStages) {
+        const orgStages = allStages.filter(s => s.organization_id === activeCompanyId);
+        const globalStages = allStages.filter(s => !s.organization_id);
+        return (orgStages.length > 0 ? orgStages : globalStages).map(mapStage);
+      }
+      return [];
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Helper to get status color from workflow stage or fallback
   const getStatusColor = useCallback((status: string) => {
@@ -1564,37 +1562,49 @@ export default function AnewLeads() {
     }
   }, [configCampaignId, loadFieldDefinitions]);
 
-  const loadCampaigns = useCallback(async () => {
-    if (!activeCompanyId) return;
-    
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("id, name, status, form_id")
-      .eq("organization_id", activeCompanyId)
-      .eq("status", "active")
-      .order("name");
+  const { data: campaigns = [] } = useQuery({
+    queryKey: ["lead-campaigns", activeCompanyId],
+    queryFn: async (): Promise<Campaign[]> => {
+      const { data, error } = await supabase
+        .from("campaigns")
+        .select("id, name, status, form_id")
+        .eq("organization_id", activeCompanyId as string)
+        .eq("status", "active")
+        .order("name");
 
-    if (!error && data) {
-      setCampaigns(data.map(c => ({ id: c.id, name: c.name, form_id: c.form_id })));
-      // Set first campaign as default for config
-      if (data.length > 0 && !configCampaignId) {
-        setConfigCampaignId(data[0].id);
+      if (error) {
+        console.error("Error loading campaigns:", error);
+        return [];
       }
-    } else if (error) {
-      console.error("Error loading campaigns:", error);
-    }
-  }, [activeCompanyId, configCampaignId]);
+      return (data || []).map(c => ({ id: c.id, name: c.name, form_id: c.form_id }));
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const loadLeadSources = useCallback(async () => {
-    if (!activeCompanyId) return;
-    let query = supabase
-      .from("lead_sources")
-      .select("id, name, icon, color")
-      .eq("is_active", true);
-    query = query.or(`organization_id.eq.${activeCompanyId},organization_id.is.null`);
-    const { data } = await query.order("name");
-    if (data) setLeadSources(data);
-  }, [activeCompanyId]);
+  // Set the first campaign as the default for the workflow config selector.
+  // Mirrors the previous in-loader side effect, moved here since useQuery
+  // fetchers must stay free of UI/state side effects.
+  useEffect(() => {
+    if (campaigns.length > 0 && !configCampaignId) {
+      setConfigCampaignId(campaigns[0].id);
+    }
+  }, [campaigns, configCampaignId]);
+
+  const { data: leadSources = [] } = useQuery({
+    queryKey: ["lead-sources", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string; icon: string | null; color: string | null }[]> => {
+      let query = supabase
+        .from("lead_sources")
+        .select("id, name, icon, color")
+        .eq("is_active", true);
+      query = query.or(`organization_id.eq.${activeCompanyId},organization_id.is.null`);
+      const { data } = await query.order("name");
+      return data || [];
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
 
   // Load leads with server-side pagination

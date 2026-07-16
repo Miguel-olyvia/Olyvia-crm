@@ -248,17 +248,27 @@ const Deals = () => {
 
       if (error) throw error;
 
-      // Trigger workflow for each deal (e.g. auto-create quotes)
+      // Trigger workflow for each deal (e.g. auto-create quotes).
+      // Fetch organization_id/created_by for all selected deals in a single
+      // batched query instead of one SELECT per deal id.
+      const { data: dealsInfo } = await (supabase
+        .from("deals" as any)
+        .select("id, organization_id, created_by")
+        .in("id", dealIds) as any);
+
+      const dealInfoById = new Map(
+        (dealsInfo || []).map((d: any) => [d.id, d])
+      );
+
       const workflowPromises = dealIds.map(async (dealId) => {
         try {
-          // Get the deal's organization_id and created_by
-          const { data: deal } = await (supabase
-            .from("deals" as any)
-            .select("organization_id, created_by")
-            .eq("id", dealId)
-            .single() as any);
+          const deal = dealInfoById.get(dealId);
 
           if (deal) {
+            // execute-workflow still runs once per deal: it operates on a
+            // single entity_id/new_stage_id pair and returns per-deal
+            // automation results (e.g. one created quote per deal), not
+            // trivially batchable without changing the function's contract.
             await supabase.functions.invoke('execute-workflow', {
               body: {
                 source_entity: 'deal',
