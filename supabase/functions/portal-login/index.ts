@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 
-import { PRODUCTION_ORIGIN } from "../_shared/cors.ts";
+import { PRODUCTION_ORIGIN, VERCEL_PREVIEW_ORIGIN_PATTERN } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { withRetry, withRetryResult } from "../_shared/retry.ts";
 
@@ -20,7 +20,8 @@ function buildCorsHeaders(requestOrigin: string | null): Record<string, string> 
   const allowed = [PRODUCTION_ORIGIN, testOrigin].filter(
     (origin): origin is string => Boolean(origin),
   );
-  const matched = requestOrigin && allowed.includes(requestOrigin)
+  const matched = requestOrigin &&
+      (allowed.includes(requestOrigin) || VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin))
     ? requestOrigin
     : PRODUCTION_ORIGIN;
 

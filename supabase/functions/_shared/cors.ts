@@ -32,7 +32,7 @@ export const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
 // https://olyvia-crm-git-development-miguel-bmgest.vercel.app
 // Anchoring with ^/$ prevents bypasses like
 // https://olyvia-crm-git-x-bmgest.vercel.app.evil.com
-const VERCEL_PREVIEW_ORIGIN_PATTERN =
+export const VERCEL_PREVIEW_ORIGIN_PATTERN =
   /^https:\/\/olyvia-crm-git-[a-z0-9-]+-bmgest\.vercel\.app$/;
 
 function isLocalDev(): boolean {
