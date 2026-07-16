@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { expandPermissions, permissionSetHas } from "@/lib/permissionAliases";
@@ -127,8 +127,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setRefreshCounter(c => c + 1);
   }, []);
 
-  return (
-    <PermissionsContext.Provider value={{
+  // Memoized so consumers of usePermissions() only see a new context value
+  // when one of these actually changes, instead of on every
+  // PermissionsProvider render (all the function fields are already stable
+  // via useCallback above, so this memo only recomputes on real changes).
+  const value = useMemo(
+    () => ({
       permissions,
       loading,
       isSystemAdmin,
@@ -136,7 +140,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       hasAnyPermission,
       hasModuleAccess,
       refreshPermissions,
-    }}>
+    }),
+    [permissions, loading, isSystemAdmin, hasPermission, hasAnyPermission, hasModuleAccess, refreshPermissions],
+  );
+
+  return (
+    <PermissionsContext.Provider value={value}>
       {children}
     </PermissionsContext.Provider>
   );

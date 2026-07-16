@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { identifyUser, resetAnalytics } from "@/lib/analytics/posthog";
@@ -226,6 +226,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // Ref-wrapper so refreshCompanies (exposed via context) can have a stable
+  // identity via useCallback without needing loadUserCompanies itself
+  // (which closes over many local state/refs) to be memoized.
+  const loadUserCompaniesRef = useRef<() => Promise<void>>(async () => {});
+
   const loadUserCompanies = async () => {
     const requestVersion = ++requestVersionRef.current;
     setIsLoading(true);
@@ -319,7 +324,9 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const setActiveCompany = (company: Company) => {
+  loadUserCompaniesRef.current = loadUserCompanies;
+
+  const setActiveCompany = useCallback((company: Company) => {
     setActiveCompanyState(company);
     localStorage.setItem("activeCompanyId", company.id);
 
@@ -331,22 +338,32 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       setUserType(contextualResult.tipo);
       setUserRoleName(contextualResult.roleName);
     }
-  };
+  }, [userType]);
 
-  const refreshCompanies = async () => {
-    await loadUserCompanies();
-  };
+  const refreshCompanies = useCallback(async () => {
+    await loadUserCompaniesRef.current();
+  }, []);
 
-  return (
-    <CompanyContext.Provider value={{ 
-      companies, 
-      activeCompany, 
+  // Memoized so consumers of useCompany() only see a new context value when
+  // one of these actually changes, instead of on every CompanyProvider
+  // render — an unmemoized value object here previously caused every
+  // consumer's effects/callbacks depending on "the whole context" to refire
+  // on every render, which could cascade into render loops downstream.
+  const value = useMemo(
+    () => ({
+      companies,
+      activeCompany,
       setActiveCompany,
       refreshCompanies,
       isLoading,
       userType,
-      userRoleName
-    }}>
+      userRoleName,
+    }),
+    [companies, activeCompany, setActiveCompany, refreshCompanies, isLoading, userType, userRoleName],
+  );
+
+  return (
+    <CompanyContext.Provider value={value}>
       {children}
     </CompanyContext.Provider>
   );

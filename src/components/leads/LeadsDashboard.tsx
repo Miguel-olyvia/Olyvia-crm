@@ -349,7 +349,14 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     staleTime: 60_000,
   });
 
-  const negotiationRows = negotiationData?.rows ?? [];
+  // Memoized (not `negotiationData?.rows ?? []`): the `?? []` fallback creates
+  // a brand-new array reference on every render whenever negotiationData is
+  // undefined (the permanent state in the default "Leads" sub-view, since
+  // this query is gated to dashboardView === "pipeline"). That fresh
+  // reference fed straight into a useEffect dependency array below, which
+  // unconditionally called setUsers([]) every time -- an infinite render
+  // loop, since a new [] is never Object.is-equal to the previous state.
+  const negotiationRows = useMemo(() => negotiationData?.rows ?? [], [negotiationData]);
   const negotiationTotalCount = negotiationData?.totalCount ?? 0;
 
   const {
@@ -420,7 +427,8 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     staleTime: 60_000,
   });
 
-  const activityFeedRows = activityRows ?? [];
+  // Memoized for the same reason as negotiationRows above -- see that comment.
+  const activityFeedRows = useMemo(() => activityRows ?? [], [activityRows]);
 
   useEffect(() => {
     const entityIds = negotiationRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
