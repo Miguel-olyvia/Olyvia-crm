@@ -498,24 +498,9 @@ export default function AnewLeads() {
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
   // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
   // teamMemberIds is session-global and must never be used outside the TEAM branch.
-  const assignableCompanyUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return companyUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return companyUsers.filter(u => allowedIds.has(u.id));
-    }
-    return companyUsers.filter(u => u.id === scopeAnewUserId);
-  }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
-  const assignableComercialUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return comercialUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return comercialUsers.filter(u => allowedIds.has(u.id));
-    }
-    return comercialUsers.filter(u => u.id === scopeAnewUserId);
-  }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
+  // NOTE: assignableCompanyUsers/assignableComercialUsers are declared further below
+  // (after companyUsers/comercialUsers are defined via useQuery) to avoid a
+  // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [sortColumn, setSortColumn] = useState<string>("created_at");
@@ -1233,6 +1218,28 @@ export default function AnewLeads() {
   const comercialUsers = comercialUsersData?.users ?? [];
   const assignOrgTree = comercialUsersData?.tree ?? [];
 
+  // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
+  // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
+  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  const assignableCompanyUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return companyUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return companyUsers.filter(u => allowedIds.has(u.id));
+    }
+    return companyUsers.filter(u => u.id === scopeAnewUserId);
+  }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
+  const assignableComercialUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return comercialUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return comercialUsers.filter(u => allowedIds.has(u.id));
+    }
+    return comercialUsers.filter(u => u.id === scopeAnewUserId);
+  }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
+
 
   const { data: availableForms = [] } = useQuery({
     queryKey: ["lead-forms", activeCompanyId],
@@ -1421,7 +1428,7 @@ export default function AnewLeads() {
     }
   };
 
-  const { data: workflowStages = [] } = useQuery({
+  const { data: workflowStages = [], refetch: refetchWorkflowStages } = useQuery({
     queryKey: ["lead-workflow-stages", activeCompanyId],
     queryFn: async (): Promise<WorkflowStage[]> => {
       const { data: allStages, error } = await supabase
@@ -6375,7 +6382,7 @@ export default function AnewLeads() {
           open={showWorkflowConfig}
           onOpenChange={setShowWorkflowConfig}
           companyId={activeCompanyId || null}
-          onStagesUpdated={loadWorkflowStages}
+          onStagesUpdated={refetchWorkflowStages}
         />
 
         {/* Contact Dialog */}
