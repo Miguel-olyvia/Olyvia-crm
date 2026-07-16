@@ -6,7 +6,7 @@ const requestSchema = z.object({
   userId: z.string(),
 });
 
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -20,6 +20,7 @@ initSentry();
 // checks — see rpc_restore_user's permission-choice note for why no separate
 // users.restore permission was introduced).
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }

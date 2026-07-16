@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
 import { handleNifBackfillRequest } from "./handler.ts";
@@ -14,6 +14,7 @@ initSentry();
  * env-derived crypto keys) into the testable handler.
  */
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
