@@ -175,11 +175,6 @@ interface FieldDefinition {
   [key: string]: any;
 }
 
-interface ContactOption {
-  id: string;
-  entity_id: string | null;
-}
-
 interface ClientOption {
   id: string;
   entity_id: string | null;
@@ -566,9 +561,7 @@ export default function AnewLeads() {
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   
   // Contact/Client association state
-  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
   const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
-  const [searchingContacts, setSearchingContacts] = useState(false);
   const [searchingClients, setSearchingClients] = useState(false);
   
   // Column customization state
@@ -2065,39 +2058,7 @@ export default function AnewLeads() {
   });
 
   // Debounce timers for search inputs (300ms) — cancels pending query on each keystroke
-  const searchContactsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchClientsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Search contacts for association
-  const searchContacts = (query: string) => {
-    if (searchContactsTimer.current) clearTimeout(searchContactsTimer.current);
-    if (!query || query.length < 2) {
-      setContactOptions([]);
-      return;
-    }
-    searchContactsTimer.current = setTimeout(async () => {
-      setSearchingContacts(true);
-      // First resolve entity IDs matching the query, then find associated contacts
-      const { ids: matchingEntityIds } = await searchEntityIds(query);
-      if (matchingEntityIds.length === 0) {
-        setContactOptions([]);
-        setSearchingContacts(false);
-        return;
-      }
-      const { data } = await supabase
-        .from("anew_contacts")
-        .select("id, entity_id")
-        .eq("organization_id", activeCompanyId)
-        .eq("status", "active")
-        .in("entity_id", matchingEntityIds)
-        .limit(10);
-      const results = (data || []).map((c: any) => ({ id: c.id, entity_id: c.entity_id }));
-      const eIds = results.map((r: any) => r.entity_id).filter(Boolean);
-      if (eIds.length > 0) await resolveEntities(eIds);
-      setContactOptions(results as ContactOption[]);
-      setSearchingContacts(false);
-    }, 300);
-  };
 
   // Search clients for association
   const searchClients = (query: string) => {
@@ -2174,7 +2135,7 @@ export default function AnewLeads() {
     const types = new Set(refFields.map(f => f.field_type));
     const newRefData: Record<string, Record<string, string>> = {};
 
-    // Pre-fetch orgIds once (shared by ref_company, ref_contact, ref_client)
+    // Pre-fetch orgIds once (shared by ref_company, ref_client)
     const orgIds = activeCompanyId ? await getDescendantOrgIds(activeCompanyId) : [];
 
     const loaders: Promise<void>[] = [];
@@ -2197,23 +2158,6 @@ export default function AnewLeads() {
             const map: Record<string, string> = {};
             (data || []).forEach(c => { map[c.id] = c.name; });
             refFields.filter(f => f.field_type === 'ref_company').forEach(f => { newRefData[f.field_key] = map; });
-          }))
-      );
-    }
-
-    if (types.has('ref_contact') && activeCompanyId && orgIds.length > 0) {
-      loaders.push(
-        Promise.resolve(supabase.from('anew_contacts').select('id, entity_id').in('organization_id', orgIds).eq('status', 'active')
-          .then(async ({ data: contacts }) => {
-            if (!contacts) return;
-            const eIds = contacts.map(c => c.entity_id).filter(Boolean);
-            if (eIds.length > 0) await resolveEntities(eIds);
-            const map: Record<string, string> = {};
-            contacts.forEach((c: any) => {
-              const identity = getIdentity(c.entity_id);
-              map[c.id] = identity?.display_name || `Contact #${c.id.slice(0, 8)}`;
-            });
-            refFields.filter(f => f.field_type === 'ref_contact').forEach(f => { newRefData[f.field_key] = map; });
           }))
       );
     }
@@ -5482,11 +5426,8 @@ export default function AnewLeads() {
                           setShowDetails(false);
                           openContactDialogForLead(selectedLead);
                         }}
-                        contactOptions={contactOptions}
                         clientOptions={clientOptions}
-                        searchingContacts={searchingContacts}
                         searchingClients={searchingClients}
-                        onSearchContacts={searchContacts}
                         onSearchClients={searchClients}
                         onAssociateContact={handleAssociateContact}
                         onAssociateClient={handleAssociateClient}
@@ -5900,7 +5841,6 @@ export default function AnewLeads() {
                         <SelectItem value="url">URL</SelectItem>
                         <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
                         <SelectItem value="ref_company">Company</SelectItem>
-                        <SelectItem value="ref_contact">Contact</SelectItem>
                         <SelectItem value="ref_client">Client</SelectItem>
                         <SelectItem value="ref_employee">Employee</SelectItem>
                         <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
@@ -6001,7 +5941,6 @@ export default function AnewLeads() {
                               <SelectItem value="url">URL</SelectItem>
                               <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
                               <SelectItem value="ref_company">Company</SelectItem>
-                              <SelectItem value="ref_contact">Contact</SelectItem>
                               <SelectItem value="ref_client">Client</SelectItem>
                               <SelectItem value="ref_employee">Employee</SelectItem>
                               <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>

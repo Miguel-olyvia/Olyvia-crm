@@ -276,7 +276,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // Deal/contact/client search with @
   type SearchResult =
     | { kind: "deal"; id: string; title: string; client_id: string | null; lead_id: string | null; contact_id?: string | null; organization_id: string | null; entity_id?: string | null; assigned_to?: string | null; entity_name?: string | null }
-    | { kind: "contact"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null }
     | { kind: "client"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null };
   const [dealSearch, setDealSearch] = useState("");
   const [dealSearchResults, setDealSearchResults] = useState<SearchResult[]>([]);
@@ -3300,19 +3299,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                           (byEntity || []).forEach((d: any) => { if (!seenIds.has(d.id)) dealsData.push(d); });
                         }
 
-                        // --- Search contacts ---
-                        let contactsData: any[] = [];
-                        if (matchingEntityIds.length > 0) {
-                          const { data } = await (supabase as any)
-                            .from("anew_contacts")
-                            .select("id, entity_id, organization_id, assigned_to")
-                            .in("organization_id", orgIds)
-                            .in("entity_id", matchingEntityIds)
-                            .is("deleted_at", null)
-                            .limit(25);
-                          contactsData = data || [];
-                        }
-
                         // --- Search clients ---
                         let clientsData: any[] = [];
                         if (matchingEntityIds.length > 0) {
@@ -3329,7 +3315,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         // Build entity name map
                         const allEntityIds = new Set<string>();
                         dealsData.forEach((d: any) => d.entity_id && allEntityIds.add(d.entity_id));
-                        contactsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
                         clientsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
                         const entityMap: Record<string, any> = {};
                         if (allEntityIds.size > 0) {
@@ -3347,14 +3332,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             organization_id: d.organization_id, entity_id: d.entity_id,
                             assigned_to: d.assigned_to,
                             entity_name: d.entity_id ? entityMap[d.entity_id]?.display_name || null : null,
-                          })),
-                          ...contactsData.map((c: any) => ({
-                            kind: "contact" as const,
-                            id: c.id,
-                            name: entityMap[c.entity_id]?.display_name || "Lead",
-                            entity_id: c.entity_id,
-                            organization_id: c.organization_id,
-                            assigned_to: c.assigned_to,
                           })),
                           ...clientsData.map((c: any) => ({
                             kind: "client" as const,
@@ -3424,7 +3401,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                               setDealSearch(""); setShowDealDropdown(false); setDealSearchResults([]);
                             }}>
                             <Badge variant="secondary" className="text-xs">
-                              {r.kind === "deal" ? "Pedido" : r.kind === "client" ? "Cliente" : "Lead"}
+                              {r.kind === "deal" ? "Pedido" : "Cliente"}
                             </Badge>
                             <div className="flex flex-col min-w-0">
                               <span className="text-sm truncate">{r.kind === "deal" ? r.title : r.name}</span>
@@ -3436,7 +3413,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta, leads ou clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta ou clientes</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}

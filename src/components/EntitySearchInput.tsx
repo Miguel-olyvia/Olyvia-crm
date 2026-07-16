@@ -12,7 +12,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export interface EntitySearchResult {
-  type: "lead" | "client" | "contact";
+  type: "lead" | "client";
   id: string;
   name: string;
   email?: string;
@@ -26,7 +26,7 @@ interface EntitySearchInputProps {
   onChange: (entity: EntitySearchResult | null) => void;
   error?: string;
   /** Which entity types to search. Default: all */
-  searchTypes?: ("lead" | "client" | "contact")[];
+  searchTypes?: ("lead" | "client")[];
   placeholder?: string;
   disabled?: boolean;
 }
@@ -36,17 +36,13 @@ const typeConfig = {
   client: { label: "Cliente", icon: Building, color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400" },
 };
 
-// "contact" is a legacy entity type still returned by fallback queries against
-// anew_contacts (used by callers not yet migrated off that table). It is no
-// longer a visible search category, so any lookup for it falls back to the
-// Lead styling instead of crashing on a missing typeConfig entry.
 const getTypeConfig = (type: string) => typeConfig[type as keyof typeof typeConfig] || typeConfig.lead;
 
 export function EntitySearchInput({
   value,
   onChange,
   error,
-  searchTypes = ["lead", "client", "contact"],
+  searchTypes = ["lead", "client"],
   placeholder,
   disabled = false,
 }: EntitySearchInputProps) {
@@ -89,12 +85,12 @@ export function EntitySearchInput({
         const isAdmin = isSystemAdmin;
         const orgId = activeCompany?.id;
 
-        // Contacts/clients: scoped strictly to the active organization and active
+        // Clients: scoped strictly to the active organization and active
         // status, via the optimized RPC (name/email/phone match server-side).
         // Fallback to a direct query only when the RPC fails or for the "lead"
         // type in isolation (leads aren't covered by this RPC).
-        const rpcEntityTypes = searchTypes.filter((type) => type === "contact" || type === "client");
-        let rpcCoveredTypes: ("contact" | "client")[] = [];
+        const rpcEntityTypes = searchTypes.filter((type) => type === "client");
+        let rpcCoveredTypes: ("client")[] = [];
 
         // NIF matching runs in parallel with the RPC, via the search-entities
         // Edge Function, which never exposes plaintext NIF/hash to the client
@@ -117,7 +113,7 @@ export function EntitySearchInput({
           if (scopedError) {
             console.error("Entity scoped search error, falling back to direct query:", scopedError);
           } else {
-            rpcCoveredTypes = rpcEntityTypes as ("contact" | "client")[];
+            rpcCoveredTypes = rpcEntityTypes as ("client")[];
             (scopedResults || []).forEach((row: any) => {
               if (!rpcEntityTypes.includes(row.type)) return;
               allResults.push({
@@ -135,16 +131,15 @@ export function EntitySearchInput({
 
         // Leads still need entity-id matching across the visible org scope.
         const needsLeads = searchTypes.includes("lead");
-        // Fallback for clients/contacts (only used when RPC failed) must also match by entity id.
+        // Fallback for clients (only used when RPC failed) must also match by entity id.
         // Also re-run when the RPC succeeded but a NIF match exists: an entity found
         // only via NIF (not by name/email/phone) must still surface even though the
         // RPC already covers that type — union NIF matches with the RPC results.
-        const needsContactClientFallback =
-          (searchTypes.includes("client") && (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0)) ||
-          (searchTypes.includes("contact") && (!rpcCoveredTypes.includes("contact") || nifMatchedEntityIds.size > 0));
+        const needsClientFallback =
+          searchTypes.includes("client") && (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0);
         let matchedEntityIds: string[] = [];
         let orgIds: string[] = orgId ? [orgId] : [];
-        if (needsLeads || needsContactClientFallback) {
+        if (needsLeads || needsClientFallback) {
           if (needsLeads && user?.id) {
             const { data: visibleOrgIds } = await (supabase as any).rpc("get_user_visible_org_ids", { _auth_uid: user.id });
             orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
@@ -167,10 +162,10 @@ export function EntitySearchInput({
           ].filter(Boolean))) as string[];
         }
 
-        // Helper: process rows of leads/clients/contacts and collect matching results.
+        // Helper: process rows of leads/clients and collect matching results.
         const collectFromRows = async (
           rows: any[] | null | undefined,
-          type: "lead" | "client" | "contact",
+          type: "lead" | "client",
           idLabel: string,
         ) => {
           if (!rows?.length) return;
@@ -246,25 +241,6 @@ export function EntitySearchInput({
             .eq("organization_id", orgId)
             .limit(50);
           await collectFromRows(clients, "client", "Cliente");
-        }
-
-        // ── Search Contacts (fallback when RPC failed, or to union NIF-only matches) ──
-        if (
-          searchTypes.includes("contact") &&
-          (!rpcCoveredTypes.includes("contact") || nifMatchedEntityIds.size > 0) &&
-          matchedEntityIds.length > 0 &&
-          orgId
-        ) {
-          const { data: contacts } = await (supabase as any)
-            .from("anew_contacts")
-            .select("id, entity_id, status")
-            .in("entity_id", matchedEntityIds)
-            .is("deleted_at", null)
-            .is("converted_to_client_id", null)
-            .eq("status", "active")
-            .eq("organization_id", orgId)
-            .limit(50);
-          await collectFromRows(contacts, "contact", "Lead");
         }
 
         // Dedupe by type+id (RPC + fallback could overlap in rare cases)

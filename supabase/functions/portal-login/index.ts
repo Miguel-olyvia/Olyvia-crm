@@ -163,6 +163,16 @@ serve(async (req) => {
     const tokenBody = await tokenRes.json().catch(() => ({}));
     const success = tokenRes.ok && typeof tokenBody.access_token === "string" && typeof tokenBody.refresh_token === "string";
 
+    // On success, GoTrue's password-grant response includes the authenticated
+    // user's id directly — no extra lookup needed. On failure we deliberately
+    // do NOT look up the user by email here (see note above the insert): the
+    // only lookup available in this codebase, auth.admin.listUsers(), is an
+    // unbounded paginated scan with no email filter, so it would add
+    // attacker-observable, email-dependent latency to this exact endpoint.
+    const authUserId: string | null = success && typeof tokenBody.user?.id === "string"
+      ? tokenBody.user.id
+      : null;
+
     // 3. Record the outcome. Awaited so lockout state is consistent for the
     // very next request even if it arrives immediately after this one.
     // Transient connection failures are retried with backoff.
@@ -172,6 +182,7 @@ serve(async (req) => {
         success,
         ip_address: clientIp,
         user_agent: userAgent,
+        auth_user_id: authUserId,
       })
     );
     if (insertError) {

@@ -363,7 +363,6 @@ export function CampaignFieldsConfig({
       'ref_company': 'companies',
       'ref_business_unit': 'business_units',
       'ref_department': 'departments',
-      'ref_contact': 'contacts',
       'ref_client': 'clients',
       'ref_employee': 'employees',
       'ref_product': 'products',
@@ -1203,7 +1202,6 @@ export function CampaignFieldsConfig({
                                     <SelectItem value="ref_company">Company</SelectItem>
                                     <SelectItem value="ref_business_unit">Business Unit</SelectItem>
                                     <SelectItem value="ref_department">Department</SelectItem>
-                                    <SelectItem value="ref_contact">Contact</SelectItem>
                                     <SelectItem value="ref_client">Client</SelectItem>
                                     <SelectItem value="ref_employee">Employee</SelectItem>
                                     <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">
