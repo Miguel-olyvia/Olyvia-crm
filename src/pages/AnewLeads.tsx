@@ -1478,6 +1478,7 @@ export default function AnewLeads() {
     'lost',
     'converted',
     'qualified',
+    'negotiation',
     'proposal_sent',
   ]);
   const getEffectiveStatus = useCallback((lead: any): string => {
