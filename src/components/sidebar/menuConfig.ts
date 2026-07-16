@@ -216,10 +216,11 @@ export const menuSections: MenuSection[] = [
     id: "platform",
     icon: ShieldAlert,
     labelKey: "sidebar.platform",
-    paths: ["/platform/support-access"],
-    permissions: ["platform.support_access.view"],
+    paths: ["/platform/support-access", "/platform/auth-audit-log"],
+    permissions: ["platform.support_access.view", "platform.auth_audit_log.view"],
     items: [
       { to: "/platform/support-access", icon: ShieldAlert, labelKey: "sidebar.supportAccess", permission: "platform.support_access.view" },
+      { to: "/platform/auth-audit-log", icon: ShieldAlert, labelKey: "sidebar.authAuditLog", permission: "platform.auth_audit_log.view" },
     ],
   },
 ];
