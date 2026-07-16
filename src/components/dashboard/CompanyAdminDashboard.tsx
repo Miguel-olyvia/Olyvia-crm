@@ -60,7 +60,7 @@ const CompanyAdminDashboard = () => {
           activitiesResult,
         ] = await Promise.all([
           client.from("anew_memberships").select("id").in("organization_id", companyIds).eq("status", "active"),
-          client.from("anew_leads").select("id").in("organization_id", companyIds).in("status", ["qualified", "negotiating"]).is("deleted_at", null),
+          client.from("anew_leads").select("id").in("organization_id", companyIds).in("status", ["qualified", "negotiation"]).is("deleted_at", null),
           client.from("anew_clients").select("id").in("organization_id", companyIds).is("deleted_at", null),
           client.from("deals").select("id, value").in("organization_id", companyIds),
           client.from("quotes").select("id").in("organization_id", companyIds),

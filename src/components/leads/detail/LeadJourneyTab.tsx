@@ -15,7 +15,7 @@ export function LeadJourneyTab({
   lead, hasClient, clientCreatedAt,
   interactionCount, dealCount, dealValue,
 }: LeadJourneyTabProps) {
-  const isNegotiatingOrLater = lead.status === "negotiating" || lead.status === "converted";
+  const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
 
   const steps = [
     {
@@ -40,11 +40,11 @@ export function LeadJourneyTab({
       current: lead.status === "qualified" && !isNegotiatingOrLater && !hasClient,
     },
     {
-      key: "negotiating",
+      key: "negotiation",
       label: "Em Negociação",
       date: isNegotiatingOrLater ? lead.updated_at : null,
       completed: isNegotiatingOrLater,
-      current: lead.status === "negotiating" && !hasClient,
+      current: lead.status === "negotiation" && !hasClient,
     },
     {
       key: "client",

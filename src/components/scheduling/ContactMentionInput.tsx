@@ -102,7 +102,7 @@ export function ContactMentionInput({
         .from('anew_leads')
         .select('id, entity_id')
         .in('entity_id', entityIds)
-        .in('status', ['qualified', 'negotiating'])
+        .in('status', ['qualified', 'negotiation'])
         .is('deleted_at', null)
         .limit(10);
 

@@ -8,7 +8,7 @@ import { useTranslation } from "@/hooks/useTranslation";
  * NOTE (Fase 1 — Contacto merged into Lead lifecycle): the "contacto" pipeline
  * stage no longer exists in anew_leads.status (see anew_leads.status enum:
  * new, contacted, no_answer, incomplete, visit_scheduled, qualified,
- * negotiating, converted, rejected). `revertLeadToContact` is kept only
+ * negotiation, converted, rejected). `revertLeadToContact` is kept only
  * because it is still referenced by the retired, unrouted src/pages/AnewContacts.tsx
  * (route removed in App.tsx). Do not wire it up to any new/active UI.
  * Uses transactional RPCs to avoid race conditions with sync triggers.
