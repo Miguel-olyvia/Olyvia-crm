@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { format, startOfDay, subDays } from "date-fns";
+import { format, formatDistanceToNow, startOfDay, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
   Area,
@@ -24,7 +24,10 @@ import {
   CalendarRange,
   Clock,
   Filter,
+  Mail,
+  MessageCircle,
   PhoneCall,
+  StickyNote,
   Target,
   TrendingUp,
   UserCheck,
@@ -61,8 +64,38 @@ import {
 } from "./leadsDashboardHelpers";
 
 const NEGOTIATION_LIST_LIMIT = 20;
+const ACTIVITY_FEED_LIMIT = 15;
+// Fetches more raw interactions than ACTIVITY_FEED_LIMIT because rows are
+// filtered down afterwards to lead-only entity_ids (entity_interactions is
+// shared across leads/clients/contacts and has no module discriminator).
+const ACTIVITY_FEED_FETCH_LIMIT = 60;
 
 const currencyFormatter = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" });
+
+// Mirrors the icon/label convention already used for entity_interactions in
+// src/components/leads/detail/LeadTimelineTab.tsx (TYPE_CONFIG), scoped down
+// to the interaction types relevant to this aggregated feed.
+const ACTIVITY_TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; label: string }> = {
+  call: { icon: PhoneCall, label: "Chamada" },
+  email: { icon: Mail, label: "Email" },
+  meeting: { icon: Users, label: "Reunião" },
+  whatsapp: { icon: MessageCircle, label: "WhatsApp" },
+  visit: { icon: CalendarIcon, label: "Visita" },
+  note: { icon: StickyNote, label: "Nota" },
+};
+
+function getActivityTypeConfig(interactionType: string | null) {
+  return ACTIVITY_TYPE_CONFIG[interactionType ?? ""] ?? ACTIVITY_TYPE_CONFIG.note;
+}
+
+interface ActivityFeedRow {
+  id: string;
+  entity_id: string | null;
+  interaction_type: string | null;
+  subject: string | null;
+  notes: string | null;
+  interaction_at: string;
+}
 
 interface WorkflowStage {
   id: string;
@@ -319,6 +352,76 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   const negotiationRows = negotiationData?.rows ?? [];
   const negotiationTotalCount = negotiationData?.totalCount ?? 0;
 
+  const {
+    data: activityRows,
+    isLoading: activityLoading,
+    error: activityQueryError,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-activity",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+    ],
+    queryFn: async (): Promise<ActivityFeedRow[]> => {
+      if (!query) return [];
+
+      const { data: interactionsData, error: interactionsError } = await supabase
+        .from("entity_interactions")
+        .select("id, entity_id, interaction_type, subject, notes, interaction_at")
+        .eq("organization_id", query.orgId)
+        .order("interaction_at", { ascending: false })
+        .limit(ACTIVITY_FEED_FETCH_LIMIT);
+
+      if (interactionsError) {
+        throw new Error(interactionsError.message || "Erro ao carregar atividade recente.");
+      }
+
+      const candidateInteractions = (interactionsData ?? []) as ActivityFeedRow[];
+      const candidateEntityIds = Array.from(
+        new Set(candidateInteractions.map((row) => row.entity_id).filter((id): id is string => Boolean(id))),
+      );
+
+      if (candidateEntityIds.length === 0) return [];
+
+      // entity_interactions is shared across leads/clients/contacts and has no
+      // module discriminator column, so lead-only rows are determined by
+      // inner-joining the candidate entity_ids against anew_leads, applying
+      // the same organization + ORG/TEAM/OWNED scoping used elsewhere in this
+      // dashboard (buildNegotiationScopeFilter).
+      let leadsQuery = supabase
+        .from("anew_leads")
+        .select("entity_id")
+        .eq("organization_id", query.orgId)
+        .is("deleted_at", null)
+        .in("entity_id", candidateEntityIds);
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        leadsQuery = leadsQuery.or(scopeFilter);
+      }
+
+      const { data: leadsData, error: leadsError } = await leadsQuery;
+      if (leadsError) {
+        throw new Error(leadsError.message || "Erro ao carregar atividade recente.");
+      }
+
+      const leadEntityIds = new Set(
+        (leadsData ?? []).map((row) => (row as { entity_id: string | null }).entity_id).filter(Boolean),
+      );
+
+      return candidateInteractions
+        .filter((row) => row.entity_id && leadEntityIds.has(row.entity_id))
+        .slice(0, ACTIVITY_FEED_LIMIT);
+    },
+    enabled: !!query && dashboardView === "pipeline",
+    staleTime: 60_000,
+  });
+
+  const activityFeedRows = activityRows ?? [];
+
   useEffect(() => {
     const entityIds = negotiationRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
     if (entityIds.length > 0) {
@@ -328,6 +431,14 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     // re-run on every identityMap change, only when the negotiation rows change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [negotiationRows]);
+
+  useEffect(() => {
+    const entityIds = activityFeedRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
+    if (entityIds.length > 0) {
+      resolveEntities(entityIds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activityFeedRows]);
 
   useEffect(() => {
     const statsAssigneeIds = getAssigneeIds(stats);
@@ -939,6 +1050,51 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                       +{negotiationTotalCount - negotiationRows.length} mais
                     </p>
                   )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Atividade Recente</CardTitle>
+              <CardDescription>Chamadas, emails e notas mais recentes nos leads</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {activityLoading && activityFeedRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">A carregar atividade recente…</div>
+              ) : activityQueryError ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Não foi possível carregar a atividade recente.
+                </div>
+              ) : activityFeedRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Sem atividade recente registada.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activityFeedRows.map((row) => {
+                    const identity = getIdentity(row.entity_id);
+                    const typeConfig = getActivityTypeConfig(row.interaction_type);
+                    const Icon = typeConfig.icon;
+                    const description = row.subject?.trim() || row.notes?.trim() || typeConfig.label;
+                    return (
+                      <div key={row.id} className="flex items-start gap-3 rounded-lg border px-3 py-2">
+                        <div className="mt-0.5 h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                          <Icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">
+                            {identity?.display_name || "Lead sem nome"}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">{description}</p>
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDistanceToNow(new Date(row.interaction_at), { addSuffix: true, locale: pt })}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
