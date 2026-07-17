@@ -88,7 +88,7 @@ export function MemberEditDialog({
 }: MemberEditDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.manage");
+  const canManage = hasPermission("organizations.edit");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("general");

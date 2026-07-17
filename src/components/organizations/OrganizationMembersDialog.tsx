@@ -72,7 +72,7 @@ export function OrganizationMembersDialog({
 }: OrganizationMembersDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.manage");
+  const canManage = hasPermission("organizations.edit");
   const [members, setMembers] = useState<Member[]>([]);
   const [allUsers, setAllUsers] = useState<AnewUser[]>([]);
   const [loading, setLoading] = useState(true);

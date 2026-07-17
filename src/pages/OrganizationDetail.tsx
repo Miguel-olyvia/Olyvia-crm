@@ -101,7 +101,7 @@ export default function OrganizationDetail() {
   
   const { hasPermission } = usePermissions();
   const canViewOrgHistory = hasPermission("organizations.view_history");
-  const canManageOrg = hasPermission("organizations.manage");
+  const canManageOrg = hasPermission("organizations.edit");
 
   const { countries } = useCountries();
   const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null);
@@ -476,10 +476,17 @@ export default function OrganizationDetail() {
   const confirmRemoveHierarchy = async (hierarchyId: string) => {
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    const { error } = await withAuditContext(supabase, businessUserId, () =>
-      (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId)
+    const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId).select("id")
     );
     if (error) { toast.error(error.message); return; }
+    if (!data || data.length === 0) {
+      // RLS can silently filter out a DELETE with no rows affected (no error
+      // is raised) — .select() after delete lets us tell that apart from a
+      // genuine success and surface it instead of a false-positive toast.
+      toast.error(t("common.error"));
+      return;
+    }
     toast.success(t("common.deleted")); fetchHierarchy();
   };
 
@@ -630,16 +637,72 @@ export default function OrganizationDetail() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{t("organizations.parents")}</CardTitle>
-              <GitBranch className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <GitBranch className="h-4 w-4 text-muted-foreground" />
+                {canManageOrg && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={() => { setHierarchyForm({ type: "parent", organization_id: "" }); setIsAddHierarchyOpen(true); }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardContent><div className="text-2xl font-bold">{parents.length}</div></CardContent>
+            <CardContent>
+              <div className="text-2xl font-bold">{parents.length}</div>
+              {parents.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {parents.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{p.parent?.name}</span>
+                      {canManageOrg && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleRemoveHierarchy(p.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{t("organizations.children")}</CardTitle>
-              <Network className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <Network className="h-4 w-4 text-muted-foreground" />
+                {canManageOrg && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={() => { setHierarchyForm({ type: "child", organization_id: "" }); setIsAddHierarchyOpen(true); }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardContent><div className="text-2xl font-bold">{children.length}</div></CardContent>
+            <CardContent>
+              <div className="text-2xl font-bold">{children.length}</div>
+              {children.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {children.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{c.child?.name}</span>
+                      {canManageOrg && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleRemoveHierarchy(c.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
