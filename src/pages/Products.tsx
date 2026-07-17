@@ -930,7 +930,15 @@ export default function Products() {
         tenantId = orgData?.id || "";
       }
       
-      setOrganizationSelection(defaultOrgSelection());
+      setOrganizationSelection({
+        tenantId,
+        companyId: primaryCompanyId,
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: secondaryIds,
+        selectedCompanyIds: companyIds.length > 0 ? companyIds : (primaryCompanyId ? [primaryCompanyId] : []),
+        levelSelections: [],
+      });
 
       // Set supplier directly from product
       setSelectedSupplierId(product.supplier_id || "");
@@ -1039,7 +1047,17 @@ export default function Products() {
 
       // Set organization
       const orgIds = (lastProduct as any).product_organizations?.map((po: any) => po.organization_id) || [];
-      setOrganizationSelection(defaultOrgSelection());
+      const copyPrimaryOrgId = orgIds.length > 0 ? orgIds[0] : (lastProduct.organization_id || activeCompany?.id || "");
+      const copySecondaryIds = orgIds.slice(1);
+      setOrganizationSelection({
+        tenantId: copyPrimaryOrgId,
+        companyId: copyPrimaryOrgId,
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: copySecondaryIds,
+        selectedCompanyIds: orgIds.length > 0 ? orgIds : (copyPrimaryOrgId ? [copyPrimaryOrgId] : []),
+        levelSelections: [],
+      });
 
       // Set prices
       const loadedPrices: PriceFormData = {
@@ -1363,7 +1381,7 @@ export default function Products() {
 
   const handleExport = async () => {
     try {
-      await exportProductsToCSV(products, activeCompany?.id);
+      await exportProductsToCSV(filteredProducts, activeCompany?.id);
       toast({
         title: t('products.toast.exportSuccess'),
         description: t('products.toast.exportSuccessDesc'),
@@ -2579,6 +2597,7 @@ export default function Products() {
           open={bulkAttributesDialogOpen}
           onOpenChange={setBulkAttributesDialogOpen}
           selectedProductIds={Array.from(bulkActions.selectedIds)}
+          companyId={activeCompany?.id || ""}
           onSuccess={() => {
             bulkActions.clearSelection();
             loadData();

@@ -79,7 +79,7 @@ export default function ProposalTemplates() {
 
     setLoading(true);
     try {
-      let query = supabase.from("proposal_templates").select("*").order("name") as any;
+      let query = supabase.from("proposal_templates").select("*").eq("template_type", "proposal").order("name") as any;
       if (filterCompany !== "all") {
         query = query.eq("organization_id", filterCompany);
       } else {

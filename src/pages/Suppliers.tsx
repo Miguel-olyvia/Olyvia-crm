@@ -659,32 +659,65 @@ const Suppliers = () => {
 
       const dataLines = lines.slice(1);
       const suppliersToInsert = [];
+      const rowErrors: string[] = [];
 
-      for (const line of dataLines) {
+      dataLines.forEach((line, index) => {
         const values = line.split(';').map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
 
-        if (values.length < 1 || !values[0]) continue;
+        if (values.length < 1 || !values[0]) return;
 
-        suppliersToInsert.push({
+        const lineNumber = index + 2; // +2 for header row and 0-index
+
+        // Build the candidate row in the SAME shape as the manual form's formData
+        // (empty-string fallbacks, not null) so it can be validated through the
+        // exact same Zod schema the manual form already enforces.
+        const candidate = {
           name: values[0],
-          contact_person: values[1] || null,
-          email: values[2] || null,
-          phone: values[3] || null,
-          address: values[4] || null,
-          city: values[5] || null,
-          postal_code: values[6] || null,
-          country: values[7] || null,
-          tax_id: values[8] || null,
-          website: values[9] || null,
-          notes: values[10] || null,
+          contact_person: values[1] || "",
+          email: values[2] || "",
+          phone: values[3] || "",
+          address: values[4] || "",
+          city: values[5] || "",
+          postal_code: values[6] || "",
+          country: values[7] || "",
+          tax_id: values[8] || "",
+          website: values[9] || "",
+          notes: values[10] || "",
           is_active: values[11]?.toLowerCase() === 'yes' || values[11]?.toLowerCase() === 'sim' || values[11]?.toLowerCase() === 'sí' || values[11]?.toLowerCase() === 'oui' || values[11]?.toLowerCase() === 'ja',
+        };
+
+        const validation = supplierSchema.safeParse(candidate);
+        if (!validation.success) {
+          const firstError = validation.error.errors[0];
+          rowErrors.push(`Linha ${lineNumber} (${candidate.name || 's/nome'}): ${firstError.message}`);
+          return;
+        }
+
+        const validated = validation.data;
+        suppliersToInsert.push({
+          name: validated.name,
+          contact_person: validated.contact_person || null,
+          email: validated.email || null,
+          phone: validated.phone || null,
+          address: validated.address || null,
+          city: validated.city || null,
+          postal_code: validated.postal_code || null,
+          country: validated.country || null,
+          tax_id: validated.tax_id || null,
+          website: validated.website || null,
+          notes: validated.notes || null,
+          is_active: validated.is_active,
           created_by: businessUserId,
           organization_id: activeCompany?.id,
         });
-      }
+      });
 
       if (suppliersToInsert.length === 0) {
-        throw new Error(t("suppliers.toast.noValidSuppliers"));
+        throw new Error(
+          rowErrors.length > 0
+            ? `${t("suppliers.toast.noValidSuppliers")} ${rowErrors.slice(0, 5).join(" | ")}`
+            : t("suppliers.toast.noValidSuppliers")
+        );
       }
 
       // Set audit context once for all writes in this import.
@@ -700,9 +733,14 @@ const Suppliers = () => {
 
         if (error) throw error;
 
+        const skippedSuffix = rowErrors.length > 0
+          ? ` ${rowErrors.length} linha(s) inválida(s) foram ignoradas: ${rowErrors.slice(0, 5).join(" | ")}${rowErrors.length > 5 ? ` (+${rowErrors.length - 5} mais)` : ""}`
+          : "";
+
         toast({
           title: t("suppliers.toast.importSuccess"),
-          description: t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length)),
+          description: `${t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length))}${skippedSuffix}`,
+          variant: rowErrors.length > 0 ? "default" : undefined,
         });
 
         setImportDialogOpen(false);

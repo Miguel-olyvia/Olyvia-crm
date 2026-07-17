@@ -26,6 +26,9 @@ const exportRequestSchema = z.object({
     status: z.string().max(40).optional(),
     dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    search: z.string().max(200).optional(),
+    assignedTo: z.string().max(80).optional(),
+    onlyMine: z.boolean().optional(),
   }).optional().default({}),
 });
 
@@ -41,6 +44,9 @@ interface ExportRequest {
     status?: string;
     dateFrom?: string;
     dateTo?: string;
+    search?: string;
+    assignedTo?: string;
+    onlyMine?: boolean;
   };
 }
 
@@ -75,6 +81,15 @@ function parseRequest(input: unknown): ExportRequest {
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
       filters[key] = value;
     }
+  }
+  if (typeof filtersInput.search === "string" && filtersInput.search.trim().length > 0) {
+    filters.search = filtersInput.search.trim().slice(0, 200);
+  }
+  if (typeof filtersInput.assignedTo === "string" && filtersInput.assignedTo.length <= 80) {
+    filters.assignedTo = filtersInput.assignedTo;
+  }
+  if (filtersInput.onlyMine === true) {
+    filters.onlyMine = true;
   }
 
   return {
@@ -462,6 +477,7 @@ async function exportQuotes(
   auth: AuthorizationContext,
   includeSensitive: boolean,
   decKey: NifKey | null,
+  caller: { anewUserId: string },
 ) {
   let query = admin
     .from("quotes")
@@ -473,7 +489,19 @@ async function exportQuotes(
   if (request.filters.status) query = query.eq("estado", request.filters.status);
   if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
   if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
-  query = applyOwnerScope(query, auth);
+  if (request.filters.assignedTo === "none") {
+    query = query.is("assigned_to", null);
+  } else if (request.filters.assignedTo) {
+    query = query.eq("assigned_to", request.filters.assignedTo);
+  }
+  // "onlyMine" always narrows to the caller's own records — this can never
+  // widen access beyond whatever applyOwnerScope would already allow, since a
+  // caller's own anewUserId is always within their own permitted scope.
+  if (request.filters.onlyMine) {
+    query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
+  } else {
+    query = applyOwnerScope(query, auth);
+  }
   const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
   if (error) throw error;
 
@@ -501,17 +529,31 @@ async function exportQuotes(
     ]),
   );
 
-  return records.map((record: any) => ({
-    quoteNumber: record.quote_number || "",
-    organization: organizations.get(record.organization_id) || "",
-    client: maps.identity.get(record.entity_id)?.display_name || "",
-    status: record.estado || "",
-    createdAt: record.created_at,
-    total: record.total || 0,
-    currency: record.moeda || "EUR",
-    baseModel: record.modelo_base || "",
-    siteAddress: includeSensitive ? record.obra_endereco || "" : "",
-  }));
+  const searchTerm = request.filters.search?.toLowerCase();
+
+  return records
+    .filter((record: any) => {
+      if (!searchTerm) return true;
+      const quoteNumber = (record.quote_number || "").toLowerCase();
+      const clientName = (maps.identity.get(record.entity_id)?.display_name || "").toLowerCase();
+      const address = (record.obra_endereco || "").toLowerCase();
+      return (
+        quoteNumber.includes(searchTerm) ||
+        clientName.includes(searchTerm) ||
+        address.includes(searchTerm)
+      );
+    })
+    .map((record: any) => ({
+      quoteNumber: record.quote_number || "",
+      organization: organizations.get(record.organization_id) || "",
+      client: maps.identity.get(record.entity_id)?.display_name || "",
+      status: record.estado || "",
+      createdAt: record.created_at,
+      total: record.total || 0,
+      currency: record.moeda || "EUR",
+      baseModel: record.modelo_base || "",
+      siteAddress: includeSensitive ? record.obra_endereco || "" : "",
+    }));
 }
 
 async function updateAudit(admin: any, auditId: string | null, values: Record<string, unknown>) {
@@ -642,7 +684,7 @@ Deno.serve(async (req: Request) => {
           ? await exportContacts(admin, request, auth, includeSensitive, decKey)
           : request.module === "leads"
             ? await exportLeads(admin, request, auth, includeSensitive, decKey)
-            : await exportQuotes(admin, request, auth, includeSensitive, decKey);
+            : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {

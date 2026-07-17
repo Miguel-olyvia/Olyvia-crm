@@ -44,6 +44,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
+import { exportClientContractsToXlsx } from "@/utils/contractsExportImport";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -177,6 +178,32 @@ const ClientContracts = () => {
       });
       setShowWhatsAppDialog(true);
     }
+  };
+
+  // Direct email/WhatsApp triggers for row-level dropdown items — unlike
+  // handleSendEmail/handleSendWhatsApp (which read the `sendingContract` state
+  // set earlier by handleOpenSendChannel), these build the context straight
+  // from the row's own `contract` argument to avoid a stale-closure read of
+  // `sendingContract` right after calling its setter.
+  const handleEmailClientDirect = (contract: any) => {
+    setSendingContract(contract);
+    setShowEmailDialog(true);
+  };
+
+  const handleWhatsAppClientDirect = (contract: any) => {
+    setSendingContract(contract);
+    setWhatsAppContext({
+      module: "contracts" as any,
+      recipientName: contract._clientName || "",
+      recipientPhone: contract._clientPhone || "",
+      recipientPhoneCountryCode: contract._clientPhoneCountryCode || undefined,
+      entityId: contract.entity_id || "",
+      organizationId: contract.organization_id || undefined,
+      contractId: contract.id,
+      contractNumber: contract.contract_number || undefined,
+      hasActiveDeal: false,
+    });
+    setShowWhatsAppDialog(true);
   };
 
   const handleDownloadPdf = async (contract: any) => {
@@ -618,6 +645,11 @@ const ClientContracts = () => {
           const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
           return d > 0 && d <= 90;
         });
+      } else if (statusFilter === "signed") {
+        // "Assinado" KPI/filter option represents both "signed" and "active"
+        // statuses (there is no separate "active" option in the Estado dropdown)
+        // — keep this in sync with the kpis.signed definition above.
+        result = result.filter(c => c.status === "signed" || c.status === "active");
       } else {
         result = result.filter(c => c.status === statusFilter);
       }
@@ -1221,7 +1253,7 @@ const ClientContracts = () => {
               <Button variant="outline" size="sm" onClick={() => navigate("/contract-templates")}>
                 <Settings className="h-4 w-4 mr-2" /> Templates
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={() => exportClientContractsToXlsx(filteredContracts)}>
                 <Download className="h-4 w-4 mr-2" /> Exportar
               </Button>
               <PermissionGate permission="client_contracts.create">
@@ -1476,7 +1508,7 @@ const ClientContracts = () => {
                   const first = contracts.find(c => selectedIds.has(c.id));
                   if (first) handleOpenSendChannel(first);
                 }}><Send className="h-3 w-3 mr-1" /> Enviar</Button>
-                <Button size="sm" variant="outline" onClick={() => toast.info("Exportar")}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
+                <Button size="sm" variant="outline" onClick={() => exportClientContractsToXlsx(filteredContracts.filter(c => selectedIds.has(c.id)))}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Limpar</Button>
               </div>
             )}
@@ -1711,8 +1743,8 @@ const ClientContracts = () => {
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">👤 Cliente</DropdownMenuLabel>
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
-                                  <DropdownMenuItem>📧 Enviar email ao cliente</DropdownMenuItem>
-                                  <DropdownMenuItem>📱 WhatsApp</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
@@ -1725,8 +1757,8 @@ const ClientContracts = () => {
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
-                                  <DropdownMenuItem>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => { toast.info("Crie a nova proposta em Propostas → Nova Proposta"); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1764,14 +1796,14 @@ const ClientContracts = () => {
                               {contract.status === "expired" && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
-                                  <DropdownMenuItem>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>
-                                  <DropdownMenuItem>📞 Contactar cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
-                                  <DropdownMenuItem>📜 Ver histórico completo</DropdownMenuItem>
+                                  <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>

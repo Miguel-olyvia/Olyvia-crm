@@ -35,6 +35,12 @@ export interface RequestControlledExportOptions {
     status?: string;
     dateFrom?: string;
     dateTo?: string;
+    /** Free-text search, matched server-side against quote number, client name and site address. */
+    search?: string;
+    /** Assigned-to (comercial) filter: an anew_users.id, or the sentinel "none" for unassigned. */
+    assignedTo?: string;
+    /** Restrict to quotes created by or assigned to the calling user (mirrors the "só os meus" toggle). */
+    onlyMine?: boolean;
   };
   download?: (payload: StandardExportPayload, filename: string) => void;
 }

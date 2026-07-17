@@ -588,8 +588,16 @@ export default function Services() {
     const primaryOrgId = service.organization_id || (associatedOrgIds.length > 0 ? associatedOrgIds[0] : "");
     const secondaryIds = associatedOrgIds.filter(id => id !== primaryOrgId);
 
-    // Set organization selection for editing
-    setOrganizationSelection(defaultOrgSelection());
+    // Set organization selection for editing from the real associations
+    setOrganizationSelection({
+      tenantId: primaryOrgId,
+      companyId: primaryOrgId,
+      businessUnitId: "",
+      departmentId: "",
+      secondaryCompanyIds: secondaryIds,
+      selectedCompanyIds: associatedOrgIds.length > 0 ? associatedOrgIds : (primaryOrgId ? [primaryOrgId] : []),
+      levelSelections: [],
+    });
 
     setOpen(true);
   };

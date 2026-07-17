@@ -379,6 +379,8 @@ const ContractTemplates = () => {
       const { data: inserted, error } = await (supabase as any).from("client_contract_templates").insert({
         name: `${template.name} (cópia)`, body_html: template.body_html, is_active: false, is_default: false,
         organization_id: activeCompany?.id, created_by: businessUserId,
+        signatory_user_id: template.signatory_user_id, signatory_role_id: template.signatory_role_id,
+        doc_settings: template.doc_settings,
       }).select("id");
       if (error) throw error;
       if (!inserted || inserted.length === 0) throw new Error("Sem permissão para duplicar minuta");

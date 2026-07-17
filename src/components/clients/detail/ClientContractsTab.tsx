@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ const STATUS_DISPLAY: Record<string, { label: string; className: string }> = {
 };
 
 export function ClientContractsTab({ entityId, clientId, organizationId }: ClientContractsTabProps) {
+  const navigate = useNavigate();
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -115,7 +117,10 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
           );
         })
       )}
-      <button className="w-full text-center text-xs text-muted-foreground hover:text-foreground border border-dashed rounded-md py-2.5">
+      <button
+        className="w-full text-center text-xs text-muted-foreground hover:text-foreground border border-dashed rounded-md py-2.5"
+        onClick={() => navigate(`/client-contracts?newContract=true&clientId=${clientId}`)}
+      >
         + Criar contrato
       </button>
     </div>

@@ -988,10 +988,34 @@ const PurchaseOrders = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
-      const ordersToInsert = parsePurchaseOrdersCSV(text, suppliers, businessUserId, activeCompany.id);
+      // order_number is unique per organization (not globally), and a single
+      // duplicate would otherwise fail the whole all-or-nothing RPC import.
+      // Pre-fetch existing order_numbers for this org (regardless of
+      // deleted_at — the DB constraint applies to soft-deleted rows too) so
+      // colliding rows can be skipped/reported instead of aborting the batch.
+      const { data: existingOrders, error: existingOrdersError } = await supabase
+        .from("purchase_orders")
+        .select("order_number")
+        .eq("organization_id", activeCompany.id);
+
+      if (existingOrdersError) throw existingOrdersError;
+
+      const existingOrderNumbers = new Set((existingOrders || []).map((o: any) => o.order_number));
+
+      const { ordersToInsert, skippedLines } = parsePurchaseOrdersCSV(
+        text,
+        suppliers,
+        businessUserId,
+        activeCompany.id,
+        existingOrderNumbers,
+      );
 
       if (ordersToInsert.length === 0) {
-        throw new Error(t('purchaseOrders.toast.noValidOrders'));
+        throw new Error(
+          skippedLines.length > 0
+            ? `${t('purchaseOrders.toast.noValidOrders')} ${skippedLines.slice(0, 5).map(s => `Linha ${s.line}: ${s.reason}`).join(" | ")}`
+            : t('purchaseOrders.toast.noValidOrders')
+        );
       }
 
       const { error } = await supabase.rpc("rpc_import_purchase_orders_csv", {
@@ -1000,8 +1024,12 @@ const PurchaseOrders = () => {
 
       if (error) throw error;
 
+      const skippedSuffix = skippedLines.length > 0
+        ? ` ${skippedLines.length} linha(s) ignoradas: ${skippedLines.slice(0, 5).map(s => `L${s.line} (${s.orderNumber}): ${s.reason}`).join(" | ")}${skippedLines.length > 5 ? ` (+${skippedLines.length - 5} mais)` : ""}`
+        : "";
+
       toast({
-        title: t('purchaseOrders.toast.importSuccess', { count: ordersToInsert.length }),
+        title: t('purchaseOrders.toast.importSuccess', { count: ordersToInsert.length }) + skippedSuffix,
       });
 
       setImportDialogOpen(false);
@@ -1204,6 +1232,12 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
+                      {formData.status === 'received' && (
+                        <p className="text-xs text-muted-foreground">
+                          {t('purchaseOrders.form.receivedStockNote') ||
+                            'Marcar como recebida não atualiza automaticamente o stock — atualize os armazéns manualmente em Stocks.'}
+                        </p>
+                      )}
                     </div>
                   </div>
 

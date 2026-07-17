@@ -12,6 +12,9 @@ import {
   LayoutTemplate
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { withAuditContext } from '@/utils/auditContext';
+import { callNifWriteProxy } from '@/lib/nif/callNifWriteProxy';
 
 interface TemplateNode {
   name: string;
@@ -311,38 +314,55 @@ export function OrgChartTemplatePicker({ open, onOpenChange, rootOrgId, rootOrgN
     setApplying(true);
 
     try {
-      const createNode = async (node: TemplateNode, parentId: string | null): Promise<void> => {
-        const isRoot = parentId === null;
-        const orgName = isRoot ? rootOrgName : node.name;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-        let orgId: string;
-        if (isRoot) {
-          orgId = rootOrgId;
-        } else {
-          const { data, error } = await (supabase as any)
-            .from('anew_organizations')
-            .insert({ name: orgName, type: node.type, status: 'active' })
-            .select('id')
-            .single();
-          if (error) throw error;
-          orgId = data.id;
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Use the same atomic RPC as OrganizationDetail.tsx/OrgChartAddDialog
+        // instead of two separate non-transactional inserts, so a failed
+        // hierarchy insert can never leave an orphan organization row. It
+        // also sets created_by server-side (v_actor), which the previous raw
+        // insert never set at all for template-bulk-created orgs.
+        const createNode = async (node: TemplateNode, parentId: string | null): Promise<void> => {
+          const isRoot = parentId === null;
+          const orgName = isRoot ? rootOrgName : node.name;
 
-          if (parentId) {
-            const { error: hErr } = await (supabase as any)
-              .from('anew_hierarchy')
-              .insert({ parent_org_id: parentId, child_org_id: orgId });
-            if (hErr) throw hErr;
+          let orgId: string;
+          if (isRoot) {
+            orgId = rootOrgId;
+          } else {
+            const { data, error } = await callNifWriteProxy<{ id: string }>(
+              "rpc_create_organization_with_hierarchy",
+              {
+                p_current_org_id: parentId,
+                p_hierarchy_type: "child",
+                p_name: orgName,
+                p_type: node.type,
+                p_description: null,
+                p_status: "active",
+                p_sector: null,
+                p_is_fiscal: false,
+                p_nif: null,
+                p_commercial_name: null,
+                p_country_code: "PT",
+                p_addresses: [],
+              },
+              null
+            );
+            if (error) throw error;
+            if (!data?.id) throw new Error('Falha ao criar organização a partir do template');
+            orgId = data.id;
           }
-        }
 
-        if (node.children) {
-          for (const child of node.children) {
-            await createNode(child, orgId);
+          if (node.children) {
+            for (const child of node.children) {
+              await createNode(child, orgId);
+            }
           }
-        }
-      };
+        };
 
-      await createNode(selectedTemplate.structure, null);
+        await createNode(selectedTemplate.structure, null);
+      });
 
       toast({ title: t('common.success'), description: t('orgChartTemplates.applied') });
       onSuccess();

@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { resolveOrgTenantIds } from "@/lib/orgSubtree";
 
 interface Organization {
   id: string;
@@ -121,7 +122,10 @@ export default function OrganizationDetail() {
   const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
   const [allHierarchy, setAllHierarchy] = useState<{ parent_org_id: string; child_org_id: string }[]>([]);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
-  const [orgsWithChildren, setOrgsWithChildren] = useState<string[]>([]);
+  // Orgs that already have a parent — excluded from the hierarchy picker since
+  // the app enforces a single-parent hierarchy (mirrors OrgChartAddDialog's
+  // excludeChildIds logic).
+  const [orgsWithParent, setOrgsWithParent] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -349,39 +353,29 @@ export default function OrganizationDetail() {
   };
 
   const fetchAllOrganizations = async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    const authUserId = userData.user?.id;
+    if (!id) return;
+
+    // Scope candidates to this organization's tenant tree — never show orgs
+    // from unrelated organizations/tenants in the picker (mirrors the pattern
+    // used in OrganizationMembersDialog's tenant-scoped user picker).
+    const tenantOrgIds = await resolveOrgTenantIds(id);
 
     const { data } = await (supabase as any)
       .from("anew_organizations").select("id, name, type, description, status, created_by")
-      .neq("id", id).eq("status", "active").order("name");
-
-    let userMembershipOrgIds: string[] = [];
-    let businessUserId: string | null = null;
-    if (authUserId) {
-      const { data: anewUser } = await (supabase as any)
-        .from("anew_users").select("id").eq("auth_user_id", authUserId).maybeSingle();
-      if (anewUser) {
-        businessUserId = anewUser.id;
-        const { data: memberships } = await (supabase as any)
-          .from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
-        if (memberships) userMembershipOrgIds = memberships.map((m: any) => m.organization_id);
-      }
-    }
+      .neq("id", id).eq("status", "active").in("id", tenantOrgIds).order("name");
 
     if (data) {
-      const filtered = data.filter((org: any) =>
-        org.created_by === businessUserId || userMembershipOrgIds.includes(org.id)
-      );
-      setAllOrganizations(filtered);
+      setAllOrganizations(data);
     }
 
     const { data: hierarchyData } = await (supabase as any)
       .from("anew_hierarchy").select("parent_org_id, child_org_id");
     if (hierarchyData) {
       setAllHierarchy(hierarchyData);
-      const parentIds = [...new Set(hierarchyData.map((h: any) => h.parent_org_id))] as string[];
-      setOrgsWithChildren(parentIds);
+      // Orgs that already have a parent must be excluded from the "select
+      // organization" picker, since the app enforces single-parent hierarchy.
+      const parentedIds = [...new Set(hierarchyData.map((h: any) => h.child_org_id))] as string[];
+      setOrgsWithParent(parentedIds);
     }
   };
 
@@ -480,7 +474,11 @@ export default function OrganizationDetail() {
 
   const handleRemoveHierarchy = (hierarchyId: string) => { setDeleteType('hierarchy'); setDeleteItemId(hierarchyId); setDeleteDialogOpen(true); };
   const confirmRemoveHierarchy = async (hierarchyId: string) => {
-    const { error } = await (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId)
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.deleted")); fetchHierarchy();
   };
@@ -512,11 +510,13 @@ export default function OrganizationDetail() {
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
     if (!businessUserId) { toast.error("Business user not resolved"); return; }
-    const { error } = await (supabase as any).from("anew_relations").insert({
-      source_org_id: id, target_org_id: relationForm.target_id,
-      relation_type: relationForm.relation_type, relation_label: relationForm.relation_label || null,
-      description: relationForm.description || null, created_by: businessUserId,
-    });
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_relations").insert({
+        source_org_id: id, target_org_id: relationForm.target_id,
+        relation_type: relationForm.relation_type, relation_label: relationForm.relation_label || null,
+        description: relationForm.description || null, created_by: businessUserId,
+      })
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.created"));
     setIsAddRelationOpen(false);
@@ -525,7 +525,11 @@ export default function OrganizationDetail() {
   };
   const handleRemoveRelation = (relationId: string) => { setDeleteType('relation'); setDeleteItemId(relationId); setDeleteDialogOpen(true); };
   const confirmRemoveRelation = async (relationId: string) => {
-    const { error } = await (supabase as any).from("anew_relations").delete().eq("id", relationId);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_relations").delete().eq("id", relationId)
+    );
     if (error) { toast.error(error.message); return; }
     toast.success(t("common.deleted")); fetchRelations();
   };
@@ -821,7 +825,7 @@ export default function OrganizationDetail() {
                 <Label>{t("organizations.selectOrganization")} *</Label>
                 <OrganizationCombobox
                   organizations={allOrganizations
-                    .filter((org) => org.id !== id && !orgsWithChildren.includes(org.id))
+                    .filter((org) => org.id !== id && !orgsWithParent.includes(org.id))
                     .map((org) => ({
                       id: org.id, name: org.name, type: org.type,
                       parent_id: allHierarchy.find(h => h.child_org_id === org.id)?.parent_org_id || null

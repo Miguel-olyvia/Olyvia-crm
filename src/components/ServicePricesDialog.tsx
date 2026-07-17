@@ -164,6 +164,15 @@ export default function ServicePricesDialog({
 
               if (error) throw error;
             }
+          } else if (existingPriceIds[type]) {
+            // Field was explicitly cleared/zeroed but a saved price row still exists
+            // for this type — delete it instead of silently leaving the stale price.
+            const { error } = await supabase
+              .from('service_prices')
+              .delete()
+              .eq('id', existingPriceIds[type]);
+
+            if (error) throw error;
           }
         }
       });

@@ -960,6 +960,7 @@ export default function AttributeOptionPalettesDialog({
           categoryId={priceCategoryId}
           categoryName={priceCategoryName}
           attributeId={attributeId}
+          companyId={activeCompany?.id || ''}
         />
       )}
 

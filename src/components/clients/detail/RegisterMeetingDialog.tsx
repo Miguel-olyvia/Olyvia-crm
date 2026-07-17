@@ -91,7 +91,7 @@ export function RegisterMeetingDialog({
         notes,
       ].filter(Boolean).join("\n\n");
 
-      await supabase.from("entity_interactions").insert({
+      const { error: insertError } = await supabase.from("entity_interactions").insert({
         entity_id: entityId,
         interaction_type: "meeting",
         subject: `Reunião com ${entityName}`,
@@ -105,11 +105,13 @@ export function RegisterMeetingDialog({
         created_by: createdBy,
         organization_id: organizationId,
       });
+      if (insertError) throw insertError;
 
       // Update last_interaction_at
-      await (supabase as any).from("anew_clients").update({
+      const { error: updateError } = await (supabase as any).from("anew_clients").update({
         last_interaction_at: new Date(meetingDate).toISOString(),
       }).eq("id", contactId);
+      if (updateError) throw updateError;
 
       // Open channel if selected
       const selectedChannel = needsChannel ? nextActionChannel : null;

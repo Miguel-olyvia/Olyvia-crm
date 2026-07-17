@@ -358,34 +358,95 @@ const Stocks = () => {
         throw new Error(t('stocks.toast.emptyFile'));
       }
 
+      // Pre-check existing (product_id, warehouse_id) pairs already tracked for this
+      // org, so a collision can be skipped/reported per-row instead of failing the
+      // whole batch atomically.
+      const { data: existingStockPairs, error: existingStockPairsError } = await supabase
+        .from("stocks")
+        .select("product_id, warehouse_id")
+        .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null);
+
+      if (existingStockPairsError) throw existingStockPairsError;
+
+      const pairKey = (productId: string, warehouseId: string) => `${productId}::${warehouseId}`;
+      const existingPairSet = new Set(
+        (existingStockPairs || []).map((s: any) => pairKey(s.product_id, s.warehouse_id))
+      );
+      const seenInFile = new Set<string>();
+
       const dataLines = lines.slice(1);
       const stocksToInsert = [];
+      const rowErrors: string[] = [];
 
-      for (const line of dataLines) {
+      // Convert a raw CSV cell to a number, WITHOUT silently coercing malformed
+      // values to 0. Empty cells default to 0 (matches "not provided"); anything
+      // else that fails to parse is surfaced as NaN so stockSchema rejects it.
+      const toNumberOrNaN = (v: string | undefined): number => {
+        const trimmed = (v ?? '').trim();
+        if (trimmed === '') return 0;
+        return Number(trimmed);
+      };
+
+      dataLines.forEach((line, index) => {
         const values = line.split(';').map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-        
-        if (values.length < 3) continue;
+
+        if (values.length < 3) return;
+
+        const lineNumber = index + 2; // +2 for header row and 0-index
 
         const product = products.find(p => p.name === values[0]);
         const warehouse = warehouses.find(w => w.name === values[1]);
 
-        if (!product || !warehouse) continue;
+        if (!product || !warehouse) {
+          rowErrors.push(`Linha ${lineNumber}: produto ou armazém não encontrado ("${values[0]}" / "${values[1]}")`);
+          return;
+        }
 
-        stocksToInsert.push({
+        const candidate = {
           product_id: product.id,
           warehouse_id: warehouse.id,
-          quantity: parseInt(values[2]) || 0,
-          minimum_quantity: parseInt(values[3]) || 0,
-          maximum_quantity: parseInt(values[4]) || 0,
-          reorder_point: parseInt(values[5]) || 0,
-          location: values[6] || null,
+          quantity: toNumberOrNaN(values[2]),
+          minimum_quantity: toNumberOrNaN(values[3]),
+          maximum_quantity: toNumberOrNaN(values[4]),
+          reorder_point: toNumberOrNaN(values[5]),
+          location: values[6] || "",
+        };
+
+        const validation = stockSchema.safeParse(candidate);
+        if (!validation.success) {
+          const firstError = validation.error.errors[0];
+          rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${firstError.message}`);
+          return;
+        }
+
+        const key = pairKey(product.id, warehouse.id);
+        if (existingPairSet.has(key) || seenInFile.has(key)) {
+          rowErrors.push(`Linha ${lineNumber}: já existe stock para "${values[0]}" no armazém "${values[1]}"`);
+          return;
+        }
+        seenInFile.add(key);
+
+        const validated = validation.data;
+        stocksToInsert.push({
+          product_id: validated.product_id,
+          warehouse_id: validated.warehouse_id,
+          quantity: validated.quantity,
+          minimum_quantity: validated.minimum_quantity,
+          maximum_quantity: validated.maximum_quantity,
+          reorder_point: validated.reorder_point,
+          location: validated.location || null,
           organization_id: activeCompany.id,
           created_by: businessUserId,
         });
-      }
+      });
 
       if (stocksToInsert.length === 0) {
-        throw new Error(t('stocks.toast.noValidStocks'));
+        throw new Error(
+          rowErrors.length > 0
+            ? `${t('stocks.toast.noValidStocks')} ${rowErrors.slice(0, 5).join(" | ")}`
+            : t('stocks.toast.noValidStocks')
+        );
       }
 
       await withAuditContext(
@@ -398,9 +459,13 @@ const Stocks = () => {
         "csv_import"
       );
 
+      const skippedSuffix = rowErrors.length > 0
+        ? ` ${rowErrors.length} linha(s) inválida(s) foram ignoradas: ${rowErrors.slice(0, 5).join(" | ")}${rowErrors.length > 5 ? ` (+${rowErrors.length - 5} mais)` : ""}`
+        : "";
+
       toast({
         title: t('stocks.toast.importSuccess'),
-        description: t('stocks.toast.importSuccessDesc', { count: stocksToInsert.length }),
+        description: `${t('stocks.toast.importSuccessDesc', { count: stocksToInsert.length })}${skippedSuffix}`,
       });
 
       setImportDialogOpen(false);

@@ -46,8 +46,9 @@ interface MemberEditDialogProps {
   onOpenChange: (open: boolean) => void;
   memberId: string;
   userId: string;
+  organizationId: string;
   membershipType: string;
-  membershipRole: string;
+  membershipRoleId: string | null;
   organizationName: string;
   onSaved?: () => void;
 }
@@ -79,8 +80,9 @@ export function MemberEditDialog({
   onOpenChange,
   memberId,
   userId,
+  organizationId,
   membershipType,
-  membershipRole,
+  membershipRoleId,
   organizationName,
   onSaved,
 }: MemberEditDialogProps) {
@@ -103,7 +105,8 @@ export function MemberEditDialog({
 
   // Membership data
   const [relationshipType, setRelationshipType] = useState(membershipType);
-  const [role, setRole] = useState(membershipRole);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>(membershipRoleId || "");
+  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; code: string }[]>([]);
 
   // Fiscal data
   const [fiscalData, setFiscalData] = useState<FiscalData>({
@@ -120,10 +123,24 @@ export function MemberEditDialog({
   useEffect(() => {
     if (open && userId) {
       fetchUserData();
+      fetchRoles();
       setRelationshipType(membershipType);
-      setRole(membershipRole);
+      setSelectedRoleId(membershipRoleId || "");
     }
-  }, [open, userId, membershipType, membershipRole]);
+  }, [open, userId, membershipType, membershipRoleId]);
+
+  const fetchRoles = async () => {
+    if (!organizationId) {
+      setAvailableRoles([]);
+      return;
+    }
+    const { data } = await (supabase as any)
+      .from("anew_roles")
+      .select("id, name, code")
+      .eq("organization_id", organizationId)
+      .order("name");
+    setAvailableRoles((data || []) as { id: string; name: string; code: string }[]);
+  };
 
   const fetchUserData = async () => {
     setLoading(true);
@@ -257,6 +274,7 @@ export function MemberEditDialog({
         .from("anew_memberships")
         .update({
           relationship_type: relationshipType,
+          role_id: selectedRoleId || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", memberId);
@@ -698,11 +716,16 @@ export function MemberEditDialog({
                     </div>
                     <div className="space-y-2">
                       <Label>{t("organizations.role")}</Label>
-                      <Input
-                        value={role}
-                        onChange={(e) => setRole(e.target.value)}
-                        placeholder={t("organizations.rolePlaceholder")}
-                      />
+                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t("users.selectRole")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableRoles.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </div>

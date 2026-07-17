@@ -1637,6 +1637,7 @@ const Deals = () => {
       const dealData = {
         title: formData.title,
         value,
+        value_max: formData.value_max ? (parseFloat(formData.value_max) || null) : null,
         stage_id: formData.stage_id,
         organization_id: activeCompany.id,
         root_organization_id: resolvedRootOrgId || activeCompany.id,
@@ -2317,6 +2318,7 @@ const Deals = () => {
               hasError={statsError}
               rpcStageStats={dealsDashboardStats?.stageStats}
               rpcStageValues={dealsDashboardStats?.stageValues}
+              totalDeals={dealsDashboardStats?.total}
             />
           </div>
         ) : (

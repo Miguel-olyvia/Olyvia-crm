@@ -207,14 +207,39 @@ const Bundles = () => {
         return unit * (Number(c.quantity) || 1);
       };
 
+      // Choice-group-aware total: components that belong to a required "choose N of M"
+      // group must only contribute their minimum-priced selection(s), not every option
+      // in the group — each option is individually is_optional: false, so a naive sum
+      // over all non-optional components would inflate the price.
+      const computeChoiceAwareTotal = (components: any[], choiceGroups: any[]): number => {
+        const nonOptional = components.filter((c) => !c.is_optional);
+        const requiredGroups = choiceGroups.filter((g) => g.is_required && (g.min_selections || 0) > 0);
+        const requiredGroupIds = new Set(requiredGroups.map((g) => g.id));
+
+        // Components not part of a required choice group are summed as-is.
+        const baseComponents = nonOptional.filter(
+          (c) => !c.choice_group_id || !requiredGroupIds.has(c.choice_group_id)
+        );
+        let total = baseComponents.reduce((sum, c) => sum + getComponentLinePrice(c), 0);
+
+        // Each required choice group only contributes its minimum-priced selection(s).
+        for (const group of requiredGroups) {
+          const groupComponents = nonOptional.filter((c) => c.choice_group_id === group.id);
+          if (groupComponents.length === 0) continue;
+          const prices = groupComponents.map(getComponentLinePrice);
+          total += Math.min(...prices) * (group.min_selections || 1);
+        }
+
+        return total;
+      };
+
       const bundlesWithPrices = bundlesRaw.map((bundle: any) => {
         const components = (bundle.bundle_components || []) as any[];
         const componentsCount = components.length;
+        const choiceGroupsForBundle = choiceGroupsByBundle.get(bundle.id) || [];
 
-        // Original price: sum of all (non-optional) component line prices
-        const originalPrice = components
-          .filter((c) => !c.is_optional)
-          .reduce((sum, c) => sum + getComponentLinePrice(c), 0);
+        // Original price: choice-group-aware sum of (non-optional) component line prices.
+        const originalPrice = computeChoiceAwareTotal(components, choiceGroupsForBundle);
 
         let finalPrice = originalPrice;
         if (bundle.pricing_type === 'fixed_price' && bundle.fixed_price) {
@@ -224,18 +249,7 @@ const Bundles = () => {
         } else if (bundle.pricing_type === 'fixed_discount' && bundle.discount_fixed) {
           finalPrice = originalPrice - Number(bundle.discount_fixed);
         } else if (bundle.pricing_type === 'custom') {
-          const requiredGroups = (choiceGroupsByBundle.get(bundle.id) || []).filter((g) => g.is_required && (g.min_selections || 0) > 0);
-          const baseComponents = components.filter((c) => !c.is_optional && !c.choice_group_id);
-          let customTotal = baseComponents.reduce((sum, c) => sum + getComponentLinePrice(c), 0);
-
-          for (const group of requiredGroups) {
-            const groupComponents = components.filter((c) => !c.is_optional && c.choice_group_id === group.id);
-            if (groupComponents.length === 0) continue;
-            const prices = groupComponents.map(getComponentLinePrice);
-            customTotal += Math.min(...prices) * (group.min_selections || 1);
-          }
-
-          finalPrice = customTotal;
+          finalPrice = originalPrice;
         }
 
         return {

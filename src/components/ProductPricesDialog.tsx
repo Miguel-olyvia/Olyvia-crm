@@ -169,6 +169,15 @@ export default function ProductPricesDialog({
 
               if (error) throw error;
             }
+          } else if (existingPriceIds[type]) {
+            // Field was explicitly cleared/zeroed but a saved price row still exists
+            // for this type — delete it instead of silently leaving the stale price.
+            const { error } = await supabase
+              .from('product_prices')
+              .delete()
+              .eq('id', existingPriceIds[type]);
+
+            if (error) throw error;
           }
         }
       });

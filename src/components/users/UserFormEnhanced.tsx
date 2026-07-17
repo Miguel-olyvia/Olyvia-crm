@@ -340,6 +340,21 @@ export function UserFormEnhanced({
             }
           });
         });
+        // Fallback: a membership's currently assigned ORG-SCOPED role must always
+        // be visible in the selector, even when the current editor's own
+        // permissions are not a superset of that role's permissions (the editor
+        // just can't newly assign it from scratch — the existing selection must
+        // still reflect the true current state instead of appearing blank).
+        const allCandidateRolesById = new Map<string, any>(data.map((r: any) => [r.id, r]));
+        memberships.forEach(m => {
+          if (!m.role_id || !m.organization_id) return;
+          if (!map[m.organization_id]) map[m.organization_id] = [];
+          if (map[m.organization_id].some(r => r.id === m.role_id)) return;
+          const assignedRole = allCandidateRolesById.get(m.role_id);
+          if (assignedRole) {
+            map[m.organization_id].push({ id: assignedRole.id, code: assignedRole.code, name: assignedRole.name });
+          }
+        });
         setRolesByOrg(map);
       }
     };

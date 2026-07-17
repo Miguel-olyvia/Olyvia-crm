@@ -42,6 +42,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
+import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
+import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { BundleChoiceConfigDialog } from "@/components/quote/BundleChoiceConfigDialog";
 import {
   Tooltip,
@@ -497,10 +499,129 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
         (servicePrices || []).map(p => [p.service_id, p.price as number])
       );
 
+      // Reconstruct attribute_price_addon on load: it is NOT persisted as its
+      // own column (only default_attributes is), so it must be recomputed
+      // from default_attributes + the product's effective option/range
+      // prices every time the template is loaded — otherwise it silently
+      // drops out of the price math after a reload even though the
+      // attribute selections themselves (default_attributes) survive.
+      const allAttributeIds = Array.from(new Set(
+        (items || []).flatMap((item: any) => {
+          if (item.default_attributes && typeof item.default_attributes === "object" && !Array.isArray(item.default_attributes)) {
+            return Object.keys(item.default_attributes);
+          }
+          return [];
+        })
+      ));
+
+      const rangesByProduct = new Map<string, Map<string, any[]>>();
+      const optionPricesByProduct = new Map<string, Awaited<ReturnType<typeof getEffectiveProductOptionPrices>>>();
+      if (allAttributeIds.length > 0 && productIds.length > 0) {
+        await Promise.all(productIds.map(async (pid) => {
+          const [ranges, options] = await Promise.all([
+            getEffectiveProductRanges({ productId: pid, attributeIds: allAttributeIds, priceContext: 'retail' }),
+            getEffectiveProductOptionPrices({ productId: pid, attributeIds: allAttributeIds, priceContext: 'retail' }),
+          ]);
+          rangesByProduct.set(pid, ranges);
+          optionPricesByProduct.set(pid, options);
+        }));
+      }
+
+      const parseDimension = (value: string): { depth: number; width: number } | null => {
+        const match = value.match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
+        return match ? { depth: parseFloat(match[1]), width: parseFloat(match[2]) } : null;
+      };
+      const parseDimension3d = (value: string): { depth: number; width: number; height: number } | null => {
+        const match = value.match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
+        return match ? { depth: parseFloat(match[1]), width: parseFloat(match[2]), height: parseFloat(match[3]) } : null;
+      };
+      const extractNumericValue = (value: string): number | null => {
+        const direct = parseFloat(value);
+        if (!Number.isNaN(direct)) return direct;
+        const dims3d = parseDimension3d(value);
+        if (dims3d) return Math.max(dims3d.depth, dims3d.width, dims3d.height);
+        const dims = parseDimension(value);
+        if (dims) return Math.max(dims.depth, dims.width);
+        const numMatch = value.match(/(\d+(?:\.\d+)?)/);
+        return numMatch ? parseFloat(numMatch[1]) : null;
+      };
+      const findRangePrice = (productId: string, attrId: string, value: string): number => {
+        const ranges = (rangesByProduct.get(productId)?.get(attrId)) || [];
+        if (ranges.length === 0) return 0;
+
+        const dimension3dRanges = ranges.filter((r: any) => (r.range_type ?? "linear").toLowerCase() === "dimension3d");
+        if (dimension3dRanges.length > 0) {
+          const dims3d = parseDimension3d(value);
+          if (dims3d) {
+            const match = [...dimension3dRanges]
+              .sort((a: any, b: any) => {
+                const aVolume = ((a.max_depth || 999999) - (a.min_depth || 0)) * ((a.max_width || 999999) - (a.min_width || 0)) * ((a.max_height || 999999) - (a.min_height || 0));
+                const bVolume = ((b.max_depth || 999999) - (b.min_depth || 0)) * ((b.max_width || 999999) - (b.min_width || 0)) * ((b.max_height || 999999) - (b.min_height || 0));
+                return aVolume - bVolume;
+              })
+              .find((r: any) =>
+                dims3d.depth >= (r.min_depth || 0) && (r.max_depth === null || dims3d.depth <= r.max_depth) &&
+                dims3d.width >= (r.min_width || 0) && (r.max_width === null || dims3d.width <= r.max_width) &&
+                dims3d.height >= (r.min_height || 0) && (r.max_height === null || dims3d.height <= r.max_height)
+              );
+            if (match) return match.price_per_unit || 0;
+          }
+        }
+
+        const dimensionRanges = ranges.filter((r: any) => (r.range_type ?? "linear").toLowerCase() === "dimension");
+        if (dimensionRanges.length > 0) {
+          const dims = parseDimension(value);
+          if (dims) {
+            const match = [...dimensionRanges]
+              .sort((a: any, b: any) => {
+                const aArea = ((a.max_width || 999999) - (a.min_width || 0)) * ((a.max_height || 999999) - (a.min_height || 0));
+                const bArea = ((b.max_width || 999999) - (b.min_width || 0)) * ((b.max_height || 999999) - (b.min_height || 0));
+                return aArea - bArea;
+              })
+              .find((r: any) =>
+                dims.depth >= (r.min_width || 0) && (r.max_width === null || dims.depth <= r.max_width) &&
+                dims.width >= (r.min_height || 0) && (r.max_height === null || dims.width <= r.max_height)
+              );
+            if (match) return match.price_per_unit || 0;
+          }
+        }
+
+        const linearRanges = ranges.filter((r: any) => {
+          const rangeType = (r.range_type ?? "linear").toLowerCase();
+          return rangeType === "linear" || rangeType === "";
+        });
+        if (linearRanges.length > 0) {
+          const numericValue = extractNumericValue(value);
+          if (numericValue !== null) {
+            const match = [...linearRanges]
+              .sort((a: any, b: any) => (((a.max_value || 999999) - (a.min_value || 0)) - ((b.max_value || 999999) - (b.min_value || 0))))
+              .find((r: any) => numericValue >= (r.min_value || 0) && (r.max_value === null || numericValue <= r.max_value));
+            if (match) return match.price_per_unit || 0;
+          }
+        }
+        return 0;
+      };
+      const findOptionPrice = (productId: string, attrId: string, value: string): number => {
+        if (!value) return 0;
+        const list = optionPricesByProduct.get(productId) || [];
+        const match = list.find((p) => p.attrId === attrId && p.value === value);
+        return match ? Number(match.price) || 0 : 0;
+      };
+      const calculateAttributeAddon = (productId: string, attributes: Record<string, any>): number => {
+        let totalAddon = 0;
+        Object.entries(attributes).forEach(([attrId, attrData]) => {
+          const value = (attrData as any)?.value?.toString() || "";
+          if (!value) return;
+          totalAddon += findRangePrice(productId, attrId, value);
+          totalAddon += findOptionPrice(productId, attrId, value);
+        });
+        return totalAddon;
+      };
+
       // Map items with proper structure
       const mappedItems: TemplateItem[] = (items || []).map(item => {
-        const defaultAttrs = typeof item.default_attributes === 'object' && item.default_attributes !== null 
-          ? (item.default_attributes as Record<string, any>) 
+        const defaultAttrs = typeof item.default_attributes === 'object' && item.default_attributes !== null
+          ? (item.default_attributes as Record<string, any>)
           : {};
         
         if (item.item_type === 'product' && item.product) {
@@ -508,6 +629,9 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
             ...item,
             item_type: 'product' as const,
             default_attributes: defaultAttrs,
+            attribute_price_addon: Object.keys(defaultAttrs).length > 0
+              ? calculateAttributeAddon(item.product.id, defaultAttrs)
+              : 0,
             catalog_item: {
               id: item.product.id,
               name: item.product.name,
@@ -608,10 +732,14 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
 
         if (error) throw error;
 
-        await supabase
+        const { error: deleteError } = await supabase
           .from("quote_template_items")
           .delete()
           .eq("template_id", templateId);
+        // Abort before inserting new items: if the delete failed, inserting
+        // now would leave the template with BOTH the old and new items (or,
+        // if the insert itself then failed, with zero items).
+        if (deleteError) throw deleteError;
       } else {
         const { data, error } = await supabase
           .from("quote_templates")

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -677,9 +678,18 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     if (!idToDelete) return;
     setPendingDeleteId(null);
     try {
-      await supabase.from("deal_need_items").delete().eq("deal_need_id", idToDelete);
-      const { error } = await supabase.from("deal_needs").delete().eq("id", idToDelete);
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+
+      // deal_needs / deal_need_items have no organization_id column of their own
+      // (scoped via deal_id -> deals.organization_id); scope the delete to the
+      // currently-open deal so a stale/foreign need id can't be deleted from here.
+      await withAuditContext(supabase, businessUserId, async () => {
+        await supabase.from("deal_need_items").delete().eq("deal_need_id", idToDelete);
+        const { error } = await supabase.from("deal_needs").delete().eq("id", idToDelete).eq("deal_id", dealId);
+        if (error) throw error;
+        return null;
+      });
       toast({ title: "Necessidade removida" });
       loadData();
     } catch (err: any) {
@@ -735,8 +745,16 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   };
 
   const cfgDeleteField = async (id: string) => {
-    try { await supabase.from("needs_assessment_field_configs").delete().eq("id", id); toast({ title: "Campo eliminado" }); loadData(); }
-    catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
+    if (!organizationId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("needs_assessment_field_configs").delete().eq("id", id).eq("organization_id", organizationId)
+      );
+      toast({ title: "Campo eliminado" });
+      loadData();
+    } catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
   };
 
   const cfgOpenMeasurementDialog = (index?: number) => {
@@ -801,8 +819,16 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   };
 
   const cfgDeleteTemplate = async (id: string) => {
-    try { await supabase.from("needs_assessment_templates").delete().eq("id", id); toast({ title: "Template eliminado" }); loadData(); }
-    catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
+    if (!organizationId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("needs_assessment_templates").delete().eq("id", id).eq("organization_id", organizationId)
+      );
+      toast({ title: "Template eliminado" });
+      loadData();
+    } catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
   };
   // ─── Render helpers ─────────────────────────────────────
   const renderCustomFieldInput = (field: FieldConfig) => {

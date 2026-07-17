@@ -49,9 +49,13 @@ interface DealsDashboardViewProps {
   hasError?: boolean;
   rpcStageStats?: Record<string, number>;
   rpcStageValues?: Record<string, number>;
+  /** Authoritative total deal count for the current scope/filters (from the
+   * RPC-backed KPI query, not capped). Used only to flag when `deals` (capped
+   * at 500 rows for the client-side KPIs below) is a partial sample. */
+  totalDeals?: number;
 }
 
-export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, hasError, rpcStageStats, rpcStageValues }: DealsDashboardViewProps) {
+export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, hasError, rpcStageStats, rpcStageValues, totalDeals }: DealsDashboardViewProps) {
   const { t } = useTranslation();
 
   const data = useMemo(() => {
@@ -161,19 +165,37 @@ export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, h
 
   const { funnelData, avgCloseTime, bySalesperson, bySource, byMonth, expectedValue, maxFunnelCount, maxSalespersonValue, maxMonthValue } = data;
 
+  // The funnel above is RPC-backed (full scope), but every KPI/chart below this
+  // point is computed client-side from `deals`, which is capped at 500 rows
+  // (see Deals.tsx's kanbanQuery .limit(500)). Flag it clearly instead of
+  // silently under-reporting for orgs with more than 500 deals in scope.
+  const isPartialSample = typeof totalDeals === "number" && totalDeals > deals.length;
+
   return (
     <div className="p-4 md:px-6 space-y-6 overflow-y-auto h-full">
+      {isPartialSample && (
+        <div className="border border-amber-500/40 bg-amber-50/40 dark:bg-amber-950/20 rounded-lg p-2 text-xs text-amber-900 dark:text-amber-200">
+          ⚠ As métricas abaixo (excepto o funil) são calculadas apenas sobre os{" "}
+          <strong>{deals.length}</strong> pedidos mais recentes de <strong>{totalDeals}</strong> no total —
+          alguns pedidos mais antigos podem não estar reflectidos.
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-xs uppercase text-muted-foreground">Valor Esperado</CardTitle></CardHeader>
-          <CardContent><span className="text-2xl font-bold">{formatCurrency(expectedValue)}</span></CardContent>
+          <CardContent>
+            <span className="text-2xl font-bold">{formatCurrency(expectedValue)}</span>
+            {isPartialSample && <p className="text-[10px] text-muted-foreground mt-1">Apenas página ({deals.length} de {totalDeals})</p>}
+          </CardContent>
         </Card>
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-xs uppercase text-muted-foreground">Tempo Médio de Fecho</CardTitle></CardHeader>
           <CardContent>
             <span className="text-2xl font-bold">{avgCloseTime == null ? "—" : `${avgCloseTime} dias`}</span>
             {avgCloseTime == null && <p className="text-xs text-muted-foreground mt-1">Sem deals ganhos com data de fecho registada.</p>}
+            {isPartialSample && <p className="text-[10px] text-muted-foreground mt-1">Apenas página ({deals.length} de {totalDeals})</p>}
           </CardContent>
         </Card>
       </div>
@@ -213,7 +235,10 @@ export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, h
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">Pedidos por Comercial</CardTitle></CardHeader>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Pedidos por Comercial</CardTitle>
+            {isPartialSample && <p className="text-[10px] font-normal text-muted-foreground mt-0.5">Apenas página ({deals.length} de {totalDeals})</p>}
+          </CardHeader>
           <CardContent>
             <div className="space-y-3 max-h-80 overflow-y-auto pr-2">
               {bySalesperson.map(([name, d]) => (
@@ -234,7 +259,10 @@ export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, h
         </Card>
 
         <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">Pedidos por Origem</CardTitle></CardHeader>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Pedidos por Origem</CardTitle>
+            {isPartialSample && <p className="text-[10px] font-normal text-muted-foreground mt-0.5">Apenas página ({deals.length} de {totalDeals})</p>}
+          </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {bySource.map(([name, d]) => (
@@ -253,7 +281,10 @@ export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, h
       </div>
 
       <Card>
-        <CardHeader className="pb-3"><CardTitle className="text-base">Receita por Mês (Ganhos)</CardTitle></CardHeader>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Receita por Mês (Ganhos)</CardTitle>
+          {isPartialSample && <p className="text-[10px] font-normal text-muted-foreground mt-0.5">Apenas página ({deals.length} de {totalDeals})</p>}
+        </CardHeader>
         <CardContent>
           <div className="flex items-end gap-2 h-40">
             {byMonth.map(([month, value]) => (

@@ -125,11 +125,20 @@ export function QuoteBuilderSidebar({
   let totalCost = 0;
   let totalSales = 0;
   if (hasCostData) {
-    validLines.forEach((line: any) => {
+    // Only lines that actually carry cost data participate in the margin
+    // calculation — a no-cost line's full sale price must never be counted
+    // as 100%-margin revenue. Use the same retail-price fallback as
+    // sectionSummaries/calcLinePrice so manually-priced lines aren't
+    // treated as €0 revenue here.
+    linesWithCost.forEach((line: any) => {
       const costUnit = line.cost_price || 0;
       totalCost += costUnit * line.qt;
-      const preco = (line.custo_material_unit + line.custo_mao_obra_unit) * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-      const precoDesc = preco * (1 - (line.discount_percent || 0) / 100);
+      const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
+      const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
+      const unitPrice = isManual
+        ? (line.retail_price_unit || 0)
+        : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+      const precoDesc = unitPrice * (1 - (line.discount_percent || 0) / 100);
       totalSales += precoDesc * line.qt;
     });
   }

@@ -37,6 +37,7 @@ import { QuoteConditions } from "@/components/quote/QuoteConditions";
 import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog";
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveQuotePdfEntityId } from "@/utils/quotePdfClient";
@@ -3157,15 +3158,33 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         <div className="flex items-center gap-2">
 
 
-          <Button variant="outline" size="sm">
-            <FileDown className="w-4 h-4 mr-1" /> Importar Template
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button variant="outline" size="sm" disabled>
+                    <FileDown className="w-4 h-4 mr-1" /> Importar Template
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Use o campo "Template Base" no formulário abaixo para carregar um template</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button variant="outline" size="sm" onClick={() => setShowPdfPreview(true)}>
             <Eye className="w-4 h-4 mr-1" /> Pré-visualizar PDF
           </Button>
-          <Button variant="outline" size="sm">
-            <Copy className="w-4 h-4 mr-1" /> Duplicar
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button variant="outline" size="sm" disabled>
+                    <Copy className="w-4 h-4 mr-1" /> Duplicar
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Em breve — para duplicar, guarde o orçamento e use "Duplicar" na lista de Orçamentos</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button onClick={handleSave} disabled={loading}>
             <Save className="w-4 h-4 mr-2" />
             {loading ? t('quoteBuilder.saving') : "Guardar Orçamento"}

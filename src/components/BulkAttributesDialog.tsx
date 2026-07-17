@@ -48,6 +48,7 @@ interface BulkAttributesDialogProps {
   onOpenChange: (open: boolean) => void;
   selectedProductIds: string[];
   onSuccess: () => void;
+  companyId: string;
 }
 
 export function BulkAttributesDialog({
@@ -55,6 +56,7 @@ export function BulkAttributesDialog({
   onOpenChange,
   selectedProductIds,
   onSuccess,
+  companyId,
 }: BulkAttributesDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -75,6 +77,7 @@ export function BulkAttributesDialog({
     const { data } = await supabase
       .from('product_attributes')
       .select('id, code, label, value_type, unit, allowed_values')
+      .eq('organization_id', companyId)
       .order('label');
     setAvailableAttributes(data || []);
   };

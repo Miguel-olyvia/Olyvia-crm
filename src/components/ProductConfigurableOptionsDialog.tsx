@@ -148,6 +148,7 @@ export default function ProductConfigurableOptionsDialog({
       const { data: allAttrsData } = await supabase
         .from("product_attributes")
         .select("id, code, label, pricing_type, value_type, allowed_values, is_variant_option, has_hex_color, is_measurement, valorization_type, pricing_dimension")
+        .eq("organization_id", companyId)
         .order("label");
 
       // 2. Load assigned attributes for this product

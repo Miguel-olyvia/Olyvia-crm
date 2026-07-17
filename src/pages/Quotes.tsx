@@ -1138,6 +1138,11 @@ export default function Quotes() {
           status: statusFilter !== "all" ? statusFilter : undefined,
           dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
           dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+          // Keep the export payload in sync with the on-screen filters applied
+          // to filteredQuotes, so the exported file always matches what's shown.
+          search: searchTerm.trim() ? searchTerm.trim() : undefined,
+          assignedTo: comercialFilter !== "all" ? comercialFilter : undefined,
+          onlyMine: onlyMine ? true : undefined,
         },
       });
       toast({
@@ -1186,27 +1191,29 @@ export default function Quotes() {
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
-    if (!error) {
-      try {
-        const { data: wfData, error: wfError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'quote', entity_id: quote.id, new_stage_id: 'aceite', old_stage_id: quote.estado, organization_id: activeCompany?.id || "", triggered_by: user.id },
-        });
-        console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
-        if (wfError) {
-          toast({ title: "Orçamento aceite", description: `Atenção: erro no workflow — ${wfError.message}`, variant: "destructive" });
-        } else if (wfData && (wfData as any).stageActions === 0) {
-          const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
-          const errLog = logs?.find(l => l.status === "error");
-          toast({ title: "Orçamento aceite", description: errLog ? `Proposta não criada: ${errLog.message}` : "Workflow executado mas sem ações (verifique configuração).", variant: "destructive" });
-        } else {
-          toast({ title: "Orçamento aceite", description: "Proposta criada automaticamente." });
-        }
-      } catch (wfErr: any) {
-        console.error("Quote workflow error:", wfErr);
-        toast({ title: "Orçamento aceite", description: `Erro no workflow: ${wfErr?.message || wfErr}`, variant: "destructive" });
-      }
-      fetchQuotes();
+    if (error) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      return;
     }
+    try {
+      const { data: wfData, error: wfError } = await supabase.functions.invoke('execute-workflow', {
+        body: { source_entity: 'quote', entity_id: quote.id, new_stage_id: 'aceite', old_stage_id: quote.estado, organization_id: activeCompany?.id || "", triggered_by: user.id },
+      });
+      console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
+      if (wfError) {
+        toast({ title: "Orçamento aceite", description: `Atenção: erro no workflow — ${wfError.message}`, variant: "destructive" });
+      } else if (wfData && (wfData as any).stageActions === 0) {
+        const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
+        const errLog = logs?.find(l => l.status === "error");
+        toast({ title: "Orçamento aceite", description: errLog ? `Proposta não criada: ${errLog.message}` : "Workflow executado mas sem ações (verifique configuração).", variant: "destructive" });
+      } else {
+        toast({ title: "Orçamento aceite", description: "Proposta criada automaticamente." });
+      }
+    } catch (wfErr: any) {
+      console.error("Quote workflow error:", wfErr);
+      toast({ title: "Orçamento aceite", description: `Erro no workflow: ${wfErr?.message || wfErr}`, variant: "destructive" });
+    }
+    fetchQuotes();
   };
 
   const handleMarkAsLost = async (quoteId: string, reason: string) => {
@@ -1656,6 +1663,7 @@ export default function Quotes() {
             isLoading={statsLoading}
             hasError={!!statsError}
             errorMessage={statsError ?? undefined}
+            totalQuotes={stats.total}
           />
         ) : viewMode === 'margens' && canViewCosts ? (
           <QuotesMarginsView

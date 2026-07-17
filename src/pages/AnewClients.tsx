@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { searchEntityIds } from "@/lib/clientSearch";
+import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -102,8 +103,6 @@ interface ClientAddress {
   street: string; number: string; floor_number: string; city: string;
   postal_code: string; district: string; municipality: string; is_primary: boolean;
 }
-
-const INACTIVE_CLIENT_STATUSES = ["inactive", "churned", "lost"];
 
 interface MatchesStatusFilterContext {
   getIdentity: (entityId: string) => { vat?: string | null } | undefined | null;
@@ -238,6 +237,9 @@ const AnewClients = () => {
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("active");
+  const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
+  const [bulkAssignUserId, setBulkAssignUserId] = useState("");
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [clientToRevert, setClientToRevert] = useState<ClientRecord | null>(null);
   const [reverting, setReverting] = useState(false);
@@ -1021,6 +1023,118 @@ const AnewClients = () => {
     } catch (error: any) { toast({ title: "Erro", description: error.message, variant: "destructive" }); }
   };
 
+  // Bulk "Atribuir a...": reuses the same audit-context + org-scoped update
+  // pattern as handleBulkStatusChange, applied to assigned_to instead of status.
+  const handleBulkAssign = async () => {
+    if (selectedIds.size === 0 || !bulkAssignUserId) return;
+    setBulkActionLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+      const ids = Array.from(selectedIds);
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).from("anew_clients").update({ assigned_to: bulkAssignUserId }).in("id", ids).eq("organization_id", activeCompany?.id)
+      );
+      if (error) throw error;
+      toast({ title: "Clientes atribuídos", description: `${selectedIds.size} clientes atribuídos a ${assignedUserMap.get(bulkAssignUserId) || "comercial selecionado"}` });
+      setSelectedIds(new Set()); setBulkAssignDialogOpen(false); setBulkAssignUserId(""); setClients([]); setHasMore(true); loadClients(0, true);
+    } catch (error: any) {
+      toast({ title: "Erro ao atribuir", description: error.message, variant: "destructive" });
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk "Marcar VIP": reuses the same rpc_toggle_client_vip RPC as the
+  // single-record VIP toggle (handleToggleVip), looped per selected client,
+  // but always sets VIP = true (a bulk "mark", not a per-row toggle).
+  const handleBulkMarkVip = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkActionLoading(true);
+    try {
+      const targetClients = clients.filter(c => selectedIds.has(c.id));
+      let successCount = 0;
+      for (const client of targetClients) {
+        const { error } = await supabase.rpc("rpc_toggle_client_vip", {
+          p_client_id: client.id,
+          p_organization_id: client.organization_id,
+          p_is_vip: true,
+        });
+        if (error) {
+          console.error("Error marking client as VIP:", client.id, error);
+          continue;
+        }
+        successCount++;
+      }
+      if (successCount === 0) {
+        toast({ title: "Erro ao marcar VIP", description: "Nenhum cliente foi atualizado.", variant: "destructive" });
+      } else {
+        toast({ title: "Clientes marcados como VIP", description: `${successCount} de ${targetClients.length} clientes atualizados` });
+      }
+      setSelectedIds(new Set()); setClients([]); setHasMore(true); loadClients(0, true);
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk "Novo Pedido": reuses the same direct `deals` insert shape as
+  // ClientDetailsDialog's single-client "novo pedido" flow, looped per
+  // selected client with sensible defaults (first pipeline stage, 50%
+  // probability) since the interactive deal form only supports one entity
+  // at a time.
+  const handleBulkCreateDeals = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkActionLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+
+      const { data: firstStage, error: stageError } = await supabase
+        .from("deal_stages")
+        .select("id")
+        .order("order_index")
+        .limit(1)
+        .maybeSingle();
+      if (stageError || !firstStage?.id) throw new Error("Nenhuma etapa de pipeline configurada.");
+
+      const targetClients = clients.filter(c => selectedIds.has(c.id) && c.entity_id);
+      let successCount = 0;
+      for (const client of targetClients) {
+        const identity = getIdentity(client.entity_id);
+        const { error } = await supabase.from("deals").insert({
+          entity_id: client.entity_id,
+          title: `Pedido - ${identity?.display_name || ""}`,
+          value: 0,
+          probability: 50,
+          stage_id: firstStage.id,
+          created_by: anewUser.id,
+          assigned_to: client.assigned_to || anewUser.id,
+          organization_id: client.organization_id,
+          root_organization_id: client.root_organization_id || client.organization_id,
+        } as any);
+        if (error) {
+          console.error("Error creating bulk deal for client:", client.id, error);
+          continue;
+        }
+        successCount++;
+      }
+      if (successCount === 0) {
+        toast({ title: "Erro ao criar pedidos", description: "Nenhum pedido foi criado.", variant: "destructive" });
+      } else {
+        toast({ title: "Pedidos criados", description: `${successCount} de ${targetClients.length} pedidos criados` });
+      }
+      setSelectedIds(new Set());
+    } catch (error: any) {
+      toast({ title: "Erro ao criar pedidos", description: error.message, variant: "destructive" });
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
   const [savingClient, setSavingClient] = useState(false);
   const submitLockRef = useRef(false);
 
@@ -1712,7 +1826,11 @@ const AnewClients = () => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
             }}
-            onCreateDeal={() => navigate("/deals")}
+            onCreateDeal={(entityId) => {
+              const identity = (allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment)[entityId];
+              const entityName = identity?.display_name || "";
+              navigate(`/deals?newDeal=true&entityId=${entityId}&entityName=${encodeURIComponent(entityName)}`);
+            }}
           />
         )}
 
@@ -1838,13 +1956,13 @@ const AnewClients = () => {
             <CardContent className="p-3 flex items-center gap-2 flex-wrap">
               <span className="text-sm font-medium text-purple-700 dark:text-purple-400">{selectedIds.size} clientes selecionados</span>
               <Separator orientation="vertical" className="h-6" />
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><UserPlus className="w-3.5 h-3.5" />Atribuir a...</Button>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={() => setBulkAssignDialogOpen(true)}><UserPlus className="w-3.5 h-3.5" />Atribuir a...</Button>
               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => {
                 setShowEmailDialog(true);
                 setEmailTarget({ id: "", name: `${selectedIds.size} clientes`, email: "" });
               }}><Mail className="w-3.5 h-3.5" />Enviar email</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkMarkVip}><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkCreateDeals}><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
               <PermissionGate permission="clients.export">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleExport}><Download className="w-3.5 h-3.5" />Exportar</Button>
               </PermissionGate>
@@ -2054,7 +2172,7 @@ const AnewClients = () => {
                             <div className="flex gap-0.5 justify-end" onClick={(e) => e.stopPropagation()}>
                               {/* Quick actions */}
                               <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate('/deals')}>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/deals?newDeal=true&entityId=${client.entity_id}&entityName=${encodeURIComponent(identity?.display_name || "")}`)}>
                                   <FileText className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger><TooltipContent>Novo Pedido</TooltipContent></Tooltip></TooltipProvider>
@@ -2146,7 +2264,7 @@ const AnewClients = () => {
 
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Comercial</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate('/deals')}>
+                                  <DropdownMenuItem onClick={() => navigate(`/deals?newDeal=true&entityId=${client.entity_id}&entityName=${encodeURIComponent(identity?.display_name || "")}`)}>
                                     <FileText className="w-3.5 h-3.5 mr-2" />Novo Pedido de Proposta
                                   </DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => {
@@ -2369,6 +2487,25 @@ const AnewClients = () => {
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>Cancelar</Button>
                 <Button onClick={handleBulkStatusChange}>Aplicar a {selectedIds.size} clientes</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Assign Dialog */}
+        <Dialog open={bulkAssignDialogOpen} onOpenChange={setBulkAssignDialogOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Atribuir a comercial</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <Select value={bulkAssignUserId} onValueChange={setBulkAssignUserId}>
+                <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
+                <SelectContent>
+                  {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setBulkAssignDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleBulkAssign} disabled={!bulkAssignUserId || bulkActionLoading}>Aplicar a {selectedIds.size} clientes</Button>
               </div>
             </div>
           </DialogContent>

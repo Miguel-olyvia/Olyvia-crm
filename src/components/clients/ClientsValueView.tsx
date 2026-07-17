@@ -125,7 +125,13 @@ export function ClientsValueView({
 
   // ── KPIs ──
   const kpis = useMemo(() => {
-    const totalRevenue = revenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    // "Receita Total" / "Valor Médio/Cliente" must share the same scope
+    // (active clients only) — otherwise the average silently mixes revenue
+    // from expired/lost clients into a denominator that only counts active
+    // ones, inflating the reported average.
+    const activeEntityIds = new Set(clients.filter(c => c.status === "active").map(c => c.entity_id));
+    const activeRevenueContracts = revenueContracts.filter(c => c.entity_id && activeEntityIds.has(c.entity_id));
+    const totalRevenue = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
     const clientCount = clients.filter(c => c.status === "active").length;
     const avgPerClient = clientCount > 0 ? totalRevenue / clientCount : 0;
 

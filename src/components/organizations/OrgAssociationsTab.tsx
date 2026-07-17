@@ -12,6 +12,8 @@ import { Link2, Save, Search } from "lucide-react";
 import { getOrgTypeLabel, OrgType } from "@/components/orgchart/OrgChartCard";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { withAuditContext } from "@/utils/auditContext";
+import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 interface OrgAssociationsTabProps {
   orgId: string;
@@ -137,22 +139,28 @@ export function OrgAssociationsTab({ orgId, orgName, orgType, canManage }: OrgAs
   const handleSave = async () => {
     setSaving(true);
     try {
-      await (supabase as any)
-        .from("anew_org_associations")
-        .delete()
-        .or(`org_id.eq.${orgId},associated_org_id.eq.${orgId}`);
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
 
-      if (selected.size > 0) {
-        const rows = Array.from(selected).map(assocId => ({
-          org_id: orgId,
-          associated_org_id: assocId,
-          association_type: 'cross_functional',
-        }));
-        const { error } = await (supabase as any)
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error: deleteError } = await (supabase as any)
           .from("anew_org_associations")
-          .insert(rows);
-        if (error) throw error;
-      }
+          .delete()
+          .or(`org_id.eq.${orgId},associated_org_id.eq.${orgId}`);
+        if (deleteError) throw deleteError;
+
+        if (selected.size > 0) {
+          const rows = Array.from(selected).map(assocId => ({
+            org_id: orgId,
+            associated_org_id: assocId,
+            association_type: 'cross_functional',
+          }));
+          const { error: insertError } = await (supabase as any)
+            .from("anew_org_associations")
+            .insert(rows);
+          if (insertError) throw insertError;
+        }
+      });
 
       toast.success(t('orgChart.associationsSaved'));
       setInitialSelected(new Set(selected));

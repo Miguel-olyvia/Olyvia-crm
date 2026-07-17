@@ -33,6 +33,7 @@ import { UserCombobox } from "@/components/users/UserCombobox";
 import { MemberEditDialog } from "./MemberEditDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveOrgTenantIds } from "@/lib/orgSubtree";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Member {
   id: string;
@@ -246,14 +247,16 @@ export function OrganizationMembersDialog({
       return;
     }
 
-    const { error } = await (supabase as any).from("anew_memberships").insert({
-      user_id: memberForm.user_id,
-      organization_id: organizationId,
-      relationship_type: memberForm.relationship_type,
-      role_id: selectedRoleId,
-      status: "active",
-      created_by: createdBy,
-    });
+    const { error } = await withAuditContext(supabase, createdBy, () =>
+      (supabase as any).from("anew_memberships").insert({
+        user_id: memberForm.user_id,
+        organization_id: organizationId,
+        relationship_type: memberForm.relationship_type,
+        role_id: selectedRoleId,
+        status: "active",
+        created_by: createdBy,
+      })
+    );
 
     if (error) {
       if (error.code === '23505') {
@@ -399,10 +402,14 @@ export function OrganizationMembersDialog({
   const handleConfirmDelete = async () => {
     if (!memberToDelete) return;
 
-    const { error } = await (supabase as any)
-      .from("anew_memberships")
-      .delete()
-      .eq("id", memberToDelete.id);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any)
+        .from("anew_memberships")
+        .delete()
+        .eq("id", memberToDelete.id)
+    );
 
     if (error) {
       toast.error(error.message);
@@ -846,8 +853,9 @@ export function OrganizationMembersDialog({
         onOpenChange={setEditDialogOpen}
         memberId={memberToEdit?.id || ""}
         userId={memberToEdit?.user_id || ""}
+        organizationId={organizationId}
         membershipType={memberToEdit?.relationship_type || "BELONGS_TO"}
-        membershipRole={memberToEdit?.role_name || memberToEdit?.role_code || ""}
+        membershipRoleId={memberToEdit?.role_id || null}
         organizationName={organizationName}
         onSaved={() => {
           fetchMembers();

@@ -77,6 +77,7 @@ export default function CategoryAttributePricesDialog({
       let query = supabase
         .from("product_attributes")
         .select("id, code, label, pricing_type")
+        .eq("organization_id", companyId)
         .order("label");
 
       if (propAttributeId) {

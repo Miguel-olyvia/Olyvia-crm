@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { differenceInDays } from 'date-fns';
+import { isInactiveClientStatus } from '@/lib/clientStatus';
 
 export interface ClientContractInfo {
   activeCount: number;
@@ -62,9 +63,11 @@ function calculateClientHealth(
   hasCompany: boolean,
   clientStatus?: string,
 ): ClientHealthScore {
-  // Only truly inactive/lost clients should be excluded from scoring
-  const ACTIVE_STATUSES = ['active', 'customer'];
-  if (clientStatus && !ACTIVE_STATUSES.includes(clientStatus)) {
+  // Only truly inactive/lost clients should be excluded from scoring.
+  // Mirrors the "active" filter's definition in AnewClients.tsx so a
+  // prospect (or any other non-inactive status) isn't miscategorized
+  // as critical-health just because it's not literally "active"/"customer".
+  if (clientStatus && isInactiveClientStatus(clientStatus)) {
     return {
       score: 0, level: 'critical',
       color: 'text-muted-foreground', bgColor: 'bg-muted',
@@ -129,10 +132,25 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
   const [interactions, setInteractions] = useState<Map<string, ClientInteractionInfo>>(new Map());
   const [tags, setTags] = useState<Map<string, ClientTag[]>>(new Map());
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const loadEnrichedData = useCallback(async () => {
     if (entityIds.length === 0) return;
+    // Entities can be shared across group-company organizations. Without a
+    // required organizationId, `.in('entity_id', ...)` alone would leak
+    // another org's contracts/interactions/tags into totals and health
+    // scores. Bail out instead of querying unscoped — callers should wait
+    // for organizationId to resolve (or pass one) before this hook fetches.
+    if (!organizationId) {
+      setContracts(new Map());
+      setInteractions(new Map());
+      setTags(new Map());
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
       const now = new Date();
       const thirtyDaysAgo = new Date();
@@ -144,11 +162,14 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
       const contractMap = new Map<string, ClientContractInfo>();
       for (let i = 0; i < entityIds.length; i += 100) {
         const batch = entityIds.slice(i, i + 100);
-        let contractQuery = supabase.from('client_contracts')
+        const { data: contractData, error: contractError } = await supabase.from('client_contracts')
           .select('id, entity_id, status, total_value, end_date')
+          .eq('organization_id', organizationId)
           .in('entity_id', batch);
-        if (organizationId) contractQuery = contractQuery.eq('organization_id', organizationId);
-        const { data: contractData } = await contractQuery;
+        if (contractError) {
+          console.error('Error loading client contracts:', contractError);
+          setError('Falha ao carregar contratos dos clientes.');
+        }
         if (contractData) {
           for (const c of contractData) {
             const info = contractMap.get(c.entity_id!) || { activeCount: 0, totalValue: 0, expiringContracts: [] };
@@ -173,12 +194,15 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
       const interactionMap = new Map<string, ClientInteractionInfo>();
       for (let i = 0; i < entityIds.length; i += 100) {
         const batch = entityIds.slice(i, i + 100);
-        let interactionQuery = supabase.from('entity_interactions')
+        const { data: intData, error: interactionError } = await supabase.from('entity_interactions')
           .select('entity_id, interaction_at, sentiment')
+          .eq('organization_id', organizationId)
           .in('entity_id', batch)
           .order('interaction_at', { ascending: false });
-        if (organizationId) interactionQuery = interactionQuery.eq('organization_id', organizationId);
-        const { data: intData } = await interactionQuery;
+        if (interactionError) {
+          console.error('Error loading client interactions:', interactionError);
+          setError('Falha ao carregar interações dos clientes.');
+        }
         if (intData) {
           const countMap = new Map<string, number>();
           for (const row of intData) {
@@ -207,11 +231,14 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
       const tagMap = new Map<string, ClientTag[]>();
       for (let i = 0; i < entityIds.length; i += 100) {
         const batch = entityIds.slice(i, i + 100);
-        let tagQuery = supabase.from('contact_tags')
+        const { data: tagData, error: tagError } = await supabase.from('contact_tags')
           .select('id, entity_id, tag, color')
+          .eq('organization_id', organizationId)
           .in('entity_id', batch);
-        if (organizationId) tagQuery = tagQuery.eq('organization_id', organizationId);
-        const { data: tagData } = await tagQuery;
+        if (tagError) {
+          console.error('Error loading client tags:', tagError);
+          setError('Falha ao carregar tags dos clientes.');
+        }
         if (tagData) {
           for (const t of tagData) {
             const existing = tagMap.get((t as any).entity_id) || [];
@@ -250,5 +277,5 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
     return map;
   }, [entityIds, interactions, contracts, identityMap, statusMap]);
 
-  return { contracts, interactions, healthScores, tags, loading, refetch: loadEnrichedData };
+  return { contracts, interactions, healthScores, tags, loading, error, refetch: loadEnrichedData };
 }

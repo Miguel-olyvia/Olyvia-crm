@@ -56,20 +56,32 @@ export function useClientPortalData() {
           return;
         }
 
-        const entityIds = [...new Set(portalUsers.map(p => p.entity_id).filter(Boolean))];
-        const organizationIds = [...new Set(portalUsers.map(p => p.organization_id).filter(Boolean))];
         const directProposalIds = [...new Set(portalUsers.map(p => p.proposal_id).filter(Boolean))];
         const contractIds = portalUsers.filter(p => p.contract_id).map(p => p.contract_id!);
         const quoteIds = portalUsers.filter(p => p.quote_id).map(p => p.quote_id!);
 
+        // Build the actual granted (organization_id, entity_id) PAIRS instead of
+        // deduping each column independently — two separate `.in()` filters would
+        // form a cross-product and leak proposals from unrelated org/entity
+        // combinations that this portal user was never actually granted access to.
+        const orgEntityPairs = [
+          ...new Map(
+            portalUsers
+              .filter(p => p.organization_id && p.entity_id)
+              .map(p => [`${p.organization_id}::${p.entity_id}`, { organization_id: p.organization_id!, entity_id: p.entity_id! }])
+          ).values(),
+        ];
+
         // Fetch proposals across all authorized group companies for this portal user
         let proposals: any[] = [];
-        if (entityIds.length > 0 && organizationIds.length > 0) {
+        if (orgEntityPairs.length > 0) {
+          const orFilter = orgEntityPairs
+            .map(({ organization_id, entity_id }) => `and(organization_id.eq.${organization_id},entity_id.eq.${entity_id})`)
+            .join(",");
           const { data: entityProps } = await supabase
             .from("proposals")
             .select("id, title, status, created_at, created_by, deal_id, client_id")
-            .in("organization_id", organizationIds)
-            .in("entity_id", entityIds)
+            .or(orFilter)
             .order("created_at", { ascending: false });
           if (cancelled) return;
           proposals = entityProps || [];
