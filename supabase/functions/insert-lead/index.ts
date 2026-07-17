@@ -34,6 +34,7 @@ import {
   cleanupCreatedEntityArtifacts,
   resolveRootOrganizationId,
   validateInsertLeadCampaign,
+  validateLocationDistrict,
 } from '../_shared/leadsValidation.ts';
 
 const corsHeaders = {
@@ -200,10 +201,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    let campaignLocationRequired = false;
+    let campaignFormId: string | null = null;
     if (leadData.campaign_id) {
       const { data: campaign, error: campaignError } = await supabase
         .from('campaigns')
-        .select('id, organization_id, status')
+        .select('id, organization_id, status, form_id, location_required')
         .eq('id', leadData.campaign_id)
         .maybeSingle();
 
@@ -224,6 +227,9 @@ Deno.serve(async (req) => {
           { status: campaignValidation.status || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      campaignLocationRequired = !!campaign?.location_required;
+      campaignFormId = campaign?.form_id ?? null;
     }
 
     const rootOrganizationId = await resolveRootOrganizationId(supabase, organizationId) || organizationId;
@@ -292,6 +298,53 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: mergedValidation }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // CRITICAL: server-side enforcement of location_required/allowed_districts.
+    // insert-lead is a scoped-API-key public-ish endpoint (no interactive form),
+    // but a caller can still pass a district value in custom_fields — validate
+    // it the same way create-lead/update-lead do, mirroring get-form-data.
+    if (leadData.campaign_id && (campaignLocationRequired || campaignFormId)) {
+      let locationDefs: Array<{ field_key?: string | null; field_type?: string | null; field_label?: string | null }> = [];
+      let insertFormLocationRequired = false;
+      if (campaignFormId) {
+        const { data: formLocationData } = await supabase
+          .from('forms')
+          .select('location_required')
+          .eq('id', campaignFormId)
+          .maybeSingle();
+        insertFormLocationRequired = !!formLocationData?.location_required;
+
+        const { data: formFieldDefs } = await supabase
+          .from('form_fields')
+          .select('field_key, field_type, field_label')
+          .eq('form_id', campaignFormId)
+          .eq('is_active', true);
+        locationDefs = formFieldDefs || [];
+      } else {
+        const { data: fieldDefs } = await supabase
+          .from('lead_field_definitions')
+          .select('field_key, field_type, field_label')
+          .eq('campaign_id', leadData.campaign_id)
+          .eq('is_active', true);
+        locationDefs = fieldDefs || [];
+      }
+
+      const locationValidation = await validateLocationDistrict({
+        supabase,
+        campaignId: leadData.campaign_id,
+        campaignLocationRequired,
+        formId: campaignFormId,
+        formLocationRequired: insertFormLocationRequired,
+        definitions: locationDefs,
+        fieldValues,
+      });
+      if (!locationValidation.ok) {
+        return new Response(
+          JSON.stringify({ error: locationValidation.error }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // --- Defensive sanitization. Rejects corrupted emails/phones, dedupes

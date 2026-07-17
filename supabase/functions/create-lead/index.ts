@@ -36,6 +36,7 @@ import {
   cleanupCreatedEntityArtifacts,
   resolveCanonicalFormId,
   resolveRootOrganizationId,
+  validateLocationDistrict,
 } from '../_shared/leadsValidation.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
@@ -154,7 +155,7 @@ Deno.serve(async (req) => {
     // Get campaign and its company
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id, name, organization_id, status, form_id')
+      .select('id, name, organization_id, status, form_id, location_required')
       .eq('id', campaign_id)
       .single();
 
@@ -203,8 +204,19 @@ Deno.serve(async (req) => {
     // Priority: form_id (form_steps/form_fields) > campaign_id (campaign_form_steps/lead_field_definitions)
     let totalSteps = 1;
     let definitions: any[] = [];
+    let formLocationRequired = false;
 
     if (canonicalFormId) {
+      // Fetch location_required alongside the form-level tables — needed for
+      // the server-side district validation below (CRITICAL: this endpoint is
+      // public and must not trust the client-side location check alone).
+      const { data: formLocationData } = await supabase
+        .from('forms')
+        .select('location_required')
+        .eq('id', canonicalFormId)
+        .maybeSingle();
+      formLocationRequired = !!formLocationData?.location_required;
+
       // Use form-level tables
       const { data: formStepsData } = await supabase
         .from('form_steps')
@@ -338,6 +350,26 @@ Deno.serve(async (req) => {
           );
         }
       }
+    }
+
+    // CRITICAL: server-side enforcement of location_required/allowed_districts.
+    // The public form only checks this client-side (PublicLeadForm.tsx); a
+    // direct API call with a district outside campaign_districts/form_districts
+    // must be rejected here, mirroring the calculation in get-form-data.
+    const locationValidation = await validateLocationDistrict({
+      supabase,
+      campaignId: campaign_id,
+      campaignLocationRequired: campaign.location_required,
+      formId: canonicalFormId,
+      formLocationRequired,
+      definitions,
+      fieldValues: field_values,
+    });
+    if (!locationValidation.ok) {
+      return new Response(
+        JSON.stringify({ error: locationValidation.error }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Validate business_unit belongs to company

@@ -23,7 +23,7 @@ const requestSchema = z.object({
 import { normalizeFirstLast } from "../_shared/composeDisplayName.ts";
 import { runMarketingAttribution } from "../_shared/marketingAttribution.ts";
 import { sanitizeFieldValues } from "../_shared/inputSanitizers.ts";
-import { resolveCanonicalFormId } from "../_shared/leadsValidation.ts";
+import { resolveCanonicalFormId, validateLocationDistrict } from "../_shared/leadsValidation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -266,7 +266,7 @@ Deno.serve(async (req) => {
     // Get existing lead
     const { data: existingLead, error: leadError } = await supabase
       .from("anew_leads")
-      .select("*, campaigns!anew_leads_campaign_id_fkey(id, organization_id, status, form_id)")
+      .select("*, campaigns!anew_leads_campaign_id_fkey(id, organization_id, status, form_id, location_required)")
       .eq("id", targetId)
       .single();
 
@@ -307,8 +307,18 @@ Deno.serve(async (req) => {
     // Priority: form_id (form_steps/form_fields) > campaign_id (campaign_form_steps/lead_field_definitions)
     let definitions: any[] = [];
     let totalSteps = 1;
+    let formLocationRequired = false;
 
     if (canonicalFormId) {
+      // Needed for the server-side district validation below (CRITICAL: this
+      // endpoint is public and must not trust the client-side location check).
+      const { data: formLocationData } = await supabase
+        .from("forms")
+        .select("location_required")
+        .eq("id", canonicalFormId)
+        .maybeSingle();
+      formLocationRequired = !!formLocationData?.location_required;
+
       const { data: formFieldDefs } = await supabase
         .from("form_fields")
         .select("*")
@@ -413,6 +423,26 @@ Deno.serve(async (req) => {
           );
         }
       }
+    }
+
+    // CRITICAL: server-side enforcement of location_required/allowed_districts.
+    // Mirrors the create-lead check — a direct API call continuing a
+    // multi-step form with a district outside campaign_districts/form_districts
+    // must be rejected here too.
+    const locationValidation = await validateLocationDistrict({
+      supabase,
+      campaignId: campaignId,
+      campaignLocationRequired: existingLead.campaigns?.location_required,
+      formId: canonicalFormId,
+      formLocationRequired,
+      definitions,
+      fieldValues: field_values,
+    });
+    if (!locationValidation.ok) {
+      return new Response(
+        JSON.stringify({ error: locationValidation.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
     const isComplete = currentStep >= totalSteps;

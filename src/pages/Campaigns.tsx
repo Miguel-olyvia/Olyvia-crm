@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useCompany } from "@/contexts/CompanyContext";
 import { PermissionGate } from "@/components/PermissionGate";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -134,6 +134,7 @@ const Campaigns = () => {
   const [brandingCampaign, setBrandingCampaign] = useState<Campaign | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
 
   // Filter states
@@ -557,6 +558,23 @@ const Campaigns = () => {
     if (formId) loadFormFields(formId);
     setOpen(true);
   };
+
+  // Deep-link: CampaignDetail's header "Edit" button navigates here with
+  // { editCampaignId } in location.state instead of just landing on the bare
+  // list. Once campaigns are loaded, find the matching row and open the same
+  // edit dialog openEditDialog() would open from a row click, then clear the
+  // state so a browser back/forward doesn't reopen it.
+  useEffect(() => {
+    const editCampaignId = (location.state as { editCampaignId?: string } | null)?.editCampaignId;
+    if (!editCampaignId || campaigns.length === 0) return;
+
+    const target = campaigns.find((c) => c.id === editCampaignId);
+    if (target) {
+      openEditDialog(target);
+    }
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaigns, location.state]);
 
   const handleCloseDialog = () => {
     setOpen(false);

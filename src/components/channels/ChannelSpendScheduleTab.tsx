@@ -39,9 +39,12 @@ export function ChannelSpendScheduleTab({ channelId, range, activeSpend }: Props
   const qc = useQueryClient();
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
-  const canCreate = hasPermission("channels.create");
-  const canEdit = hasPermission("channels.edit");
-  const canDelete = hasPermission("channels.delete");
+  // RLS on `channels` checks campaigns.create/edit/delete, not channels.* —
+  // there is no channels.* permission seeded anywhere (see
+  // 20260615130000_baseline_new_database.sql ~L25855-25884).
+  const canCreate = hasPermission("campaigns.create");
+  const canEdit = hasPermission("campaigns.edit");
+  const canDelete = hasPermission("campaigns.delete");
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY);

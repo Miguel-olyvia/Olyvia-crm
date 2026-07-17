@@ -979,7 +979,10 @@ const CampaignDetail = () => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
           <PermissionGate permission="campaigns.edit">
-            <Button variant="outline" onClick={() => navigate(`/campaigns`)}>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/campaigns", { state: { editCampaignId: campaign.id } })}
+            >
               <Pencil className="w-4 h-4 mr-2" />
               Edit
             </Button>
@@ -1301,7 +1304,7 @@ const CampaignDetail = () => {
           <TabsContent value="channels" className="space-y-4">
             <div className="flex justify-between items-center">
               <p className="text-muted-foreground">Manage channels and record metrics</p>
-              <PermissionGate permission="channels.create">
+              <PermissionGate permission="campaigns.create">
                 <Button onClick={() => { resetChannelForm(); setChannelDialogOpen(true); }}>
                   <Plus className="w-4 h-4 mr-2" />
                   Add Channel
@@ -1373,12 +1376,12 @@ const CampaignDetail = () => {
                             >
                               <Upload className="w-4 h-4" />
                             </Button>
-                            <PermissionGate permission="channels.edit">
+                            <PermissionGate permission="campaigns.edit">
                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEditChannel(channel); }}>
                                 <Pencil className="w-4 h-4" />
                               </Button>
                             </PermissionGate>
-                            <PermissionGate permission="channels.delete">
+                            <PermissionGate permission="campaigns.delete">
                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setChannelToDelete(channel); setDeleteDialogOpen(true); }}>
                                 <Trash2 className="w-4 h-4 text-destructive" />
                               </Button>

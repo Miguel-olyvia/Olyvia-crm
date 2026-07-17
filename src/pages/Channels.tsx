@@ -371,7 +371,11 @@ const Channels = () => {
             <h1 className="text-3xl font-bold mb-2">{t('channels.title')}</h1>
             <p className="text-muted-foreground">{t('channels.subtitle')}</p>
           </div>
-          <PermissionGate permission="channels.create">
+          {/* RLS on `channels` actually checks campaigns.create/edit/delete
+              (see 20260615130000_baseline_new_database.sql ~L25855-25884) —
+              there is no channels.* permission seeded anywhere, so gating on
+              "channels.create" hid this button from everyone but system admins. */}
+          <PermissionGate permission="campaigns.create">
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -618,7 +622,7 @@ const Channels = () => {
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1">
-                          <PermissionGate permission="channels.edit">
+                          <PermissionGate permission="campaigns.edit">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -627,7 +631,7 @@ const Channels = () => {
                               <Pencil className="w-4 h-4" />
                             </Button>
                           </PermissionGate>
-                          <PermissionGate permission="channels.delete">
+                          <PermissionGate permission="campaigns.delete">
                             <Button
                               variant="ghost"
                               size="icon"

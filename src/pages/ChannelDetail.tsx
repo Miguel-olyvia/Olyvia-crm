@@ -20,6 +20,12 @@ import { ChannelSpendScheduleTab } from "@/components/channels/ChannelSpendSched
 import { ChannelReportsTab } from "@/components/channels/ChannelReportsTab";
 import { ChannelSettingsTab } from "@/components/channels/ChannelSettingsTab";
 
+// Revenue attribution window (fn_channel_revenue_facts) is a fixed 90-day
+// lookback, independent of the report's chart/table date range. The
+// ChannelOverviewTab tooltip explicitly promises "janela 90d" — it must not
+// drift when the user picks a different bucket/date range in the selector.
+const REVENUE_ATTRIBUTION_WINDOW_DAYS = 90;
+
 function defaultRangeFor(bucket: "day" | "week" | "month" | "year") {
   const to = new Date();
   const from = new Date();
@@ -45,8 +51,11 @@ const ChannelDetail = () => {
   const [rangeTouched, setRangeTouched] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const canManageSpend = hasAnyPermission(["channels.create", "channels.edit", "channels.delete"]);
-  const canEditSettings = hasPermission("channels.edit");
+  // RLS on `channels` checks campaigns.create/edit/delete, not channels.* —
+  // there is no channels.* permission seeded anywhere (see
+  // 20260615130000_baseline_new_database.sql ~L25855-25884).
+  const canManageSpend = hasAnyPermission(["campaigns.create", "campaigns.edit", "campaigns.delete"]);
+  const canEditSettings = hasPermission("campaigns.edit");
 
   const availableTabs = useMemo(() => {
     const tabs = ["overview", "leads"];
@@ -81,16 +90,12 @@ const ChannelDetail = () => {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey,
     queryFn: async () => {
-      const windowDays = Math.max(
-        1,
-        Math.ceil((new Date(range.to).getTime() - new Date(range.from).getTime()) / 86_400_000)
-      );
       const { data, error } = await supabase.rpc("get_channel_dashboard", {
         p_channel_id: id!,
         p_date_from: range.from,
         p_date_to: range.to,
         p_bucket: bucket,
-        p_window_days: windowDays,
+        p_window_days: REVENUE_ATTRIBUTION_WINDOW_DAYS,
       });
       if (error) throw error;
       return data as any;

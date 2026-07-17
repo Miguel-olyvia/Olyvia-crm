@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -121,7 +122,9 @@ export function CampaignFieldsConfig({
     pattern_message: "",
     placeholder: "",
     help_text: "",
+    custom_options_text: "",
   });
+  const [editCustomOptionsText, setEditCustomOptionsText] = useState("");
 
   // Load system entities when field type changes to a ref_* or list_* type
   useEffect(() => {
@@ -379,9 +382,34 @@ export function CampaignFieldsConfig({
     return fieldType.startsWith('list_');
   };
 
+  // select/radio/checkbox fields that are NOT bound to a system entity
+  // (ref_*/list_*) have no other source of options — the user must be able
+  // to type them in as free text, one option per line.
+  const FREE_TEXT_OPTION_TYPES = ['select', 'radio', 'checkbox'];
+  const needsFreeTextOptions = (fieldType: string): boolean =>
+    FREE_TEXT_OPTION_TYPES.includes(fieldType) && !getSystemEntityType(fieldType);
+
+  const parseCustomOptionsText = (text: string): string[] =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+
   const handleAddField = async () => {
     if (!newField.field_key || !newField.field_label) {
       toast({ title: "Please fill key and label", variant: "destructive" });
+      return;
+    }
+
+    if (
+      needsFreeTextOptions(newField.field_type) &&
+      parseCustomOptionsText(newField.custom_options_text).length === 0
+    ) {
+      toast({
+        title: "Adicione pelo menos uma opção",
+        description: "Campos do tipo Dropdown/Radio/Checkbox precisam de opções para o utilizador escolher.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -396,6 +424,15 @@ export function CampaignFieldsConfig({
         entity_ids: selectedEntityIds,
         options: selectedEntities.map(e => e.name)
       };
+    } else if (needsFreeTextOptions(newField.field_type)) {
+      // select/radio/checkbox with no system entity backing: persist the
+      // free-text options the user typed in, one per line. Without this the
+      // field is saved with options: null and renders as an empty, unusable
+      // dropdown on the public form (PublicLeadForm.tsx/CampaignFormPreview.tsx).
+      const customOptions = parseCustomOptionsText(newField.custom_options_text);
+      if (customOptions.length > 0) {
+        fieldOptions = { options: customOptions };
+      }
     }
 
     // Build option_icons for select fields with show_icons enabled
@@ -463,6 +500,7 @@ export function CampaignFieldsConfig({
         pattern_message: "",
         placeholder: "",
         help_text: "",
+        custom_options_text: "",
       });
       setSelectedEntityIds([]);
       setSystemEntities([]);
@@ -472,6 +510,24 @@ export function CampaignFieldsConfig({
 
   const handleUpdateField = async () => {
     if (!editingField) return;
+
+    if (
+      needsFreeTextOptions(editingField.field_type) &&
+      parseCustomOptionsText(editCustomOptionsText).length === 0
+    ) {
+      toast({
+        title: "Adicione pelo menos uma opção",
+        description: "Campos do tipo Dropdown/Radio/Checkbox precisam de opções para o utilizador escolher.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Preserve options for system-entity-backed fields as-is; for free-text
+    // select/radio/checkbox fields, persist whatever was typed in the editor.
+    const updatedOptions = needsFreeTextOptions(editingField.field_type)
+      ? { options: parseCustomOptionsText(editCustomOptionsText) }
+      : editingField.options;
 
     const { error } = await supabase
       .from("lead_field_definitions")
@@ -483,6 +539,7 @@ export function CampaignFieldsConfig({
         contact_field_mapping: editingField.contact_field_mapping || null,
         client_field_mapping: editingField.client_field_mapping || null,
         step_number: editingField.step_number,
+        options: updatedOptions,
       })
       .eq("id", editingField.id);
 
@@ -491,6 +548,7 @@ export function CampaignFieldsConfig({
     } else {
       toast({ title: "Field updated" });
       setEditingField(null);
+      setEditCustomOptionsText("");
       loadFieldDefinitions();
     }
   };
@@ -941,6 +999,26 @@ export function CampaignFieldsConfig({
                   </div>
                 )}
 
+                {/* Free-text options for select/radio/checkbox fields NOT bound to a
+                    system entity — the only way to define what the user can pick. */}
+                {needsFreeTextOptions(newField.field_type) && (
+                  <div className="space-y-2 border rounded-lg p-4 bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <ListChecks className="w-4 h-4 text-primary" />
+                      <Label className="font-medium">Opções (uma por linha)</Label>
+                    </div>
+                    <Textarea
+                      placeholder={"Ex:\nCasa de Banho\nCozinha\nSala"}
+                      rows={4}
+                      value={newField.custom_options_text}
+                      onChange={(e) => setNewField({ ...newField, custom_options_text: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      {parseCustomOptionsText(newField.custom_options_text).length} opções configuradas
+                    </p>
+                  </div>
+                )}
+
                 {/* Multi-select option for select-type fields */}
                 {(newField.field_type === 'select' || newField.field_type === 'checkbox') && (
                   <div className="flex items-center gap-2 border rounded-lg p-3 bg-muted/30">
@@ -1277,6 +1355,17 @@ export function CampaignFieldsConfig({
                                   </Select>
                                 </div>
                               </div>
+                              {needsFreeTextOptions(editingField.field_type) && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs text-muted-foreground">Opções (uma por linha)</Label>
+                                  <Textarea
+                                    placeholder={"Ex:\nCasa de Banho\nCozinha\nSala"}
+                                    rows={3}
+                                    value={editCustomOptionsText}
+                                    onChange={(e) => setEditCustomOptionsText(e.target.value)}
+                                  />
+                                </div>
+                              )}
                               <div className="flex items-center gap-4">
                                 <div className="flex items-center gap-1">
                                   <Switch
@@ -1365,7 +1454,17 @@ export function CampaignFieldsConfig({
                                     Mapeado
                                   </Badge>
                                 )}
-                                <Button variant="ghost" size="icon" onClick={() => setEditingField(field)}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => {
+                                    setEditingField(field);
+                                    const existingOptions = Array.isArray(field.options?.options)
+                                      ? field.options.options
+                                      : [];
+                                    setEditCustomOptionsText(existingOptions.join("\n"));
+                                  }}
+                                >
                                   <Pencil className="w-4 h-4" />
                                 </Button>
                                 <Button variant="ghost" size="icon" onClick={() => handleDeleteField(field.id)}>

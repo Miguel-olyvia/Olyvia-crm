@@ -70,7 +70,6 @@ import { format, startOfDay, endOfDay, differenceInDays, parseISO, isPast } from
 import { pt } from "date-fns/locale";
 import ProposalItemsEditor, { ProposalItem, calculateProposalItemsTotal } from "@/components/proposals/ProposalItemsEditor";
 import { Checkbox } from "@/components/ui/checkbox";
-import { BulkActionsBar } from "@/components/BulkActionsBar";
 
 import { SendProposalDialog } from "@/components/proposals/SendProposalDialog";
 import { ProposalSendHistory } from "@/components/proposals/ProposalSendHistory";
@@ -93,6 +92,8 @@ import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote, calcInline
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sparkles } from "lucide-react";
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
+import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 
 interface WorkflowStage {
   id: string;
@@ -508,6 +509,12 @@ const Proposals = () => {
 
   const [callDialogOpen, setCallDialogOpen] = useState(false);
   const [callTarget, setCallTarget] = useState<{ entityId: string; name: string }>({ entityId: "", name: "" });
+
+  const [whatsAppDialogOpen, setWhatsAppDialogOpen] = useState(false);
+  const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
+
+  const [bulkEmailSending, setBulkEmailSending] = useState(false);
+  const [bulkPdfExporting, setBulkPdfExporting] = useState(false);
 
   const [sendHistoryOpen, setSendHistoryOpen] = useState(false);
   const [sendHistoryProposalId, setSendHistoryProposalId] = useState<string | null>(null);
@@ -1060,6 +1067,84 @@ const Proposals = () => {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkStatusChanging(false);
+    }
+  };
+
+  // Bulk email: reuses the same send-proposal-email edge function as
+  // SendProposalDialog (single-row send), applied sequentially to every
+  // selected proposal that has a resolvable recipient email. Kept simple on
+  // purpose — no per-proposal message editing UI for the bulk case.
+  const handleBulkSendEmail = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkEmailSending(true);
+    let successCount = 0;
+    let skipCount = 0;
+    let failCount = 0;
+    try {
+      for (const id of selectedIds) {
+        const proposal = proposals.find(p => p.id === id);
+        if (!proposal) { failCount++; continue; }
+        const directEntityId = (proposal as any).entity_id as string | null;
+        const eid = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null);
+        const email = (eid ? entityEmails[eid] : entityEmails[`deal:${id}`]) || "";
+        const name = (eid ? entityNames[eid] : entityNames[`deal:${id}`]) || "";
+        if (!email) { skipCount++; continue; }
+        try {
+          const { error } = await supabase.functions.invoke("send-proposal-email", {
+            body: {
+              proposal_id: id,
+              recipient_email: email,
+              recipient_name: name,
+              recipients: [email],
+              cc: [],
+              subject: `Proposta ${proposal.title}`,
+              message: `Olá${name ? ` ${name}` : ""},\n\nSegue a proposta "${proposal.title}" para a sua análise.\n\nCumprimentos`,
+            },
+          });
+          if (error) throw error;
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+      toast({
+        title: "Envio em lote concluído",
+        description: `${successCount} enviada(s), ${skipCount} sem email, ${failCount} com erro.`,
+        variant: failCount > 0 ? "destructive" : undefined,
+      });
+      setSelectedIds([]);
+      loadData();
+    } finally {
+      setBulkEmailSending(false);
+    }
+  };
+
+  // Bulk PDF export: reuses generateProposalPdfBlob (same as the row-level
+  // "Descarregar PDF" dropdown item) and triggers a browser download per
+  // selected proposal, sequentially to avoid overwhelming the download manager.
+  const handleBulkExportPdf = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkPdfExporting(true);
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      toast({ title: "A gerar PDFs…", description: "Pode demorar alguns segundos." });
+      for (const id of selectedIds) {
+        try {
+          const { blob, fileName } = await generateProposalPdfBlob(id);
+          downloadBlob(blob, fileName);
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+      toast({
+        title: "Exportação concluída",
+        description: `${successCount} PDF(s) gerado(s)${failCount > 0 ? `, ${failCount} com erro` : ""}.`,
+        variant: failCount > 0 ? "destructive" : undefined,
+      });
+    } finally {
+      setBulkPdfExporting(false);
     }
   };
 
@@ -1814,6 +1899,46 @@ const Proposals = () => {
   };
 
   // Row background color
+  // Resolves the client/lead entity linked to a proposal (direct entity_id, or
+  // via its deal), used to wire up phone/call/WhatsApp actions consistently
+  // across the quick-actions row and the row dropdown.
+  const getProposalEntityInfo = (proposal: Proposal) => {
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const entityId = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null) || "";
+    const name = (directEntityId ? entityNames[directEntityId] : entityNames[`deal:${proposal.id}`]) || proposal.title;
+    const phone = (directEntityId ? entityPhones[directEntityId] : entityPhones[`deal:${proposal.id}`]) || "";
+    return { entityId, name, phone };
+  };
+
+  const handleQuickCall = (proposal: Proposal) => {
+    const { entityId, name } = getProposalEntityInfo(proposal);
+    if (!entityId) {
+      toast({ title: "Sem entidade associada", description: "Esta proposta não tem um cliente/lead associado.", variant: "destructive" });
+      return;
+    }
+    setCallTarget({ entityId, name });
+    setCallDialogOpen(true);
+  };
+
+  const handleQuickWhatsApp = (proposal: Proposal) => {
+    const { name, phone, entityId } = getProposalEntityInfo(proposal);
+    if (!phone) {
+      toast({ title: "Sem telefone", description: "Este cliente/lead não tem telefone associado.", variant: "destructive" });
+      return;
+    }
+    setWhatsAppContext({
+      module: "proposals",
+      recipientName: name,
+      recipientPhone: phone,
+      entityId: entityId || undefined,
+      organizationId: (proposal as any).organization_id || activeCompany?.id || undefined,
+      proposalId: proposal.id,
+      proposalTitle: proposal.title,
+      proposalValue: proposal.value ?? undefined,
+    });
+    setWhatsAppDialogOpen(true);
+  };
+
   const getRowBg = (proposal: Proposal): string => {
     const now = new Date();
     const stage = getProposalStage(proposal);
@@ -1851,7 +1976,7 @@ const Proposals = () => {
     if (sn === "sent" || sn === "enviada") {
       return (
         <>
-          <Button size="icon" variant={isNoResponse ? "default" : "ghost"} className={cn("h-7 w-7", isNoResponse && "animate-pulse")} title="Follow-up">
+          <Button size="icon" variant={isNoResponse ? "default" : "ghost"} className={cn("h-7 w-7", isNoResponse && "animate-pulse")} onClick={() => handleQuickCall(proposal)} title="Follow-up">
             <Phone className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
@@ -1891,7 +2016,7 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Follow-up">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Follow-up">
             <Phone className="w-3.5 h-3.5" />
           </Button>
         </>
@@ -1903,7 +2028,7 @@ const Proposals = () => {
         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
           <Eye className="w-3.5 h-3.5" />
         </Button>
-        <Button size="icon" variant="ghost" className="h-7 w-7" title="Ligar">
+        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Ligar">
           <Phone className="w-3.5 h-3.5" />
         </Button>
       </>
@@ -1926,7 +2051,7 @@ const Proposals = () => {
         <DropdownMenuItem onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }}>
           <Mail className="w-3.5 h-3.5 mr-2" /> {sn === "sent" || sn === "enviada" ? "Reenviar email" : "Enviar por email"}
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleQuickWhatsApp(proposal)}>
           <MessageSquare className="w-3.5 h-3.5 mr-2" /> WhatsApp
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -2046,7 +2171,7 @@ const Proposals = () => {
             <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
               <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleQuickCall(proposal)}>
               <Phone className="w-3.5 h-3.5 mr-2" /> Contactar cliente
             </DropdownMenuItem>
           </>
@@ -2969,12 +3094,15 @@ const Proposals = () => {
               <div className="mb-4 flex items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
                 <span className="text-sm font-medium text-primary">{selectedIds.length} proposta{selectedIds.length > 1 ? "s" : ""} seleccionada{selectedIds.length > 1 ? "s" : ""}</span>
                 <div className="flex gap-2 ml-auto">
-                  <Button variant="outline" size="sm"><Mail className="w-3.5 h-3.5 mr-1" /> Enviar email</Button>
+                  <Button variant="outline" size="sm" disabled={bulkEmailSending} onClick={handleBulkSendEmail}>
+                    <Mail className="w-3.5 h-3.5 mr-1" /> {bulkEmailSending ? "A enviar…" : "Enviar email"}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setBulkStatusDialogOpen(true)}>
                     <Columns3 className="w-3.5 h-3.5 mr-1" /> Mover estado
                   </Button>
-                  <Button variant="outline" size="sm"><FileText className="w-3.5 h-3.5 mr-1" /> Exportar PDF</Button>
-                  <Button variant="outline" size="sm"><Link2 className="w-3.5 h-3.5 mr-1" /> Gerar links públicos</Button>
+                  <Button variant="outline" size="sm" disabled={bulkPdfExporting} onClick={handleBulkExportPdf}>
+                    <FileText className="w-3.5 h-3.5 mr-1" /> {bulkPdfExporting ? "A gerar…" : "Exportar PDF"}
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
                     <X className="w-4 h-4" />
                   </Button>
@@ -3227,6 +3355,11 @@ const Proposals = () => {
         organizationId={activeCompany?.id || ""}
         contactId=""
         onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
+      />
+      <WhatsAppSendDialog
+        open={whatsAppDialogOpen}
+        onOpenChange={setWhatsAppDialogOpen}
+        context={whatsAppContext}
       />
       <ProposalSendHistory open={sendHistoryOpen} onOpenChange={setSendHistoryOpen} proposalId={sendHistoryProposalId} proposalTitle={sendHistoryProposalTitle} />
       {(visualEditorProposalId || editingId) && (
