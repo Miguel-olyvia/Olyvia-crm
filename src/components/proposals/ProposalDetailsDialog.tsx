@@ -158,6 +158,7 @@ interface ProposalDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   proposal: {
     id: string;
+    proposal_number?: string | null;
     title: string;
     description: string | null;
     value: number;
@@ -438,7 +439,11 @@ export function ProposalDetailsDialog({
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-xl">
               <FileText className="w-5 h-5 text-primary" />
-              {proposal.title}
+              {proposal.proposal_number && (
+                <span className="font-mono text-primary">{proposal.proposal_number}</span>
+              )}
+              {proposal.proposal_number && <span className="text-muted-foreground">·</span>}
+              <span>{proposal.title}</span>
             </DialogTitle>
             <Button variant="outline" size="sm" className="gap-1 mr-6" onClick={() => setPortalPreviewOpen(true)}>
               <Eye className="h-4 w-4" /> Preview Portal

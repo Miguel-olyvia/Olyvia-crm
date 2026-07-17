@@ -56,17 +56,30 @@ export function DealsDashboardView({ deals, stages, formatCurrency, isLoading, h
 
   const data = useMemo(() => {
     const sortedStages = [...stages].sort((a, b) => a.order_index - b.order_index);
-    const funnelData = sortedStages.map((stage, idx) => {
-      const count = rpcStageStats
+    const directCount: Record<string, number> = {};
+    const directValue: Record<string, number> = {};
+    sortedStages.forEach(stage => {
+      directCount[stage.id] = rpcStageStats
         ? (rpcStageStats[stage.id] ?? 0)
         : deals.filter(d => d.deal_stages?.id === stage.id).length;
-      const value = rpcStageValues
+      directValue[stage.id] = rpcStageValues
         ? (rpcStageValues[stage.id] ?? 0)
         : deals.filter(d => d.deal_stages?.id === stage.id).reduce((s, d) => s + (d.value || 0), 0);
+    });
+    const funnelData = sortedStages.map((stage, idx) => {
+      let count = 0;
+      let value = 0;
+      for (let i = idx; i < sortedStages.length; i++) {
+        count += directCount[sortedStages[i].id] || 0;
+        value += directValue[sortedStages[i].id] || 0;
+      }
       const nextStage = sortedStages[idx + 1];
-      const nextCount = nextStage
-        ? (rpcStageStats ? (rpcStageStats[nextStage.id] ?? 0) : deals.filter(d => d.deal_stages?.id === nextStage.id).length)
-        : 0;
+      let nextCount = 0;
+      if (nextStage) {
+        for (let i = idx + 1; i < sortedStages.length; i++) {
+          nextCount += directCount[sortedStages[i].id] || 0;
+        }
+      }
       const conversionRate = count > 0 && nextStage ? Math.round((nextCount / count) * 100) : null;
       return { stage, count, value, conversionRate };
     });

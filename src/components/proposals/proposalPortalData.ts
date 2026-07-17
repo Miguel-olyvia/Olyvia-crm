@@ -118,8 +118,9 @@ async function resolveCommercialForProposal(
     dealClientAssignedTo = dealClient?.assigned_to ?? null;
   }
 
-  // Priority: proposal.client.assigned_to > deal.client.assigned_to > deal.assigned_to > proposal.created_by
+  // Priority: proposal.assigned_to > proposal.client.assigned_to > deal.client.assigned_to > deal.assigned_to > proposal.created_by
   const commercialId =
+    proposal.assigned_to ??
     clientRes.data?.assigned_to ??
     dealClientAssignedTo ??
     dealRes.data?.assigned_to ??

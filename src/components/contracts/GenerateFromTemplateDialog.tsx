@@ -10,7 +10,7 @@ import {
   Eye, Sparkles, FileText, Loader2, CheckCircle, ChevronRight, Star, ExternalLink, Pencil,
 } from "lucide-react";
 import { substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
-import { gatherContractData, applyQuoteItemsToken } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, fetchTemplateSignatory, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { useNavigate } from "react-router-dom";
 
 interface Template {
@@ -72,11 +72,17 @@ export function GenerateFromTemplateDialog({
       const templateDocSettings = template.doc_settings || {};
       const primaryColor = templateDocSettings?.primary_color || "#7C3AED";
       const baseWithItems = applyQuoteItemsToken(template.body_html, variableData, templateDocSettings, primaryColor);
-      const highlightedHtml = substituteVariables(baseWithItems, variableData, true);
+      const sig = await fetchTemplateSignatory(template.id);
+      const baseWithSignatory = injectSignatoryIntoSignatureBlock(
+        baseWithItems,
+        sig?.name,
+        sig?.roleName,
+      );
+      const highlightedHtml = substituteVariables(baseWithSignatory, variableData, true);
       setPreviewHtml(highlightedHtml);
       // Pass pre-substitution HTML so handleGenerated can detect ALL custom tokens
       // (including "fixed" vars with defaults). finalizeGeneration applies substituteVariables.
-      setFinalHtml(baseWithItems);
+      setFinalHtml(baseWithSignatory);
       setStep("preview");
     } catch (err: any) {
       toast.error("Erro ao preparar preview: " + err.message);

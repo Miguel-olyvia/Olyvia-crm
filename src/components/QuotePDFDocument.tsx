@@ -1,6 +1,7 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
 import { resolveField, type RenderContext } from '@/utils/documentVariables';
+import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -384,10 +385,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     return sum + (parseFloat(String(line.total_sem_iva || 0)));
   }, 0);
 
-  // Apply global discount
+  // Apply global discount. Round the discounted subtotal to cents (matching
+  // QuoteBuilder.calculateTotals' round2(totalSemIvaComDesconto)) so the PDF
+  // total reconciles with the on-screen total to the cent.
   const discountFactor = descontoPercent > 0 ? (1 - descontoPercent / 100) : 1;
-  const discountValue = subtotalBruto * (1 - discountFactor);
-  const subtotal = subtotalBruto * discountFactor;
+  const subtotal = round2(subtotalBruto * discountFactor);
+  const discountValue = subtotalBruto - subtotal;
 
   // Calculate service fees totals
   const totalFeesValue = fees.reduce((sum, fee) => {
@@ -450,13 +453,20 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     }
   });
 
+  // Round each VAT-rate bucket to cents before summing (matching
+  // QuoteBuilder.calculateTotals' round2(data.vat) discipline) so the total
+  // matches the visual sum of the individual rows shown below.
   const vatBreakdown = Array.from(vatByRateMap.entries())
+    .map(([rate, v]) => [rate, { base: v.base, vat: round2(v.vat) }] as const)
     .filter(([, v]) => v.base > 0 || v.vat > 0)
     .sort((a, b) => a[0] - b[0]);
 
+  const roundedFeeVatBreakdown = feeVatBreakdown.map((f) => ({ ...f, vat: round2(f.vat) }));
+
   const totalIva = vatBreakdown.reduce((sum, [, v]) => sum + v.vat, 0)
-    + feeVatBreakdown.reduce((sum, f) => sum + f.vat, 0);
-  const subtotalWithFees = subtotal + totalFeesValue;
+    + roundedFeeVatBreakdown.reduce((sum, f) => sum + f.vat, 0);
+  const totalFeesValueRounded = round2(totalFeesValue);
+  const subtotalWithFees = subtotal + totalFeesValueRounded;
   const total = subtotalWithFees + totalIva;
 
 
@@ -757,9 +767,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           </React.Fragment>
         );
       })}</>}
-      <View style={[styles.totalsRow, { marginTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 5 }]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>SUBTOTAL (sem IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{(subtotal + totalFeesValue).toFixed(2)}</Text></View>
+      <View style={[styles.totalsRow, { marginTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 5 }]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>SUBTOTAL (sem IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{subtotalWithFees.toFixed(2)}</Text></View>
       {vatBreakdown.map(([rate, v]) => <View key={rate} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {rate.toFixed(0)}%:</Text><Text style={styles.totalValue}>€{v.vat.toFixed(2)}</Text></View>)}
-      {feeVatBreakdown.map((f, i) => <View key={`fee-vat-${i}`} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {f.rate.toFixed(0)}% ({f.name}):</Text><Text style={styles.totalValue}>€{f.vat.toFixed(2)}</Text></View>)}
+      {roundedFeeVatBreakdown.map((f, i) => <View key={`fee-vat-${i}`} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {f.rate.toFixed(0)}% ({f.name}):</Text><Text style={styles.totalValue}>€{f.vat.toFixed(2)}</Text></View>)}
       <View style={styles.totalsRow}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>IVA Total:</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{totalIva.toFixed(2)}</Text></View>
       <View style={[styles.totalsRow, styles.grandTotal]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>TOTAL GERAL (c/ IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{total.toFixed(2)}</Text></View>
     </View>

@@ -2895,9 +2895,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         linesBase.push({ line, precoSemIva });
       });
 
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     const totalSemIvaComDesconto = totalSemIva * globalDiscountFactor;
-    const totalComIva = totalSemIvaComDesconto + totalIva; // grand sub+VAT (post-discount)
-    const totalComDesconto = totalSemIvaComDesconto + totalIva;
+
+    // Convert vatByRate to sorted array for display (arredondar cada parcela
+    // antes de somar para o total bater com a soma visual).
+    const vatBreakdown = Object.entries(vatByRate)
+      .map(([rate, data]) => ({ rate: Number(rate), base: data.base, vat: round2(data.vat) }))
+      .sort((a, b) => b.rate - a.rate); // Sort by rate descending (23% first)
+    const totalIvaRounded = vatBreakdown.reduce((s, v) => s + v.vat, 0);
+    const totalComIva = round2(totalSemIvaComDesconto) + totalIvaRounded; // grand sub+VAT (post-discount)
+    const totalComDesconto = totalComIva;
 
     // Cálculo de taxas via helper canónico (supabase/functions/_shared/calculateQuoteFees).
     // Fonte ÚNICA partilhada com a Olyvia (Edge Functions). Não duplicar lógica aqui.
@@ -2925,15 +2933,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const totalFeesVat = feesResult.totalFeesVat;
     const totalFeesWithVat = feesResult.totalFeesWithVat;
     const grandTotal = totalComDesconto + totalFeesWithVat;
-    
-    // Convert vatByRate to sorted array for display
-    const vatBreakdown = Object.entries(vatByRate)
-      .map(([rate, data]) => ({ rate: Number(rate), base: data.base, vat: data.vat }))
-      .sort((a, b) => b.rate - a.rate); // Sort by rate descending (23% first)
 
     return {
       totalSemIva,
-      totalIva,
+      totalIva: totalIvaRounded,
       totalComIva,
       totalComDesconto,
       fees: calculatedFees,

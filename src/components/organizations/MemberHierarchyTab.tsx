@@ -197,13 +197,32 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
       setOrgAncestors(ancestorPath);
 
       // 3. Get memberships
-      const { data: memberships } = await (supabase as any)
+      const { data: allMemberships } = await (supabase as any)
         .from("anew_memberships")
         .select("id, user_id, organization_id, role_id, status, start_date")
         .in("organization_id", Array.from(allOrgIds))
         .eq("status", "active");
 
-      // 4. Get user details (name, email, phone, avatar, position, auth_user_id)
+      // 4. Get roles (loaded before filtering memberships so we can exclude
+      // client-portal accounts — this view is meant to show only internal
+      // Olyvia staff)
+      const roleIds = [...new Set((allMemberships || []).filter((m: any) => m.role_id).map((m: any) => m.role_id))];
+      const { data: roles } = roleIds.length > 0
+        ? await (supabase as any).from("anew_roles").select("id, name, code").in("id", roleIds)
+        : { data: [] };
+
+      const roleMap = new Map<string, { name: string; code: string }>();
+      for (const r of (roles || [])) roleMap.set(r.id, { name: r.name, code: r.code || "" });
+
+      // Exclude client portal users (role code === 'client') — only internal
+      // Olyvia users should appear in the team hierarchy
+      const memberships = (allMemberships || []).filter((m: any) => {
+        if (!m.role_id) return true;
+        const role = roleMap.get(m.role_id);
+        return role?.code !== "client";
+      });
+
+      // 5. Get user details (name, email, phone, avatar, position, auth_user_id)
       const userIds = [...new Set((memberships || []).map((m: any) => m.user_id))];
       const { data: users } = userIds.length > 0
         ? await (supabase as any).from("anew_users").select("id, name, email, phone, avatar_url, position, auth_user_id").in("id", userIds)
@@ -211,15 +230,6 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
 
       const userMap = new Map<string, any>();
       for (const u of (users || [])) userMap.set(u.id, u);
-
-      // 5. Get roles
-      const roleIds = [...new Set((memberships || []).filter((m: any) => m.role_id).map((m: any) => m.role_id))];
-      const { data: roles } = roleIds.length > 0
-        ? await (supabase as any).from("anew_roles").select("id, name, code").in("id", roleIds)
-        : { data: [] };
-
-      const roleMap = new Map<string, { name: string; code: string }>();
-      for (const r of (roles || [])) roleMap.set(r.id, { name: r.name, code: r.code || "" });
 
       // 6. Get reporting links from organization_teams (leader -> members)
       const { data: orgTeams } = await (supabase as any)

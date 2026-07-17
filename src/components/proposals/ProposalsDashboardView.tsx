@@ -78,10 +78,21 @@ export function ProposalsDashboardView({
     });
 
     return ordered.map((stage, idx) => {
-      const count = directCount[stage.id] || 0;
-      const value = directValue[stage.id] || 0;
+      // Funil acumulado: cada stage soma a contagem/valor deste stage
+      // MAIS todos os stages seguintes no pipeline (não apenas o stage exato).
+      let count = 0;
+      let value = 0;
+      for (let i = idx; i < ordered.length; i++) {
+        count += directCount[ordered[i].id] || 0;
+        value += directValue[ordered[i].id] || 0;
+      }
       const nextStage = ordered[idx + 1];
-      const nextCount = nextStage ? (directCount[nextStage.id] || 0) : 0;
+      let nextCount = 0;
+      if (nextStage) {
+        for (let i = idx + 1; i < ordered.length; i++) {
+          nextCount += directCount[ordered[i].id] || 0;
+        }
+      }
       const conversionRate = count > 0 && nextStage ? Math.round((nextCount / count) * 100) : null;
       return { stage, count, value, conversionRate };
     });
@@ -305,7 +316,7 @@ export function ProposalsDashboardView({
                   </div>
                   {item.conversionRate !== null && idx < funnelData.length - 1 && (
                     <div className="ml-28 pl-6 py-0.5 text-xs text-muted-foreground">
-                      <span className="text-primary font-semibold">{item.conversionRate}%</span> conversão para o stage seguinte →
+                      <span className="text-primary font-semibold">{item.conversionRate}%</span> acumulada para o stage seguinte →
                     </div>
                   )}
                 </div>
@@ -320,6 +331,9 @@ export function ProposalsDashboardView({
               </span>
             </div>
           )}
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Conversão = propostas que ainda estão neste stage ou mais à frente, divididas pelas do stage anterior.
+          </p>
         </CardContent>
       </Card>
 

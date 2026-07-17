@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { CONTRACT_VARIABLES, substituteVariables, SAMPLE_VARIABLE_DATA } from "@/utils/contractVariables";
-import { applyQuoteItemsToken, applyFormulaChips, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
+import { applyQuoteItemsToken, applyFormulaChips, injectSignatoryIntoSignatureBlock, hasSignatoryHook, SIGNATORY_BLOCK_MARKER_HTML } from "@/components/contracts/contractDocument";
 import { useOrgHeaderData, applyOrgHeaderOverrides } from "@/components/contracts/useOrgHeaderData";
 import { upsertQuoteItemsChipInHtml, readQuoteItemsChipConfig } from "@/components/contracts/TableInsertPopover";
 import { DEFAULT_QUOTE_ITEMS_CONFIG, type QuoteItemsChipConfig } from "@/components/contracts/DataTableConfigForm";
@@ -782,6 +782,27 @@ const ContractTemplates = () => {
                   </TabsContent>
 
                   <TabsContent value="signatures" className="flex-1 min-h-0 overflow-y-auto space-y-4">
+                    {formData.signatory_user_id && !hasSignatoryHook(formData.body_html) && (
+                      <div className="border rounded-lg p-3 bg-amber-50 border-amber-200 text-sm flex items-start gap-3">
+                        <div className="flex-1 text-amber-900">
+                          O corpo da minuta não tem nenhum local para mostrar o signatário (sem
+                          variável <code className="font-mono">{"{{signatario_nome}}"}</code> nem bloco de
+                          assinatura). Insere um marcador no sítio que preferires.
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const nextBody = `${formData.body_html || ""}${SIGNATORY_BLOCK_MARKER_HTML}`;
+                            setFormData({ ...formData, body_html: nextBody });
+                            toast.success("Bloco de assinatura adicionado");
+                          }}
+                        >
+                          Inserir bloco de assinatura
+                        </Button>
+                      </div>
+                    )}
                     <SignatoriesPanel
                       companyId={activeCompany?.id}
                       selectable

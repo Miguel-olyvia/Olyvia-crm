@@ -186,7 +186,17 @@ async function generateFromQuotePdfs(
         ? await fetchQuotePdfTemplateById(quote.template_id)
         : null;
       const templateForQuote = quoteOwnTemplate ?? fallbackTemplate;
-      const { blob } = await generateQuotePdfBlob(quote.id, { templateOverride: templateForQuote });
+      // Mark this render as proposal-context so a quote missing a variable
+      // referenced only by the proposal template renders (blank/placeholder)
+      // instead of being silently dropped from the merged PDF.
+      const { blob } = await generateQuotePdfBlob(quote.id, {
+        templateOverride: templateForQuote,
+        documentContext: {
+          kind: 'proposal',
+          number: proposal?.proposal_number ?? null,
+          title: proposal?.title ?? null,
+        },
+      });
       const arrayBuffer = await blob.arrayBuffer();
       const src = await PDFDocument.load(arrayBuffer);
       const copied = await merged.copyPages(src, src.getPageIndices());

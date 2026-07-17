@@ -15,6 +15,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
+import { calculateInlineQuoteTotals } from "@/utils/quotes/inlineQuoteVatCalculation";
 
 export interface InlineQuoteLine {
   id: string;
@@ -595,11 +596,13 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     return afterDiscount;
   };
 
-  const totalSemIva = quote.lines.reduce((sum, l) => sum + calcLinePrice(l), 0);
-  const totalIva = quote.lines.reduce((sum, l) => sum + calcLinePrice(l) * (l.iva_percent / 100), 0);
-  const totalAfterGlobalDiscount = totalSemIva * (1 - quote.desconto_global_percent / 100);
-  const totalIvaAfterDiscount = totalIva * (1 - quote.desconto_global_percent / 100);
-  const grandTotal = totalAfterGlobalDiscount + totalIvaAfterDiscount;
+  // Bundle-aware VAT calculation shared with QuoteBuilderSidebar's consolidated
+  // totals, so this card's own badge/totals can never disagree with the sidebar.
+  const inlineTotals = calculateInlineQuoteTotals(quote);
+  const totalSemIva = inlineTotals.totalSemIva;
+  const totalAfterGlobalDiscount = inlineTotals.totalSemIvaComDesconto;
+  const totalIvaAfterDiscount = inlineTotals.totalIva;
+  const grandTotal = inlineTotals.totalComIva;
 
   const sectionNames = quote.sections.length > 0 ? quote.sections : ["Geral"];
 

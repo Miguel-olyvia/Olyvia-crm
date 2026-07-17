@@ -42,6 +42,7 @@ import {
 } from "@/lib/leads/fieldDefinitions";
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 import { leadContactSchema } from "@/lib/validations";
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
 interface Lead {
   id: string;
@@ -494,7 +495,7 @@ export function AnewLeadContactDialog({
       // Get active members from anew_memberships for this organization
       const { data: memberships, error: membershipsError } = await supabase
         .from("anew_memberships")
-        .select("user_id")
+        .select("user_id, role_id")
         .eq("organization_id", effectiveCompanyId)
         .eq("status", "active");
 
@@ -504,17 +505,34 @@ export function AnewLeadContactDialog({
         return;
       }
 
-      const userIds = [...new Set((memberships || []).map(m => m.user_id))];
+      // Exclude portal/client roles — only internal staff should be assignable
+      const roleIds = [...new Set((memberships || []).map(m => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+
+      const internalMemberships = (memberships || []).filter((m) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+
+      const userIds = [...new Set(internalMemberships.map(m => m.user_id))];
       if (userIds.length === 0) {
         setUsers([]);
         return;
       }
 
-      // Fetch user details from anew_users
+      // Fetch user details from anew_users, excluding inactive users
       const { data: usersData, error: usersError } = await supabase
         .from("anew_users")
         .select("id, name")
-        .in("id", userIds);
+        .in("id", userIds)
+        .eq("status", "active");
 
       if (usersError) {
         console.error("Error loading users:", usersError);

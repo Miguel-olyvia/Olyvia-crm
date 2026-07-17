@@ -22,6 +22,7 @@ interface SendProposalDialogProps {
   proposal: {
     id: string;
     title: string;
+    proposal_number?: string | null;
     deal_id?: string | null;
     organization_id?: string | null;
   } | null;
@@ -48,7 +49,7 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
 
   useEffect(() => {
     if (open && proposal) {
-      setSubject(initialSubject || `Proposta: ${proposal.title}`);
+      setSubject(initialSubject || `Proposta ${proposal.proposal_number ? proposal.proposal_number + ' · ' : ''}${proposal.title}`);
       setCc([]);
       setShowCc(false);
 

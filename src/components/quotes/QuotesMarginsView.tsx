@@ -8,8 +8,10 @@ import { cn } from "@/lib/utils";
 interface QuoteLinesAgg {
   quoteId: string;
   totalValue: number;
+  totalValueWithCost?: number;
   totalCost: number;
   hasCostData: boolean;
+  partialCostData?: boolean;
   margin: number;
 }
 
@@ -25,6 +27,8 @@ interface QuotesMarginsViewProps {
   linesAgg: Record<string, QuoteLinesAgg>;
   entityNamesMap: Record<string, string>;
   getEntityId: (q: Quote) => string | undefined;
+  globalMargin?: { avgMargin: number; hasCostData: boolean };
+  totalQuotes?: number;
 }
 
 function MarginBadge({ margin }: { margin: number }) {
@@ -33,10 +37,14 @@ function MarginBadge({ margin }: { margin: number }) {
   return <Badge className="bg-red-500/20 text-red-700 dark:text-red-400">{margin.toFixed(0)}% ❌</Badge>;
 }
 
-export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityId }: QuotesMarginsViewProps) {
+export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityId, globalMargin, totalQuotes }: QuotesMarginsViewProps) {
   const sortedByMargin = useMemo(() => {
     return quotes
-      .filter(q => linesAgg[q.id]?.totalValue > 0 && linesAgg[q.id]?.hasCostData)
+      .filter(q => {
+        const a = linesAgg[q.id];
+        const base = a?.totalValueWithCost ?? a?.totalValue ?? 0;
+        return a?.hasCostData && base > 0;
+      })
       .map(q => ({ ...q, agg: linesAgg[q.id] }))
       .sort((a, b) => (a.agg?.margin || 0) - (b.agg?.margin || 0));
   }, [quotes, linesAgg]);
@@ -45,11 +53,29 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
   const medMargin = sortedByMargin.filter(q => q.agg.margin >= 15 && q.agg.margin < 30);
   const highMargin = sortedByMargin.filter(q => q.agg.margin >= 30);
 
+  // Média ponderada por valor: Σ(venda − custo) / Σ venda
+  // sobre linhas com preço de compra definido (consistente com KPI do topo).
   const avgMargin = useMemo(() => {
-    const withData = sortedByMargin.filter(q => q.agg.totalValue > 0);
-    if (withData.length === 0) return 0;
-    return withData.reduce((s, q) => s + q.agg.margin, 0) / withData.length;
+    let sumBase = 0;
+    let sumCost = 0;
+    sortedByMargin.forEach(q => {
+      const base = q.agg.totalValueWithCost ?? q.agg.totalValue ?? 0;
+      sumBase += base;
+      sumCost += q.agg.totalCost || 0;
+    });
+    if (sumBase <= 0) return 0;
+    return ((sumBase - sumCost) / sumBase) * 100;
   }, [sortedByMargin]);
+
+  const hasPartial = sortedByMargin.some(q => q.agg.partialCostData);
+
+  // Se o servidor deu a média global (sobre TODOS os orçamentos filtrados),
+  // usamo-la como fonte de verdade; senão, cair para a média local (só página).
+  const displayedMargin = globalMargin?.hasCostData ? globalMargin.avgMargin : avgMargin;
+  const isGlobal = !!globalMargin?.hasCostData;
+  const pageScopeLabel = totalQuotes && totalQuotes > sortedByMargin.length
+    ? `nos ${sortedByMargin.length} de ${totalQuotes} carregados`
+    : `nos ${sortedByMargin.length} carregados`;
 
   return (
     <div className="p-4 md:px-6 space-y-6 overflow-y-auto h-full">
@@ -57,10 +83,22 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4">
-            <div className="text-xs text-muted-foreground font-medium">Margem Média Global</div>
-            <div className={cn("text-2xl font-bold mt-1", avgMargin >= 30 ? "text-green-600" : avgMargin >= 15 ? "text-amber-600" : "text-red-600")}>
-              {avgMargin.toFixed(1)}%
+            <div className="text-xs text-muted-foreground font-medium" title="Ponderada por valor: Σ(venda − custo) / Σ venda. Considera apenas linhas com preço de compra definido em Produtos/Serviços.">
+              Margem Média Global
             </div>
+            <div className={cn("text-2xl font-bold mt-1", displayedMargin >= 30 ? "text-green-600" : displayedMargin >= 15 ? "text-amber-600" : "text-red-600")}>
+              {displayedMargin.toFixed(1)}%
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-1">
+              {isGlobal
+                ? `sobre ${totalQuotes ?? "todos os"} orçamentos filtrados`
+                : `${pageScopeLabel} (apenas página)`}
+            </div>
+            {hasPartial && (
+              <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+                <AlertTriangle className="h-3 w-3" /> Alguns orçamentos têm linhas sem preço de compra
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card className="border-green-200 bg-green-50/50 dark:bg-green-950/20">
@@ -69,6 +107,7 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
               <CheckCircle2 className="h-3.5 w-3.5" /> Margem Alta (&gt;30%)
             </div>
             <div className="text-2xl font-bold text-green-700 dark:text-green-400 mt-1">{highMargin.length}</div>
+            <div className="text-[10px] text-green-700/70 dark:text-green-400/70 mt-0.5">{pageScopeLabel}</div>
           </CardContent>
         </Card>
         <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20">
@@ -77,6 +116,7 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
               <TrendingUp className="h-3.5 w-3.5" /> Margem Média (15-30%)
             </div>
             <div className="text-2xl font-bold text-amber-700 dark:text-amber-400 mt-1">{medMargin.length}</div>
+            <div className="text-[10px] text-amber-700/70 dark:text-amber-400/70 mt-0.5">{pageScopeLabel}</div>
           </CardContent>
         </Card>
         <Card className="border-red-200 bg-red-50/50 dark:bg-red-950/20">
@@ -85,6 +125,7 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
               <AlertTriangle className="h-3.5 w-3.5" /> Margem Baixa (&lt;15%)
             </div>
             <div className="text-2xl font-bold text-red-700 dark:text-red-400 mt-1">{lowMargin.length}</div>
+            <div className="text-[10px] text-red-700/70 dark:text-red-400/70 mt-0.5">{pageScopeLabel}</div>
           </CardContent>
         </Card>
       </div>
@@ -111,7 +152,12 @@ export function QuotesMarginsView({ quotes, linesAgg, entityNamesMap, getEntityI
                       <span className="text-xs text-muted-foreground truncate">{clientName}</span>
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">
-                      Valor: {formatCurrency(q.agg.totalValue)} · Custo: {formatCurrency(q.agg.totalCost)}
+                      Valor: {formatCurrency(q.agg.totalValueWithCost ?? q.agg.totalValue)} · Custo: {formatCurrency(q.agg.totalCost)}
+                      {q.agg.partialCostData && (
+                        <span className="ml-2 text-amber-600" title="Alguns itens deste orçamento não têm preço de compra em Produtos/Serviços; foram excluídos do cálculo.">
+                          · margem parcial
+                        </span>
+                      )}
                     </div>
                   </div>
                   <MarginBadge margin={q.agg.margin} />

@@ -558,6 +558,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
           proposal={{
             id: replyContact.docId,
             title: replyContact.docTitle || replyContact.docRef || "Proposta",
+            proposal_number: replyContact.docRef,
             deal_id: replyContact.docDealId,
             organization_id: replyContact.organizationId,
           }}

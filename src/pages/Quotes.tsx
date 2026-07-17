@@ -79,6 +79,10 @@ import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
+// Escape user input for PostgREST ilike filters ("," ")" "%" break the parser).
+const escapePostgrestIlike = (v: string) =>
+  v.replace(/[\\%_,()]/g, (c) => (c === '%' || c === '_' ? `\\${c}` : ''));
+
 interface Quote {
   id: string;
   quote_number: string | null;
@@ -138,9 +142,11 @@ interface ProposalWorkflowStage {
 interface QuoteLinesAgg {
   quoteId: string;
   totalValue: number;
+  totalValueWithCost: number;
   totalWithIva: number;
   totalCost: number;
   hasCostData: boolean;
+  partialCostData: boolean;
   margin: number;
   lineCount: number;
   sections: string[];
@@ -453,7 +459,7 @@ export default function Quotes() {
     const { data: { user } } = await supabase.auth.getUser();
     const viewScope = getPermissionScope("quotes.view");
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
-    const searchQuoteNumber = searchTerm.trim().length >= 2 ? searchTerm.trim() : null;
+    const searchQuoteNumber = searchTerm.trim().length >= 2 ? escapePostgrestIlike(searchTerm.trim()) : null;
 
     if (!append) {
       let stagesQuery = supabase
@@ -738,7 +744,7 @@ export default function Quotes() {
     if (term.length < 2) return;
     const handle = setTimeout(async () => {
       try {
-        const like = `%${term}%`;
+        const like = `%${escapePostgrestIlike(term)}%`;
         const [byName, byEmail, byPhone] = await Promise.all([
           supabase.from("anew_entities").select("id").ilike("display_name", like).limit(200),
           supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(200),
@@ -865,7 +871,7 @@ export default function Quotes() {
       const agg: Record<string, QuoteLinesAgg> = {};
       (lines || []).forEach((line: any) => {
         if (!agg[line.quote_id]) {
-          agg[line.quote_id] = { quoteId: line.quote_id, totalValue: 0, totalWithIva: 0, totalCost: 0, hasCostData: false, margin: 0, lineCount: 0, sections: [] };
+          agg[line.quote_id] = { quoteId: line.quote_id, totalValue: 0, totalValueWithCost: 0, totalWithIva: 0, totalCost: 0, hasCostData: false, partialCostData: false, margin: 0, lineCount: 0, sections: [] };
         }
         const a = agg[line.quote_id];
         const qty = parseFloat(String(line.qt || 1));
@@ -889,13 +895,17 @@ export default function Quotes() {
         const unitCost = detailsMap[line.id]?.unitCost || 0;
         if (unitCost > 0) {
           a.totalCost += unitCost * qty;
+          a.totalValueWithCost += base;
           a.hasCostData = true;
+        } else {
+          a.partialCostData = true;
         }
         a.lineCount++;
         if (line.section_name && !a.sections.includes(line.section_name)) a.sections.push(line.section_name);
       });
       Object.values(agg).forEach(a => {
-        a.margin = a.hasCostData && a.totalValue > 0 ? ((a.totalValue - a.totalCost) / a.totalValue) * 100 : 0;
+        // Margem = (venda − custo) / venda × 100, usando apenas linhas com preço de compra definido.
+        a.margin = a.hasCostData && a.totalValueWithCost > 0 ? ((a.totalValueWithCost - a.totalCost) / a.totalValueWithCost) * 100 : 0;
       });
       setLinesAgg(agg);
     };
@@ -969,7 +979,7 @@ export default function Quotes() {
     const totalValue = Object.values(linesAgg).reduce((s, a) => s + a.totalValue, 0);
     const quotesWithCost = Object.values(linesAgg).filter(a => a.hasCostData);
     const totalCost = quotesWithCost.reduce((s, a) => s + a.totalCost, 0);
-    const totalValueWithCost = quotesWithCost.reduce((s, a) => s + a.totalValue, 0);
+    const totalValueWithCost = quotesWithCost.reduce((s, a) => s + a.totalValueWithCost, 0);
     const avgMargin = totalValueWithCost > 0 ? ((totalValueWithCost - totalCost) / totalValueWithCost) * 100 : 0;
     const avgValue = total > 0 ? totalValue / total : 0;
     const taxaAceitacao = total > 0 ? Math.round((aceite / total) * 100) : 0;
@@ -1648,7 +1658,14 @@ export default function Quotes() {
             errorMessage={statsError ?? undefined}
           />
         ) : viewMode === 'margens' && canViewCosts ? (
-          <QuotesMarginsView quotes={quotes} linesAgg={linesAgg} entityNamesMap={entityNamesMap} getEntityId={getEntityId} />
+          <QuotesMarginsView
+            quotes={quotes}
+            linesAgg={linesAgg}
+            entityNamesMap={entityNamesMap}
+            getEntityId={getEntityId}
+            globalMargin={{ avgMargin: stats.avgMargin, hasCostData }}
+            totalQuotes={stats.total}
+          />
         ) : (
           /* Lista View */
           <div className="flex-1 px-4 md:px-6 pb-4 min-h-[340px]">

@@ -468,7 +468,7 @@ const ClientContracts = () => {
       const contractIds = contracts.map((c: any) => c.id);
       const { data: portalUsers } = await (supabase as any)
         .from("client_portal_users")
-        .select("contract_id, portal_status")
+        .select("id, contract_id, portal_status")
         .eq("organization_id", activeCompany.id)
         .in("contract_id", contractIds);
       if (cancelled) return;
@@ -476,6 +476,33 @@ const ClientContracts = () => {
       (portalUsers || []).forEach((pu: any) => {
         if (pu.contract_id) statusMap[pu.contract_id] = pu.portal_status;
       });
+
+      // The legacy `client_portal_users.contract_id` column only stores the LAST
+      // contract sent to that portal user — if a second contract is later sent,
+      // the first one silently disappears from portal-status tracking even though
+      // the backend (create-client-portal-access) also recorded it in
+      // `client_portal_documents`. Union both sources so every sent contract keeps
+      // showing a portal status, not just the most recent one.
+      const portalUserIds = (portalUsers || []).map((pu: any) => pu.id).filter(Boolean);
+      if (portalUserIds.length > 0) {
+        const { data: docs } = await (supabase as any)
+          .from("client_portal_documents")
+          .select("portal_user_id, document_id")
+          .in("portal_user_id", portalUserIds)
+          .eq("document_type", "contract")
+          .eq("is_visible", true);
+        if (cancelled) return;
+        const portalUserStatusById = new Map(
+          (portalUsers || []).map((pu: any) => [pu.id, pu.portal_status])
+        );
+        (docs || []).forEach((doc: any) => {
+          if (doc.document_id && !statusMap[doc.document_id]) {
+            const status = portalUserStatusById.get(doc.portal_user_id);
+            if (status) statusMap[doc.document_id] = status;
+          }
+        });
+      }
+
       setContractPortalStatuses(statusMap);
     };
     void loadPortalStatuses();
