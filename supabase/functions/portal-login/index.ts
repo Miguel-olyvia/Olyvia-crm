@@ -177,6 +177,10 @@ serve(async (req) => {
     // 3. Record the outcome. Awaited so lockout state is consistent for the
     // very next request even if it arrives immediately after this one.
     // Transient connection failures are retried with backoff.
+    // `attemptTimestamp` is set explicitly (rather than left to the column's
+    // default) so the new-device check below can unambiguously exclude the
+    // row being inserted here by filtering on `created_at < attemptTimestamp`.
+    const attemptTimestamp = new Date().toISOString();
     const { error: insertError } = await withRetryResult(() =>
       supabase.from("auth_login_attempts").insert({
         identifier,
@@ -184,10 +188,61 @@ serve(async (req) => {
         ip_address: clientIp,
         user_agent: userAgent,
         auth_user_id: authUserId,
+        created_at: attemptTimestamp,
       })
     );
     if (insertError) {
       console.error("[portal-login] failed to record attempt:", insertError.message);
+    }
+
+    // 3a. RGPD Art. 32 audit trail (part 3): alert the user when a successful
+    // login comes from an IP/device combination they've never used before.
+    // This is a purely informational side-effect — any failure here (lookup
+    // or notification insert) is logged and swallowed so it can never affect
+    // the login response itself.
+    if (success && authUserId) {
+      try {
+        // NOTE: ip_address/user_agent are attacker-controlled request headers
+        // and frequently contain commas/parentheses (e.g. standard User-Agent
+        // strings), which would corrupt PostgREST's `.or("col.eq.value,...")`
+        // filter syntax if interpolated directly. So the ip/user-agent match
+        // is done in application code below instead of in the query filter.
+        const { data: priorSuccesses, error: deviceLookupError } = await withRetryResult(() =>
+          supabase
+            .from("auth_login_attempts")
+            .select("ip_address, user_agent")
+            .eq("auth_user_id", authUserId)
+            .eq("success", true)
+            .lt("created_at", attemptTimestamp)
+            .order("created_at", { ascending: false })
+            .limit(200)
+        );
+
+        if (deviceLookupError) {
+          console.error("[portal-login] device-history lookup error:", deviceLookupError.message);
+        } else {
+          const isKnownDevice = (priorSuccesses || []).some((row) =>
+            row.ip_address === clientIp && row.user_agent === userAgent
+          );
+
+          if (!isKnownDevice) {
+            const { error: notifyError } = await supabase.from("notifications").insert({
+              user_id: authUserId,
+              type: "new_device_login",
+              kind: "alert",
+              priority: "high",
+              title: "Novo acesso detetado",
+              message: "Detetámos um novo acesso à sua conta a partir de um endereço IP ou dispositivo que não reconhecemos. Se foi você, pode ignorar esta mensagem.",
+              data: { ip_address: clientIp, user_agent: userAgent },
+            });
+            if (notifyError) {
+              console.error("[portal-login] failed to create new-device notification:", notifyError.message);
+            }
+          }
+        }
+      } catch (deviceCheckErr) {
+        console.error("[portal-login] new-device check failed unexpectedly:", deviceCheckErr);
+      }
     }
 
     // 3b. Enforce the lockout at the GoTrue level itself, not just in this
