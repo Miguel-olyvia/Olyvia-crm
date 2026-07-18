@@ -1,6 +1,6 @@
 import { z } from "npm:zod";
 import { authErrorResponse, requireAdminRole, resolveCallerIdentity } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { encryptNif, hashNif, tokenizeNif } from "../_shared/nifCrypto.ts";
 
@@ -64,7 +64,7 @@ export async function handleNifBackfillRequest(
   deps: NifBackfillDeps,
 ): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   const { supabase } = deps;
@@ -73,14 +73,14 @@ export async function handleNifBackfillRequest(
   try {
     caller = await resolveCallerIdentity(req, supabase);
   } catch (e) {
-    return authErrorResponse(e, corsHeaders);
+    return authErrorResponse(e, getCorsHeaders(req));
   }
 
   const isAdmin = await requireAdminRole(supabase, caller);
   if (!isAdmin) {
     return new Response(
       JSON.stringify({ error: "Admin role required" }),
-      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 403, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
@@ -89,7 +89,7 @@ export async function handleNifBackfillRequest(
   if (!parsed.success) {
     return new Response(
       JSON.stringify({ error: "Invalid request", details: parsed.error.issues }),
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 400, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
@@ -107,7 +107,7 @@ export async function handleNifBackfillRequest(
     await captureError(e, { function: "nif-backfill", stage: "derive-keys" });
     return new Response(
       JSON.stringify({ error: `Encryption keys unavailable: ${message}` }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
@@ -122,7 +122,7 @@ export async function handleNifBackfillRequest(
     console.error("nif-backfill: failed to select candidate rows:", selectError.message);
     return new Response(
       JSON.stringify({ error: "Failed to select candidate rows" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 500, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
@@ -142,7 +142,7 @@ export async function handleNifBackfillRequest(
         tokens_written: 0,
         tokens_would_write: tokensWouldWrite,
       }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
     );
   }
 
@@ -192,6 +192,6 @@ export async function handleNifBackfillRequest(
 
   return new Response(
     JSON.stringify({ processed, tokens_written: tokensWritten }),
-    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    { status: 200, headers: { ...getCorsHeaders(req), "Content-Type": "application/json" } },
   );
 }

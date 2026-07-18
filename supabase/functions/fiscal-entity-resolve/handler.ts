@@ -1,6 +1,6 @@
 import { z } from "npm:zod";
 import { authErrorResponse, AuthError, resolveCallerIdentity } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { encryptNif, hashNif, normalizeNif } from "../_shared/nifCrypto.ts";
 import { withRetryResult } from "../_shared/retry.ts";
@@ -54,19 +54,24 @@ interface ErrorBody {
   code: "INVALID_INPUT" | "UNAUTHENTICATED" | "RESOLVE_CONFLICT" | "INTERNAL_ERROR";
 }
 
-function jsonResponse(body: SuccessBody | ErrorBody, status: number): Response {
+function jsonResponse(
+  req: Request,
+  body: SuccessBody | ErrorBody,
+  status: number,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
 function errorResponse(
+  req: Request,
   status: number,
   code: ErrorBody["code"],
   message: string,
 ): Response {
-  return jsonResponse({ success: false, error: message, code }, status);
+  return jsonResponse(req, { success: false, error: message, code }, status);
 }
 
 /**
@@ -75,9 +80,9 @@ function errorResponse(
  * (valid token, no anew_users profile); both are unauthenticated states for
  * the purposes of this endpoint's contract, which only defines UNAUTHENTICATED.
  */
-function authErrorToEnvelope(error: unknown): Response {
+function authErrorToEnvelope(req: Request, error: unknown): Response {
   if (error instanceof AuthError) {
-    return errorResponse(error.status, "UNAUTHENTICATED", error.message);
+    return errorResponse(req, error.status, "UNAUTHENTICATED", error.message);
   }
   throw error;
 }
@@ -114,7 +119,7 @@ export async function handleFiscalEntityResolveRequest(
   deps: FiscalEntityResolveDeps,
 ): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   const { supabaseAdmin } = deps;
@@ -122,18 +127,18 @@ export async function handleFiscalEntityResolveRequest(
   try {
     await resolveCallerIdentity(req, supabaseAdmin);
   } catch (e) {
-    return authErrorToEnvelope(e);
+    return authErrorToEnvelope(req, e);
   }
 
   const rawBody = await req.json().catch(() => null);
   if (rawBody === null) {
-    return errorResponse(400, "INVALID_INPUT", "Invalid JSON body");
+    return errorResponse(req, 400, "INVALID_INPUT", "Invalid JSON body");
   }
 
   const parsed = requestSchema.safeParse(rawBody);
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message ?? "Invalid request";
-    return errorResponse(400, "INVALID_INPUT", message);
+    return errorResponse(req, 400, "INVALID_INPUT", message);
   }
 
   const { nif, commercialName, entityType } = parsed.data;
@@ -141,7 +146,7 @@ export async function handleFiscalEntityResolveRequest(
 
   const normalizedNif = normalizeNif(nif);
   if (normalizedNif === "") {
-    return errorResponse(400, "INVALID_INPUT", "nif is required");
+    return errorResponse(req, 400, "INVALID_INPUT", "nif is required");
   }
 
   let encKey: NifKey;
@@ -155,7 +160,7 @@ export async function handleFiscalEntityResolveRequest(
       e instanceof Error ? e.message : "unknown error",
     );
     await captureError(e, { function: "fiscal-entity-resolve", stage: "derive-keys" });
-    return errorResponse(500, "INTERNAL_ERROR", "Internal error");
+    return errorResponse(req, 500, "INTERNAL_ERROR", "Internal error");
   }
 
   let nifEncrypted: string;
@@ -171,7 +176,7 @@ export async function handleFiscalEntityResolveRequest(
       e instanceof Error ? e.message : "unknown error",
     );
     await captureError(e, { function: "fiscal-entity-resolve", stage: "derive-nif-fields" });
-    return errorResponse(500, "INTERNAL_ERROR", "Internal error");
+    return errorResponse(req, 500, "INTERNAL_ERROR", "Internal error");
   }
 
   // Transient connection failures are retried with backoff; conflict/business
@@ -193,9 +198,9 @@ export async function handleFiscalEntityResolveRequest(
     await captureError(error, { function: "fiscal-entity-resolve", stage: "resolve-rpc" });
 
     if (error.code === "23505") {
-      return errorResponse(409, "RESOLVE_CONFLICT", "Could not resolve fiscal entity due to a conflict");
+      return errorResponse(req, 409, "RESOLVE_CONFLICT", "Could not resolve fiscal entity due to a conflict");
     }
-    return errorResponse(500, "INTERNAL_ERROR", "Internal error");
+    return errorResponse(req, 500, "INTERNAL_ERROR", "Internal error");
   }
 
   const row = Array.isArray(data) ? data[0] : data;
@@ -205,10 +210,11 @@ export async function handleFiscalEntityResolveRequest(
       function: "fiscal-entity-resolve",
       stage: "resolve-rpc-empty",
     });
-    return errorResponse(500, "INTERNAL_ERROR", "Internal error");
+    return errorResponse(req, 500, "INTERNAL_ERROR", "Internal error");
   }
 
   return jsonResponse(
+    req,
     {
       success: true,
       data: {

@@ -4,7 +4,7 @@ import {
   type CallerIdentity,
   resolveCallerIdentity,
 } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { decryptNif, normalizeNif, tokenizeNif } from "../_shared/nifCrypto.ts";
 
@@ -59,15 +59,19 @@ interface ErrorBody {
   error: string;
 }
 
-function jsonResponse(body: SuccessBody | ErrorBody, status: number): Response {
+function jsonResponse(
+  req: Request,
+  body: SuccessBody | ErrorBody,
+  status: number,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
-function emptyResult(): Response {
-  return jsonResponse({ success: true, data: { fiscal_entity_ids: [] } }, 200);
+function emptyResult(req: Request): Response {
+  return jsonResponse(req, { success: true, data: { fiscal_entity_ids: [] } }, 200);
 }
 
 /**
@@ -224,7 +228,7 @@ export async function handleSearchEntitiesRequest(
   deps: SearchEntitiesDeps,
 ): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   const { supabaseAdmin } = deps;
@@ -233,17 +237,18 @@ export async function handleSearchEntitiesRequest(
   try {
     caller = await resolveCallerIdentity(req, supabaseAdmin);
   } catch (e) {
-    return authErrorResponse(e, corsHeaders);
+    return authErrorResponse(e, getCorsHeaders(req));
   }
 
   const rawBody = await req.json().catch(() => null);
   if (rawBody === null) {
-    return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
+    return jsonResponse(req, { success: false, error: "Invalid JSON body" }, 400);
   }
 
   const parsed = requestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return jsonResponse(
+      req,
       { success: false, error: parsed.error.issues[0]?.message ?? "Invalid request" },
       400,
     );
@@ -253,7 +258,7 @@ export async function handleSearchEntitiesRequest(
   const normalizedTerm = normalizeNif(parsed.data.term);
 
   if (normalizedTerm.length < MIN_NIF_SEARCH_LENGTH) {
-    return emptyResult();
+    return emptyResult(req);
   }
 
   let hmacKey: NifKey;
@@ -267,7 +272,7 @@ export async function handleSearchEntitiesRequest(
       : "unknown error deriving encryption keys";
     console.error("search-entities: failed to derive encryption keys:", message);
     await captureError(e, { function: "search-entities", stage: "derive-keys" });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   let tokens: string[];
@@ -279,7 +284,7 @@ export async function handleSearchEntitiesRequest(
       e instanceof Error ? e.message : "unknown error",
     );
     await captureError(e, { function: "search-entities", stage: "tokenize" });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   const { data: tokenRows, error: tokenError } = await supabaseAdmin
@@ -290,7 +295,7 @@ export async function handleSearchEntitiesRequest(
   if (tokenError) {
     console.error("search-entities: token query failed:", tokenError.message);
     await captureError(tokenError, { function: "search-entities", stage: "token-query" });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   const candidateFiscalEntityIds = selectFiscalEntityIdsCoveringAllTokens(
@@ -298,7 +303,7 @@ export async function handleSearchEntitiesRequest(
     tokens,
   );
   if (candidateFiscalEntityIds.length === 0) {
-    return emptyResult();
+    return emptyResult(req);
   }
 
   const { data: fiscalEntityRows, error: fiscalEntityError } = await supabaseAdmin
@@ -315,7 +320,7 @@ export async function handleSearchEntitiesRequest(
       function: "search-entities",
       stage: "fiscal-entities-query",
     });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   const confirmedFiscalEntityIds = await recheckSubstringMatches(
@@ -324,7 +329,7 @@ export async function handleSearchEntitiesRequest(
     encKey,
   );
   if (confirmedFiscalEntityIds.length === 0) {
-    return emptyResult();
+    return emptyResult(req);
   }
 
   const { data: linkRows, error: linkError } = await supabaseAdmin
@@ -338,7 +343,7 @@ export async function handleSearchEntitiesRequest(
       linkError.message,
     );
     await captureError(linkError, { function: "search-entities", stage: "link-query" });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   const fiscalEntityIdsByEntityId = new Map<string, string[]>();
@@ -350,7 +355,7 @@ export async function handleSearchEntitiesRequest(
   const candidateEntityIds = Array.from(fiscalEntityIdsByEntityId.keys());
 
   if (candidateEntityIds.length === 0) {
-    return emptyResult();
+    return emptyResult(req);
   }
 
   let visibleEntityIds: Set<string>;
@@ -366,7 +371,7 @@ export async function handleSearchEntitiesRequest(
       e instanceof Error ? e.message : "unknown error",
     );
     await captureError(e, { function: "search-entities", stage: "visibility-filter" });
-    return jsonResponse({ success: false, error: "Internal error" }, 500);
+    return jsonResponse(req, { success: false, error: "Internal error" }, 500);
   }
 
   const resultFiscalEntityIds: string[] = [];
@@ -381,6 +386,7 @@ export async function handleSearchEntitiesRequest(
   }
 
   return jsonResponse(
+    req,
     { success: true, data: { fiscal_entity_ids: resultFiscalEntityIds.slice(0, limit) } },
     200,
   );

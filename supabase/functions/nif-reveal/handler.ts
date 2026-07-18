@@ -1,6 +1,6 @@
 import { z } from "npm:zod";
 import { authErrorResponse, resolveCallerIdentity } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { decryptNif } from "../_shared/nifCrypto.ts";
 
@@ -43,10 +43,10 @@ interface EntityLinkRow {
   fiscal_entity_id: string;
 }
 
-function jsonResponse(body: unknown, status: number): Response {
+function jsonResponse(req: Request, body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
@@ -78,7 +78,7 @@ export async function handleNifRevealRequest(
   deps: NifRevealDeps,
 ): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   const { supabaseAdmin } = deps;
@@ -87,17 +87,18 @@ export async function handleNifRevealRequest(
   try {
     caller = await resolveCallerIdentity(req, supabaseAdmin);
   } catch (e) {
-    return authErrorResponse(e, corsHeaders);
+    return authErrorResponse(e, getCorsHeaders(req));
   }
 
   const rawBody = await req.json().catch(() => null);
   if (rawBody === null) {
-    return jsonResponse({ success: false, error: "Invalid JSON body" }, 400);
+    return jsonResponse(req, { success: false, error: "Invalid JSON body" }, 400);
   }
 
   const parsed = requestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return jsonResponse(
+      req,
       { success: false, error: "Invalid request", details: parsed.error.issues },
       400,
     );
@@ -115,6 +116,7 @@ export async function handleNifRevealRequest(
     console.error("nif-reveal: failed to derive decryption key:", message);
     await captureError(e, { function: "nif-reveal", stage: "derive-key" });
     return jsonResponse(
+      req,
       { success: false, error: `Decryption key unavailable: ${message}` },
       500,
     );
@@ -132,6 +134,7 @@ export async function handleNifRevealRequest(
       fiscalError.message,
     );
     return jsonResponse(
+      req,
       { success: false, error: "Failed to load fiscal entities" },
       500,
     );
@@ -150,6 +153,7 @@ export async function handleNifRevealRequest(
       linkError.message,
     );
     return jsonResponse(
+      req,
       { success: false, error: "Failed to load entity links" },
       500,
     );
@@ -186,6 +190,7 @@ export async function handleNifRevealRequest(
         visibilityError.message,
       );
       return jsonResponse(
+        req,
         { success: false, error: "Failed to resolve visibility" },
         500,
       );
@@ -234,5 +239,5 @@ export async function handleNifRevealRequest(
     }
   }
 
-  return jsonResponse({ success: true, data: { revealed, denied } }, 200);
+  return jsonResponse(req, { success: true, data: { revealed, denied } }, 200);
 }

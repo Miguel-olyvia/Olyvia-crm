@@ -1,6 +1,6 @@
 import { z } from "npm:zod";
 import { authErrorResponse, resolveCallerIdentity } from "../_shared/auth.ts";
-import { corsHeaders } from "../_shared/cors.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError } from "../_shared/sentry.ts";
 import { encryptNif, hashNif, tokenizeNif } from "../_shared/nifCrypto.ts";
 import { withRetryResult } from "../_shared/retry.ts";
@@ -90,10 +90,10 @@ export interface NifWriteProxyDeps {
   getHmacKey: () => NifKey;
 }
 
-function jsonResponse(body: unknown, status: number): Response {
+function jsonResponse(req: Request, body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...getCorsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
@@ -161,7 +161,7 @@ export async function handleNifWriteProxyRequest(
   deps: NifWriteProxyDeps,
 ): Promise<Response> {
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers: getCorsHeaders(req) });
   }
 
   const { supabaseAdmin } = deps;
@@ -170,7 +170,7 @@ export async function handleNifWriteProxyRequest(
   try {
     caller = await resolveCallerIdentity(req, supabaseAdmin);
   } catch (e) {
-    return authErrorResponse(e, corsHeaders);
+    return authErrorResponse(e, getCorsHeaders(req));
   }
   // caller is resolved purely to enforce "must be authenticated"; the
   // specific write permission is delegated to the target RPC below.
@@ -180,12 +180,13 @@ export async function handleNifWriteProxyRequest(
 
   const rawBody = await req.json().catch(() => null);
   if (rawBody === null) {
-    return jsonResponse({ error: "Invalid JSON body" }, 400);
+    return jsonResponse(req, { error: "Invalid JSON body" }, 400);
   }
 
   const parsed = requestSchema.safeParse(rawBody);
   if (!parsed.success) {
     return jsonResponse(
+      req,
       { error: "Invalid request", details: parsed.error.issues },
       400,
     );
@@ -194,7 +195,7 @@ export async function handleNifWriteProxyRequest(
   const { rpc, nif, params } = parsed.data;
 
   if (!isAllowedRpc(rpc)) {
-    return jsonResponse({ error: "RPC não permitida" }, 400);
+    return jsonResponse(req, { error: "RPC não permitida" }, 400);
   }
 
   // Higienização: descarta imediatamente qualquer p_nif_encrypted/p_nif_hash/
@@ -232,6 +233,7 @@ export async function handleNifWriteProxyRequest(
         stage: "derive-keys",
       });
       return jsonResponse(
+        req,
         { error: `Encryption keys unavailable: ${message}` },
         500,
       );
@@ -259,7 +261,7 @@ export async function handleNifWriteProxyRequest(
         function: "nif-write-proxy",
         stage: "derive-nif-fields",
       });
-      return jsonResponse({ error: "Failed to process NIF" }, 500);
+      return jsonResponse(req, { error: "Failed to process NIF" }, 500);
     }
   }
 
@@ -274,10 +276,11 @@ export async function handleNifWriteProxyRequest(
     console.error(`nif-write-proxy: rpc "${rpc}" failed:`, error.message);
     const status = typeof error.status === "number" ? error.status : 400;
     return jsonResponse(
+      req,
       { error: stripSensitiveFields(error.message ?? "RPC failed") },
       status,
     );
   }
 
-  return jsonResponse({ data: stripSensitiveFields(data) }, 200);
+  return jsonResponse(req, { data: stripSensitiveFields(data) }, 200);
 }
