@@ -12,11 +12,20 @@
  * via a strict, anchored pattern without ever reflecting an arbitrary origin.
  *
  * Resolution order (per request):
- *   1. SUPABASE_URL contains "localhost" or "127.0.0.1" → local dev, allow "*".
+ *   1. SUPABASE_URL contains "localhost" or "127.0.0.1" → local dev (local
+ *      Supabase stack), allow "*".
  *   2. Otherwise, the request's Origin header is allowed (reflected back) only if
  *      it exactly matches the production origin, exactly matches the ALLOWED_ORIGIN
- *      env var (if set), or matches the anchored Vercel preview URL pattern for
- *      this project.
+ *      env var (if set), matches the anchored Vercel preview URL pattern for
+ *      this project, or matches the anchored local-dev loopback pattern
+ *      (`http(s)://localhost` / `http(s)://127.0.0.1`, optional port). This last
+ *      case covers a frontend running locally (e.g. `vite dev` on
+ *      http://localhost:5173) while calling the real, hosted Supabase project —
+ *      SUPABASE_URL never contains "localhost" in that case, so check #1 alone
+ *      would miss it and every OPTIONS preflight from local dev would be
+ *      rejected by the browser (Access-Control-Allow-Origin mismatch), exactly
+ *      like the bug fixed in portal-login/index.ts. The pattern is anchored
+ *      (`^...$`) so it can never reflect an arbitrary third-party origin.
  *   3. Otherwise, fall back to the known production origin (never reflect an
  *      unrecognized origin, never fall back to "*" outside local dev).
  *
@@ -34,6 +43,13 @@ export const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
 // https://olyvia-crm-git-x-bmgest.vercel.app.evil.com
 export const VERCEL_PREVIEW_ORIGIN_PATTERN =
   /^https:\/\/olyvia-crm-git-[a-z0-9-]+-bmgest\.vercel\.app$/;
+
+// Anchored: matches only the localhost/127.0.0.1 loopback hosts with an
+// optional port (e.g. http://localhost:5173, http://127.0.0.1:4173), never an
+// arbitrary origin that merely contains "localhost" (e.g.
+// https://localhost.evil.com or https://evil-localhost.com are rejected).
+export const LOCAL_DEV_ORIGIN_PATTERN =
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 function isLocalDev(): boolean {
   const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
@@ -57,7 +73,8 @@ function resolveAllowedOrigin(req: Request): {
     requestOrigin !== null &&
     (requestOrigin === PRODUCTION_ORIGIN ||
       requestOrigin === explicitAllowedOrigin ||
-      VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin));
+      VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin) ||
+      LOCAL_DEV_ORIGIN_PATTERN.test(requestOrigin));
 
   if (isAllowed) {
     return { origin: requestOrigin, isDynamic: true };
