@@ -25,7 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { differenceInDays } from "date-fns";
-import { calculateHealthScore } from "@/hooks/useContactHealthScore";
+import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -419,21 +419,51 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   };
 
   // Computed values
+  //
+  // Uses the same calculateClientHealth shared utility as the Clients list
+  // (AnewClients.tsx via useClientEnrichedData) so this detail dialog can
+  // never again show a different score/level for the same client than the
+  // list row does. hasCompany defaults to false: this dialog doesn't load
+  // entity-type data, so that single minor data-completeness signal (worth
+  // up to 5 of 100 points) is conservatively omitted rather than guessed.
   const healthScore = useMemo(() => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const count30d = interactions.filter(i => new Date(i.interaction_at) >= thirtyDaysAgo).length;
     const lastInteraction = interactions[0]?.interaction_at || client?.last_interaction_at || null;
-    return calculateHealthScore({
-      lastInteractionAt: lastInteraction,
-      hasActiveDeal: deals.length > 0,
-      hasActiveProposal: proposals.length > 0,
-      hasEmail: !!client?.email,
-      hasPhone: !!client?.phone,
-      hasVat: !!client?.vat,
-      interactionCount30d: count30d,
-    });
-  }, [interactions, deals, proposals, client]);
+    const lastSentimentInteraction = interactions.find(i => i.sentiment);
+
+    const interactionInfo: ClientInteractionInfo | undefined = lastInteraction
+      ? {
+          lastInteractionAt: lastInteraction,
+          interactionCount30d: count30d,
+          lastSentiment: (lastSentimentInteraction?.sentiment as ClientInteractionInfo["lastSentiment"]) ?? null,
+        }
+      : undefined;
+
+    const activeContracts = contracts.filter(c => c.status === "active" || c.status === "signed");
+    const contractInfo: ClientContractInfo = {
+      activeCount: activeContracts.length,
+      totalValue: activeContracts.reduce((sum, c) => sum + (c.total_value || 0), 0),
+      expiringContracts: activeContracts
+        .filter((c): c is typeof c & { end_date: string } => !!c.end_date)
+        .filter(c => {
+          const days = differenceInDays(new Date(c.end_date), new Date());
+          return days >= 0 && days <= 30;
+        })
+        .map(c => ({ id: c.id, end_date: c.end_date, total_value: c.total_value || 0 })),
+    };
+
+    return calculateClientHealth(
+      interactionInfo,
+      contractInfo,
+      !!client?.email,
+      !!client?.phone,
+      !!client?.vat,
+      false,
+      client?.status,
+    );
+  }, [interactions, contracts, client]);
 
   const totalValue = useMemo(() => {
     const contractVal = contracts.filter(c => c.status === "active" || c.status === "signed").reduce((s, c) => s + (c.total_value || 0), 0);

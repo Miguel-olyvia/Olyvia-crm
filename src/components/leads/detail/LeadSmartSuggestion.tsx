@@ -15,7 +15,8 @@ interface LeadSmartSuggestionProps {
 export function LeadSmartSuggestion({
   lastInteractionAt, hasActiveDeal, hasNextAction, status, leadName, onCall, onCreateDeal,
 }: LeadSmartSuggestionProps) {
-  const daysSince = lastInteractionAt ? differenceInDays(new Date(), new Date(lastInteractionAt)) : 999;
+  const hasContactHistory = Boolean(lastInteractionAt);
+  const daysSince = lastInteractionAt ? differenceInDays(new Date(), new Date(lastInteractionAt)) : null;
   const firstName = leadName.split(" ")[0] || "Lead";
 
   let suggestion = "";
@@ -23,8 +24,9 @@ export function LeadSmartSuggestion({
   let ActionIcon = Lightbulb;
   let onAction: (() => void) | null = null;
 
-  if (!hasNextAction && daysSince > 5) {
-    suggestion = `${firstName} sem contacto há ${daysSince} dias e sem acção planeada. Sugerimos contactar para dar seguimento.`;
+  if (!hasNextAction && (!hasContactHistory || (daysSince !== null && daysSince > 5))) {
+    const contactPhrase = hasContactHistory ? `sem contacto há ${daysSince} dias` : "nunca contactada";
+    suggestion = `${firstName} ${contactPhrase} e sem acção planeada. Sugerimos contactar para dar seguimento.`;
     actionLabel = "Ligar";
     ActionIcon = Phone;
     onAction = onCall;
@@ -38,8 +40,9 @@ export function LeadSmartSuggestion({
     actionLabel = "Novo Pedido";
     ActionIcon = Briefcase;
     onAction = onCreateDeal;
-  } else if (daysSince > 7) {
-    suggestion = `Último contacto com ${firstName} há ${daysSince} dias. Recomendamos contactar brevemente.`;
+  } else if (!hasContactHistory || (daysSince !== null && daysSince > 7)) {
+    const contactPhrase = hasContactHistory ? `há ${daysSince} dias` : "nunca registado";
+    suggestion = `Último contacto com ${firstName} ${contactPhrase}. Recomendamos contactar brevemente.`;
     actionLabel = "Ligar";
     ActionIcon = Phone;
     onAction = onCall;

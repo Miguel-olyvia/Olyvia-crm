@@ -552,7 +552,7 @@ export default function ProductCategories() {
             </PermissionGate>
           </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingCategory ? t('productCategories.dialog.editTitle') : t('productCategories.dialog.newTitle')}</DialogTitle>
               </DialogHeader>

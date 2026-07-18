@@ -72,7 +72,9 @@ export default function Roles() {
   const canCreate = hasPermission("roles.create");
   const canEdit = hasPermission("roles.edit");
   const canDelete = hasPermission("roles.delete");
-  const canManagePermissions = hasPermission("roles.manage_permissions") || canEdit;
+  // Note: "roles.manage_permissions" is not a real permission code in anew_permissions
+  // (phantom permission, unreachable by any real role) — this always reduces to canEdit.
+  const canManagePermissions = canEdit;
   const editScope = getPermissionScope("roles.edit");
   const deleteScope = getPermissionScope("roles.delete");
 

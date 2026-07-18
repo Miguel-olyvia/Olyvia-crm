@@ -100,7 +100,11 @@ export default function OrganizationDetail() {
   const navigate = useNavigate();
   
   const { hasPermission } = usePermissions();
-  const canViewOrgHistory = hasPermission("organizations.view_history");
+  // "organizations.view_history" is not a real permission code in anew_permissions
+  // (phantom permission — see 20261110330000_fix_anew_hierarchy_rls_phantom_permission.sql
+  // for the same class of bug). "organizations.edit" is the real permission already used
+  // for this org-management capability elsewhere (OrganizationMembersDialog, MemberEditDialog).
+  const canViewOrgHistory = hasPermission("organizations.edit");
   const canManageOrg = hasPermission("organizations.edit");
 
   const { countries } = useCountries();

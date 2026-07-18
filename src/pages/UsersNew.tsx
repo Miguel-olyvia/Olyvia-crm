@@ -230,8 +230,12 @@ export default function UsersNew() {
   const canCreate = hasPermission("users.create");
   const canEdit = hasPermission("users.edit");
   const canDelete = hasPermission("users.delete");
-  const canViewHistory = hasPermission("users.view_history");
-  const historyScope = getPermissionScope("users.view_history");
+  // "users.view_history" is not a real permission code in anew_permissions (phantom
+  // permission, unreachable by any real role). "users.edit" is the real permission
+  // already used for this same user-management capability (this menu item sits next
+  // to the edit action, gated the same way).
+  const canViewHistory = hasPermission("users.edit");
+  const historyScope = getPermissionScope("users.edit");
   const editScope = getPermissionScope("users.edit");
   const deleteScope = getPermissionScope("users.delete");
 

@@ -24,7 +24,8 @@ export function ClientSmartSuggestion({
   clientName, expiringContract, onCall, onCreateDeal, onEmail, onSchedule,
 }: ClientSmartSuggestionProps) {
   const [dismissed, setDismissed] = useState(false);
-  const daysSince = lastInteractionAt ? differenceInDays(new Date(), new Date(lastInteractionAt)) : 999;
+  const hasContactHistory = Boolean(lastInteractionAt);
+  const daysSince = lastInteractionAt ? differenceInDays(new Date(), new Date(lastInteractionAt)) : null;
   const firstName = clientName.split(" ")[0];
 
   if (dismissed) return null;
@@ -45,8 +46,9 @@ export function ClientSmartSuggestion({
     secondaryLabel = "Ligar";
     secondaryIcon = Phone;
     onSecondary = onCall;
-  } else if (daysSince > 7) {
-    suggestion = `${firstName} tem ${contractCount > 0 ? `${contractCount} contrato${contractCount !== 1 ? "s" : ""}` : "registos"} mas sem contacto há ${daysSince} dias. Sugerimos ligar para dar seguimento.`;
+  } else if (!hasContactHistory || (daysSince !== null && daysSince > 7)) {
+    const contactPhrase = hasContactHistory ? `sem contacto há ${daysSince} dias` : "sem qualquer contacto registado";
+    suggestion = `${firstName} tem ${contractCount > 0 ? `${contractCount} contrato${contractCount !== 1 ? "s" : ""}` : "registos"} mas ${contactPhrase}. Sugerimos ligar para dar seguimento.`;
     actionLabel = "Ligar";
     ActionIcon = Phone;
     onAction = onCall;

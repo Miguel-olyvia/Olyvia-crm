@@ -122,6 +122,7 @@ export const bundleTranslations = {
     'bundles.choices.optionsAdded': 'Options Added',
     'bundles.choices.deleteGroup': 'Delete Group',
     'bundles.choices.nameRequired': 'Group name is required',
+    'bundles.choices.itemAlreadyInBundle': 'This product/service is already part of the bundle',
   },
   pt: {
     'bundles.title': 'Bundles',
@@ -245,5 +246,6 @@ export const bundleTranslations = {
     'bundles.choices.optionsAdded': 'Opções Adicionadas',
     'bundles.choices.deleteGroup': 'Eliminar Grupo',
     'bundles.choices.nameRequired': 'Nome do grupo é obrigatório',
+    'bundles.choices.itemAlreadyInBundle': 'Este produto/serviço já faz parte do bundle',
   },
 };

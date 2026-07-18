@@ -46,7 +46,7 @@ interface Member {
     id: string;
     name: string;
     email: string;
-  };
+  } | null;
 }
 
 interface AnewUser {
@@ -140,34 +140,60 @@ export function OrganizationMembersDialog({
 
   const fetchMembers = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
+    // anew_memberships and anew_users have no FK between them, so an embedded
+    // PostgREST join (profile:anew_users!anew_memberships_user_id_anew_fkey(...))
+    // always fails with PGRST200 ("Could not find a relationship..."). Fetch
+    // memberships and users separately and join in JS — same pattern used in
+    // src/pages/UsersNew.tsx for this exact table pair.
+    const { data: membershipsData, error: membershipsError } = await (supabase as any)
       .from("anew_memberships")
-      .select(`
-        id,
-        user_id,
-        relationship_type,
-        role_id,
-        profile:anew_users!anew_memberships_user_id_anew_fkey(id, name, email)
-      `)
+      .select("id, user_id, relationship_type, role_id")
       .eq("organization_id", organizationId)
       .eq("status", "active");
 
-    if (!error && data) {
-      const roleIds = [...new Set((data || []).map((m: any) => m.role_id).filter(Boolean))];
-      let rolesMap: Record<string, { name: string; code: string }> = {};
-      if (roleIds.length > 0) {
-        const { data: roles } = await (supabase as any)
-          .from("anew_roles")
-          .select("id, name, code")
-          .in("id", roleIds);
-        rolesMap = Object.fromEntries((roles || []).map((r: any) => [r.id, { name: r.name, code: r.code }]));
-      }
-      setMembers((data || []).map((m: any) => ({
-        ...m,
-        role_name: rolesMap[m.role_id]?.name || null,
-        role_code: rolesMap[m.role_id]?.code || null,
-      })) as Member[]);
+    if (membershipsError) {
+      toast.error(membershipsError.message);
+      setLoading(false);
+      return;
     }
+
+    const userIds = [...new Set((membershipsData || []).map((m: any) => m.user_id).filter(Boolean))];
+    let profilesMap: Record<string, { id: string; name: string; email: string }> = {};
+    if (userIds.length > 0) {
+      const { data: usersData, error: usersError } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name, email")
+        .in("id", userIds);
+
+      if (usersError) {
+        toast.error(usersError.message);
+        setLoading(false);
+        return;
+      }
+      profilesMap = Object.fromEntries((usersData || []).map((u: any) => [u.id, u]));
+    }
+
+    const roleIds = [...new Set((membershipsData || []).map((m: any) => m.role_id).filter(Boolean))];
+    let rolesMap: Record<string, { name: string; code: string }> = {};
+    if (roleIds.length > 0) {
+      const { data: roles, error: rolesError } = await (supabase as any)
+        .from("anew_roles")
+        .select("id, name, code")
+        .in("id", roleIds);
+      if (rolesError) {
+        toast.error(rolesError.message);
+        setLoading(false);
+        return;
+      }
+      rolesMap = Object.fromEntries((roles || []).map((r: any) => [r.id, { name: r.name, code: r.code }]));
+    }
+
+    setMembers((membershipsData || []).map((m: any) => ({
+      ...m,
+      profile: profilesMap[m.user_id] || null,
+      role_name: rolesMap[m.role_id]?.name || null,
+      role_code: rolesMap[m.role_id]?.code || null,
+    })) as Member[]);
     setLoading(false);
   };
 

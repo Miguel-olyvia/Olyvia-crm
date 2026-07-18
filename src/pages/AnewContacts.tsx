@@ -1268,8 +1268,26 @@ const AnewContacts = () => {
       const orgId = activeCompany?.id;
       let users: {id:string;name:string}[] = [];
       if (orgId) {
-        const { data: members } = await supabase.from("anew_memberships").select("user_id, anew_users!anew_memberships_user_id_anew_fkey(id, name)").eq("organization_id", orgId).eq("status","active");
-        users = (members||[]).map((m:any)=>m.anew_users).filter(Boolean).sort((a:any,b:any)=>(a.name||'').localeCompare(b.name||''));
+        // anew_memberships and anew_users have no FK between them, so an embedded
+        // PostgREST join (anew_users!anew_memberships_user_id_anew_fkey(...)) always
+        // fails with PGRST200. Fetch memberships and users separately and join in JS —
+        // same pattern used in src/pages/UsersNew.tsx for this exact table pair.
+        const { data: members, error: membersError } = await supabase
+          .from("anew_memberships")
+          .select("user_id")
+          .eq("organization_id", orgId)
+          .eq("status", "active");
+        if (membersError) throw membersError;
+
+        const userIds = [...new Set((members || []).map((m: any) => m.user_id).filter(Boolean))];
+        if (userIds.length > 0) {
+          const { data: usersData, error: usersError } = await supabase
+            .from("anew_users")
+            .select("id, name")
+            .in("id", userIds);
+          if (usersError) throw usersError;
+          users = (usersData || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+        }
       }
       setScheduleUsers(users);
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -1280,7 +1298,10 @@ const AnewContacts = () => {
       const defaultEnd = suggestions.length > 0 ? suggestions[0].end : new Date(defaultStart.getTime()+3600000);
       setScheduleFormData({ title: `Meeting with ${getIdentity(contact.entity_id)?.display_name || 'Contact'}`, description: "", visit_type: "meeting", location: "", start_time: formatDateTimeLocal(defaultStart), end_time: formatDateTimeLocal(defaultEnd), assigned_to: assignedUserId, notes: "" });
       setScheduleDialogOpen(true);
-    } catch (error) { console.error("Error loading schedule data:", error); } finally { setLoadingSuggestions(false); }
+    } catch (error: any) {
+      console.error("Error loading schedule data:", error);
+      toast({ title: t('contacts.toast.loadContactsError'), description: error?.message, variant: "destructive" });
+    } finally { setLoadingSuggestions(false); }
   };
   const handleCreateSchedule = async () => {
     if (!contactForSchedule || !scheduleFormData.title || !scheduleFormData.start_time || !scheduleFormData.end_time) {

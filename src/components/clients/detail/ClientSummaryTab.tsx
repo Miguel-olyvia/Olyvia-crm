@@ -4,7 +4,7 @@ import { Label } from "@/components/ui/label";
 import { AlertTriangle, Calendar, Check, HelpCircle, Star } from "lucide-react";
 import { differenceInDays, format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { type HealthScore } from "@/hooks/useContactHealthScore";
+import { type ClientHealthScore } from "@/hooks/useClientEnrichedData";
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
@@ -22,7 +22,7 @@ interface ClientSummaryTabProps {
   deals: Deal[];
   contracts: Contract[];
   interactions: any[];
-  healthScore: HealthScore;
+  healthScore: ClientHealthScore;
   nextAction: { id?: string; description: string; date: string } | null;
   sourceLead: any | null;
   userMap: Record<string, string>;
@@ -31,14 +31,18 @@ interface ClientSummaryTabProps {
   onEditAction?: () => void;
 }
 
+// Mirrors ClientHealthScore["breakdown"] (useClientEnrichedData.ts) — the same
+// shared scoring function now used by both this dialog and the Clients list,
+// so the factor keys/maxes here must track that breakdown's actual ranges.
+// Several factors can go negative (e.g. no contact in 60+ days, no active
+// contracts); `max` below is only the best-case value used to size the bar.
 const HEALTH_FACTOR_CONFIG = [
-  { key: "lastContact", icon: "👁", label: "Último contacto", max: 25 },
-  { key: "dealActivity", icon: "📋", label: "Deals activos", max: 15 },
-  { key: "engagement", icon: "📧", label: "Engagement (emails)", max: 12 },
-  { key: "responseSpeed", icon: "⚡", label: "Velocidade resposta", max: 15 },
+  { key: "lastContact", icon: "👁", label: "Último contacto", max: 20 },
+  { key: "contracts", icon: "📑", label: "Contratos activos", max: 15 },
+  { key: "emailEngagement", icon: "📧", label: "Engagement", max: 10 },
   { key: "dataCompleteness", icon: "📄", label: "Dados completos", max: 10 },
   { key: "interactionFrequency", icon: "📊", label: "Frequência de interacção", max: 10 },
-  { key: "sentiment", icon: "😊", label: "Sentimento", max: 10 },
+  { key: "sentiment", icon: "😊", label: "Sentimento", max: 12 },
 ];
 
 export function ClientSummaryTab({
@@ -49,12 +53,11 @@ export function ClientSummaryTab({
 
   const factorValues: Record<string, number> = {
     lastContact: healthScore.breakdown.lastContact,
-    dealActivity: healthScore.breakdown.dealActivity,
-    engagement: Math.min(12, Math.round(healthScore.breakdown.interactionFrequency * 1.2)),
-    responseSpeed: Math.min(15, healthScore.breakdown.lastContact <= 20 ? 15 : 5),
+    contracts: healthScore.breakdown.contracts,
+    emailEngagement: healthScore.breakdown.emailEngagement,
     dataCompleteness: healthScore.breakdown.dataCompleteness,
     interactionFrequency: healthScore.breakdown.interactionFrequency,
-    sentiment: 10,
+    sentiment: healthScore.breakdown.sentiment,
   };
 
   const steps = [
@@ -189,7 +192,9 @@ export function ClientSummaryTab({
             </Label>
             {HEALTH_FACTOR_CONFIG.map(f => {
               const value = factorValues[f.key] || 0;
-              const pct = Math.round((value / f.max) * 100);
+              // Several factors can be negative (see HEALTH_FACTOR_CONFIG comment
+              // above), so clamp the bar width to a valid [0, 100] range.
+              const pct = Math.max(0, Math.min(100, Math.round((value / f.max) * 100)));
               return (
                 <div key={f.key} className="flex items-center gap-2">
                   <span className="text-sm shrink-0 w-4">{f.icon}</span>

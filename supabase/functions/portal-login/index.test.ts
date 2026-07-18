@@ -166,6 +166,114 @@ async function checkIsKnownDevice(
   );
 }
 
+/**
+ * Replicates supabase/functions/portal-login/index.ts's `buildCorsHeaders()`
+ * (including its `LOCAL_DEV_ORIGIN_PATTERN` companion). Keep this in sync
+ * with index.ts if that logic changes. See the file-level comment above for
+ * why index.ts itself isn't imported directly (it calls `serve(...)` at
+ * module load and needs real Supabase/GoTrue env + network access).
+ *
+ * This covers the CORS regression fixed in this session: local dev origins
+ * (e.g. http://localhost:5173) were always falling back to PRODUCTION_ORIGIN,
+ * which the browser then rejects because it doesn't match the request's
+ * actual Origin — breaking login from any non-production environment
+ * (local dev, e2e, CI).
+ */
+const PRODUCTION_ORIGIN_REPLICA = "https://app.olyvia.pt";
+const VERCEL_PREVIEW_ORIGIN_PATTERN_REPLICA =
+  /^https:\/\/olyvia-crm-git-[a-z0-9-]+-bmgest\.vercel\.app$/;
+const LOCAL_DEV_ORIGIN_PATTERN_REPLICA =
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
+function buildCorsHeadersReplica(
+  requestOrigin: string | null,
+  allowedOriginEnv?: string,
+): Record<string, string> {
+  const allowed = [PRODUCTION_ORIGIN_REPLICA, allowedOriginEnv].filter(
+    (origin): origin is string => Boolean(origin),
+  );
+  const matched = requestOrigin &&
+      (allowed.includes(requestOrigin) ||
+        VERCEL_PREVIEW_ORIGIN_PATTERN_REPLICA.test(requestOrigin) ||
+        LOCAL_DEV_ORIGIN_PATTERN_REPLICA.test(requestOrigin))
+    ? requestOrigin
+    : PRODUCTION_ORIGIN_REPLICA;
+
+  return {
+    "Access-Control-Allow-Origin": matched,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
+    Vary: "Origin",
+  };
+}
+
+Deno.test("CORS: a local dev origin (http://localhost:5173) is reflected back, not forced to PRODUCTION_ORIGIN", () => {
+  const headers = buildCorsHeadersReplica("http://localhost:5173");
+  assertEquals(headers["Access-Control-Allow-Origin"], "http://localhost:5173");
+});
+
+Deno.test("CORS: a local dev origin on a different port (http://localhost:8080) is also reflected back", () => {
+  const headers = buildCorsHeadersReplica("http://localhost:8080");
+  assertEquals(headers["Access-Control-Allow-Origin"], "http://localhost:8080");
+});
+
+Deno.test("CORS: a 127.0.0.1 origin with a port is reflected back", () => {
+  const headers = buildCorsHeadersReplica("http://127.0.0.1:4173");
+  assertEquals(headers["Access-Control-Allow-Origin"], "http://127.0.0.1:4173");
+});
+
+Deno.test("CORS: a bare localhost origin with no port is reflected back", () => {
+  const headers = buildCorsHeadersReplica("http://localhost");
+  assertEquals(headers["Access-Control-Allow-Origin"], "http://localhost");
+});
+
+Deno.test("CORS: an arbitrary non-local, non-production origin still falls back to PRODUCTION_ORIGIN (policy stays closed)", () => {
+  const headers = buildCorsHeadersReplica("https://evil.example.com");
+  assertEquals(headers["Access-Control-Allow-Origin"], PRODUCTION_ORIGIN_REPLICA);
+});
+
+Deno.test("CORS: a lookalike host that merely contains 'localhost' as a suffix/subdomain is rejected (anchored pattern holds)", () => {
+  const headers = buildCorsHeadersReplica("https://localhost.evil.com");
+  assertEquals(headers["Access-Control-Allow-Origin"], PRODUCTION_ORIGIN_REPLICA);
+});
+
+Deno.test("CORS: a lookalike host with 'localhost' as a prefix is rejected (anchored pattern holds)", () => {
+  const headers = buildCorsHeadersReplica("https://evil-localhost.com");
+  assertEquals(headers["Access-Control-Allow-Origin"], PRODUCTION_ORIGIN_REPLICA);
+});
+
+Deno.test("CORS: the exact production origin is still reflected back (existing behavior preserved)", () => {
+  const headers = buildCorsHeadersReplica("https://app.olyvia.pt");
+  assertEquals(headers["Access-Control-Allow-Origin"], PRODUCTION_ORIGIN_REPLICA);
+});
+
+Deno.test("CORS: a Vercel preview origin matching the anchored pattern is still reflected back (existing behavior preserved)", () => {
+  const headers = buildCorsHeadersReplica(
+    "https://olyvia-crm-git-development-bmgest.vercel.app",
+  );
+  assertEquals(
+    headers["Access-Control-Allow-Origin"],
+    "https://olyvia-crm-git-development-bmgest.vercel.app",
+  );
+});
+
+Deno.test("CORS: the ALLOWED_ORIGIN env-configured test origin is still reflected back (existing behavior preserved)", () => {
+  const headers = buildCorsHeadersReplica(
+    "http://custom-test-origin.example",
+    "http://custom-test-origin.example",
+  );
+  assertEquals(
+    headers["Access-Control-Allow-Origin"],
+    "http://custom-test-origin.example",
+  );
+});
+
+Deno.test("CORS: a null/missing Origin header falls back to PRODUCTION_ORIGIN", () => {
+  const headers = buildCorsHeadersReplica(null);
+  assertEquals(headers["Access-Control-Allow-Origin"], PRODUCTION_ORIGIN_REPLICA);
+});
+
 const USER_A = "user-a";
 const USER_B = "user-b";
 const NOW = "2026-07-17T12:00:00.000Z";

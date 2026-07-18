@@ -88,6 +88,7 @@ interface Deal {
   id: string;
   title: string;
   value: number;
+  value_max?: number | null;
   probability: number;
   description: string | null;
   lost_reason: string | null;
@@ -449,7 +450,7 @@ const Deals = () => {
       // com o mesmo âmbito de propriedade (TEAM/OWNED) e filtros do loadData.
       let kanbanQuery = supabase
         .from("deals")
-        .select("id, title, value, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
+        .select("id, title, value, value_max, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .is("deleted_at", null)
         .in("organization_id", scopeOrgIdsArr)
         .order("created_at", { ascending: false })
@@ -647,7 +648,7 @@ const Deals = () => {
       // Load deals with pagination filtered by organization
       let dealsQuery = supabase
         .from("deals")
-        .select(`id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
+        .select(`id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(from, to);
@@ -704,7 +705,7 @@ const Deals = () => {
           
           let leadDealsQuery = supabase
             .from("deals")
-            .select(`id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
+            .select(`id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
             .eq("organization_id", activeCompany.id)
             .in("lead_id", leadIds)
             .is("deleted_at", null)
@@ -892,7 +893,7 @@ const Deals = () => {
     try {
       const { data, error } = await (supabase as any)
         .from("deals")
-        .select("id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
+        .select("id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .eq("id", dealId)
         .single();
 
@@ -1324,7 +1325,7 @@ const Deals = () => {
     setFormData({
       title: deal.title,
       value: deal.value?.toString() || "",
-      value_max: (deal as any).value_max?.toString() || "",
+      value_max: deal.value_max?.toString() || "",
       stage_id: deal.deal_stages?.id || stages[0]?.id || "",
       lead_id: deal.lead_id || "",
       client_id: deal.client_id || "",

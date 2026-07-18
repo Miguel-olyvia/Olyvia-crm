@@ -54,7 +54,12 @@ function getHealthLevel(score: number): { level: ClientHealthScore['level']; col
   return { level: 'critical', color: 'text-red-600', bgColor: 'bg-red-500', label: 'Crítico' };
 }
 
-function calculateClientHealth(
+// Exported as the single shared source of truth for client health scoring:
+// both the Clients list (AnewClients.tsx, via useClientEnrichedData below)
+// and the client detail dialog (ClientDetailsDialog.tsx) must call this same
+// function so the two surfaces never again show a different score/level for
+// the same client.
+export function calculateClientHealth(
   interaction: ClientInteractionInfo | undefined,
   contract: ClientContractInfo | undefined,
   hasEmail: boolean,

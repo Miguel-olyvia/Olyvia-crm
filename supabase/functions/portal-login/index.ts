@@ -14,14 +14,29 @@ import { withRetry, withRetryResult } from "../_shared/retry.ts";
  * value would then block real production logins via CORS. Instead, accept
  * whichever of [PRODUCTION_ORIGIN, ALLOWED_ORIGIN] matches the request's
  * actual Origin header, falling back to PRODUCTION_ORIGIN otherwise.
+ *
+ * A request Origin of `http://localhost:<port>` or `http://127.0.0.1:<port>`
+ * is also reflected back, regardless of what SUPABASE_URL/ALLOWED_ORIGIN are
+ * set to. This is deliberately independent of `_shared/cors.ts`'s
+ * `isLocalDev()` check: this function's Edge Function always talks to the
+ * real hosted Supabase project (SUPABASE_URL never contains "localhost"),
+ * even when the *frontend* calling it is running locally (e.g. `vite dev` on
+ * http://localhost:8080/5173) — so what matters here is the caller's Origin
+ * header, not where Supabase itself is hosted. The pattern is anchored
+ * (`^...$`) and only matches the localhost/127.0.0.1 loopback hosts with an
+ * optional port, so it can never reflect an arbitrary third-party origin.
  */
+const LOCAL_DEV_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+
 function buildCorsHeaders(requestOrigin: string | null): Record<string, string> {
   const testOrigin = Deno.env.get("ALLOWED_ORIGIN");
   const allowed = [PRODUCTION_ORIGIN, testOrigin].filter(
     (origin): origin is string => Boolean(origin),
   );
   const matched = requestOrigin &&
-      (allowed.includes(requestOrigin) || VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin))
+      (allowed.includes(requestOrigin) ||
+        VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin) ||
+        LOCAL_DEV_ORIGIN_PATTERN.test(requestOrigin))
     ? requestOrigin
     : PRODUCTION_ORIGIN;
 

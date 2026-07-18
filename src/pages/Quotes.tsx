@@ -994,7 +994,12 @@ export default function Quotes() {
   }, [quotes, linesAgg]);
 
   // Check if any quote has actual cost data
-  const canViewCosts = hasPermission("quotes.view_costs") || isSystemAdmin;
+  // "quotes.view_costs" is not a real permission code in anew_permissions (phantom
+  // permission, unreachable by any real role). "quotes.manage" is the real DB write
+  // gate for the quotes domain and is already used elsewhere to protect sensitive
+  // quote data (see 20260627050000_quotes_security_fixes.sql), which matches the
+  // sensitivity of cost/margin figures here.
+  const canViewCosts = hasPermission("quotes.manage") || isSystemAdmin;
   const hasCostData = useMemo(() => {
     return canViewCosts && Object.values(linesAgg).some(a => a.hasCostData);
   }, [linesAgg, canViewCosts]);

@@ -245,6 +245,7 @@ export default function Services() {
         .from("service_categories")
         .select("id, name, parent_id, organization_id")
         .or(orgScopeFilter)
+        .eq("is_deleted", false)
         .order("name");
 
       const companiesQuery = supabase

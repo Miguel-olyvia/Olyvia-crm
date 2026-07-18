@@ -299,16 +299,24 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
       query?.anewUserId,
       query?.authUserId,
       teamMemberIdsKey,
+      dateRange.from.toISOString(),
+      dateRange.to.toISOString(),
     ],
     queryFn: async () => {
       if (!query) return { rows: [] as NegotiationLeadRow[], totalCount: 0, deals: new Map<string, number>() };
 
+      // Filtered by the same created_at date range the stage funnel above uses
+      // (get_lead_dashboard_stats_scoped's p_date_from/p_date_to), so this list's
+      // count always matches the "Negotiation" bar in the funnel instead of
+      // silently showing a different, unscoped total for the same metric.
       let negotiationQuery = supabase
         .from("anew_leads")
         .select("id, entity_id, assigned_to, updated_at, created_at", { count: "exact" })
         .eq("organization_id", query.orgId)
         .eq("status", "negotiation")
         .is("deleted_at", null)
+        .gte("created_at", dateRange.from.toISOString())
+        .lte("created_at", dateRange.to.toISOString())
         .order("updated_at", { ascending: true })
         .range(0, NEGOTIATION_LIST_LIMIT - 1);
 
@@ -672,7 +680,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
             <KPICard
               title="Total Pipeline Ativo"
               value={formatMetricValue(kpis.totalLeads)}
-              subtitle={`leads em pipeline · ${formatMetricValue(kpis.leadsToday)} hoje`}
+              subtitle={`leads em pipeline no período · ${formatMetricValue(kpis.leadsToday)} hoje`}
               icon={Users}
               trend={compareMode && kpis.totalGrowth !== null && kpis.totalGrowth !== 0 ? (kpis.totalGrowth > 0 ? "up" : "down") : undefined}
               trendValue={compareMode ? kpis.totalGrowth : null}
