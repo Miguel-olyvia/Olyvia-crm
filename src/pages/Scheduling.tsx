@@ -76,6 +76,15 @@ export default function Scheduling() {
   fetchResourcesRef.current = fetchResources;
   const ensureTimeOffBoardRef = useRef(ensureTimeOffBoard);
   ensureTimeOffBoardRef.current = ensureTimeOffBoard;
+  // Auto-provisioning the "time-off" system board is an admin-level action
+  // gated by the same 'scheduling.boards.create' RLS policy on schedule_boards
+  // (see supabase/migrations/20260615130000, "Users can create schedule boards").
+  // Users without that permission (e.g. org-scope contract managers, regular
+  // team-scope sales reps) can view Scheduling fine but previously triggered
+  // a doomed INSERT attempt on every page load, logging a 42501 RLS error.
+  const canCreateBoards = hasPermission('scheduling.boards.create');
+  const canCreateBoardsRef = useRef(canCreateBoards);
+  canCreateBoardsRef.current = canCreateBoards;
   const fetchItemsRef = useRef(fetchItems);
   fetchItemsRef.current = fetchItems;
 
@@ -131,7 +140,9 @@ export default function Scheduling() {
       setSelectedBoardIds([]); setSelectedResourceIds([]);
       setSelectedItem(null); setSelectedBoard(null); setSelectedResource(null);
       setScheduleScope(canSeeAll ? 'all' : 'mine');
-      await ensureTimeOffBoardRef.current();
+      if (canCreateBoardsRef.current) {
+        await ensureTimeOffBoardRef.current();
+      }
       const [boardsData, resourcesData] = await Promise.all([fetchBoardsRef.current(), fetchResourcesRef.current()]);
       if (cancelled) return;
       setBoards(boardsData); setResources(resourcesData);
