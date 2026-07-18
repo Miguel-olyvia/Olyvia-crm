@@ -115,3 +115,54 @@ Deno.test.ignore(
     // Control case — see file header.
   },
 );
+
+/**
+ * ── Granular `users.create` permission authorization path ───────────────
+ *
+ * Added alongside the fix that stopped `index.ts` from gating user creation
+ * behind ONLY the hardcoded `["system_admin", "super_admin", "org_admin"]`
+ * role-code allowlist (see `isAdmin`/`callerHasCreateUserPermission` in
+ * index.ts). A caller whose role is none of those three codes, but whose
+ * role has been explicitly granted the `users.create` permission via
+ * `anew_role_permissions` (checked server-side through the same
+ * `has_anew_permission(_auth_uid, _permission_code)` RPC used by
+ * execute-workflow and other Edge Functions), is now also authorized.
+ *
+ * Critically, this new path does NOT bypass the organization scope check:
+ * that check gates on `caller.roleCodes.includes("system_admin")` and
+ * `caller.orgIds`, neither of which depends on which authorization path
+ * (role-code vs. granular permission) let the caller through. So a
+ * `users.create`-permitted caller is scoped exactly like an org_admin —
+ * limited to `caller.orgIds` — never wider.
+ *
+ * These are left as `Deno.test.ignore` for the same reason as the three
+ * cases above: `create-user/index.ts` has not been refactored to the
+ * injectable `handler.ts` pattern yet, so there is no dependency-injectable
+ * entry point to drive with mocks. See the file header's "What would make
+ * this test runnable" section — the same `handler.ts` extraction unblocks
+ * these two cases as well, plus a mocked `has_anew_permission` RPC response.
+ */
+
+Deno.test.ignore(
+  "create-user — a caller with only a custom role (no admin role-code) that has been granted `users.create` CAN create a user scoped to an org they belong to (200)",
+  () => {
+    // Scenario: caller's only active membership is a custom role (e.g.
+    // `testescope_base_role`) in Org A, and that role has been granted the
+    // `users.create` permission via anew_role_permissions. Requested
+    // membership is scoped to Org A (== caller.orgIds). Mock
+    // `has_anew_permission` to return true for this caller + "users.create".
+    // Expected: 200, user created with a single membership row in Org A.
+  },
+);
+
+Deno.test.ignore(
+  "create-user — a `users.create`-permitted caller is still rejected (403 organization_out_of_scope) when requesting a membership outside their own orgs",
+  () => {
+    // Same caller/permission setup as above, but the request's
+    // memberships[].organization_id targets Org B, which is NOT in
+    // caller.orgIds. Expected: 403 organization_out_of_scope, and no rows
+    // written to auth.users/anew_users/anew_memberships — proving the
+    // granular-permission path never grants broader scope than org_admin
+    // already has.
+  },
+);

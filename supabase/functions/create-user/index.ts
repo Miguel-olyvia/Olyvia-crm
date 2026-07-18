@@ -139,6 +139,29 @@ function isAdmin(roleCodes: string[]) {
   return roleCodes.some((code) => ["system_admin", "super_admin", "org_admin"].includes(code));
 }
 
+// Granular-permission fallback: a caller who is not one of the three
+// hardcoded admin role-codes above can still be authorized to create users
+// if their role has been explicitly granted the `users.create` permission
+// via anew_role_permissions (the same mechanism gating the "Criar" button in
+// src/pages/UsersNew.tsx). This never grants more scope than an org_admin
+// already has — the organization scope check further below applies
+// identically to both authorization paths, since it keys off
+// `caller.roleCodes.includes("system_admin")` and `caller.orgIds`, neither of
+// which depends on which path authorized the caller.
+async function callerHasCreateUserPermission(supabase: any, authUserId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("has_anew_permission", {
+    _auth_uid: authUserId,
+    _permission_code: "users.create",
+  });
+
+  if (error) {
+    console.error("Error checking users.create permission:", error);
+    return false;
+  }
+
+  return Boolean(data);
+}
+
 function normalizeMemberships(memberships: any, membership: any) {
   const rawMemberships = [
     ...(Array.isArray(memberships) ? memberships : []),
@@ -321,8 +344,19 @@ serve(async (req: Request) => {
     // Admin check via Anew
     const caller = await resolveCallerAdmin(supabaseClient, requestingUser.id);
 
-    if (!caller.anewUserId || !isAdmin(caller.roleCodes)) {
-      console.error("User is not an admin. Roles:", caller.roleCodes);
+    // Authorization: either a hardcoded admin role-code (system_admin,
+    // super_admin, org_admin) OR the granular `users.create` permission
+    // explicitly granted to the caller's role. The granular path never
+    // widens scope beyond what the role-code path already allows — see the
+    // organization scope check below, which applies identically regardless
+    // of which authorization path let the caller through.
+    const authorizedByRole = isAdmin(caller.roleCodes);
+    const authorizedByPermission = !authorizedByRole && caller.anewUserId
+      ? await callerHasCreateUserPermission(supabaseClient, requestingUser.id)
+      : false;
+
+    if (!caller.anewUserId || (!authorizedByRole && !authorizedByPermission)) {
+      console.error("User is not authorized to create users. Roles:", caller.roleCodes);
       return new Response(JSON.stringify({ error: "Only admins can create users" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
