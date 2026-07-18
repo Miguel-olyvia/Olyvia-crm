@@ -8,7 +8,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { X, Search, Building, Crosshair, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompany } from "@/contexts/CompanyContext";
-import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
+import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export interface EntitySearchResult {
@@ -48,7 +50,13 @@ export function EntitySearchInput({
 }: EntitySearchInputProps) {
   const { t } = useTranslation();
   const { activeCompany } = useCompany();
-  const { isSystemAdmin } = usePermissions();
+  const {
+    getPermissionScope,
+    anewUserId: scopeAnewUserId,
+    authUserId: scopeAuthUserId,
+    teamMemberIds,
+    loading: scopeLoading,
+  } = usePermissionScope();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<EntitySearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,14 +84,41 @@ export function EntitySearchInput({
         return;
       }
 
+      if (scopeLoading) {
+        // Permission scope hasn't resolved yet. Fail closed instead of
+        // risking a query that skips the OWNED/TEAM restriction below.
+        setResults([]);
+        setOpen(true);
+        return;
+      }
+
       setLoading(true);
       const searchLower = term.toLowerCase();
       const allResults: EntitySearchResult[] = [];
 
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        const isAdmin = isSystemAdmin;
         const orgId = activeCompany?.id;
+
+        // SECURITY: these must mirror the exact same leads.view / clients.view
+        // scope (ORG/TEAM/OWNED) that AnewLeads.tsx and AnewClients.tsx apply
+        // to their main lists — never a bespoke admin-only check. Otherwise a
+        // scope-restricted viewer could use this search box to discover
+        // records (name/email/phone, and financial data downstream) that
+        // don't appear in their own Leads/Clients list.
+        const leadsScope = getPermissionScope("leads.view");
+        const clientsScope = getPermissionScope("clients.view");
+        const leadScopeUserIds = getLeadScopeUserIds(
+          scopeAnewUserId,
+          scopeAuthUserId,
+          leadsScope === "TEAM" ? teamMemberIds : [],
+        );
+        const clientScopeUserIds = getContactScopeUserIds(
+          clientsScope,
+          scopeAnewUserId,
+          scopeAuthUserId,
+          teamMemberIds,
+        );
 
         // Clients: scoped strictly to the active organization and active
         // status, via the optimized RPC (name/email/phone match server-side).
@@ -108,14 +143,37 @@ export function EntitySearchInput({
         ]);
         const nifMatchedEntityIds = new Set<string>(nifEntityIds);
 
-        if (rpcEntityTypes.length > 0 && orgId) {
+        if (rpcEntityTypes.length > 0 && orgId && clientsScope !== "NONE") {
           const { data: scopedResults, error: scopedError } = rpcOutcome;
           if (scopedError) {
             console.error("Entity scoped search error, falling back to direct query:", scopedError);
           } else {
             rpcCoveredTypes = rpcEntityTypes as ("client")[];
-            (scopedResults || []).forEach((row: any) => {
-              if (!rpcEntityTypes.includes(row.type)) return;
+            const candidateRows = (scopedResults || []).filter((row: any) => rpcEntityTypes.includes(row.type));
+
+            // SECURITY: search_proposal_entities (the RPC above) only enforces
+            // ORG-level visibility (get_user_visible_org_ids) — it has no
+            // notion of the clients.view permission scope. Re-check every
+            // candidate row against the same OWNED/TEAM restriction
+            // AnewClients.tsx applies via buildContactScopeOrFilter before
+            // surfacing it here.
+            let allowedClientIds: Set<string> | null = null;
+            if (clientsScope !== "ORG" && candidateRows.length > 0) {
+              const orFilter = buildContactScopeOrFilter(clientsScope, clientScopeUserIds);
+              if (!orFilter) {
+                allowedClientIds = new Set();
+              } else {
+                const { data: scopedClients } = await (supabase as any)
+                  .from("anew_clients")
+                  .select("id")
+                  .in("id", candidateRows.map((r: any) => r.id))
+                  .or(orFilter);
+                allowedClientIds = new Set((scopedClients || []).map((c: any) => c.id));
+              }
+            }
+
+            candidateRows.forEach((row: any) => {
+              if (allowedClientIds && !allowedClientIds.has(row.id)) return;
               allResults.push({
                 type: row.type,
                 id: row.id,
@@ -210,16 +268,18 @@ export function EntitySearchInput({
         };
 
         // ── Search Leads ──
-        if (searchTypes.includes("lead") && matchedEntityIds.length > 0) {
-          // Resolve auth UUID to anew_users.id for assigned_to filter
-          let anewUserId: string | null = null;
-          if (!isAdmin && user?.id) {
-            const { data: anewUser } = await supabase.from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
-            anewUserId = anewUser?.id || null;
-          }
+        if (searchTypes.includes("lead") && matchedEntityIds.length > 0 && leadsScope !== "NONE") {
           let q = (supabase.from("anew_leads") as any).select("id, entity_id, assigned_to, status").in("entity_id", matchedEntityIds).is("deleted_at", null).limit(50);
           if (orgIds.length > 0) q = q.in("organization_id", orgIds);
-          if (!isAdmin && anewUserId) q = q.eq("assigned_to", anewUserId);
+          if (leadsScope !== "ORG") {
+            if (leadScopeUserIds.length === 0) {
+              // No resolvable owner ids for a non-ORG scope: fail closed
+              // instead of returning unscoped results.
+              q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+            } else {
+              q = q.or(`assigned_to.in.(${leadScopeUserIds.join(",")}),created_by.in.(${leadScopeUserIds.join(",")})`);
+            }
+          }
           q = q.not("status", "eq", "converted");
           const { data: leads } = await q;
           await collectFromRows(leads, "lead", "Lead");
@@ -230,9 +290,10 @@ export function EntitySearchInput({
           searchTypes.includes("client") &&
           (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0) &&
           matchedEntityIds.length > 0 &&
-          orgId
+          orgId &&
+          clientsScope !== "NONE"
         ) {
-          const { data: clients } = await (supabase as any)
+          let clientsQuery = (supabase as any)
             .from("anew_clients")
             .select("id, entity_id, status")
             .in("entity_id", matchedEntityIds)
@@ -240,6 +301,16 @@ export function EntitySearchInput({
             .eq("status", "active")
             .eq("organization_id", orgId)
             .limit(50);
+          if (clientsScope !== "ORG") {
+            const orFilter = buildContactScopeOrFilter(clientsScope, clientScopeUserIds);
+            if (!orFilter) {
+              // No resolvable owner ids for a non-ORG scope: fail closed.
+              clientsQuery = clientsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+            } else {
+              clientsQuery = clientsQuery.or(orFilter);
+            }
+          }
+          const { data: clients } = await clientsQuery;
           await collectFromRows(clients, "client", "Cliente");
         }
 
@@ -261,7 +332,15 @@ export function EntitySearchInput({
         setLoading(false);
       }
     },
-    [activeCompany?.id, isSystemAdmin, searchTypes]
+    [
+      activeCompany?.id,
+      searchTypes,
+      scopeLoading,
+      getPermissionScope,
+      scopeAnewUserId,
+      scopeAuthUserId,
+      teamMemberIds,
+    ]
   );
 
   const handleInputChange = (val: string) => {

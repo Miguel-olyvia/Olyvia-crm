@@ -537,17 +537,64 @@ const ClientContracts = () => {
   }, [contracts, activeCompany?.id]);
 
   const { data: proposals = [] } = useQuery({
-    queryKey: ["proposals-for-contracts", activeCompany?.id],
+    queryKey: [
+      "proposals-for-contracts",
+      activeCompany?.id,
+      isSystemAdmin,
+      getPermissionScope("proposals.view"),
+      scopeAnewUserId,
+      teamMemberIds.join(","),
+    ],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
-      const { data, error } = await (supabase as any)
+
+      // SECURITY: this picker must apply the exact same proposals.view scope
+      // (ORG/TEAM/OWNED) that Proposals.tsx uses for the main Propostas list
+      // — including the monetary values it surfaces — via the same
+      // getPermissionScope source of truth, or a scope-restricted viewer
+      // could discover proposals here that don't appear in their own list.
+      const viewScope = getPermissionScope("proposals.view");
+      if (viewScope === "NONE" && !isSystemAdmin) return [];
+
+      let proposalsQuery = (supabase as any)
         .from("proposals")
         .select(`id, title, entity_id, deal_id, quotes(total)`)
         .eq("organization_id", activeCompany.id)
         .in("status", ["approved", "accepted", "sent", "draft"])
         .order("created_at", { ascending: false });
+
+      if (viewScope !== "ORG" && !isSystemAdmin) {
+        const allowedUserIds = new Set<string>();
+        if (scopeAnewUserId) allowedUserIds.add(scopeAnewUserId);
+        if (viewScope === "TEAM") teamMemberIds.forEach((id) => allowedUserIds.add(id));
+
+        if (allowedUserIds.size === 0) return [];
+
+        const { data: userLeads } = await supabase
+          .from("anew_leads")
+          .select("id")
+          .eq("organization_id", activeCompany.id)
+          .in("assigned_to", Array.from(allowedUserIds));
+        const leadIds = (userLeads || []).map((l: any) => l.id);
+
+        let dealIds: string[] = [];
+        if (leadIds.length > 0) {
+          const { data: userDeals } = await supabase
+            .from("deals")
+            .select("id")
+            .eq("organization_id", activeCompany.id)
+            .in("lead_id", leadIds);
+          dealIds = (userDeals || []).map((d: any) => d.id);
+        }
+
+        const orClauses = [`created_by.in.(${Array.from(allowedUserIds).join(",")})`];
+        if (dealIds.length > 0) orClauses.push(`deal_id.in.(${dealIds.join(",")})`);
+        proposalsQuery = proposalsQuery.or(orClauses.join(","));
+      }
+
+      const { data, error } = await proposalsQuery;
       if (error) throw error;
-      
+
       const entityIds: string[] = [];
       const dealIds: string[] = [];
       (data || []).forEach((p: any) => {
@@ -585,7 +632,7 @@ const ClientContracts = () => {
       
       return data as Proposal[];
     },
-    enabled: !!activeCompany?.id,
+    enabled: !!activeCompany?.id && !scopeLoading,
   });
 
   // Handle "new contract preset to a client" URL params (Clients' "Criar contrato"
