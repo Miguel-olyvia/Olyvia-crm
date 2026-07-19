@@ -1,0 +1,115 @@
+-- Add missing audit trigger on user_creation_templates
+-- 2026-07-19 | Module: Utilizadores | Feature: Templates (UserTemplateManager.tsx)
+-- Forward-only migration. Do not fold into the baseline.
+--
+-- Gap found (verified live against the linked remote Supabase DB, not just
+-- code reading):
+--   SELECT * FROM pg_trigger WHERE tgrelid = 'user_creation_templates'::regclass;
+--     -> returned ZERO rows. The table has no triggers at all (not even an
+--        updated_at maintenance trigger), and in particular no audit trigger.
+--   SELECT count(*) FROM entity_audit_log WHERE table_name = 'user_creation_templates';
+--     -> returned 0, and has always returned 0 (no historical audit rows
+--        exist for this table under any prior name/path either).
+--
+-- Practical impact: creating, editing, or deleting a user-creation template
+-- via "Utilizadores" -> Templates (src/components/users/UserTemplateManager.tsx)
+-- currently leaves no audit trail whatsoever. Every other org-scoped
+-- configuration entity in this codebase (deals, proposals, anew_leads, brands,
+-- suppliers, ...) has an audit trigger; this table was missed.
+--
+-- Table schema (confirmed live via information_schema.columns):
+--   user_creation_templates(id uuid, name text, description text,
+--     company_id uuid, organization_id uuid, is_active boolean,
+--     created_at timestamptz, updated_at timestamptz, created_by uuid,
+--     default_role_id uuid, default_relationship_type text,
+--     field_configs jsonb, custom_attributes jsonb, sort_order integer)
+--
+-- Because this table carries a direct, non-nullable-in-practice
+-- organization_id column, it is a "Group A" table per this codebase's audit
+-- taxonomy (see 20260625010000_entity_audit_log.sql section 4) and simply
+-- reuses the existing generic trigger function public.fn_generic_entity_audit()
+-- — no new function is defined here, exactly like the attachment pattern used
+-- for deals / proposals / anew_leads (20260625010000 section 4), brands
+-- (20260705010000_brands_audit_triggers.sql), and suppliers
+-- (20260714010000_suppliers_audit_triggers.sql).
+--
+-- fn_generic_entity_audit() behaviour relevant here (re-confirmed by reading
+-- 20260625010000_entity_audit_log.sql section 3, not redefined by this
+-- migration):
+--   - Resolves organization_id from NEW.organization_id / OLD.organization_id
+--     directly (Strategy A / Group A tables).
+--   - Resolves entity_id as the row's own id (no separate entity_id column
+--     on user_creation_templates).
+--   - Resolves actor via the app.audit_user_id GUC, falling back to
+--     current_business_user_id().
+--   - Diffs UPDATE payloads against its built-in noise-column list
+--     (updated_at, created_at, etc.).
+--   - Silently no-ops if organization_id cannot be resolved on either NEW or
+--     OLD. Not expected to trigger here since organization_id is populated
+--     for every real template row, but harmless if it ever is NULL.
+--
+-- Fix: attach a single AFTER INSERT OR UPDATE OR DELETE trigger on
+-- user_creation_templates that calls the existing, unmodified
+-- fn_generic_entity_audit(). DROP IF EXISTS + CREATE is used because
+-- Postgres 13 (this project's baseline) does not support
+-- CREATE OR REPLACE TRIGGER, and to keep the migration idempotent.
+--
+-- Explicitly OUT OF SCOPE for this migration (known, smaller, separate gap):
+--   user_template_organizations, user_template_fields, and
+--   user_template_attributes are child tables of user_creation_templates
+--   (linked via template_id, no direct organization_id column of their own)
+--   also referenced from UserTemplateManager.tsx. They are NOT audited by
+--   this migration. A future contributor should not assume this fix silently
+--   covers them — they would need their own satellite audit function
+--   (resolving organization_id/entity_id via template_id ->
+--   user_creation_templates, following the brand_organizations satellite
+--   pattern in 20260705010000_brands_audit_triggers.sql) in a follow-up
+--   migration.
+
+-- ============================================================
+-- Trigger registration
+-- ============================================================
+-- No pre-existing triggers of any kind were found on user_creation_templates
+-- (pg_trigger returned zero rows for this relation), so there is no ordering
+-- concern with an updated_at maintenance trigger as there was for brands.
+
+DROP TRIGGER IF EXISTS trg_audit_user_creation_templates ON public.user_creation_templates;
+CREATE TRIGGER trg_audit_user_creation_templates
+  AFTER INSERT OR UPDATE OR DELETE ON public.user_creation_templates
+  FOR EACH ROW EXECUTE FUNCTION public.fn_generic_entity_audit();
+
+-- ============================================================
+-- Verification notes (not executed)
+-- ============================================================
+-- 1. Confirm the trigger is registered and enabled:
+--
+--   SELECT tgname, tgrelid::regclass, tgenabled
+--   FROM pg_trigger
+--   WHERE tgrelid = 'public.user_creation_templates'::regclass;
+--
+--   Expected: exactly one row —
+--     trg_audit_user_creation_templates | user_creation_templates | enabled
+--
+-- 2. Functional check: create, edit, and delete a user-creation template via
+--    "Utilizadores" -> Templates, then confirm audit rows now appear:
+--
+--   SELECT operation, changed_fields, full_record, changed_by, created_at
+--   FROM entity_audit_log
+--   WHERE table_name = 'user_creation_templates'
+--   ORDER BY created_at DESC
+--   LIMIT 10;
+--
+--   Expected: one INSERT row on create, one UPDATE row (with changed_fields
+--   diff) on edit, one DELETE row on delete — where previously this query
+--   always returned zero rows.
+--
+-- 3. Confirm the known, separate gap remains and is not silently masked:
+--
+--   SELECT * FROM pg_trigger WHERE tgrelid IN (
+--     'public.user_template_organizations'::regclass,
+--     'public.user_template_fields'::regclass,
+--     'public.user_template_attributes'::regclass
+--   );
+--
+--   Expected: still zero rows — those child tables are intentionally out of
+--   scope for this migration.
