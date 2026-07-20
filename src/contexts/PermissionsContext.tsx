@@ -68,17 +68,30 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         }
 
         // P2.a — Single RPC replaces: anew_users + anew_hierarchy chain + anew_memberships + anew_roles + anew_role_permissions
-        const { data: rawCtx, error: ctxError } = await (supabase as any).rpc("get_user_context");
+        // Transient network blips (e.g. a dropped fetch) have no retry at the
+        // supabase-js layer for rpc() calls, so a single retry with a short
+        // backoff is done here before failing closed.
+        let rawCtx: unknown = null;
+        let ctxError: unknown = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = await (supabase as any).rpc("get_user_context");
+          rawCtx = result.data;
+          ctxError = result.error;
+          if (version !== versionRef.current) return;
+          if (!ctxError) break;
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 300));
+        }
         const ctx = rawCtx as UserContextRpcResult | null;
-        if (version !== versionRef.current) return;
         if (ctxError) {
           console.error("get_user_context RPC error:", ctxError);
-          setPermissions([]); setPermissionSet(new Set());
+          // Fail closed: don't leave a stale isSystemAdmin/permissions state
+          // from a previous successful fetch in effect after this one failed.
+          setPermissions([]); setPermissionSet(new Set()); setIsSystemAdmin(false);
           return;
         }
 
         if (!ctx || !ctx.business_user_id) {
-          setPermissions([]); setPermissionSet(new Set());
+          setPermissions([]); setPermissionSet(new Set()); setIsSystemAdmin(false);
           return;
         }
 
