@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 
 import {
   downloadStandardXlsx,
@@ -72,7 +73,8 @@ export async function requestControlledExport(
   });
 
   if (error || !isControlledExportResponse(data)) {
-    throw new Error("Não foi possível exportar os dados");
+    const message = await getFriendlyErrorMessage(error, getLocalizedFallback("friendlyError.exportFailed"));
+    throw new Error(message);
   }
 
   download(

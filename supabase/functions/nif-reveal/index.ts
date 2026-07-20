@@ -35,11 +35,15 @@ Deno.serve(async (req) => {
       getDecKey: () => deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM"),
     });
   } catch (error: unknown) {
+    // handler.ts already catches and safely reports every expected failure
+    // mode internally, so reaching this outer catch means something truly
+    // unexpected happened (e.g. env/client setup) — never echo it raw, since
+    // this handles decrypted NIF data.
     const message = error instanceof Error ? error.message : "Internal error";
     console.error("Error in nif-reveal:", message);
     await captureError(error, { function: "nif-reveal" });
     return new Response(
-      JSON.stringify({ success: false, error: message }),
+      JSON.stringify({ success: false, error: "Internal error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }

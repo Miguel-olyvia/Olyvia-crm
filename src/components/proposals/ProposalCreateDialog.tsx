@@ -445,14 +445,22 @@ export function ProposalCreateDialog({
         if (error) throw error;
         savedProposal = data;
         savedProposalId = editingId;
+        let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
           try {
-            await supabase.functions.invoke('execute-workflow', {
+            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
               body: { source_entity: 'proposal', entity_id: editingId, new_stage_id: formData.stage_id, old_stage_id: originalStageId, organization_id: activeCompany?.id, triggered_by: user.id },
             });
-          } catch (err) { console.error("Workflow execution error:", err); }
+            if (workflowError) throw workflowError;
+          } catch (err) {
+            console.error("Workflow execution error:", err);
+            workflowFailed = true;
+          }
         }
-        toast({ title: t('proposals.toast.updateSuccess') });
+        toast({
+          title: t('proposals.toast.updateSuccess'),
+          description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+        });
       } else {
         const { data, error } = await supabase.rpc('rpc_create_proposal', {
           p_proposal_data: proposalData,

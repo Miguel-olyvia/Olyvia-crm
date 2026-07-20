@@ -841,6 +841,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
 
       // Trigger workflow automation (e.g., auto-create quote)
+      let workflowFailed = false;
       if (newDeal?.id && selectedStageId) {
         try {
           await supabase.functions.invoke('execute-workflow', {
@@ -854,10 +855,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           });
         } catch (wfErr) {
           console.error("Workflow execution error:", wfErr);
+          workflowFailed = true;
         }
       }
 
-      toast({ title: "Deal criado com sucesso" });
+      if (workflowFailed) {
+        toast({
+          title: "Deal criado, mas a automação falhou",
+          description: "O deal foi criado com sucesso, mas não foi possível executar a automação associada.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Deal criado com sucesso" });
+      }
       setShowDealForm(false);
       setDealFormData({ title: "", description: "", value: "", stage_id: dealStages[0]?.id || "", expected_close_date: "" });
       setDealLineItems([]);

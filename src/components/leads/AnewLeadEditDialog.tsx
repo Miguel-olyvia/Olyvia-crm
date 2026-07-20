@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import {
   Dialog,
   DialogContent,
@@ -306,26 +307,40 @@ export function AnewLeadEditDialog({
         if (error) throw error;
       });
 
+      let workflowFailed = false;
       if (statusChanged && workflowStageId) {
-        const { error: workflowError } = await supabase.functions.invoke("execute-workflow", {
-          body: {
-            source_entity: "lead",
-            entity_id: lead.id,
-            new_stage_id: workflowStageId,
-            old_stage_id: lead.workflow_stage_id || null,
-            organization_id: companyId,
-          },
-        });
+        try {
+          const { error: workflowError } = await supabase.functions.invoke("execute-workflow", {
+            body: {
+              source_entity: "lead",
+              entity_id: lead.id,
+              new_stage_id: workflowStageId,
+              old_stage_id: lead.workflow_stage_id || null,
+              organization_id: companyId,
+            },
+          });
 
-        if (workflowError) {
-          throw workflowError;
+          if (workflowError) {
+            throw workflowError;
+          }
+        } catch (workflowErr) {
+          console.error("Error executing workflow automation:", workflowErr);
+          workflowFailed = true;
+          const description = await getFriendlyErrorMessage(workflowErr);
+          toast({
+            title: "Lead guardada, mas a automação falhou",
+            description,
+            variant: "destructive",
+          });
         }
       }
 
-      toast({
-        title: "Lead atualizada",
-        description: "Os dados da lead foram guardados com sucesso.",
-      });
+      if (!workflowFailed) {
+        toast({
+          title: "Lead atualizada",
+          description: "Os dados da lead foram guardados com sucesso.",
+        });
+      }
 
       onLeadUpdated({
         leadId: lead.id,

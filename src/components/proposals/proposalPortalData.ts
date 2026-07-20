@@ -140,8 +140,10 @@ export async function loadProposalPortalData(
     .maybeSingle();
 
   if (proposalErr) {
+    // A real query failure must not be confused with "proposal not found":
+    // throw so the caller can distinguish a transient/DB error from a genuine 404.
     console.error("[proposalPortalData] proposal lookup", proposalErr);
-    return null;
+    throw proposalErr;
   }
   if (!proposal) return null;
 

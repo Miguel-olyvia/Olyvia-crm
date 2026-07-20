@@ -44,11 +44,15 @@ Deno.serve(async (req) => {
       getHmacKey: () => deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC"),
     });
   } catch (error: unknown) {
+    // handler.ts already catches and safely reports every expected failure
+    // mode internally, so reaching this outer catch means something truly
+    // unexpected happened (e.g. env/client setup) — never echo it raw, since
+    // this proxies writes of decrypted NIF data.
     const message = error instanceof Error ? error.message : "Internal error";
     console.error("Error in nif-write-proxy:", message);
     await captureError(error, { function: "nif-write-proxy" });
     return new Response(
-      JSON.stringify({ error: message }),
+      JSON.stringify({ error: "Internal error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }

@@ -5,6 +5,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { searchEntityIds } from "@/lib/clientSearch";
 import Layout from "@/components/Layout";
@@ -185,6 +186,10 @@ const Deals = () => {
   const [savingDeal, setSavingDeal] = useState(false);
   const currentPageRef = useRef(0);
   const submitLockRef = useRef(false);
+  // Tracks whether the last attempt to load this deal's existing line items
+  // (deal_need_items) for the edit form failed — used to block a save that
+  // would otherwise silently overwrite deal_need_items with incomplete data.
+  const itemsLoadFailedRef = useRef(false);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -261,6 +266,7 @@ const Deals = () => {
         (dealsInfo || []).map((d: any) => [d.id, d])
       );
 
+      let anyWorkflowFailed = false;
       const workflowPromises = dealIds.map(async (dealId) => {
         try {
           const deal = dealInfoById.get(dealId);
@@ -281,15 +287,20 @@ const Deals = () => {
             });
           }
         } catch (wfError) {
-          console.error(`Workflow failed for deal ${dealId}:`, wfError);
+          anyWorkflowFailed = true;
+          const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+          console.error(`Workflow failed for deal ${dealId}:`, friendlyWfMessage);
         }
       });
 
       await Promise.all(workflowPromises);
 
-      toast({ 
-        title: t('common.statusUpdated'),
-        description: `${selectedIds.size} ${t('deals.records') || 'registos'} ${t('common.updated') || 'atualizados'}.`
+      toast({
+        title: anyWorkflowFailed ? t('deals.toast.workflowFailedTitle') : t('common.statusUpdated'),
+        description: anyWorkflowFailed
+          ? t('deals.toast.workflowFailedDesc')
+          : `${selectedIds.size} ${t('deals.records') || 'registos'} ${t('common.updated') || 'atualizados'}.`,
+        variant: anyWorkflowFailed ? "destructive" : undefined,
       });
       clearSelection();
       setBulkStatusDialogOpen(false);
@@ -1279,6 +1290,7 @@ const Deals = () => {
       if (stageError) throw stageError;
 
       // Execute workflow for stage change
+      let kanbanWorkflowFailed = false;
       try {
         await supabase.functions.invoke('execute-workflow', {
           body: {
@@ -1291,15 +1303,25 @@ const Deals = () => {
           },
         });
       } catch (wfError) {
-        console.error("Workflow execution error:", wfError);
+        kanbanWorkflowFailed = true;
+        const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+        console.error("Workflow execution error:", friendlyWfMessage);
       }
 
-      toast({ title: "Pedido movido com sucesso" });
+      if (kanbanWorkflowFailed) {
+        toast({
+          title: t('deals.toast.workflowFailedTitle'),
+          description: t('deals.toast.workflowFailedDesc'),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Pedido movido com sucesso" });
+      }
       loadData();
     } catch (error: any) {
       toast({ title: "Erro ao mover pedido", description: error.message, variant: "destructive" });
     }
-  }, [activeCompany?.id, toast, loadData]);
+  }, [activeCompany?.id, toast, loadData, t]);
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -1322,6 +1344,7 @@ const Deals = () => {
   const handleEdit = (deal: Deal) => {
     setEditingId(deal.id);
     setOriginalStageId(deal.deal_stages?.id || null);
+    itemsLoadFailedRef.current = false;
     setFormData({
       title: deal.title,
       value: deal.value?.toString() || "",
@@ -1407,7 +1430,13 @@ const Deals = () => {
           }
         }
       } catch (err) {
+        itemsLoadFailedRef.current = true;
         console.error("Error loading deal items:", err);
+        toast({
+          title: t('deals.toast.itemsLoadErrorTitle'),
+          description: t('deals.toast.itemsLoadErrorDesc'),
+          variant: "destructive",
+        });
       }
     })();
     
@@ -1635,6 +1664,18 @@ const Deals = () => {
         throw new Error("Nenhuma organização ativa. Selecione uma organização e tente novamente.");
       }
 
+      // Guard against data loss: if the existing deal_need_items failed to load when
+      // the edit form was opened, dealLineItems is empty/stale — saving now would send
+      // that incomplete list as p_items and the RPC would overwrite deal_need_items with it.
+      if (editingId && itemsLoadFailedRef.current) {
+        toast({
+          title: t('deals.toast.itemsLoadErrorTitle'),
+          description: t('deals.toast.itemsLoadErrorBlockDesc'),
+          variant: "destructive",
+        });
+        return;
+      }
+
       const dealData = {
         title: formData.title,
         value,
@@ -1677,6 +1718,7 @@ const Deals = () => {
         if (error) throw error;
         if (!updatedDeal) throw new Error("Deal not found or access denied.");
 
+        let updateWorkflowFailed = false;
         if (originalStageId && formData.stage_id !== originalStageId) {
           try {
             await supabase.functions.invoke('execute-workflow', {
@@ -1690,11 +1732,21 @@ const Deals = () => {
               },
             });
           } catch (wfError) {
-            console.error("Workflow execution error:", wfError);
+            updateWorkflowFailed = true;
+            const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+            console.error("Workflow execution error:", friendlyWfMessage);
           }
         }
 
-        toast({ title: t('deals.toast.updateSuccess') });
+        if (updateWorkflowFailed) {
+          toast({
+            title: t('deals.toast.workflowFailedTitle'),
+            description: t('deals.toast.workflowFailedDesc'),
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: t('deals.toast.updateSuccess') });
+        }
       } else {
         const recentDuplicateWindow = new Date(Date.now() - 30_000).toISOString();
         let recentDuplicateQuery = (supabase.from("deals") as any)
@@ -1758,6 +1810,7 @@ const Deals = () => {
         if (error) throw error;
 
         // Execute workflow AFTER the RPC persists items so auto-created quotes get the line items
+        let createWorkflowFailed = false;
         if (newDeal?.id && formData.stage_id) {
           try {
             await supabase.functions.invoke('execute-workflow', {
@@ -1770,11 +1823,21 @@ const Deals = () => {
               },
             });
           } catch (wfError) {
-            console.error("Workflow execution on create error:", wfError);
+            createWorkflowFailed = true;
+            const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+            console.error("Workflow execution on create error:", friendlyWfMessage);
           }
         }
 
-        toast({ title: t('deals.toast.createSuccess') });
+        if (createWorkflowFailed) {
+          toast({
+            title: t('deals.toast.workflowFailedTitle'),
+            description: t('deals.toast.workflowFailedDesc'),
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: t('deals.toast.createSuccess') });
+        }
       }
 
       setOpen(false);
@@ -1813,6 +1876,7 @@ const Deals = () => {
     setSearchResults([]);
     setFieldErrors({});
     setDealLineItems([]);
+    itemsLoadFailedRef.current = false;
   };
 
 

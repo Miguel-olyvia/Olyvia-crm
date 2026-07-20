@@ -28,6 +28,7 @@ import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { NativeSelect } from "@/components/ui/native-select";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface AnewUser {
   id: string;
@@ -432,7 +433,7 @@ export function MemberFormPanel({
     const { validateMembershipHierarchy } = await import("@/utils/validateMembershipHierarchy");
     const validation = await validateMembershipHierarchy(memberForm.user_id, organizationId, memberForm.role_id);
     if (!validation.allowed) {
-      toast.error(validation.reason || "Não é permitido atribuir um cargo inferior ao que o utilizador já possui numa organização superior.");
+      toast.error(validation.reason || t("organizations.roleDowngradeNotAllowed"));
       setLoading(false);
       return;
     }
@@ -440,7 +441,7 @@ export function MemberFormPanel({
     const { data: userData } = await supabase.auth.getUser();
     const createdBy = await resolveBusinessUserId(userData.user?.id);
     if (!createdBy) {
-      toast.error("Não foi possível resolver o utilizador de negócio do operador.");
+      toast.error(t("organizations.businessUserNotResolved"));
       setLoading(false);
       return;
     }
@@ -458,17 +459,17 @@ export function MemberFormPanel({
       if (error.code === '23505') {
         toast.error(t("organizations.memberAlreadyExists"));
       } else {
-        toast.error(error.message);
+        toast.error(await getFriendlyErrorMessage(error));
       }
       setLoading(false);
       return;
     }
-    
+
     toast.success(t("common.created"));
     setLoading(false);
     onSaved();
   };
-  
+
   // NEW: Create user using UserFormEnhanced data
   const handleCreateNewUser = async () => {
     if (!formData.name || !formData.email || !formData.password) {
@@ -477,7 +478,7 @@ export function MemberFormPanel({
     }
 
     if (newUserMemberships.some((m) => m.organization_id && !m.role_id)) {
-      toast.error("É obrigatório selecionar uma role para cada organização.");
+      toast.error(t("organizations.roleRequiredPerOrg"));
       return;
     }
 
@@ -538,23 +539,23 @@ export function MemberFormPanel({
       });
       
       if (functionError) {
-        toast.error(functionError.message);
+        toast.error(await getFriendlyErrorMessage(functionError));
         setSavingNewUser(false);
         return;
       }
-      
+
       if (functionData?.error) {
-        toast.error(functionData.error);
+        toast.error(await getFriendlyErrorMessage(functionData.error));
         setSavingNewUser(false);
         return;
       }
-      
+
       toast.success(t("common.created"));
       setSavingNewUser(false);
       setCreateUserSheetOpen(false);
       onSaved();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao criar utilizador");
+      toast.error(await getFriendlyErrorMessage(err, t("users.toast.createError")));
       setSavingNewUser(false);
     }
   };
@@ -580,11 +581,11 @@ export function MemberFormPanel({
       .eq("id", member.user_id);
     
     if (userError) {
-      toast.error(userError.message);
+      toast.error(await getFriendlyErrorMessage(userError));
       setLoading(false);
       return;
     }
-    
+
     // Update membership
     const { error: memberError } = await (supabase as any)
       .from("anew_memberships")
@@ -592,20 +593,20 @@ export function MemberFormPanel({
         relationship_type: editMembershipType,
       })
       .eq("id", member.id);
-    
+
     if (memberError) {
-      toast.error(memberError.message);
+      toast.error(await getFriendlyErrorMessage(memberError));
       setLoading(false);
       return;
     }
-    
+
     // Update password if provided
     if (editPassword) {
       const { error: pwError } = await supabase.functions.invoke('update-user-password', {
         body: { targetUserId: member.user_id, newPassword: editPassword },
       });
       if (pwError) {
-        toast.error(pwError.message);
+        toast.error(await getFriendlyErrorMessage(pwError));
       }
     }
     

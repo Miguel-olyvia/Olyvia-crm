@@ -455,7 +455,7 @@ export default function AnewLeads() {
             setDetailTab("info");
             setShowDetails(true);
           } else if (!cancelled) {
-            toast({ title: "Lead não encontrado", description: "Pode não existir ou não tens permissão.", variant: "destructive" });
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
           }
         }
       } finally {
@@ -1317,7 +1317,7 @@ export default function AnewLeads() {
   const performExport = async (includeSensitive: boolean) => {
     const organizationId = activeCompanyId;
     if (!organizationId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     setExporting(true);
@@ -1336,8 +1336,9 @@ export default function AnewLeads() {
         title: "Exportação concluída",
         description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
-    } catch (error: any) {
-      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.exportError'), description, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -1345,7 +1346,7 @@ export default function AnewLeads() {
 
   const handleExport = () => {
     if (!activeCompanyId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     if (hasPermission("leads.export_sensitive")) {
@@ -1357,11 +1358,11 @@ export default function AnewLeads() {
 
   const handleImport = async () => {
     if (!importFile) {
-      toast({ title: "Seleciona um ficheiro CSV", variant: "destructive" });
+      toast({ title: t('leads.toast.selectCsvFile'), variant: "destructive" });
       return;
     }
     if (!activeCompanyId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     setImporting(true);
@@ -1442,8 +1443,9 @@ export default function AnewLeads() {
       setImportDialogOpen(false);
       setImportFile(null);
       loadLeads(false);
-    } catch (error: any) {
-      toast({ title: "Erro ao importar", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.importError'), description, variant: "destructive" });
     } finally {
       setImporting(false);
     }
@@ -1746,7 +1748,8 @@ export default function AnewLeads() {
       .range(from, to);
 
     if (error) {
-      toast({ title: "Error loading leads", description: error.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
     } else {
       const allUserIds = new Set<string>();
       for (const d of (data || [])) {
@@ -1946,7 +1949,8 @@ export default function AnewLeads() {
         .limit(KANBAN_LEADS_LIMIT);
 
       if (error) {
-        toast({ title: "Erro ao carregar kanban", description: error.message, variant: "destructive" });
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.kanbanLoadError'), description, variant: "destructive" });
         return;
       }
 
@@ -2022,7 +2026,8 @@ export default function AnewLeads() {
       );
 
       if (error) {
-        toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
         return;
       }
 
@@ -2038,9 +2043,10 @@ export default function AnewLeads() {
         });
         if (workflowError) {
           console.error("Kanban stage-drop workflow execution failed:", workflowError);
+          const workflowDescription = await getFriendlyErrorMessage(workflowError);
           toast({
             title: "Status atualizado com automações incompletas",
-            description: "O workflow associado a esta fase falhou e deve ser revisto.",
+            description: workflowDescription,
             variant: "destructive",
           });
         }
@@ -2049,10 +2055,11 @@ export default function AnewLeads() {
       loadKanbanLeads();
       loadStatusCounts();
       loadLeads();
-    } catch (error: any) {
-      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
     }
-  }, [workflowStages, scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads]);
+  }, [workflowStages, scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads, t]);
 
   // Fetch kanban data only while that tab is visible, but keep it in sync
   // with every filter change made anywhere on the page (same dependency list
@@ -3304,12 +3311,17 @@ export default function AnewLeads() {
         if (addr.decision === "error") {
           console.warn("[post-commit] address sync failed", addr.reason);
           toast({
-            title: "Lead criado, mas a morada não foi sincronizada",
+            title: t('leads.toast.addressSyncFailed'),
             description: addr.reason ?? undefined,
           });
         }
       } catch (e) {
         console.warn("[post-commit] address sync threw", e);
+        const description = await getFriendlyErrorMessage(e);
+        toast({
+          title: t('leads.toast.addressSyncFailed'),
+          description,
+        });
       }
 
       if (entityRenamePayloadForPostCommit && entityReusedForPostCommit) {
@@ -3568,10 +3580,12 @@ export default function AnewLeads() {
         });
         if (addr.decision === "error") {
           console.warn("[post-commit/create-anyway] address sync failed", addr.reason);
-          toast({ title: "Lead criado, mas a morada não foi sincronizada", description: addr.reason ?? undefined });
+          toast({ title: t('leads.toast.addressSyncFailed'), description: addr.reason ?? undefined });
         }
       } catch (e) {
         console.warn("[post-commit/create-anyway] address sync threw", e);
+        const description = await getFriendlyErrorMessage(e);
+        toast({ title: t('leads.toast.addressSyncFailed'), description });
       }
 
       toast({ title: t('leads.toast.createSuccess') });
@@ -3606,7 +3620,8 @@ export default function AnewLeads() {
       // Reuse the (now-shared) entity instead of creating a new one.
       await handleDuplicateCreateAnyway(match.entityId);
     } catch (err: unknown) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('leads.toast.shareEntityError'), description, variant: "destructive" });
       setCreatingLead(false);
     }
   };
@@ -3640,7 +3655,10 @@ export default function AnewLeads() {
           setSelectedLead(data);
           setShowDetails(true);
         } else {
-          toast({ title: "Lead encontrada", description: `A lead "${match.displayName}" já existe. Pesquise por ela na lista.` });
+          toast({
+            title: t('leads.toast.leadAlreadyExists'),
+            description: t('leads.toast.leadAlreadyExistsDesc', { name: match.displayName }),
+          });
         }
       })();
     }
@@ -3658,7 +3676,10 @@ export default function AnewLeads() {
       const mergedValues = { ...(existingLead?.field_values || {}), ...cleanFieldValues };
       const newStatus = ["lost", "rejected"].includes(existingLead?.status) ? "new" : existingLead?.status;
       await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId);
-      toast({ title: "Lead atualizada", description: `Os dados da lead "${match.displayName}" foram atualizados.` });
+      toast({
+        title: t('leads.toast.leadUpdated'),
+        description: t('leads.toast.leadUpdatedDesc', { name: match.displayName }),
+      });
       setDuplicateDialogOpen(false);
       setShowCreateLead(false);
       setPendingLeadData(null);
@@ -3666,8 +3687,9 @@ export default function AnewLeads() {
       setNewLeadValues({});
       setLeads([]); setHasMore(true); loadLeads();
       loadStatusCounts();
-    } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('leads.toast.updateError'), description, variant: "destructive" });
     } finally {
       setCreatingLead(false);
     }
@@ -3836,9 +3858,10 @@ export default function AnewLeads() {
     }
 
     if (firstError) {
-      toast({ title: "Erro ao eliminar", description: firstError.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(firstError);
+      toast({ title: t('leads.toast.deleteError'), description, variant: "destructive" });
     } else {
-      toast({ title: `${selectedLeadIds.length} lead(s) movida(s) para o lixo` });
+      toast({ title: t('leads.toast.bulkDeletedCount', { count: selectedLeadIds.length }) });
       setSelectedLeadIds([]);
       loadLeads();
       loadStatusCounts();
@@ -3863,9 +3886,10 @@ export default function AnewLeads() {
       );
 
       if (error) {
-        toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
       } else {
-        toast({ title: `Status atualizado para ${selectedLeadIds.length} lead(s)` });
+        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: selectedLeadIds.length }) });
         // Execute workflow for each lead BEFORE reloading
         if (matchingStage?.id && activeCompanyId) {
           const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
@@ -3886,9 +3910,11 @@ export default function AnewLeads() {
           const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
           if (failedWorkflows.length > 0) {
             console.error("Bulk workflow execution failures:", failedWorkflows);
+            const firstReason = (failedWorkflows[0] as PromiseRejectedResult).reason;
+            const workflowDescription = await getFriendlyErrorMessage(firstReason);
             toast({
               title: "Status atualizado com automações incompletas",
-              description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos.`,
+              description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos. ${workflowDescription}`,
               variant: "destructive",
             });
           }
@@ -3898,8 +3924,9 @@ export default function AnewLeads() {
         loadLeads();
         loadStatusCounts();
       }
-    } catch (error: any) {
-      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
     } finally {
       setIsBulkUpdating(false);
     }
@@ -3920,15 +3947,17 @@ export default function AnewLeads() {
       );
 
       if (error) {
-        toast({ title: "Erro ao atualizar resultado", description: error.message, variant: "destructive" });
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.resultUpdateError'), description, variant: "destructive" });
       } else {
-        toast({ title: `Resultado atualizado para ${selectedLeadIds.length} lead(s)` });
+        toast({ title: t('leads.toast.bulkResultUpdatedCount', { count: selectedLeadIds.length }) });
         setSelectedLeadIds([]);
         loadLeads();
         loadStatusCounts();
       }
-    } catch (error: any) {
-      toast({ title: "Erro ao atualizar resultado", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.resultUpdateError'), description, variant: "destructive" });
     } finally {
       setIsBulkUpdating(false);
     }
@@ -3949,15 +3978,17 @@ export default function AnewLeads() {
       );
 
       if (error) {
-        toast({ title: "Erro ao atualizar atribuído", description: error.message, variant: "destructive" });
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
       } else {
-        toast({ title: `Atribuição atualizada para ${selectedLeadIds.length} lead(s)` });
+        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: selectedLeadIds.length }) });
         setSelectedLeadIds([]);
         loadLeads();
         loadStatusCounts();
       }
-    } catch (error: any) {
-      toast({ title: "Erro ao atualizar atribuído", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
     } finally {
       setIsBulkUpdating(false);
     }
@@ -4246,7 +4277,9 @@ export default function AnewLeads() {
         if (ent) {
           nameStr = ent.display_name || `${ent.first_name || ""} ${ent.last_name || ""}`.trim();
         }
-      } catch (e) { /* noop */ }
+      } catch (e) {
+        console.error("[AnewLeads] Failed to load entity email/name for row email action:", e);
+      }
     }
     // Fallback to lead field_values aliases (po_email, nome, etc.)
     if (!emailAddr) emailAddr = info.email || "";

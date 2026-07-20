@@ -46,6 +46,7 @@ import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveOrgTenantIds } from "@/lib/orgSubtree";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Organization {
   id: string;
@@ -325,29 +326,44 @@ export default function OrganizationDetail() {
   };
 
   const fetchHierarchy = async () => {
-    const { data: parentData } = await (supabase as any)
+    const { data: parentData, error: parentError } = await (supabase as any)
       .from("anew_hierarchy")
       .select("id, parent_org_id, child_org_id, parent:anew_organizations!anew_hierarchy_parent_org_id_fkey(id, name, type, description, status)")
       .eq("child_org_id", id);
-    if (parentData) setParents(parentData as any);
+    if (parentError) {
+      console.error("Error fetching parent hierarchy:", parentError);
+      toast.error(t("common.error"));
+    } else if (parentData) {
+      setParents(parentData as any);
+    }
 
-    const { data: childData } = await (supabase as any)
+    const { data: childData, error: childError } = await (supabase as any)
       .from("anew_hierarchy")
       .select("id, parent_org_id, child_org_id, child:anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type, description, status)")
       .eq("parent_org_id", id);
-    if (childData) setChildren(childData as any);
+    if (childError) {
+      console.error("Error fetching child hierarchy:", childError);
+      toast.error(t("common.error"));
+    } else if (childData) {
+      setChildren(childData as any);
+    }
   };
 
   const fetchRelations = async () => {
-    const { data: sourceData } = await (supabase as any)
+    const { data: sourceData, error: sourceError } = await (supabase as any)
       .from("anew_relations")
       .select("id, source_org_id, target_org_id, relation_type, relation_label, metadata, target:anew_organizations!anew_relations_target_org_id_fkey(id, name, type, description, status)")
       .eq("source_org_id", id);
 
-    const { data: targetData } = await (supabase as any)
+    const { data: targetData, error: targetError } = await (supabase as any)
       .from("anew_relations")
       .select("id, source_org_id, target_org_id, relation_type, relation_label, metadata, source:anew_organizations!anew_relations_source_org_id_fkey(id, name, type, description, status)")
       .eq("target_org_id", id);
+
+    if (sourceError || targetError) {
+      console.error("Error fetching relations:", sourceError || targetError);
+      toast.error(t("common.error"));
+    }
 
     const allRelations = [
       ...(sourceData || []).map((r: any) => ({ ...r, direction: "outgoing" })),
@@ -364,17 +380,23 @@ export default function OrganizationDetail() {
     // used in OrganizationMembersDialog's tenant-scoped user picker).
     const tenantOrgIds = await resolveOrgTenantIds(id);
 
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("anew_organizations").select("id, name, type, description, status, created_by")
       .neq("id", id).eq("status", "active").in("id", tenantOrgIds).order("name");
 
-    if (data) {
+    if (error) {
+      console.error("Error fetching organizations:", error);
+      toast.error(t("common.error"));
+    } else if (data) {
       setAllOrganizations(data);
     }
 
-    const { data: hierarchyData } = await (supabase as any)
+    const { data: hierarchyData, error: hierarchyError } = await (supabase as any)
       .from("anew_hierarchy").select("parent_org_id, child_org_id");
-    if (hierarchyData) {
+    if (hierarchyError) {
+      console.error("Error fetching hierarchy:", hierarchyError);
+      toast.error(t("common.error"));
+    } else if (hierarchyData) {
       setAllHierarchy(hierarchyData);
       // Orgs that already have a parent must be excluded from the "select
       // organization" picker, since the app enforces single-parent hierarchy.
@@ -384,9 +406,14 @@ export default function OrganizationDetail() {
   };
 
   const fetchAllUsers = async () => {
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("anew_users").select("id, name").order("name");
-    if (data) setAllUsers(data.map((u: any) => ({ id: u.id, name: u.name })));
+    if (error) {
+      console.error("Error fetching users:", error);
+      toast.error(t("common.error"));
+    } else if (data) {
+      setAllUsers(data.map((u: any) => ({ id: u.id, name: u.name })));
+    }
   };
 
   // Member actions
@@ -402,7 +429,7 @@ export default function OrganizationDetail() {
     const { error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any).from("anew_memberships").delete().eq("id", memberId)
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.deleted")); fetchMembers();
   };
 
@@ -417,7 +444,7 @@ export default function OrganizationDetail() {
     const { error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any).from("anew_hierarchy").insert(insertData)
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.created"));
     setIsAddHierarchyOpen(false);
     setHierarchyForm({ type: "parent", organization_id: "" });
@@ -431,7 +458,7 @@ export default function OrganizationDetail() {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      if (!businessUserId) { toast.error("Business user not resolved"); return; }
+      if (!businessUserId) { toast.error(t("organizations.businessUserNotResolved")); return; }
       const finalType = newOrgFormData.type === "other" ? newOrgFormData.customType : newOrgFormData.type;
       const newOrgName = newOrgFormData.name.trim();
       const hasFiscalData = newOrgFormData.isFiscal && !!newOrgFormData.nif?.trim();
@@ -470,7 +497,7 @@ export default function OrganizationDetail() {
       fetchHierarchy(); fetchAllOrganizations();
     } catch (error: unknown) {
       console.error("Error creating organization from sheet:", error);
-      toast.error(error instanceof Error ? error.message : t("common.error"));
+      toast.error(await getFriendlyErrorMessage(error, t("common.error")));
     } finally {
       setIsCreatingOrgFromSheet(false);
     }
@@ -483,7 +510,7 @@ export default function OrganizationDetail() {
     const { data, error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId).select("id")
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     if (!data || data.length === 0) {
       // RLS can silently filter out a DELETE with no rows affected (no error
       // is raised) — .select() after delete lets us tell that apart from a
@@ -509,7 +536,7 @@ export default function OrganizationDetail() {
         .update({ name: editChildForm.name, type: editChildForm.type, description: editChildForm.description || null })
         .eq("id", editingChild.id)
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.saved"));
     setIsEditChildOpen(false); setEditingChild(null); setEditChildForm({ name: "", type: "", description: "" });
     fetchHierarchy();
@@ -520,7 +547,7 @@ export default function OrganizationDetail() {
     if (!relationForm.target_id || !relationForm.relation_type) { toast.error(t("common.required")); return; }
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    if (!businessUserId) { toast.error("Business user not resolved"); return; }
+    if (!businessUserId) { toast.error(t("organizations.businessUserNotResolved")); return; }
     const { error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any).from("anew_relations").insert({
         source_org_id: id, target_org_id: relationForm.target_id,
@@ -528,7 +555,7 @@ export default function OrganizationDetail() {
         description: relationForm.description || null, created_by: businessUserId,
       })
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.created"));
     setIsAddRelationOpen(false);
     setRelationForm({ target_id: "", relation_type: "RELATED_TO", relation_label: "", description: "" });
@@ -541,7 +568,7 @@ export default function OrganizationDetail() {
     const { error } = await withAuditContext(supabase, businessUserId, () =>
       (supabase as any).from("anew_relations").delete().eq("id", relationId)
     );
-    if (error) { toast.error(error.message); return; }
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.deleted")); fetchRelations();
   };
 
@@ -578,7 +605,7 @@ export default function OrganizationDetail() {
     return (
       <>
         <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
-          <p className="text-lg font-medium">Organização não encontrada ou sem acesso.</p>
+          <p className="text-lg font-medium">{t("organizations.notFoundOrNoAccess")}</p>
           <Button variant="outline" onClick={() => navigate("/organizations")}>{t("common.back")}</Button>
         </div>
       </>

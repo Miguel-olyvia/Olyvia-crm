@@ -1,36 +1,68 @@
 /**
  * Extracts a human-readable error message from various error shapes
  * (Supabase FunctionsHttpError, fetch Response, Error, string) and maps
- * known technical messages to friendly Portuguese messages.
+ * known technical messages to friendly, localized messages.
  */
+import { translations } from "@/translations/index";
 
-const FRIENDLY_MAP: Array<{ match: RegExp; message: string }> = [
-  {
-    match: /Nenhum SMTP ativo encontrado/i,
-    message:
-      "Não há servidor de email (SMTP) configurado. Vá a Definições → Email e ative uma conta SMTP antes de enviar.",
-  },
-  { match: /SMTP/i, message: "Falha ao contactar o servidor de email (SMTP). Verifique as credenciais em Definições → Email." },
-  { match: /rate limit|too many requests/i, message: "Demasiadas tentativas em pouco tempo. Aguarde alguns segundos e tente novamente." },
-  { match: /unauthorized|not authenticated|jwt/i, message: "Sessão expirada. Por favor inicie sessão novamente." },
-  { match: /forbidden|not allowed|permission/i, message: "Não tem permissão para executar esta ação." },
-  { match: /not found/i, message: "Recurso não encontrado." },
-  { match: /timeout|timed out/i, message: "A operação demorou demasiado tempo. Tente novamente." },
-  { match: /network|failed to fetch|load failed/i, message: "Sem ligação ao servidor. Verifique a sua internet e tente novamente." },
-  { match: /invalid.*email|email.*invalid/i, message: "Endereço de email inválido." },
-  { match: /duplicate|already exists|unique/i, message: "Este registo já existe." },
-  { match: /Edge Function returned a non-2xx/i, message: "Ocorreu um erro no servidor. Tente novamente." },
+type Language = "en" | "pt" | "es" | "fr" | "de";
+
+/**
+ * Reads the user's selected language outside of React (this module is used
+ * from plain async helpers, not hooks/components). Mirrors the storage key
+ * and default used by LanguageContext (src/contexts/LanguageContext.tsx).
+ */
+function getCurrentLanguage(): Language {
+  try {
+    if (typeof localStorage === "undefined") return "en";
+    const saved = localStorage.getItem("language") as Language | null;
+    return saved || "en";
+  } catch {
+    return "en";
+  }
+}
+
+function translate(key: string): string {
+  const lang = getCurrentLanguage();
+  const table = translations as unknown as Record<string, Record<string, string>>;
+  return table[lang]?.[key] || table.en?.[key] || key;
+}
+
+/**
+ * Resolves a translation key using the same non-hook locale lookup as
+ * getFriendlyErrorMessage, for callers that need a localized fallback
+ * message outside of a React component (e.g. requestControlledExport.ts).
+ */
+export function getLocalizedFallback(key: string): string {
+  return translate(key);
+}
+
+const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
+  { match: /Nenhum SMTP ativo encontrado/i, key: "friendlyError.noSmtp" },
+  { match: /SMTP/i, key: "friendlyError.smtpError" },
+  { match: /rate limit|too many requests/i, key: "friendlyError.rateLimit" },
+  { match: /unauthorized|not authenticated|jwt/i, key: "friendlyError.sessionExpired" },
+  { match: /forbidden|not allowed|permission/i, key: "friendlyError.forbidden" },
+  { match: /not found/i, key: "friendlyError.notFound" },
+  { match: /timeout|timed out/i, key: "friendlyError.timeout" },
+  { match: /network|failed to fetch|load failed/i, key: "friendlyError.network" },
+  { match: /invalid.*email|email.*invalid/i, key: "friendlyError.invalidEmail" },
+  { match: /duplicate|already exists|unique/i, key: "friendlyError.duplicate" },
+  { match: /Edge Function returned a non-2xx/i, key: "friendlyError.serverError" },
 ];
 
 function mapFriendly(raw: string): string {
-  if (!raw) return "Ocorreu um erro inesperado. Tente novamente.";
-  for (const { match, message } of FRIENDLY_MAP) {
-    if (match.test(raw)) return message;
+  if (!raw) return translate("friendlyError.unexpectedRetry");
+  for (const { match, key } of FRIENDLY_MAP) {
+    if (match.test(raw)) return translate(key);
   }
   return raw;
 }
 
-export async function getFriendlyErrorMessage(error: unknown, fallback = "Ocorreu um erro inesperado."): Promise<string> {
+export async function getFriendlyErrorMessage(
+  error: unknown,
+  fallback = translate("friendlyError.unexpected"),
+): Promise<string> {
   if (!error) return fallback;
 
   // String

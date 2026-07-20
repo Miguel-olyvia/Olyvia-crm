@@ -29,6 +29,7 @@ import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Organization {
   id: string;
@@ -148,6 +149,7 @@ export default function Organizations() {
       setCountries(data || []);
     } catch (error) {
       console.error("Error fetching countries:", error);
+      toast.error(t("common.error"));
     }
   };
 
@@ -401,7 +403,7 @@ export default function Organizations() {
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
       console.error("Error creating organization:", error);
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -448,7 +450,7 @@ export default function Organizations() {
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
       console.error("Error updating organization:", error);
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -480,7 +482,8 @@ export default function Organizations() {
       }
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error deleting organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -501,7 +504,8 @@ export default function Organizations() {
       setRestoreDialogOpen(false); setOrgToRestore(null);
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error restoring organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -585,7 +589,8 @@ export default function Organizations() {
       await refreshCompanies();
       setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error unlinking organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -612,7 +617,8 @@ export default function Organizations() {
       await refreshCompanies();
       setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error linking organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -624,7 +630,9 @@ export default function Organizations() {
     try {
       const { data: hd } = await (supabase as any).from("anew_hierarchy").select("parent_org_id").eq("child_org_id", org.id).maybeSingle();
       if (hd?.parent_org_id) currentParentId = hd.parent_org_id;
-    } catch {}
+    } catch (error) {
+      console.error("Error fetching organization parent:", error);
+    }
 
     let fiscalNif = "", fiscalCommercialName = "";
     if ((org as any).is_fiscal) {
@@ -661,7 +669,9 @@ export default function Organizations() {
           };
         });
       }
-    } catch {}
+    } catch (error) {
+      console.error("Error fetching organization addresses:", error);
+    }
 
     setFormData({
       name: org.name, type: isCustomType ? "other" : org.type, customType: isCustomType ? org.type : "",

@@ -105,14 +105,16 @@ export function ResourceServiceAreas({ resourceId, disabled }: ResourceServiceAr
         };
 
         if (area.id) {
-          await supabase
+          const { error } = await supabase
             .from('resource_service_areas')
             .update(base)
             .eq('id', area.id);
+          if (error) throw error;
         } else {
-          await supabase
+          const { error } = await supabase
             .from('resource_service_areas')
             .insert([{ ...base, created_by: businessUserId }]);
+          if (error) throw error;
         }
       }
       toast.success(t('common.saved'));

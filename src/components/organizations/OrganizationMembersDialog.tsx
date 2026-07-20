@@ -34,6 +34,7 @@ import { MemberEditDialog } from "./MemberEditDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveOrgTenantIds } from "@/lib/orgSubtree";
 import { withAuditContext } from "@/utils/auditContext";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Member {
   id: string;
@@ -255,13 +256,13 @@ export function OrganizationMembersDialog({
     const { data: userData } = await supabase.auth.getUser();
     const createdBy = await resolveBusinessUserId(userData.user?.id);
     if (!createdBy) {
-      toast.error("Não foi possível resolver o utilizador de negócio do operador.");
+      toast.error(t("organizations.businessUserNotResolved"));
       return;
     }
 
     const selectedRoleId = memberForm.role_id || availableRoles.find((r) => r.code === "org_viewer")?.id || availableRoles[0]?.id;
     if (!selectedRoleId) {
-      toast.error("É obrigatório selecionar uma role.");
+      toast.error(t("organizations.roleRequired"));
       return;
     }
 
@@ -269,7 +270,7 @@ export function OrganizationMembersDialog({
     const { validateMembershipHierarchy } = await import("@/utils/validateMembershipHierarchy");
     const validation = await validateMembershipHierarchy(memberForm.user_id, organizationId, selectedRoleId);
     if (!validation.allowed) {
-      toast.error(validation.reason || "Não é permitido atribuir um cargo inferior ao que o utilizador já possui numa organização superior.");
+      toast.error(validation.reason || t("organizations.roleDowngradeNotAllowed"));
       return;
     }
 
@@ -289,7 +290,7 @@ export function OrganizationMembersDialog({
         toast.error(t("organizations.memberAlreadyExists"));
         return;
       }
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
       return;
     }
 
@@ -307,12 +308,12 @@ export function OrganizationMembersDialog({
 
     const selectedRoleId = memberForm.role_id || availableRoles.find((r) => r.code === "org_viewer")?.id || availableRoles[0]?.id;
     if (!selectedRoleId) {
-      toast.error("É obrigatório selecionar uma role.");
+      toast.error(t("organizations.roleRequired"));
       return;
     }
 
     if (newUserForm.password.length < 6) {
-      toast.error(t("users.passwordTooShort"));
+      toast.error(t("profile.passwordTooShort"));
       return;
     }
 
@@ -344,13 +345,13 @@ export function OrganizationMembersDialog({
       });
 
       if (error) {
-        toast.error(error.message || t("common.error"));
+        toast.error(await getFriendlyErrorMessage(error, t("common.error")));
         setIsCreatingUser(false);
         return;
       }
 
       if (data?.error) {
-        toast.error(data.error);
+        toast.error(await getFriendlyErrorMessage(data.error, t("common.error")));
         setIsCreatingUser(false);
         return;
       }
@@ -362,7 +363,7 @@ export function OrganizationMembersDialog({
       fetchAllUsers();
       onMembersChanged?.();
     } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+      toast.error(await getFriendlyErrorMessage(err, t("common.error")));
       setIsCreatingUser(false);
     }
   };
@@ -438,7 +439,7 @@ export function OrganizationMembersDialog({
     );
 
     if (error) {
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
       return;
     }
 

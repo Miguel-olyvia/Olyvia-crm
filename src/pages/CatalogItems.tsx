@@ -123,19 +123,33 @@ const CatalogItems = () => {
 
       // Load companies for system admin
       if (isSystemAdmin && allCompanies.length === 0) {
-        const { data: companiesData } = await supabase
+        const { data: companiesData, error: companiesError } = await supabase
           .from("anew_organizations")
           .select("id, name")
           .order("name");
+        if (companiesError) {
+          toast({
+            title: t('catalogItems.toast.errorLoadingCompanies'),
+            description: companiesError.message,
+            variant: "destructive",
+          });
+        }
         setAllCompanies(companiesData || []);
       }
 
       // Load categories
-      const { data: categoriesData } = await supabase
+      const { data: categoriesData, error: categoriesError } = await supabase
         .from("product_categories")
         .select("id, name")
         .is("parent_id", null)
         .order("name");
+      if (categoriesError) {
+        toast({
+          title: t('catalogItems.toast.errorLoadingCategories'),
+          description: categoriesError.message,
+          variant: "destructive",
+        });
+      }
       setCategories(categoriesData || []);
 
       // Build products query with prices LEFT joined (products without prices should still appear)
@@ -176,8 +190,8 @@ const CatalogItems = () => {
 
       if ((productsData?.length ?? 0) >= MAX_CATALOG_ITEMS) {
         toast({
-          title: "Aviso",
-          description: `A lista pode estar incompleta (limite de ${MAX_CATALOG_ITEMS} itens atingido). Use os filtros para refinar a pesquisa.`,
+          title: t('catalogItems.toast.warning'),
+          description: t('catalogItems.toast.listIncomplete', { limit: MAX_CATALOG_ITEMS }),
         });
       }
 

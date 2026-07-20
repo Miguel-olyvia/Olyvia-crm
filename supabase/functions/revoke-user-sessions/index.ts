@@ -130,8 +130,9 @@ serve(async (req: Request): Promise<Response> => {
     }
     console.error("[revoke-user-sessions] Error:", error);
     await captureError(error, { function: "revoke-user-sessions" });
-    const message = error instanceof Error ? error.message : "Internal error";
-    return new Response(JSON.stringify({ error: message }), {
+    // Unexpected exception (not the curated AuthError/signOutError cases
+    // above) — never echo raw internal error text to the client.
+    return new Response(JSON.stringify({ error: "unexpected_error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

@@ -1,3 +1,28 @@
+import { translations } from "@/translations/index";
+
+type Language = "en" | "pt" | "es" | "fr" | "de";
+
+/**
+ * Reads the user's selected language outside of React, consistent with the
+ * approach used in src/utils/friendlyError.ts (mirrors the storage key and
+ * default used by LanguageContext).
+ */
+function getCurrentLanguage(): Language {
+  try {
+    if (typeof localStorage === "undefined") return "en";
+    const saved = localStorage.getItem("language") as Language | null;
+    return saved || "en";
+  } catch {
+    return "en";
+  }
+}
+
+function translate(key: string): string {
+  const lang = getCurrentLanguage();
+  const table = translations as unknown as Record<string, Record<string, string>>;
+  return table[lang]?.[key] || table.en?.[key] || key;
+}
+
 function getRawMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
@@ -9,7 +34,7 @@ function getRawMessage(error: unknown): string {
 export function getUploadErrorMessage(error: unknown): string {
   const raw = getRawMessage(error);
   if (raw.includes("upload_burst_rate_limit_exceeded")) {
-    return "Demasiados uploads em pouco tempo. Aguarde um minuto e tente novamente.";
+    return translate("friendlyError.uploadRateLimit");
   }
   return raw;
 }

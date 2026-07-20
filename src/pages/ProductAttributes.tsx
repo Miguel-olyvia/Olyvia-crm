@@ -511,7 +511,7 @@ export default function ProductAttributes() {
       if (!user) throw new Error(t('productAttributes.toast.notAuthenticated'));
 
       if (!attr.organization_id) {
-        throw new Error("Atributo sem organização associada");
+        throw new Error(t('productAttributes.toast.noOrganization'));
       }
 
       // Single RPC does the full deep clone (attribute + option groups/values +
@@ -530,7 +530,7 @@ export default function ProductAttributes() {
 
       toast({
         title: t('productAttributes.toast.success'),
-        description: `Atributo duplicado como "${newAttribute?.code ?? attr.code + '_copy'}"`,
+        description: t('productAttributes.toast.duplicateSuccessDesc', { code: newAttribute?.code ?? attr.code + '_copy' }),
       });
 
       loadData();

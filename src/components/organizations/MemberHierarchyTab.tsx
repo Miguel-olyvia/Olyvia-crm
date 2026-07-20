@@ -405,6 +405,7 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
       setExpandedOrgs(new Set([orgId]));
     } catch (error) {
       console.error("Error loading member hierarchy:", error);
+      toast.error(t("common.error"));
     } finally {
       setLoading(false);
     }

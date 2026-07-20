@@ -167,9 +167,10 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error in fetch-holidays:', error);
     await captureError(error, { function: "fetch-holidays" });
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // Never surface a raw internal exception message to the client; the real
+    // error is already logged above and sent to Sentry for debugging.
     return new Response(
-      JSON.stringify({ error: errorMessage, holidays: [] }),
+      JSON.stringify({ error: 'Unexpected error', holidays: [] }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

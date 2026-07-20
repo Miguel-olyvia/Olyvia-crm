@@ -1474,10 +1474,11 @@ export default function Products() {
         });
 
         // Busca categorias da org activa para o import
-        const { data: allCategoriesForImport } = await supabase
+        const { data: allCategoriesForImport, error: categoriesForImportError } = await supabase
           .from("product_categories")
           .select("id, name, parent_id, organization_id")
           .eq("organization_id", activeCompany?.id);
+        if (categoriesForImportError) throw categoriesForImportError;
         const allCats = allCategoriesForImport || categories;
         const parentCategories = allCats.filter((c: any) => !c.parent_id);
         const subcategories = allCats.filter((c: any) => c.parent_id);

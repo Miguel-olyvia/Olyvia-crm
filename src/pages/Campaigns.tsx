@@ -423,11 +423,12 @@ const Campaigns = () => {
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
-        toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador. Faça login novamente.", variant: "destructive" });
+        toast({ title: t('campaigns.toast.identityError'), description: t('campaigns.toast.identityErrorDesc'), variant: "destructive" });
         return;
       }
 
       let campaignId: string;
+      let relationSyncFailed = false;
 
       if (editingCampaign) {
         const { error } = await supabase
@@ -439,11 +440,12 @@ const Campaigns = () => {
         campaignId = editingCampaign.id;
 
         // Delete existing relations
-        await Promise.all([
+        const deleteResults = await Promise.all([
           supabase.from("campaign_organizations").delete().eq("campaign_id", campaignId),
           supabase.from("campaign_districts").delete().eq("campaign_id", campaignId),
           supabase.from("campaign_sources").delete().eq("campaign_id", campaignId),
         ]);
+        if (deleteResults.some((r) => r.error)) relationSyncFailed = true;
       } else {
         const { data, error } = await supabase.from("campaigns").insert({
           ...campaignData,
@@ -456,26 +458,28 @@ const Campaigns = () => {
 
       // Insert campaign organizations (unified)
       if (formData.selected_org_ids.length > 0) {
-        await supabase.from("campaign_organizations").insert(
+        const { error } = await supabase.from("campaign_organizations").insert(
           formData.selected_org_ids.map((orgId) => ({
             campaign_id: campaignId,
             organization_id: orgId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
       if (formData.selected_district_ids.length > 0) {
-        await supabase.from("campaign_districts").insert(
+        const { error } = await supabase.from("campaign_districts").insert(
           formData.selected_district_ids.map((districtId) => ({
             campaign_id: campaignId,
             district_id: districtId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
       // Insert campaign sources
       if (formData.selected_source_ids.length > 0) {
-        await supabase.from("campaign_sources").insert(
+        const { error } = await supabase.from("campaign_sources").insert(
           formData.selected_source_ids.map((sourceId) => ({
             campaign_id: campaignId,
             source_id: sourceId,
@@ -483,11 +487,20 @@ const Campaigns = () => {
             created_by: businessUserId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
-      toast({
-        title: editingCampaign ? t('campaigns.toast.updateSuccess') : t('campaigns.toast.createSuccess'),
-      });
+      if (relationSyncFailed) {
+        toast({
+          title: t('campaigns.toast.relationSyncError'),
+          description: t('campaigns.toast.relationSyncErrorDesc'),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: editingCampaign ? t('campaigns.toast.updateSuccess') : t('campaigns.toast.createSuccess'),
+        });
+      }
 
       handleCloseDialog();
       void loadData();

@@ -190,10 +190,14 @@ export function ScheduleBoardsTab({
       setAllItemsRaw((allItems || []) as any[]);
     } catch (err) {
       console.error('Error loading board stats:', err);
+      toast({
+        title: t('scheduling.board.statsLoadError'),
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
-  }, [companyId, boards]);
+  }, [companyId, boards, t, toast]);
 
   useEffect(() => { loadBoardStats(); }, [loadBoardStats]);
 
@@ -330,8 +334,8 @@ export function ScheduleBoardsTab({
     const ids = actionablePendingToday.map(p => p.id);
     if (ids.length === 0) {
       toast({
-        title: 'Sem permissão',
-        description: 'Não tens agendamentos teus pendentes para confirmar.',
+        title: t('scheduling.toast.noPermissionTitle'),
+        description: t('scheduling.toast.noPermissionDesc'),
         variant: 'destructive',
       });
       return;
@@ -340,17 +344,17 @@ export function ScheduleBoardsTab({
     try {
       const ok = await onConfirmItems(ids);
       toast({
-        title: 'Agendamentos confirmados',
-        description: `${ok} de ${ids.length} confirmado${ids.length !== 1 ? 's' : ''}.`,
+        title: t('scheduling.toast.confirmedTitle'),
+        description: t('scheduling.toast.confirmedDesc', { confirmed: ok, total: ids.length }),
       });
       await loadBoardStats();
     } catch (err) {
       console.error(err);
-      toast({ title: 'Erro', description: 'Não foi possível confirmar.', variant: 'destructive' });
+      toast({ title: t('common.error'), description: t('scheduling.toast.confirmError'), variant: 'destructive' });
     } finally {
       setConfirming(false);
     }
-  }, [actionablePendingToday, onConfirmItems, loadBoardStats, toast]);
+  }, [actionablePendingToday, onConfirmItems, loadBoardStats, toast, t]);
 
   // Banner button label
   const totalPending = pendingTodayItems.length;

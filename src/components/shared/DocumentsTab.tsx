@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
 
@@ -83,6 +84,7 @@ function validateFile(file: File): string | null {
 }
 
 export function DocumentsTab({ entityId, entityType, organizationId, readOnly }: DocumentsTabProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -197,7 +199,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         setUploadData({ document_type: "other", notes: "" });
       }
     } catch (err: unknown) {
-      toast.error("Erro ao anexar documentos: " + getUploadErrorMessage(err));
+      toast.error(t("documentsTab.toast.attachError") + ": " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }

@@ -755,7 +755,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast({ title: "Erro ao carregar logotipo", description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
+        toast({ title: t("proposalTemplateEditor.toast.logoError"), description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
         return;
       }
 
@@ -763,7 +763,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       setConfig(prev => ({ ...prev, logo_url: urlData.publicUrl }));
       toast({ title: "Logotipo carregado com sucesso" });
     } catch (err: unknown) {
-      toast({ title: "Erro ao carregar logotipo", description: getUploadErrorMessage(err), variant: "destructive" });
+      toast({ title: t("proposalTemplateEditor.toast.logoError"), description: getUploadErrorMessage(err), variant: "destructive" });
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";

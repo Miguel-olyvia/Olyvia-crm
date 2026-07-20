@@ -916,7 +916,7 @@ const AnewClients = () => {
       toast({ title: !currentVip ? "Cliente marcado como VIP" : "Cliente deixou de ser VIP" });
       setClients([]); setHasMore(true); loadClients(0, true);
     } catch (err: any) {
-      toast({ title: "Erro ao atualizar VIP", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.vipUpdateError'), description: err.message, variant: "destructive" });
     } finally {
       setVipTogglingClientId(null);
     }
@@ -953,9 +953,9 @@ const AnewClients = () => {
       );
       if (error) throw error;
       await resolveClientNotifications([clientToDelete.id]);
-      toast({ title: "Cliente movido para lixo" });
+      toast({ title: t('clients.toast.movedToTrash') });
       setDeleteDialogOpen(false); setClientToDelete(null); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.deleteError'), description: error.message, variant: "destructive" }); }
   };
 
   const toggleSelectAll = () => { selectedIds.size === displayClients.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(displayClients.map(c => c.id))); };
@@ -998,9 +998,9 @@ const AnewClients = () => {
       if (inactiveStatuses.includes(bulkNewStatus)) {
         await resolveClientNotifications(ids);
       }
-      toast({ title: "Status atualizado", description: `${selectedIds.size} clientes atualizados` });
+      toast({ title: t('clients.toast.statusUpdated'), description: t('clients.toast.statusUpdatedDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkStatusDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('common.error'), description: error.message, variant: "destructive" }); }
   };
 
   const handleBulkDelete = async () => {
@@ -1018,9 +1018,9 @@ const AnewClients = () => {
         if (error) throw error;
       }
       await resolveClientNotifications(ids);
-      toast({ title: "Clientes movidos para lixo", description: `${selectedIds.size} clientes` });
+      toast({ title: t('clients.toast.bulkMovedToTrash'), description: t('clients.toast.bulkMovedToTrashDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.bulkDeleteError'), description: error.message, variant: "destructive" }); }
   };
 
   // Bulk "Atribuir a...": reuses the same audit-context + org-scoped update
@@ -1038,10 +1038,10 @@ const AnewClients = () => {
         (supabase as any).from("anew_clients").update({ assigned_to: bulkAssignUserId }).in("id", ids).eq("organization_id", activeCompany?.id)
       );
       if (error) throw error;
-      toast({ title: "Clientes atribuídos", description: `${selectedIds.size} clientes atribuídos a ${assignedUserMap.get(bulkAssignUserId) || "comercial selecionado"}` });
+      toast({ title: t('clients.toast.bulkAssignSuccess'), description: t('clients.toast.bulkAssignSuccessDesc', { count: selectedIds.size, name: assignedUserMap.get(bulkAssignUserId) || "comercial selecionado" }) });
       setSelectedIds(new Set()); setBulkAssignDialogOpen(false); setBulkAssignUserId(""); setClients([]); setHasMore(true); loadClients(0, true);
     } catch (error: any) {
-      toast({ title: "Erro ao atribuir", description: error.message, variant: "destructive" });
+      toast({ title: t('clients.toast.bulkAssignError'), description: error.message, variant: "destructive" });
     } finally {
       setBulkActionLoading(false);
     }
@@ -1069,9 +1069,9 @@ const AnewClients = () => {
         successCount++;
       }
       if (successCount === 0) {
-        toast({ title: "Erro ao marcar VIP", description: "Nenhum cliente foi atualizado.", variant: "destructive" });
+        toast({ title: t('clients.toast.bulkVipError'), description: t('clients.toast.bulkVipErrorDesc'), variant: "destructive" });
       } else {
-        toast({ title: "Clientes marcados como VIP", description: `${successCount} de ${targetClients.length} clientes atualizados` });
+        toast({ title: t('clients.toast.bulkVipSuccess'), description: t('clients.toast.bulkVipSuccessDesc', { success: successCount, total: targetClients.length }) });
       }
       setSelectedIds(new Set()); setClients([]); setHasMore(true); loadClients(0, true);
     } finally {
@@ -1123,13 +1123,13 @@ const AnewClients = () => {
         successCount++;
       }
       if (successCount === 0) {
-        toast({ title: "Erro ao criar pedidos", description: "Nenhum pedido foi criado.", variant: "destructive" });
+        toast({ title: t('clients.toast.bulkDealsError'), description: t('clients.toast.bulkDealsErrorDesc'), variant: "destructive" });
       } else {
-        toast({ title: "Pedidos criados", description: `${successCount} de ${targetClients.length} pedidos criados` });
+        toast({ title: t('clients.toast.bulkDealsSuccess'), description: t('clients.toast.bulkDealsSuccessDesc', { success: successCount, total: targetClients.length }) });
       }
       setSelectedIds(new Set());
     } catch (error: any) {
-      toast({ title: "Erro ao criar pedidos", description: error.message, variant: "destructive" });
+      toast({ title: t('clients.toast.bulkDealsError'), description: error.message, variant: "destructive" });
     } finally {
       setBulkActionLoading(false);
     }
@@ -1154,25 +1154,25 @@ const AnewClients = () => {
       const errors: Record<string, string> = {};
       validation.error.errors.forEach(err => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
       setFieldErrors(errors);
-      toast({ title: "Erro de validação", description: validation.error.errors[0]?.message, variant: "destructive" });
+      toast({ title: t('clients.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
     setFieldErrors({});
     if (addressData.postal_code) {
       const av = addressSchema.safeParse(addressData);
-      if (!av.success) { toast({ title: "Erro na morada", description: av.error.errors[0]?.message, variant: "destructive" }); return; }
+      if (!av.success) { toast({ title: t('clients.toast.addressValidationError'), description: av.error.errors[0]?.message, variant: "destructive" }); return; }
     }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
       const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
       if (!anewUser?.id) {
-        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        toast({ title: t('common.error'), description: t('clients.toast.profileNotFound'), variant: "destructive" });
         return;
       }
       const internalUserId = anewUser.id;
       const organizationId = activeCompany?.id || null;
-      if (!organizationId) { toast({ title: "Erro", description: "Nenhuma organização ativa", variant: "destructive" }); return; }
+      if (!organizationId) { toast({ title: t('common.error'), description: t('clients.toast.noActiveOrg'), variant: "destructive" }); return; }
 
       const personNames = clientType === "person" ? normalizeFirstLast(formData.first_name, formData.last_name) : { first: null, last: null };
       const displayName = clientType === "person" ? composeDisplayName(personNames.first, personNames.last) : companyFormData.name;
@@ -1299,14 +1299,14 @@ const AnewClients = () => {
         phoneCountryCode: phoneCode || null, vat: vat || null,
       });
 
-      toast({ title: "Cliente criado com sucesso" });
+      toast({ title: t('clients.toast.clientCreated') });
       setOpen(false); setClientType("person");
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
-    } catch (error: any) { toast({ title: "Erro ao criar cliente", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
@@ -1416,11 +1416,11 @@ const AnewClients = () => {
         setSavingClient(true);
         try {
           await convertContactMatchToClient(match);
-          toast({ title: "Contacto convertido", description: `O contacto "${match.displayName}" foi convertido em cliente.` });
+          toast({ title: t('clients.toast.contactConverted'), description: t('clients.toast.contactConvertedDesc', { name: match.displayName }) });
           setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
           setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
         } catch (err: any) {
-          toast({ title: "Erro ao converter", description: err.message, variant: "destructive" });
+          toast({ title: t('clients.toast.convertError'), description: err.message, variant: "destructive" });
         } finally { setSavingClient(false); }
       }
       return;
@@ -1429,11 +1429,11 @@ const AnewClients = () => {
     try {
       await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
       await supabase.from("anew_entity_roles").update({ status: pendingClientData.status } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
-      toast({ title: "Cliente atualizado", description: `Os dados do cliente "${match.displayName}" foram atualizados.` });
+      toast({ title: t('clients.toast.clientUpdated'), description: t('clients.toast.duplicateUpdateDesc', { name: match.displayName }) });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.updateError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1444,11 +1444,11 @@ const AnewClients = () => {
       await linkEntityToOrg(match.entityId, pendingClientData.organizationId);
       // Reuse the (now shared) entity for the new client record
       await createClientRecord(match.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
-      toast({ title: "Cliente criado a partir de entidade do grupo" });
+      toast({ title: t('clients.toast.createFromGroupSuccess') });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.shareEntityError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1485,21 +1485,21 @@ const AnewClients = () => {
         email: pendingClientData.email || null, phone: pendingClientData.phone || null,
         phoneCountryCode: pendingClientData.phoneCountryCode || null, vat: pendingClientData.vat || null,
       });
-      toast({ title: "Cliente criado com sucesso" });
+      toast({ title: t('clients.toast.clientCreated') });
       setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao criar cliente", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.createError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
   const performExport = async (includeSensitive: boolean) => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
-      toast({ title: "Selecione uma organização", variant: "destructive" });
+      toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
       return;
     }
     setExporting(true);
@@ -1519,7 +1519,7 @@ const AnewClients = () => {
         description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
     } catch (error: any) {
-      toast({ title: "Erro na exportação", description: error.message, variant: "destructive" });
+      toast({ title: t('clients.toast.exportError'), description: error.message, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -1528,7 +1528,7 @@ const AnewClients = () => {
   const handleExport = () => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
-      toast({ title: "Selecione uma organização", variant: "destructive" });
+      toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
       return;
     }
     if (hasPermission("clients.export_sensitive")) {
@@ -1679,7 +1679,7 @@ const AnewClients = () => {
                 navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
-              toast({ title: "Cliente não encontrado", variant: "destructive" });
+              toast({ title: t('clients.toast.clientNotFound'), variant: "destructive" });
               return;
             }
 
@@ -1727,7 +1727,7 @@ const AnewClients = () => {
                 navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
-              toast({ title: "Cliente não encontrado", variant: "destructive" });
+              toast({ title: t('clients.toast.clientNotFound'), variant: "destructive" });
               return;
             }
 

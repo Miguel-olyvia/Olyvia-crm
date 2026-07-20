@@ -568,8 +568,10 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
     if (authResp) return authResp;
     console.error("Error:", error);
     await captureError(error, { function: "suggest-schedule-assignee" });
+    // Never echo a raw internal exception (e.g. Postgres/RPC error) to the
+    // client — the real error is already logged above and sent to Sentry.
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

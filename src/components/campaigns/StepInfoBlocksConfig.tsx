@@ -81,6 +81,7 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
       setInfoBlocks(data || []);
     } catch (error) {
       console.error("Error loading info blocks:", error);
+      toast({ title: t('campaigns.infoBlocks.toast.loadError'), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -88,7 +89,7 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
 
   const handleAddBlock = async () => {
     if (!newBlock.step_id || !newBlock.title || !newBlock.content) {
-      toast({ title: "Preencha todos os campos obrigatórios", variant: "destructive" });
+      toast({ title: t('campaigns.infoBlocks.toast.fieldsRequired'), variant: "destructive" });
       return;
     }
 
@@ -107,7 +108,7 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
 
       if (error) throw error;
 
-      toast({ title: "Bloco de informação adicionado" });
+      toast({ title: t('campaigns.infoBlocks.toast.addSuccess') });
       setNewBlock({
         step_id: newBlock.step_id,
         title: "",
@@ -117,7 +118,7 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
       });
       loadInfoBlocks();
     } catch (error: any) {
-      toast({ title: "Erro ao adicionar bloco", description: error.message, variant: "destructive" });
+      toast({ title: t('campaigns.infoBlocks.toast.addError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -137,11 +138,11 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
 
       if (error) throw error;
 
-      toast({ title: "Bloco atualizado" });
+      toast({ title: t('campaigns.infoBlocks.toast.updateSuccess') });
       setEditingBlock(null);
       loadInfoBlocks();
     } catch (error: any) {
-      toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
+      toast({ title: t('campaigns.infoBlocks.toast.updateError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -154,10 +155,10 @@ export function StepInfoBlocksConfig({ campaignId, formSteps }: StepInfoBlocksCo
 
       if (error) throw error;
 
-      toast({ title: "Bloco removido" });
+      toast({ title: t('campaigns.infoBlocks.toast.deleteSuccess') });
       loadInfoBlocks();
     } catch (error: any) {
-      toast({ title: "Erro ao remover", description: error.message, variant: "destructive" });
+      toast({ title: t('campaigns.infoBlocks.toast.deleteError'), description: error.message, variant: "destructive" });
     }
   };
 

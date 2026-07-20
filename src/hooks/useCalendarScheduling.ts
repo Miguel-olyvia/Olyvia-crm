@@ -5,6 +5,7 @@ import type { ScheduleItem, ScheduleBoard, ScheduleResource } from '@/types/sche
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useTranslation } from '@/hooks/useTranslation';
 
 const DEFAULT_VISITS_BOARD_NAME = 'Visitas';
 const DEFAULT_VISITS_BOARD_COLOR = '#3b82f6';
@@ -43,6 +44,7 @@ export interface CalendarVisit {
 }
 
 export function useCalendarScheduling(companyId?: string) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [visitsBoard, setVisitsBoard] = useState<ScheduleBoard | null>(null);
   const { hasPermission } = usePermissions();
@@ -280,12 +282,12 @@ export function useCalendarScheduling(companyId?: string) {
 
       return visits;
     } catch (error: any) {
-      toast.error('Erro ao carregar visitas: ' + error.message);
+      toast.error(t('scheduling.visits.loadError') + ': ' + error.message);
       return [];
     } finally {
       setLoading(false);
     }
-  }, [companyId, ensureVisitsBoard]);
+  }, [companyId, ensureVisitsBoard, t]);
 
   // Create a visit (schedule_item in Visitas board)
   const createVisit = useCallback(async (visitData: {
@@ -388,13 +390,13 @@ export function useCalendarScheduling(companyId?: string) {
           });
       }
 
-      toast.success('Visita agendada com sucesso!');
+      toast.success(t('scheduling.visits.createSuccess'));
       return true;
     } catch (error: any) {
-      toast.error('Erro ao agendar visita: ' + error.message);
+      toast.error(t('scheduling.visits.createError') + ': ' + error.message);
       return false;
     }
-  }, [companyId, ensureVisitsBoard]);
+  }, [companyId, ensureVisitsBoard, t]);
 
   // Update visit status
   const updateVisitStatus = useCallback(async (
@@ -410,13 +412,13 @@ export function useCalendarScheduling(companyId?: string) {
         .eq('id', visitId);
 
       if (error) throw error;
-      toast.success('Estado atualizado');
+      toast.success(t('scheduling.visits.statusUpdateSuccess'));
       return true;
     } catch (error: any) {
-      toast.error('Erro ao atualizar: ' + error.message);
+      toast.error(t('scheduling.visits.statusUpdateError') + ': ' + error.message);
       return false;
     }
-  }, []);
+  }, [t]);
 
   // Update visit (full edit)
   const updateVisit = useCallback(async (
@@ -465,13 +467,13 @@ export function useCalendarScheduling(companyId?: string) {
         .eq('id', visitId);
 
       if (error) throw error;
-      toast.success('Visita atualizada com sucesso!');
+      toast.success(t('scheduling.visits.updateSuccess'));
       return true;
     } catch (error: any) {
-      toast.error('Erro ao atualizar visita: ' + error.message);
+      toast.error(t('scheduling.visits.updateError') + ': ' + error.message);
       return false;
     }
-  }, []);
+  }, [t]);
 
   return {
     loading,

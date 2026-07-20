@@ -95,6 +95,7 @@ export function OrganizationAddressManager({ orgId }: Props) {
 
     if (linkError) {
       console.error("Error fetching organization address links:", linkError);
+      toast.error(t("common.error"));
       setLoading(false);
       return;
     }
@@ -110,6 +111,7 @@ export function OrganizationAddressManager({ orgId }: Props) {
 
       if (error) {
         console.error("Error fetching addresses:", error);
+        toast.error(t("common.error"));
         setLoading(false);
         return;
       }

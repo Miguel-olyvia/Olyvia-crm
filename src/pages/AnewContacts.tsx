@@ -1481,7 +1481,7 @@ const AnewContacts = () => {
         // Use shared sanitizer-aware helper to prevent placeholders ("N/A", "0000-000")
         // from being persisted. Helper is a no-op when data lacks core minimum.
         try {
-          await syncEntityPrimaryAddressFromLead({
+          const addr = await syncEntityPrimaryAddressFromLead({
             supabase,
             entityId: contactEntityId,
             fieldValues: {
@@ -1493,6 +1493,13 @@ const AnewContacts = () => {
             actorId: internalUserId,
             allowOverwriteValid: false,
           });
+          if (addr.decision === "error") {
+            console.warn("[contact-address-sync] address sync failed", addr.reason);
+            toast({
+              title: t('contacts.toast.addressSyncFailed'),
+              description: addr.reason ?? undefined,
+            });
+          }
         } catch (addrErr) {
           console.warn("[contact-address-sync] non-fatal:", addrErr);
         }
@@ -1535,7 +1542,7 @@ const AnewContacts = () => {
           setSelectedContact(data);
           setDetailsOpen(true);
         } else {
-          toast({ title: "Contacto encontrado", description: `O contacto "${match.displayName}" já existe. Pesquise na lista.` });
+          toast({ title: t('contacts.toast.duplicateFound'), description: t('contacts.toast.duplicateFoundDesc', { name: match.displayName }) });
         }
       })();
     }
@@ -1549,11 +1556,11 @@ const AnewContacts = () => {
       if (updContactErr) throw updContactErr;
       const { error: updRoleErr } = await supabase.from("anew_entity_roles").update({ status: pendingContactData.roleStatus } as any).eq("entity_id", pendingContactData.entityId).eq("role", "contact").eq("organization_id", pendingContactData.organizationId);
       if (updRoleErr) throw updRoleErr;
-      toast({ title: "Contacto atualizado", description: `Os dados do contacto "${match.displayName}" foram atualizados.` });
+      toast({ title: t('contacts.toast.updateSuccess'), description: t('contacts.toast.updateSuccessDesc', { name: match.displayName }) });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+      toast({ title: t('contacts.toast.updateError'), description: err.message, variant: "destructive" });
     } finally { setSavingContact(false); }
   };
 
@@ -1647,11 +1654,11 @@ const AnewContacts = () => {
         }, shareContactNif)
       );
       if (shareRpcError) throw shareRpcError;
-      toast({ title: "Contacto criado a partir de entidade do grupo" });
+      toast({ title: t('contacts.toast.createFromGroupSuccess') });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+      toast({ title: t('contacts.toast.shareEntityError'), description: err.message, variant: "destructive" });
     } finally { setSavingContact(false); }
   };
 
@@ -2549,10 +2556,10 @@ const AnewContacts = () => {
                   if (convertError) throw convertError;
 
                   const reusedExistingClient = !!(convertResult as any)?.reused_existing_client;
-                  toast({ title: "Convertido em Cliente", description: reusedExistingClient ? "Cliente existente reutilizado e contacto sincronizado." : "O contacto foi convertido em cliente com sucesso." });
+                  toast({ title: t('contacts.toast.convertToClientSuccess'), description: reusedExistingClient ? t('contacts.toast.convertReusedDesc') : t('contacts.toast.convertNewDesc') });
                   cachedExcludeRef.current = null;
                   loadContacts(0, true); setDashboardKey(prev=>prev+1);
-                } catch (err: any) { toast({ title: "Erro na conversão", description: err.message, variant: "destructive" }); }
+                } catch (err: any) { toast({ title: t('contacts.toast.conversionError'), description: err.message, variant: "destructive" }); }
                 finally { convertClientLockRef.current = false; setConverting(false); setConvertDialogOpen(false); setContactToConvert(null); }
               }}>
                 {converting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Confirmar

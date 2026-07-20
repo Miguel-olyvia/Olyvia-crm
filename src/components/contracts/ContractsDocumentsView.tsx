@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
 
@@ -79,6 +80,7 @@ interface ContractsDocumentsViewProps {
 }
 
 export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProps) {
+  const { t } = useTranslation();
   const { activeCompany } = useCompany();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -182,7 +184,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast.error("Erro ao anexar documento: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
+        toast.error(t("contracts.toast.attachError") + ": " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
         return;
       }
 
@@ -211,7 +213,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       setSelectedFile(null);
       setUploadData({ contract_id: "", document_type: "other", notes: "" });
     } catch (err: unknown) {
-      toast.error("Erro ao anexar documento: " + getUploadErrorMessage(err));
+      toast.error(t("contracts.toast.attachError") + ": " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }

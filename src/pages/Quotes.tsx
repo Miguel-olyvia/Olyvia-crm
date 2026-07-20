@@ -1191,13 +1191,13 @@ export default function Quotes() {
     if (!user) return;
     const businessUserId = await resolveCurrentBusinessUserId();
     if (!businessUserId) {
-      toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+      toast({ title: t('quotes.toast.userNotIdentified'), variant: 'destructive' });
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
     try {
@@ -1206,17 +1206,17 @@ export default function Quotes() {
       });
       console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
       if (wfError) {
-        toast({ title: "Orçamento aceite", description: `Atenção: erro no workflow — ${wfError.message}`, variant: "destructive" });
+        toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowErrorDesc', { message: wfError.message }), variant: "destructive" });
       } else if (wfData && (wfData as any).stageActions === 0) {
         const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
         const errLog = logs?.find(l => l.status === "error");
-        toast({ title: "Orçamento aceite", description: errLog ? `Proposta não criada: ${errLog.message}` : "Workflow executado mas sem ações (verifique configuração).", variant: "destructive" });
+        toast({ title: t('quotes.toast.accepted'), description: errLog ? t('quotes.toast.proposalNotCreatedDesc', { message: errLog.message }) : t('quotes.toast.workflowNoActionsDesc'), variant: "destructive" });
       } else {
-        toast({ title: "Orçamento aceite", description: "Proposta criada automaticamente." });
+        toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.proposalCreatedDesc') });
       }
     } catch (wfErr: any) {
       console.error("Quote workflow error:", wfErr);
-      toast({ title: "Orçamento aceite", description: `Erro no workflow: ${wfErr?.message || wfErr}`, variant: "destructive" });
+      toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowExceptionDesc', { message: wfErr?.message || wfErr }), variant: "destructive" });
     }
     fetchQuotes();
   };
@@ -1224,23 +1224,23 @@ export default function Quotes() {
   const handleMarkAsLost = async (quoteId: string, reason: string) => {
     const businessUserId = await resolveCurrentBusinessUserId();
     if (!businessUserId) {
-      toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+      toast({ title: t('quotes.toast.userNotIdentified'), variant: 'destructive' });
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'perdido', observacoes: reason } as any).eq("id", quoteId);
     if (error) {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
-    toast({ title: "Orçamento marcado como perdido" });
+    toast({ title: t('quotes.toast.markedAsLost') });
     fetchQuotes();
     setLostReasonDialog(null);
   };
 
   const handleDuplicateQuote = async (quote: Quote, applyDiscountPercent?: number) => {
     try {
-      toast({ title: "A duplicar orçamento…" });
+      toast({ title: t('quotes.toast.duplicating') });
       const { data, error } = await supabase.functions.invoke('duplicate-quote', {
         body: {
           quote_id: quote.id,
@@ -1250,7 +1250,7 @@ export default function Quotes() {
       });
       if (error) throw error;
       const newId = (data as any)?.id as string | undefined;
-      toast({ title: "Orçamento duplicado", description: (data as any)?.quote_number ? `Novo nº ${(data as any).quote_number}` : undefined });
+      toast({ title: t('quotes.toast.duplicated'), description: (data as any)?.quote_number ? t('quotes.toast.duplicatedDescNumber', { number: (data as any).quote_number }) : undefined });
       await fetchQuotes();
       if (newId) {
         setSelectedQuote(newId);
@@ -1258,7 +1258,7 @@ export default function Quotes() {
       }
     } catch (e: any) {
       console.error("[duplicate-quote] error", e);
-      toast({ title: "Erro ao duplicar", description: e?.message || String(e), variant: "destructive" });
+      toast({ title: t('quotes.toast.duplicateError'), description: e?.message || String(e), variant: "destructive" });
     }
   };
 

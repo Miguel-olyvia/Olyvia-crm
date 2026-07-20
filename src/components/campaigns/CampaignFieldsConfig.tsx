@@ -191,6 +191,7 @@ export function CampaignFieldsConfig({
         setSelectedEntityIds(data.map((e: any) => e.id));
       } catch (error) {
         console.error('Error loading system entities:', error);
+        toast({ title: t('campaigns.fields.loadEntitiesError'), variant: "destructive" });
         setSystemEntities([]);
       } finally {
         setLoadingEntities(false);
@@ -233,6 +234,7 @@ export function CampaignFieldsConfig({
 
     if (error) {
       console.error("Error loading form steps:", error);
+      toast({ title: t('campaigns.steps.loadError'), description: error.message, variant: "destructive" });
     } else {
       // If no steps exist, create a default one
       if (!data || data.length === 0) {
@@ -270,6 +272,7 @@ export function CampaignFieldsConfig({
 
     if (error) {
       console.error("Error loading field definitions:", error);
+      toast({ title: t('campaigns.fields.loadError'), description: error.message, variant: "destructive" });
     } else {
       setFieldDefs(data || []);
     }

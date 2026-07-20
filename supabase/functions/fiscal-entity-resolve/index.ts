@@ -35,11 +35,15 @@ Deno.serve(async (req) => {
       getHmacKey: () => deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC"),
     });
   } catch (error: unknown) {
+    // handler.ts already catches and safely reports every expected failure
+    // mode internally, so reaching this outer catch means something truly
+    // unexpected happened (e.g. env/client setup) — never echo it raw, since
+    // this handles NIF resolution.
     const message = error instanceof Error ? error.message : "Internal error";
     console.error("Error in fiscal-entity-resolve:", message);
     await captureError(error, { function: "fiscal-entity-resolve" });
     return new Response(
-      JSON.stringify({ success: false, error: message, code: "INTERNAL_ERROR" }),
+      JSON.stringify({ success: false, error: "Internal error", code: "INTERNAL_ERROR" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }

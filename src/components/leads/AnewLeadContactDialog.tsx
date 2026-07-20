@@ -35,6 +35,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { UserSchedulePreview } from "./UserSchedulePreview";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   resolveLeadDialogFieldDefinitions,
@@ -970,7 +971,7 @@ export function AnewLeadContactDialog({
       // Trigger workflow automations if status changed
       if (statusChanged && workflowStageId && companyId) {
         try {
-          await supabase.functions.invoke("execute-workflow", {
+          const { error: workflowError } = await supabase.functions.invoke("execute-workflow", {
             body: {
               source_entity: "lead",
               entity_id: lead.id,
@@ -979,9 +980,19 @@ export function AnewLeadContactDialog({
               triggered_by: userData?.user?.id,
             },
           });
+
+          if (workflowError) {
+            throw workflowError;
+          }
           console.log("[LeadContactDialog] Workflow executed for status:", statusToSet);
         } catch (wfErr) {
           console.error("[LeadContactDialog] Workflow execution error:", wfErr);
+          const description = await getFriendlyErrorMessage(wfErr);
+          toast({
+            title: "Contacto registado, mas a automação falhou",
+            description,
+            variant: "destructive",
+          });
         }
       }
 

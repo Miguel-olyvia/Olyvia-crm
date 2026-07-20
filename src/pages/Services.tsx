@@ -469,10 +469,10 @@ export default function Services() {
   const handleExport = async () => {
     try {
       await exportServicesToCSV(filteredServices, activeCompany?.id);
-      toast({ title: "Exportação concluída" });
+      toast({ title: t("services.toast.exportSuccess") });
     } catch (error: any) {
       toast({
-        title: "Erro ao exportar",
+        title: t("services.toast.exportError"),
         description: error.message,
         variant: "destructive",
       });
@@ -484,7 +484,7 @@ export default function Services() {
       downloadServicesTemplate();
     } catch (error: any) {
       toast({
-        title: "Erro ao gerar template",
+        title: t("services.toast.templateError"),
         description: error.message,
         variant: "destructive",
       });
@@ -498,8 +498,8 @@ export default function Services() {
 
     if (!activeCompany?.id) {
       toast({
-        title: "Empresa não definida",
-        description: "Selecione uma empresa ativa antes de importar.",
+        title: t("services.toast.companyNotSet"),
+        description: t("services.toast.selectActiveCompanyImport"),
         variant: "destructive",
       });
       if (inputEl) inputEl.value = "";
@@ -533,7 +533,7 @@ export default function Services() {
       loadData();
     } catch (error: any) {
       toast({
-        title: "Erro ao importar",
+        title: t("services.toast.importError"),
         description: error.message,
         variant: "destructive",
       });
@@ -556,10 +556,18 @@ export default function Services() {
     });
 
     // Load prices for service
-    const { data: prices } = await supabase
+    const { data: prices, error: pricesError } = await supabase
       .from("service_prices")
       .select("price_type, price, currency, vat_rate")
       .eq("service_id", service.id);
+
+    if (pricesError) {
+      toast({
+        title: t("services.toast.pricesLoadError"),
+        description: pricesError.message,
+        variant: "destructive",
+      });
+    }
 
     if (prices && prices.length > 0) {
       const priceMap: ServicePriceFormData = {
@@ -580,10 +588,18 @@ export default function Services() {
     }
 
     // Load associated companies from service_companies table
-    const { data: serviceOrgs } = await supabase
+    const { data: serviceOrgs, error: serviceOrgsError } = await supabase
       .from("service_organizations")
       .select("organization_id")
       .eq("service_id", service.id);
+
+    if (serviceOrgsError) {
+      toast({
+        title: t("services.toast.organizationsLoadError"),
+        description: serviceOrgsError.message,
+        variant: "destructive",
+      });
+    }
 
     const associatedOrgIds = serviceOrgs?.map((sc: any) => sc.organization_id) || [];
     const primaryOrgId = service.organization_id || (associatedOrgIds.length > 0 ? associatedOrgIds[0] : "");

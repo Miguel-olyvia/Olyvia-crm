@@ -1103,7 +1103,8 @@ const Proposals = () => {
           });
           if (error) throw error;
           successCount++;
-        } catch {
+        } catch (sendError) {
+          console.error(`Error sending proposal ${id}:`, sendError);
           failCount++;
         }
       }
@@ -1134,7 +1135,8 @@ const Proposals = () => {
           const { blob, fileName } = await generateProposalPdfBlob(id);
           downloadBlob(blob, fileName);
           successCount++;
-        } catch {
+        } catch (exportError) {
+          console.error(`Error exporting PDF for proposal ${id}:`, exportError);
           failCount++;
         }
       }
@@ -1461,9 +1463,10 @@ const Proposals = () => {
         savedProposal = data;
         savedProposalId = editingId;
 
+        let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
           try {
-            await supabase.functions.invoke('execute-workflow', {
+            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
               body: {
                 source_entity: 'proposal',
                 entity_id: editingId,
@@ -1473,11 +1476,16 @@ const Proposals = () => {
                 triggered_by: user.id,
               }
             });
+            if (workflowError) throw workflowError;
           } catch (workflowError) {
             console.error("Workflow execution error:", workflowError);
+            workflowFailed = true;
           }
         }
-        toast({ title: t('proposals.toast.updateSuccess') });
+        toast({
+          title: t('proposals.toast.updateSuccess'),
+          description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+        });
       } else {
         const { data, error } = await supabase.rpc('rpc_create_proposal', {
           p_proposal_data: proposalData,
@@ -1588,10 +1596,20 @@ const Proposals = () => {
         .update({ stage_id: sentStage.id, status: "sent", sent_at: new Date().toISOString() })
         .eq("id", proposal.id);
       if (error) throw error;
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta marcada como enviada",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta marcada como enviada" });
       loadData();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
@@ -1612,10 +1630,20 @@ const Proposals = () => {
       await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
       const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
       if (error) throw error;
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta aceite com sucesso",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta aceite com sucesso" });
       setDetailsOpen(false);
       loadData();
     } catch (error: any) {
@@ -1644,10 +1672,20 @@ const Proposals = () => {
         rejection_notes: reason.notes,
       }).eq("id", selectedProposal.id);
       if (error) throw error;
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta recusada",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta recusada" });
       setRejectReasonDialogOpen(false);
       setDetailsOpen(false);
       loadData();
@@ -1677,10 +1715,20 @@ const Proposals = () => {
         rejection_notes: null,
       }).eq("id", proposal.id);
       if (reopenError) throw reopenError;
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta reaberta",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta reaberta" });
       loadData();
     } catch (error: any) {
       toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });

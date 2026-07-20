@@ -31,6 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, Legend, AreaChart, Area } from "recharts";
 import { campaignDetailChannelSchema, campaignDetailMarketingListsSchema } from "@/lib/validations";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Campaign {
   id: string;
@@ -128,6 +129,7 @@ const CampaignDetail = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "overview";
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const { activeCompany } = useCompany();
 
@@ -339,7 +341,7 @@ const CampaignDetail = () => {
       setDailyMetrics(Object.values(bucketMap).sort((a: any, b: any) => a.date.localeCompare(b.date)));
     } catch (err: any) {
       toast({
-        title: "Erro ao carregar métricas do dashboard",
+        title: t('campaignDetail.toast.dashboardError'),
         description: err?.message,
         variant: "destructive",
       });
@@ -387,7 +389,7 @@ const CampaignDetail = () => {
 
       if (leadSourcesRes.error) {
         toast({
-          title: "Erro ao carregar origens de lead",
+          title: t('campaignDetail.toast.sourcesError'),
           description: leadSourcesRes.error.message,
           variant: "destructive",
         });
@@ -636,7 +638,7 @@ const CampaignDetail = () => {
 
     } catch (error: any) {
       toast({
-        title: "Error loading campaign",
+        title: t('campaignDetail.toast.loadError'),
         description: error.message,
         variant: "destructive",
       });
@@ -735,7 +737,7 @@ const CampaignDetail = () => {
         if (err.path[0]) errors[err.path[0].toString()] = err.message;
       });
       setChannelFieldErrors(errors);
-      toast({ title: "Validation Error", description: validation.error.errors[0]?.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
     setChannelFieldErrors({});
@@ -759,20 +761,20 @@ const CampaignDetail = () => {
       if (editingChannel) {
         const { error } = await (supabase.from("channels") as any).update(channelData).eq("id", editingChannel.id);
         if (error) throw error;
-        toast({ title: "Channel updated successfully!" });
+        toast({ title: t('campaignDetail.toast.channelUpdateSuccess') });
       } else {
         const businessUserId = await resolveCurrentBusinessUserId();
         if (!businessUserId) throw new Error("Business user not found for current auth user");
         const { error } = await (supabase.from("channels") as any).insert({ ...channelData, created_by: businessUserId });
         if (error) throw error;
-        toast({ title: "Channel created successfully!" });
+        toast({ title: t('campaignDetail.toast.channelCreateSuccess') });
       }
 
       setChannelDialogOpen(false);
       resetChannelForm();
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error saving channel", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.channelError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -781,10 +783,10 @@ const CampaignDetail = () => {
     try {
       const { error } = await supabase.from("channels").delete().eq("id", channelToDelete.id);
       if (error) throw error;
-      toast({ title: "Channel deleted successfully!" });
+      toast({ title: t('campaignDetail.toast.channelDeleteSuccess') });
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error deleting channel", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.channelDeleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteDialogOpen(false);
       setChannelToDelete(null);
@@ -801,7 +803,7 @@ const CampaignDetail = () => {
     const validation = campaignDetailMarketingListsSchema.safeParse({ selectedListIds });
     if (!validation.success) {
       setListsFieldError(validation.error.errors[0]?.message || null);
-      toast({ title: "Validation Error", description: validation.error.errors[0]?.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
     setListsFieldError(null);
@@ -813,11 +815,11 @@ const CampaignDetail = () => {
         );
         if (error) throw error;
       }
-      toast({ title: "Marketing lists updated successfully!" });
+      toast({ title: t('campaignDetail.toast.listsUpdateSuccess') });
       setListsDialogOpen(false);
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error updating lists", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.listsError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -832,12 +834,12 @@ const CampaignDetail = () => {
         target_value: parseFloat(goalFormData.target_value),
       });
       if (error) throw error;
-      toast({ title: "Goal added successfully!" });
+      toast({ title: t('campaignDetail.toast.goalAddSuccess') });
       setGoalDialogOpen(false);
       setGoalFormData({ goal_type: "leads", target_value: "" });
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error adding goal", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.goalError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -877,7 +879,7 @@ const CampaignDetail = () => {
         .upsert(payload, { onConflict: 'channel_id,metric_date' });
 
       if (error) throw error;
-      toast({ title: "Metrics saved successfully!" });
+      toast({ title: t('campaignDetail.toast.metricsSuccess') });
       setMetricsDialogOpen(false);
       setSelectedChannelForMetrics(null);
       setMetricsFormData({
@@ -886,7 +888,7 @@ const CampaignDetail = () => {
       });
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error saving metrics", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.metricsError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -904,12 +906,12 @@ const CampaignDetail = () => {
         notes: leadFormData.notes || null,
       });
       if (error) throw error;
-      toast({ title: "Lead added successfully!" });
+      toast({ title: t('campaignDetail.toast.leadSuccess') });
       setLeadDialogOpen(false);
       setLeadFormData({ channel_id: "none", source: "", medium: "", status: "new", notes: "" });
       void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error adding lead", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.leadError'), description: error.message, variant: "destructive" });
     }
   };
 

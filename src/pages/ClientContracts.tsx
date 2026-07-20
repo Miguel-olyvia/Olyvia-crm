@@ -41,6 +41,7 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
@@ -208,17 +209,17 @@ const ClientContracts = () => {
 
   const handleDownloadPdf = async (contract: any) => {
     if (!activeCompany?.id) {
-      toast.error("Sem organização ativa");
+      toast.error(t('clientContracts.toast.noActiveOrg'));
       return;
     }
 
-    const loadingToast = toast.loading("A gerar PDF do contrato...");
+    const loadingToast = toast.loading(t('clientContracts.toast.generatingPdf'));
     let iframe: HTMLIFrameElement | null = null;
 
     try {
       const resolved = await resolveContractDocument(contract, activeCompany.id, activeCompany.name);
       if (!resolved) {
-        toast.error("Este contrato não tem conteúdo para gerar PDF");
+        toast.error(t('clientContracts.toast.noPdfContent'));
         return;
       }
 
@@ -327,9 +328,10 @@ const ClientContracts = () => {
         .from(pageElement)
         .save();
 
-      toast.success("PDF descarregado com sucesso");
+      toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
-      toast.error("Erro ao gerar PDF: " + (error?.message || "erro desconhecido"));
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
     } finally {
       toast.dismiss(loadingToast);
       iframe?.remove();
@@ -872,8 +874,11 @@ const ClientContracts = () => {
       });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato criado com sucesso"); handleCloseDialog(); },
-    onError: (error) => { toast.error("Erro ao criar contrato: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.createSuccess')); handleCloseDialog(); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.createError'), { description });
+    },
   });
 
   const updateMutation = useMutation({
@@ -893,8 +898,11 @@ const ClientContracts = () => {
       });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato atualizado"); handleCloseDialog(); },
-    onError: (error) => { toast.error("Erro: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.updateSuccess')); handleCloseDialog(); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.updateError'), { description });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -906,8 +914,11 @@ const ClientContracts = () => {
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "contract", p_id: id });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato movido para o lixo"); setIsDeleteOpen(false); setDeleteId(null); },
-    onError: (error) => { toast.error("Erro: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.deleteSuccess')); setIsDeleteOpen(false); setDeleteId(null); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.deleteError'), { description });
+    },
   });
 
   // Duplicar: cria um novo draft reutilizando rpc_create_client_contract com as
@@ -938,8 +949,11 @@ const ClientContracts = () => {
       });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato duplicado — novo draft criado"); },
-    onError: (error: any) => { toast.error("Erro ao duplicar contrato: " + (error?.message || "erro desconhecido")); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.duplicateSuccess')); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.duplicateError'), { description });
+    },
   });
 
   // Reatribuir comercial: muda o "owner" (created_by) do contrato via RPC dedicada.
@@ -957,12 +971,15 @@ const ClientContracts = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
-      toast.success("Comercial reatribuído com sucesso");
+      toast.success(t('clientContracts.toast.reassignSuccess'));
       setIsReassignDialogOpen(false);
       setReassigningContract(null);
       setReassignOwnerId("");
     },
-    onError: (error: any) => { toast.error("Erro ao reatribuir: " + (error?.message || "erro desconhecido")); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.reassignError'), { description });
+    },
   });
 
   // Org roster for the "Reatribuir comercial" picker — mirrors AnewLeads.tsx's
@@ -1049,7 +1066,7 @@ const ClientContracts = () => {
 
   const handleDuplicate = (contract: ClientContract) => {
     if (!(isSystemAdmin || canCreate)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     duplicateMutation.mutate(contract);
@@ -1057,7 +1074,7 @@ const ClientContracts = () => {
 
   const handleOpenReassign = (contract: ClientContract) => {
     if (!canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     setReassigningContract(contract);
@@ -1068,7 +1085,7 @@ const ClientContracts = () => {
   const handleFinalize = async (contractId: string) => {
     const contract = contracts.find(c => c.id === contractId) as any;
     if (contract && !canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     const { data: { user } } = await supabase.auth.getUser();
@@ -1088,7 +1105,7 @@ const ClientContracts = () => {
 
   const handleEdit = (contract: ClientContract) => {
     if (!canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     setEditingContract(contract);
@@ -1097,13 +1114,13 @@ const ClientContracts = () => {
 
   const handleDialogSave = (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string }) => {
     if (data.start_date && data.end_date && new Date(data.end_date) <= new Date(data.start_date)) {
-      toast.error("A data de fim deve ser posterior à data de início.");
+      toast.error(t('clientContracts.toast.endDateBeforeStart'));
       return;
     }
     if (data.id) {
       const target = contracts.find(c => c.id === data.id) as any;
       if (target && !canEditContract(target)) {
-        toast.error("Acesso negado");
+        toast.error(t('clientContracts.accessDenied'));
         return;
       }
       updateMutation.mutate(data as any);
@@ -1115,7 +1132,7 @@ const ClientContracts = () => {
   const handleStatusChange = async (contractId: string, newStatus: string) => {
     const contract = contracts.find(c => c.id === contractId) as any;
     if (contract && !canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     const businessUserId = await resolveCurrentBusinessUserId();
@@ -1126,9 +1143,9 @@ const ClientContracts = () => {
       p_id: contractId,
       p_status: newStatus,
     });
-    if (error) { toast.error("Erro ao mudar estado"); return; }
+    if (error) { toast.error(t('clientContracts.toast.statusChangeError')); return; }
     queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
-    toast.success(`Estado alterado para ${getTranslatedStatus(newStatus)}`);
+    toast.success(t('clientContracts.toast.statusChanged', { status: getTranslatedStatus(newStatus) }));
   };
 
   const toggleSelection = (id: string) => {
@@ -1330,7 +1347,7 @@ const ClientContracts = () => {
           onAction={(action, c) => {
             if (action === "send_signature" && c) handleOpenSendChannel(c);
             if (action === "view_client" && c) navigate("/clients");
-            if (action === "followup" && c) toast.info(`Follow-up ${c._clientName}`);
+            if (action === "followup" && c) toast.info(t('clientContracts.toast.followUpFor', { name: c._clientName || "" }));
           }}
         />
 
@@ -1713,7 +1730,7 @@ const ClientContracts = () => {
                           )}
                           {contract.status === "pending_signature" && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info("Follow-up")}>
+                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
                                 <Phone className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" title="Reenviar" onClick={() => handleOpenSendChannel(contract)}>
@@ -1735,10 +1752,10 @@ const ClientContracts = () => {
                           )}
                           {contract.status === "expired" && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-red-600 animate-pulse" title="Contactar" onClick={() => toast.info("Contactar")}>
+                              <Button variant="ghost" size="icon" className="text-red-600 animate-pulse" title="Contactar" onClick={() => toast.info(t('clientContracts.toast.contact'))}>
                                 <Phone className="h-4 w-4" />
                               </Button>
-                              <Button variant="ghost" size="icon" title="Renovar" onClick={() => toast.info("Renovar")}>
+                              <Button variant="ghost" size="icon" title="Renovar" onClick={() => toast.info(t('clientContracts.toast.renew'))}>
                                 <RotateCcw className="h-4 w-4" />
                               </Button>
                             </>
@@ -1766,7 +1783,7 @@ const ClientContracts = () => {
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />
@@ -1797,7 +1814,7 @@ const ClientContracts = () => {
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />
@@ -1805,7 +1822,7 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => { toast.info("Crie a nova proposta em Propostas → Nova Proposta"); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1827,7 +1844,7 @@ const ClientContracts = () => {
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />

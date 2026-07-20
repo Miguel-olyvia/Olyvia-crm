@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export interface Team {
   id: string;
@@ -26,6 +27,7 @@ export interface TeamFormData {
 }
 
 export function useOrganizationTeams(orgId: string) {
+  const { t } = useTranslation();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -119,14 +121,14 @@ export function useOrganizationTeams(orgId: string) {
         if (memberError) throw memberError;
       }
 
-      toast.success("Grupo criado com sucesso");
+      toast.success(t('organizations.team.createSuccess'));
       await loadTeams();
       return true;
     } catch (error: any) {
-      toast.error(error.message || "Erro ao criar grupo");
+      toast.error(error.message || t('organizations.team.createError'));
       return false;
     }
-  }, [orgId, teams.length, loadTeams]);
+  }, [orgId, teams.length, loadTeams, t]);
 
   const updateTeam = useCallback(async (teamId: string, data: TeamFormData) => {
     try {
@@ -173,14 +175,14 @@ export function useOrganizationTeams(orgId: string) {
         if (memberError) throw memberError;
       }
 
-      toast.success("Grupo atualizado com sucesso");
+      toast.success(t('organizations.team.updateSuccess'));
       await loadTeams();
       return true;
     } catch (error: any) {
-      toast.error(error.message || "Erro ao atualizar grupo");
+      toast.error(error.message || t('organizations.team.updateError'));
       return false;
     }
-  }, [loadTeams]);
+  }, [loadTeams, t]);
 
   const deleteTeam = useCallback(async (teamId: string) => {
     try {
@@ -191,12 +193,12 @@ export function useOrganizationTeams(orgId: string) {
         .eq("id", teamId);
 
       if (error) throw error;
-      toast.success("Grupo eliminado");
+      toast.success(t('organizations.team.deleteSuccess'));
       await loadTeams();
     } catch (error: any) {
-      toast.error(error.message || "Erro ao eliminar grupo");
+      toast.error(error.message || t('organizations.team.deleteError'));
     }
-  }, [loadTeams]);
+  }, [loadTeams, t]);
 
   const moveMemberToTeam = useCallback(async (userId: string, targetTeamId: string | null) => {
     try {
@@ -215,9 +217,9 @@ export function useOrganizationTeams(orgId: string) {
 
       await loadTeams();
     } catch (error: any) {
-      toast.error(error.message || "Erro ao mover membro");
+      toast.error(error.message || t('organizations.team.moveMemberError'));
     }
-  }, [loadTeams]);
+  }, [loadTeams, t]);
 
   const reorderTeams = useCallback(async (orderedIds: string[]) => {
     try {
@@ -230,8 +232,9 @@ export function useOrganizationTeams(orgId: string) {
       await loadTeams();
     } catch (error: any) {
       console.error("Error reordering:", error);
+      toast.error(error.message || t('organizations.team.reorderError'));
     }
-  }, [loadTeams]);
+  }, [loadTeams, t]);
 
   const promoteToLeader = useCallback(async (teamId: string, userId: string) => {
     try {
@@ -253,12 +256,12 @@ export function useOrganizationTeams(orgId: string) {
           .insert({ team_id: teamId, user_id: userId });
       }
 
-      toast.success("Líder atualizado");
+      toast.success(t('organizations.team.promoteLeaderSuccess'));
       await loadTeams();
     } catch (error: any) {
-      toast.error(error.message);
+      toast.error(error.message || t('organizations.team.promoteLeaderError'));
     }
-  }, [teams, loadTeams]);
+  }, [teams, loadTeams, t]);
 
   return {
     teams,

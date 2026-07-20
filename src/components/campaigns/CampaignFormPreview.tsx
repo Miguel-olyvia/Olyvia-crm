@@ -163,6 +163,7 @@ export function CampaignFormPreview({
   const [currentStep, setCurrentStep] = useState(1);
   const [formValues, setFormValues] = useState<Record<string, any>>({});
   const [previewLocale, setPreviewLocale] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const branding = formData?.branding;
 
@@ -174,6 +175,7 @@ export function CampaignFormPreview({
   useEffect(() => {
     if (open && campaignId) {
       setPreviewLocale(null);
+      setLoadError(null);
       loadFormStructure(null);
       setCurrentStep(1);
       setFormValues({});
@@ -189,6 +191,7 @@ export function CampaignFormPreview({
 
   const loadFormStructure = async (langOverride?: string | null) => {
     setLoading(true);
+    setLoadError(null);
     try {
       // Pass ?lang= so the backend resolves translations from forms.settings.i18n
       // (same code path used by the public form — no fallback duplication).
@@ -218,6 +221,7 @@ export function CampaignFormPreview({
       );
     } catch (error) {
       console.error("Error loading form structure:", error);
+      setLoadError("Não foi possível carregar a pré-visualização do formulário. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -804,6 +808,10 @@ export function CampaignFormPreview({
           <div className="flex flex-col items-center justify-center py-16 gap-4">
             <Loader2 className="h-8 w-8 animate-spin" style={{ color: primaryColor }} />
             <p className="text-muted-foreground">A carregar formulário...</p>
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-12 text-destructive">
+            <p>{loadError}</p>
           </div>
         ) : !formData || formData.steps.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">

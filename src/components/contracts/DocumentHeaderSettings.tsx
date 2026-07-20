@@ -8,6 +8,7 @@ import { AlignLeft, AlignCenter, AlignRight, Upload, Image as ImageIcon, Loader2
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
+import { useTranslation } from "@/hooks/useTranslation";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
@@ -39,6 +40,7 @@ function validateFile(file: File): string | null {
 }
 
 export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
   const { activeCompany } = useCompany();
@@ -70,7 +72,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       });
       const validateResult = parseValidateUploadResponse(validateData);
       if (validateError || !validateResult.ok) {
-        toast.error("Erro ao carregar logotipo: " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
+        toast.error(t("documentHeader.toast.logoError") + ": " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
         return;
       }
 
@@ -79,7 +81,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       toast.success("Logotipo carregado com sucesso");
     } catch (err: unknown) {
       console.error("Logo upload error:", err);
-      toast.error("Erro ao carregar logotipo: " + getUploadErrorMessage(err));
+      toast.error(t("documentHeader.toast.logoError") + ": " + getUploadErrorMessage(err));
     } finally {
       uploadingRef.current = false;
       if (fileInputRef.current) fileInputRef.current.value = "";

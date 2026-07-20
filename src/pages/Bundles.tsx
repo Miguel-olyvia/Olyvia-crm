@@ -148,8 +148,8 @@ const Bundles = () => {
 
       if ((data?.length ?? 0) >= MAX_BUNDLES) {
         toast({
-          title: "Aviso",
-          description: `A lista pode estar incompleta (limite de ${MAX_BUNDLES} pacotes atingido). Use os filtros para refinar a pesquisa.`,
+          title: t('bundles.toast.warning'),
+          description: t('bundles.toast.listIncomplete', { limit: MAX_BUNDLES }),
         });
       }
 
@@ -627,8 +627,8 @@ const Bundles = () => {
     } catch (error: any) {
       if (error.message === CANCELLED_MESSAGE) {
         toast({
-          title: "Importação cancelada",
-          description: "A importação foi interrompida.",
+          title: t('bundles.toast.importCancelled'),
+          description: t('bundles.toast.importCancelledDesc'),
         });
       } else {
         toast({

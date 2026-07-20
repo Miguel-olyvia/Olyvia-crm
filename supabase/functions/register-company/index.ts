@@ -401,9 +401,11 @@ serve(async (req) => {
   } catch (error: unknown) {
     console.error("Unexpected error:", error);
     await captureError(error, { function: "register-company" });
-    const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred";
+    // This is a public, unauthenticated endpoint: never return the raw
+    // exception text, which may contain internal Postgres/Supabase details.
+    // The real error is already logged above and sent to Sentry for debugging.
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: "Unexpected error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

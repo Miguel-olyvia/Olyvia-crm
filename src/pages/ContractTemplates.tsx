@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +65,7 @@ interface ContractTemplate {
 const ContractTemplates = () => {
   const { activeCompany } = useCompany();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const queryClient = useQueryClient();
   const [editingTemplate, setEditingTemplate] = useState<ContractTemplate | null>(null);
@@ -328,10 +331,13 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta criada com sucesso");
+      toast.success(t('contractTemplates.toast.createSuccess'));
       handleCloseEditor();
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.createError'), { description });
+    },
   });
 
   const updateMutation = useMutation({
@@ -349,10 +355,13 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta actualizada");
+      toast.success(t('contractTemplates.toast.updateSuccess'));
       handleCloseEditor();
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.updateError'), { description });
+    },
   });
 
   const deleteMutation = useMutation({
@@ -363,11 +372,14 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta eliminada");
+      toast.success(t('contractTemplates.toast.deleteSuccess'));
       setIsDeleteOpen(false);
       setDeleteId(null);
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.deleteError'), { description });
+    },
   });
 
   const duplicateMutation = useMutation({
@@ -387,9 +399,12 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta duplicada");
+      toast.success(t('contractTemplates.toast.duplicateSuccess'));
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.duplicateError'), { description });
+    },
   });
 
   const handleCloseEditor = () => {
@@ -420,7 +435,7 @@ const ContractTemplates = () => {
     setFormData({ ...formData, name: formData.name || baseName, body_html: html });
     setIsEditorOpen(true);
     if (isFromPdf) {
-      toast.info("Texto extraído do PDF — reveja a formatação e insira as variáveis", { duration: 5000 });
+      toast.info(t('contractTemplates.toast.pdfImported'), { duration: 5000 });
     }
     // Open variable detection assistant after a brief delay
     setTimeout(() => setIsVariableAssistantOpen(true), 500);
@@ -798,7 +813,7 @@ const ContractTemplates = () => {
                           onClick={() => {
                             const nextBody = `${formData.body_html || ""}${SIGNATORY_BLOCK_MARKER_HTML}`;
                             setFormData({ ...formData, body_html: nextBody });
-                            toast.success("Bloco de assinatura adicionado");
+                            toast.success(t('contractTemplates.toast.signatureBlockAdded'));
                           }}
                         >
                           Inserir bloco de assinatura

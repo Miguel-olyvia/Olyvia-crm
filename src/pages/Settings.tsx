@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/hooks/useTranslation";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface CustomField {
   id: string;
@@ -215,7 +216,8 @@ const Settings = () => {
       // For now, childOrgs = all visible orgs (same list)
       setChildOrgs(orgsResult.data || []);
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -303,7 +305,8 @@ const Settings = () => {
       setSmtpDialogOpen(false);
       loadSmtpSettings(userCompanyId);
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -339,7 +342,10 @@ const Settings = () => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const friendlyMessage = await getFriendlyErrorMessage(error);
+        throw new Error(friendlyMessage);
+      }
 
       toast.success(t('settingsPage.smtp.testSuccess'));
     } catch (error: any) {
@@ -378,7 +384,8 @@ const Settings = () => {
       resetForm();
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -395,7 +402,8 @@ const Settings = () => {
       toast.success(t('settingsPage.customFields.deleted'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -423,7 +431,8 @@ const Settings = () => {
       toast.success(t('settingsPage.calendar.success'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -451,7 +460,8 @@ const Settings = () => {
 
       toast.success(t('settingsPage.contactUniqueKeys.success'));
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -541,7 +551,8 @@ const Settings = () => {
       });
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -573,7 +584,8 @@ const Settings = () => {
       toast.success(t('settingsPage.channelTypes.deleted'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -592,7 +604,8 @@ const Settings = () => {
       toast.success(!currentStatus ? t('settingsPage.channelTypes.activated') : t('settingsPage.channelTypes.deactivated'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }

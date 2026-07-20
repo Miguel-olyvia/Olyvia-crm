@@ -226,6 +226,25 @@ export function MemberEditDialog({
     }
   };
 
+  // memberEditSchema (src/lib/validations.ts) has no t()-based error map — like
+  // every other Zod schema in this codebase, its messages are hardcoded raw
+  // strings. Translate them here at the display boundary instead, mapping each
+  // known raw message to a translation key rather than showing raw PT text
+  // regardless of the active app language.
+  const ZOD_MESSAGE_TRANSLATION_KEYS: Record<string, string> = {
+    "O nome é obrigatório": "organizations.memberEdit.nameRequired",
+    "O nome deve ter menos de 200 caracteres": "organizations.memberEdit.nameTooLong",
+    "Formato de email inválido": "organizations.memberEdit.emailInvalid",
+    "O email deve ter menos de 255 caracteres": "organizations.memberEdit.emailTooLong",
+    "O telefone deve ter menos de 20 caracteres": "organizations.memberEdit.phoneTooLong",
+    "A password deve ter pelo menos 8 caracteres": "organizations.memberEdit.passwordTooShort",
+    "A password deve ter menos de 72 caracteres": "organizations.memberEdit.passwordTooLong",
+  };
+  const translateZodMessage = (rawMessage: string): string => {
+    const translationKey = ZOD_MESSAGE_TRANSLATION_KEYS[rawMessage];
+    return translationKey ? t(translationKey) : rawMessage;
+  };
+
   const validateForm = (): boolean => {
     const result = memberEditSchema.safeParse({
       name: formData.name,
@@ -238,7 +257,7 @@ export function MemberEditDialog({
       const nextErrors: Record<string, string> = {};
       for (const issue of result.error.issues) {
         const key = String(issue.path[0] ?? "");
-        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+        if (key && !nextErrors[key]) nextErrors[key] = translateZodMessage(issue.message);
       }
       setFieldErrors(nextErrors);
       const firstMessage = Object.values(nextErrors)[0];
@@ -296,7 +315,7 @@ export function MemberEditDialog({
           });
           if (pwError) {
             console.error("Password update error:", pwError);
-            toast.error(t("users.passwordUpdateError"));
+            toast.error(t("profile.passwordUpdateError"));
           }
         }
       }

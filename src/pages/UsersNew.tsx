@@ -1216,7 +1216,10 @@ export default function UsersNew() {
         const deleteInvoke = await supabase.functions.invoke("delete-user", {
           body: { userId: user.auth_user_id },
         });
-        if (deleteInvoke.error) throw deleteInvoke.error;
+        if (deleteInvoke.error) {
+          const detailedError = await extractFunctionErrorMessage(deleteInvoke, deleteInvoke.error);
+          throw new Error(detailedError || deleteInvoke.error.message);
+        }
       }
 
       // rpc_delete_user runs the soft-deactivation UPDATE + audit-log write
@@ -1243,7 +1246,10 @@ export default function UsersNew() {
         const restoreInvoke = await supabase.functions.invoke("restore-user", {
           body: { userId: targetUser.auth_user_id },
         });
-        if (restoreInvoke.error) throw restoreInvoke.error;
+        if (restoreInvoke.error) {
+          const detailedError = await extractFunctionErrorMessage(restoreInvoke, restoreInvoke.error);
+          throw new Error(detailedError || restoreInvoke.error.message);
+        }
       }
 
       const { error: restoreUserError } = await supabase.rpc("rpc_restore_user", {

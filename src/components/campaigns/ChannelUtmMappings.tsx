@@ -21,6 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Trash2, Pencil, Plus, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Channel {
   id: string;
@@ -175,6 +176,7 @@ const emptyForm = {
 };
 
 export function ChannelUtmMappings({ campaignId, channels }: Props) {
+  const { t } = useTranslation();
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -202,7 +204,7 @@ export function ChannelUtmMappings({ campaignId, channels }: Props) {
     if (error) {
       console.error(error);
       toast({
-        title: "Erro a carregar mappings",
+        title: t('campaigns.utmMappings.toast.loadError'),
         description: error.message,
         variant: "destructive",
       });
@@ -243,7 +245,7 @@ export function ChannelUtmMappings({ campaignId, channels }: Props) {
 
   const save = async () => {
     if (!form.channel_id) {
-      toast({ title: "Escolhe um canal", variant: "destructive" });
+      toast({ title: t('campaigns.utmMappings.toast.selectChannel'), variant: "destructive" });
       return;
     }
     const payload = {
@@ -270,13 +272,13 @@ export function ChannelUtmMappings({ campaignId, channels }: Props) {
     }
     if (error) {
       toast({
-        title: "Erro a gravar",
+        title: t('campaigns.utmMappings.toast.saveError'),
         description: error.message,
         variant: "destructive",
       });
       return;
     }
-    toast({ title: editingId ? "Regra atualizada" : "Regra criada" });
+    toast({ title: editingId ? t('campaigns.utmMappings.toast.updated') : t('campaigns.utmMappings.toast.created') });
     cancelForm();
     load();
   };
@@ -288,7 +290,7 @@ export function ChannelUtmMappings({ campaignId, channels }: Props) {
       .eq("id", m.id);
     if (error) {
       toast({
-        title: "Erro",
+        title: t('campaigns.utmMappings.toast.toggleError'),
         description: error.message,
         variant: "destructive",
       });
@@ -305,7 +307,7 @@ export function ChannelUtmMappings({ campaignId, channels }: Props) {
       .eq("id", m.id);
     if (error) {
       toast({
-        title: "Erro a apagar",
+        title: t('campaigns.utmMappings.toast.deleteError'),
         description: error.message,
         variant: "destructive",
       });
