@@ -29,17 +29,29 @@ interface LeadsTableColumnsProps {
 }
 
 // Default system columns
-const DEFAULT_SYSTEM_COLUMNS: ColumnConfig[] = [
+// NOTE: "pipeline" mirrors the Pipeline column from the retired Contactos
+// listing (src/pages/AnewContacts.tsx) — Deals/Propostas/Orçamentos badges
+// per lead, sourced from the get_lead_page_pipeline() RPC (see
+// 20261110430000_lead_page_pipeline_rpc.sql), not raw per-row queries.
+// "assigned_to" and "days_without_contact" were previously always-rendered,
+// non-configurable columns in AnewLeads.tsx; they're exposed here so the
+// dialog accurately reflects everything the table can show/hide.
+// "last_contact_result" was removed: it was never rendered as its own
+// column (it's a sub-detail badge inside the "Último Contacto" cell), so
+// toggling it previously had no visible effect.
+export const DEFAULT_SYSTEM_COLUMNS: ColumnConfig[] = [
   { id: "phone_icon", key: "phone_icon", label: "📞", visible: true, order: 0, isSystem: true },
   { id: "last_contact_at", key: "last_contact_at", label: "Último Contacto", visible: true, order: 1, isSystem: true },
   { id: "campaign", key: "campaign", label: "Campanha", visible: true, order: 2, isSystem: true },
   { id: "name", key: "name", label: "Nome", visible: true, order: 3, isSystem: true },
   { id: "phone", key: "phone", label: "Telefone", visible: true, order: 4, isSystem: true },
-  { id: "email", key: "email", label: "Email", visible: true, order: 5, isSystem: true },
-  { id: "status", key: "status", label: "Status", visible: true, order: 6, isSystem: true },
-  { id: "last_contact_result", key: "last_contact_result", label: "Resultado", visible: true, order: 7, isSystem: true },
+  { id: "pipeline", key: "pipeline", label: "Pipeline", visible: true, order: 5, isSystem: true },
+  { id: "email", key: "email", label: "Email", visible: true, order: 6, isSystem: true },
+  { id: "status", key: "status", label: "Status", visible: true, order: 7, isSystem: true },
   { id: "source", key: "source", label: "Origem", visible: false, order: 8, isSystem: true },
   { id: "created_at", key: "created_at", label: "Criado", visible: true, order: 9, isSystem: true },
+  { id: "assigned_to", key: "assigned_to", label: "Comercial", visible: true, order: 10, isSystem: true },
+  { id: "days_without_contact", key: "days_without_contact", label: "Dias s/ Contacto", visible: true, order: 11, isSystem: true },
 ];
 
 const STORAGE_KEY_PREFIX = "leads_columns_";
@@ -207,15 +219,25 @@ export function LeadsTableColumns({
             {columns.map((column, index) => (
               <div
                 key={column.id}
-                draggable
-                onDragStart={() => handleDragStart(index)}
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDragEnd={handleDragEnd}
-                className={`flex items-center gap-3 p-2 rounded-md border bg-background cursor-move transition-colors ${
+                className={`flex items-center gap-3 p-2 rounded-md border bg-background transition-colors ${
                   draggedItem === index ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
                 }`}
               >
-                <GripVertical className="h-4 w-4 text-muted-foreground shrink-0" />
+                {/* draggable lives on the grip handle only (not the whole
+                    row) — a draggable ancestor around the Checkbox/Label
+                    suppresses their click events in Chromium, silently
+                    breaking the visibility toggle (confirmed live: clicking
+                    the checkbox never changed its aria-checked/data-state
+                    while nested inside a draggable row). */}
+                <span
+                  draggable
+                  onDragStart={() => handleDragStart(index)}
+                  className="cursor-move shrink-0"
+                >
+                  <GripVertical className="h-4 w-4 text-muted-foreground" />
+                </span>
                 <Checkbox
                   id={`col-${column.id}`}
                   checked={column.visible}

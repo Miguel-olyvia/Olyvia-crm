@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
@@ -68,7 +68,7 @@ import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAIScheduling
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
 import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
-import { LeadsTableColumns, ColumnConfig } from "@/components/leads/LeadsTableColumns";
+import { LeadsTableColumns, ColumnConfig, DEFAULT_SYSTEM_COLUMNS } from "@/components/leads/LeadsTableColumns";
 import { LeadsAIOrganization } from "@/components/leads/LeadsAIOrganization";
 import { LeadsAIConfig } from "@/components/leads/LeadsAIConfig";
 import { DynamicFormField } from "@/components/leads/DynamicFormField";
@@ -101,7 +101,7 @@ import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
-import { LeadTableRow } from "@/components/leads/LeadTableRow";
+import { LeadTableRow, LeadPipelineEntry } from "@/components/leads/LeadTableRow";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { calculateLeadHealthScore, type LeadHealthScore } from "@/hooks/useLeadHealthScore";
 import { LeadDetailHeader } from "@/components/leads/detail/LeadDetailHeader";
@@ -544,8 +544,29 @@ export default function AnewLeads() {
   const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
   const [searchingClients, setSearchingClients] = useState(false);
   
-  // Column customization state
-  const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>([]);
+  // Column customization state — initialized from the default set (rather
+  // than []) so the table doesn't render with only the fixed checkbox/Ações
+  // columns for the brief moment before LeadsTableColumns' mount effect
+  // calls onColumnsChange with the persisted (or default) configuration.
+  const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>(
+    DEFAULT_SYSTEM_COLUMNS.filter(c => c.visible)
+  );
+  // Pipeline (Deals/Propostas/Orçamentos) aggregate per lead entity_id,
+  // mirroring the Pipeline column already shown in the retired Contactos
+  // listing. Sourced from get_lead_page_pipeline() — see
+  // 20261110430000_lead_page_pipeline_rpc.sql.
+  const [leadPipelineData, setLeadPipelineData] = useState<Record<string, LeadPipelineEntry>>({});
+  // Memoized so LeadsTableColumns' `[campaignId, fieldDefinitions]` mount
+  // effect doesn't re-fire (and silently reset any unsaved toggle/reorder in
+  // its dialog) on every AnewLeads re-render — an inline .map() below would
+  // produce a brand-new array reference every render, confirmed live to
+  // make the "Personalizar Colunas" checkboxes visually toggle for an
+  // instant and then snap back, since the effect immediately reloaded the
+  // persisted config over the in-progress edit.
+  const columnFieldDefinitions = useMemo(
+    () => fieldDefs.map(f => ({ field_key: f.field_key, field_label: f.field_label })),
+    [fieldDefs]
+  );
 
   // Callbacks state
   const [callbacksChecked, setCallbacksChecked] = useState(false);
@@ -1815,6 +1836,45 @@ export default function AnewLeads() {
         }
         setLeadInteractionCounts(counts);
         setLeadDealEntityIds(dealSet);
+
+        // Pipeline (Deals/Propostas/Orçamentos) aggregate for the new
+        // "Pipeline" column — same aggregate-RPC pattern as the health call
+        // above, never raw per-row queries (see anewLeadsAggregateRpc.test.ts).
+        const { data: pipelineRows, error: pipelineError } = await (supabase as any)
+          .rpc("get_lead_page_pipeline", {
+            p_org_id: activeCompanyId,
+            p_entity_ids: [...new Set(leadEntityIds)],
+            p_scope: requestedScope,
+          });
+
+        if (pipelineError) {
+          console.error("Error loading lead pipeline aggregates:", pipelineError);
+        } else {
+          const pipelineMap: Record<string, LeadPipelineEntry> = {};
+          (pipelineRows || []).forEach((row: {
+            entity_id: string;
+            deal_count: number | string;
+            deal_value: number | string;
+            proposal_count: number | string;
+            proposal_value: number | string;
+            proposal_value_with_iva: number | string;
+            quote_count: number | string;
+            quote_value: number | string;
+            quote_value_with_iva: number | string;
+          }) => {
+            pipelineMap[row.entity_id] = {
+              deal_count: Number(row.deal_count) || 0,
+              deal_value: Number(row.deal_value) || 0,
+              proposal_count: Number(row.proposal_count) || 0,
+              proposal_value: Number(row.proposal_value) || 0,
+              proposal_value_with_iva: Number(row.proposal_value_with_iva) || 0,
+              quote_count: Number(row.quote_count) || 0,
+              quote_value: Number(row.quote_value) || 0,
+              quote_value_with_iva: Number(row.quote_value_with_iva) || 0,
+            };
+          });
+          setLeadPipelineData(pipelineMap);
+        }
       }
 
       // Client-side post-filter: ensure effective status alignment
@@ -4985,7 +5045,7 @@ export default function AnewLeads() {
                 </div>
                 <LeadsTableColumns
                   campaignId={campaignFilter !== "all" ? campaignFilter : undefined}
-                  fieldDefinitions={fieldDefs.map(f => ({ field_key: f.field_key, field_label: f.field_label }))}
+                  fieldDefinitions={columnFieldDefinitions}
                   onColumnsChange={setVisibleColumns}
                 />
               </div>
@@ -5015,96 +5075,155 @@ export default function AnewLeads() {
                             aria-label="Selecionar todos"
                           />
                         </TableHead>
-                        {/* Last Contact At */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none w-28"
-                          onClick={() => handleSort("last_contact_at")}
-                        >
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span className="text-xs">Últ. Contacto</span>
-                            {renderSortIcon("last_contact_at")}
-                          </div>
-                        </TableHead>
-                        {/* Name */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("nome")}
-                        >
-                          <div className="flex items-center">Nome{renderSortIcon("nome")}</div>
-                        </TableHead>
-                        {/* Phone */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("telefone")}
-                        >
-                          <div className="flex items-center">Telefone{renderSortIcon("telefone")}</div>
-                        </TableHead>
-                        {/* WhatsApp Column */}
-                        <TableHead className="w-10 text-center">
-                          <MessageCircle className="h-4 w-4 mx-auto text-green-600" />
-                        </TableHead>
-                        {/* Email */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("email")}
-                        >
-                          <div className="flex items-center">Email{renderSortIcon("email")}</div>
-                        </TableHead>
-                        {/* Status */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("status")}
-                        >
-                          <div className="flex items-center">Status{renderSortIcon("status")}</div>
-                        </TableHead>
-                        {/* Campaign - only if filter is "all" */}
-                        {campaignFilter === "all" && (
-                          <TableHead 
-                            className="cursor-pointer hover:bg-muted/50 select-none"
-                            onClick={() => handleSort("campaign")}
-                          >
-                            <div className="flex items-center">Campanha{renderSortIcon("campaign")}</div>
-                          </TableHead>
-                        )}
-                        {/* Dynamic columns from campaign fields - only when filtered */}
-                        {campaignFilter !== "all" && displayColumns.slice(3).map(col => (
-                          <TableHead 
-                            key={col.field_key}
-                            className="cursor-pointer hover:bg-muted/50 select-none"
-                            onClick={() => handleSort(col.field_key)}
-                          >
-                            <div className="flex items-center">
-                              {col.field_label}
-                              {renderSortIcon(col.field_key)}
-                            </div>
-                          </TableHead>
-                        ))}
-                        {/* Created */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none w-28"
-                          onClick={() => handleSort("created_at")}
-                        >
-                          <div className="flex items-center">Criado{renderSortIcon("created_at")}</div>
-                        </TableHead>
-                        {/* Created by / Source */}
-                        <TableHead
-                          className="w-32 cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("source")}
-                        >
-                          <div className="flex items-center">Origem{renderSortIcon("source")}</div>
-                        </TableHead>
-                        {/* Assigned To */}
-                        <TableHead className="w-36">
-                          <div className="flex items-center">{t('leads.assignedTo')}</div>
-                        </TableHead>
-                        {/* Dias sem contacto */}
-                        <TableHead className="w-32">
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span className="text-xs">Dias s/ contacto</span>
-                          </div>
-                        </TableHead>
+                        {/* Configurable headers — mirrors the cell switch in
+                            LeadTableRow.tsx, driven by the same visibleColumns
+                            (order + visibility from "Personalizar Colunas"). */}
+                        {visibleColumns.map(column => {
+                          switch (column.key) {
+                            case "phone_icon":
+                              return (
+                                <TableHead key={column.id} className="w-10 text-center">
+                                  <MessageCircle className="h-4 w-4 mx-auto text-green-600" />
+                                </TableHead>
+                              );
+                            case "last_contact_at":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none w-28"
+                                  onClick={() => handleSort("last_contact_at")}
+                                >
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    <span className="text-xs">Últ. Contacto</span>
+                                    {renderSortIcon("last_contact_at")}
+                                  </div>
+                                </TableHead>
+                              );
+                            case "campaign":
+                              if (campaignFilter !== "all") {
+                                return (
+                                  <Fragment key={column.id}>
+                                    {displayColumns.slice(3).map(col => (
+                                      <TableHead
+                                        key={col.field_key}
+                                        className="cursor-pointer hover:bg-muted/50 select-none"
+                                        onClick={() => handleSort(col.field_key)}
+                                      >
+                                        <div className="flex items-center">
+                                          {col.field_label}
+                                          {renderSortIcon(col.field_key)}
+                                        </div>
+                                      </TableHead>
+                                    ))}
+                                  </Fragment>
+                                );
+                              }
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("campaign")}
+                                >
+                                  <div className="flex items-center">Campanha{renderSortIcon("campaign")}</div>
+                                </TableHead>
+                              );
+                            case "name":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("nome")}
+                                >
+                                  <div className="flex items-center">Nome{renderSortIcon("nome")}</div>
+                                </TableHead>
+                              );
+                            case "phone":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("telefone")}
+                                >
+                                  <div className="flex items-center">Telefone{renderSortIcon("telefone")}</div>
+                                </TableHead>
+                              );
+                            case "pipeline":
+                              return (
+                                <TableHead key={column.id}>
+                                  <div className="flex items-center">Pipeline</div>
+                                </TableHead>
+                              );
+                            case "email":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("email")}
+                                >
+                                  <div className="flex items-center">Email{renderSortIcon("email")}</div>
+                                </TableHead>
+                              );
+                            case "status":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("status")}
+                                >
+                                  <div className="flex items-center">Status{renderSortIcon("status")}</div>
+                                </TableHead>
+                              );
+                            case "created_at":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none w-28"
+                                  onClick={() => handleSort("created_at")}
+                                >
+                                  <div className="flex items-center">Criado{renderSortIcon("created_at")}</div>
+                                </TableHead>
+                              );
+                            case "source":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="w-32 cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("source")}
+                                >
+                                  <div className="flex items-center">Origem{renderSortIcon("source")}</div>
+                                </TableHead>
+                              );
+                            case "assigned_to":
+                              return (
+                                <TableHead key={column.id} className="w-36">
+                                  <div className="flex items-center">{t('leads.assignedTo')}</div>
+                                </TableHead>
+                              );
+                            case "days_without_contact":
+                              return (
+                                <TableHead key={column.id} className="w-32">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    <span className="text-xs">Dias s/ contacto</span>
+                                  </div>
+                                </TableHead>
+                              );
+                            default:
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort(column.key)}
+                                >
+                                  <div className="flex items-center">
+                                    {column.label}
+                                    {renderSortIcon(column.key)}
+                                  </div>
+                                </TableHead>
+                              );
+                          }
+                        })}
                         {/* Actions Column - Last */}
                         <TableHead className="text-right sticky right-0 bg-muted/30 z-10 min-w-[180px]">Ações</TableHead>
                       </TableRow>
@@ -5112,13 +5231,13 @@ export default function AnewLeads() {
                     <TableBody>
                       {loading ? (
                         <TableRow>
-                          <TableCell colSpan={13} className="text-center py-8">
+                          <TableCell colSpan={2 + visibleColumns.length} className="text-center py-8">
                             <OlyviaLoader size={28} text="A carregar..." />
                           </TableCell>
                         </TableRow>
                       ) : filteredLeads.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={2 + visibleColumns.length} className="text-center py-8 text-muted-foreground">
                             {campaigns.length === 0 && globalTotal === 0 ? (
                               <div className="space-y-2">
                                 <p>Nenhuma campanha configurada. Crie uma campanha primeiro.</p>
@@ -5148,6 +5267,8 @@ export default function AnewLeads() {
                               email={email}
                               campaignFilter={campaignFilter}
                               displayColumns={displayColumns}
+                              visibleColumns={visibleColumns}
+                              pipelineData={lead.entity_id ? leadPipelineData[lead.entity_id] : undefined}
                               getStatusColor={getStatusColor}
                               getStatusLabel={getStatusLabel}
                               getEffectiveStatus={getEffectiveStatus}

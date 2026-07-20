@@ -15,12 +15,32 @@ import {
 import { PermissionGate } from "@/components/PermissionGate";
 import {
   Phone, Eye, Pencil, FileText, Mail, MessageCircle,
-  MoreHorizontal, Star, Copy, Trash2, User, CalendarIcon,
+  MoreHorizontal, Star, Copy, Trash2, User, CalendarIcon, Handshake, ScrollText,
 } from "lucide-react";
 import { PhoneCallDropdown } from "@/components/shared/PhoneCallDropdown";
 import { format, formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import type { ColumnConfig } from "./LeadsTableColumns";
+
+// Deal/Proposal/Quote aggregate for one lead's entity_id, sourced from the
+// get_lead_page_pipeline() RPC (20261110430000_lead_page_pipeline_rpc.sql).
+// Mirrors the shape AnewContacts.tsx computed client-side for its own
+// "Pipeline" column (dealsData/proposalsData/quotesData).
+export interface LeadPipelineEntry {
+  deal_count: number;
+  deal_value: number;
+  proposal_count: number;
+  proposal_value: number;
+  proposal_value_with_iva: number;
+  quote_count: number;
+  quote_value: number;
+  quote_value_with_iva: number;
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value || 0);
+}
 
 export interface LeadTableRowProps {
   lead: any;
@@ -30,6 +50,13 @@ export interface LeadTableRowProps {
   email: string;
   campaignFilter: string;
   displayColumns: Array<{ field_key?: string; key?: string; [k: string]: any }>;
+  // Ordered, already-visible-filtered column config driving which
+  // configurable cells render and in what order (checkbox and Ações stay
+  // fixed regardless). Falls back to a fixed legacy layout when empty/not
+  // yet loaded, so the table never renders blank before the first
+  // onColumnsChange callback fires.
+  visibleColumns: ColumnConfig[];
+  pipelineData?: LeadPipelineEntry;
   // Helper functions
   getStatusColor: (status: string) => React.CSSProperties;
   getStatusLabel: (status: string) => string;
@@ -60,6 +87,8 @@ export const LeadTableRow = memo(function LeadTableRow({
   email,
   campaignFilter,
   displayColumns,
+  visibleColumns,
+  pipelineData,
   getStatusColor,
   getStatusLabel,
   getEffectiveStatus,
@@ -95,166 +124,246 @@ export const LeadTableRow = memo(function LeadTableRow({
         />
       </TableCell>
 
-      {/* Last Contact At */}
-      <TableCell>
-        {lead.last_contact_at ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="flex flex-col">
-                <span className="text-xs font-medium">
-                  {formatDistanceToNow(new Date(lead.last_contact_at), { addSuffix: true, locale: pt })}
-                </span>
-                {lead.last_contact_result && (
-                  <Badge
-                    variant="outline"
-                    className="text-[10px] px-1 py-0 mt-0.5 w-fit"
-                    style={(() => {
-                      const info = getContactResultInfo(lead.last_contact_result);
-                      return info ? {
-                        backgroundColor: info.color + '15',
-                        color: info.color,
-                        borderColor: info.color + '40'
-                      } : {};
-                    })()}
-                  >
-                    {getContactResultInfo(lead.last_contact_result)?.name || lead.last_contact_result}
-                  </Badge>
+      {/* Configurable columns — rendered in the order/visibility chosen via
+          the "Personalizar Colunas" dialog (LeadsTableColumns.tsx). Checkbox
+          (above) and Ações (below) are always fixed, matching the Contactos
+          listing's UX (src/pages/AnewContacts.tsx). */}
+      {visibleColumns.map(column => {
+        switch (column.key) {
+          case "phone_icon":
+            return (
+              <TableCell key={column.id} className="text-center" onClick={e => e.stopPropagation()}>
+                {phone ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        onClick={() => onWhatsApp(lead)}
+                      >
+                        <MessageCircle className="w-4 h-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>WhatsApp</TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <span className="text-muted-foreground/30">
+                    <MessageCircle className="w-4 h-4 mx-auto" />
+                  </span>
                 )}
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              {format(new Date(lead.last_contact_at), "dd/MM/yyyy HH:mm", { locale: pt })}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          <span className="text-xs text-muted-foreground">Sem contacto</span>
-        )}
-      </TableCell>
+              </TableCell>
+            );
 
-      {/* Name */}
-      <TableCell>
-        <span className="font-medium">{name || "-"}</span>
-      </TableCell>
+          case "last_contact_at":
+            return (
+              <TableCell key={column.id}>
+                {lead.last_contact_at ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-medium">
+                          {formatDistanceToNow(new Date(lead.last_contact_at), { addSuffix: true, locale: pt })}
+                        </span>
+                        {lead.last_contact_result && (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1 py-0 mt-0.5 w-fit"
+                            style={(() => {
+                              const info = getContactResultInfo(lead.last_contact_result);
+                              return info ? {
+                                backgroundColor: info.color + '15',
+                                color: info.color,
+                                borderColor: info.color + '40'
+                              } : {};
+                            })()}
+                          >
+                            {getContactResultInfo(lead.last_contact_result)?.name || lead.last_contact_result}
+                          </Badge>
+                        )}
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {format(new Date(lead.last_contact_at), "dd/MM/yyyy HH:mm", { locale: pt })}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Sem contacto</span>
+                )}
+              </TableCell>
+            );
 
-      {/* Phone */}
-      <TableCell>
-        <span className="text-sm">{phone || "-"}</span>
-      </TableCell>
+          case "campaign":
+            // When a specific campaign is selected, its custom fields take
+            // this column's place instead of the Campanha badge (unchanged
+            // behavior from before this column became configurable).
+            if (campaignFilter !== "all") {
+              return (
+                <React.Fragment key={column.id}>
+                  {displayColumns.slice(3).map(col => {
+                    const fieldKey = col.field_key || col.key || '';
+                    const value = lead.field_values?.[fieldKey];
+                    return (
+                      <TableCell key={fieldKey}>
+                        <span className="text-sm">{resolveFieldValue(fieldKey, value)}</span>
+                      </TableCell>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            }
+            return (
+              <TableCell key={column.id}>
+                <Badge variant="outline" className="text-xs">
+                  {lead.campaigns?.name || "-"}
+                </Badge>
+              </TableCell>
+            );
 
-      {/* WhatsApp */}
-      <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-        {phone ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                onClick={() => onWhatsApp(lead)}
-              >
-                <MessageCircle className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>WhatsApp</TooltipContent>
-          </Tooltip>
-        ) : (
-          <span className="text-muted-foreground/30">
-            <MessageCircle className="w-4 h-4 mx-auto" />
-          </span>
-        )}
-      </TableCell>
+          case "name":
+            return (
+              <TableCell key={column.id}>
+                <span className="font-medium">{name || "-"}</span>
+              </TableCell>
+            );
 
-      {/* Email */}
-      <TableCell>
-        <span className="text-sm text-muted-foreground">{email || "-"}</span>
-      </TableCell>
+          case "phone":
+            return (
+              <TableCell key={column.id}>
+                <span className="text-sm">{phone || "-"}</span>
+              </TableCell>
+            );
 
-      {/* Status */}
-      <TableCell>
-        <Badge style={getStatusColor(getEffectiveStatus(lead))}>
-          {getStatusLabel(getEffectiveStatus(lead))}
-        </Badge>
-      </TableCell>
-
-      {/* Campaign - only if filter is "all" */}
-      {campaignFilter === "all" && (
-        <TableCell>
-          <Badge variant="outline" className="text-xs">
-            {lead.campaigns?.name || "-"}
-          </Badge>
-        </TableCell>
-      )}
-
-      {/* Dynamic columns from campaign fields */}
-      {campaignFilter !== "all" && displayColumns.slice(3).map(col => {
-        const fieldKey = col.field_key || col.key || '';
-        const value = lead.field_values?.[fieldKey];
-        return (
-          <TableCell key={fieldKey}>
-            <span className="text-sm">{resolveFieldValue(fieldKey, value)}</span>
-          </TableCell>
-        );
-      })}
-
-      {/* Created */}
-      <TableCell>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true, locale: pt })}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {format(new Date(lead.created_at), "dd/MM/yyyy HH:mm")}
-          </TooltipContent>
-        </Tooltip>
-      </TableCell>
-
-      {/* Origin / Created by */}
-      <TableCell>
-        {lead.source ? (
-          <Badge variant="outline" className="text-xs">
-            {lead.source === 'web' ? '🌐 Web' :
-              lead.source === 'api' ? '🔌 API' :
-                lead.source === 'import' ? '📥 Import' :
-                  lead.source}
-          </Badge>
-        ) : lead.profiles?.name ? (
-          <div className="flex items-center gap-1.5">
-            <User className="w-3 h-3 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground truncate max-w-[80px]">
-              {lead.profiles.name}
-            </span>
-          </div>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        )}
-      </TableCell>
-
-      {/* Assigned To */}
-      <TableCell>
-        <span className="text-xs">
-          {lead.assigned_user?.name || (
-            <span className="text-muted-foreground italic">{t('leads.unassigned')}</span>
-          )}
-        </span>
-      </TableCell>
-
-      {/* Dias sem contacto */}
-      <TableCell>
-        {(() => {
-          if (!lead.last_contact_at) {
-            return <span className="text-xs font-medium text-destructive">Sem contacto</span>;
+          case "pipeline": {
+            const hasPipeline = !!(pipelineData && (
+              pipelineData.deal_count > 0 || pipelineData.proposal_count > 0 || pipelineData.quote_count > 0
+            ));
+            return (
+              <TableCell key={column.id}>
+                {hasPipeline ? (
+                  <div className="flex flex-col gap-0.5">
+                    {pipelineData!.deal_count > 0 && (
+                      <Badge variant="outline" className="text-[10px] whitespace-nowrap w-fit">
+                        <Handshake className="h-3 w-3 mr-1" />
+                        {pipelineData!.deal_count} pedido{pipelineData!.deal_count > 1 ? 's' : ''} · {formatCurrency(pipelineData!.deal_value)}
+                      </Badge>
+                    )}
+                    {pipelineData!.proposal_count > 0 && (
+                      <Badge variant="outline" className="text-[10px] whitespace-nowrap w-fit border-blue-300 text-blue-700 dark:border-blue-700 dark:text-blue-400">
+                        <FileText className="h-3 w-3 mr-1" />
+                        {pipelineData!.proposal_count} proposta{pipelineData!.proposal_count > 1 ? 's' : ''} · {formatCurrency(pipelineData!.proposal_value)}
+                        {pipelineData!.proposal_value_with_iva > 0 && pipelineData!.proposal_value_with_iva !== pipelineData!.proposal_value ? ` (c/ IVA: ${formatCurrency(pipelineData!.proposal_value_with_iva)})` : ''}
+                      </Badge>
+                    )}
+                    {pipelineData!.quote_count > 0 && (
+                      <Badge variant="outline" className="text-[10px] whitespace-nowrap w-fit border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-400">
+                        <ScrollText className="h-3 w-3 mr-1" />
+                        {pipelineData!.quote_count} orçamento{pipelineData!.quote_count > 1 ? 's' : ''} · {formatCurrency(pipelineData!.quote_value)}
+                        {pipelineData!.quote_value_with_iva > 0 && pipelineData!.quote_value_with_iva !== pipelineData!.quote_value ? ` (c/ IVA: ${formatCurrency(pipelineData!.quote_value_with_iva)})` : ''}
+                      </Badge>
+                    )}
+                  </div>
+                ) : <span className="text-xs text-muted-foreground">—</span>}
+              </TableCell>
+            );
           }
-          const daysDiff = Math.floor((Date.now() - new Date(lead.last_contact_at).getTime()) / (1000 * 60 * 60 * 24));
-          const isOverdue = daysDiff > 7;
-          return (
-            <span className={cn("text-xs font-medium", isOverdue ? "text-destructive" : "text-muted-foreground")}>
-              {daysDiff} {daysDiff === 1 ? "dia" : "dias"}
-            </span>
-          );
-        })()}
-      </TableCell>
+
+          case "email":
+            return (
+              <TableCell key={column.id}>
+                <span className="text-sm text-muted-foreground">{email || "-"}</span>
+              </TableCell>
+            );
+
+          case "status":
+            return (
+              <TableCell key={column.id}>
+                <Badge style={getStatusColor(getEffectiveStatus(lead))}>
+                  {getStatusLabel(getEffectiveStatus(lead))}
+                </Badge>
+              </TableCell>
+            );
+
+          case "created_at":
+            return (
+              <TableCell key={column.id}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(lead.created_at), { addSuffix: true, locale: pt })}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {format(new Date(lead.created_at), "dd/MM/yyyy HH:mm")}
+                  </TooltipContent>
+                </Tooltip>
+              </TableCell>
+            );
+
+          case "source":
+            return (
+              <TableCell key={column.id}>
+                {lead.source ? (
+                  <Badge variant="outline" className="text-xs">
+                    {lead.source === 'web' ? '🌐 Web' :
+                      lead.source === 'api' ? '🔌 API' :
+                        lead.source === 'import' ? '📥 Import' :
+                          lead.source}
+                  </Badge>
+                ) : lead.profiles?.name ? (
+                  <div className="flex items-center gap-1.5">
+                    <User className="w-3 h-3 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground truncate max-w-[80px]">
+                      {lead.profiles.name}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                )}
+              </TableCell>
+            );
+
+          case "assigned_to":
+            return (
+              <TableCell key={column.id}>
+                <span className="text-xs">
+                  {lead.assigned_user?.name || (
+                    <span className="text-muted-foreground italic">{t('leads.unassigned')}</span>
+                  )}
+                </span>
+              </TableCell>
+            );
+
+          case "days_without_contact":
+            return (
+              <TableCell key={column.id}>
+                {(() => {
+                  if (!lead.last_contact_at) {
+                    return <span className="text-xs font-medium text-destructive">Sem contacto</span>;
+                  }
+                  const daysDiff = Math.floor((Date.now() - new Date(lead.last_contact_at).getTime()) / (1000 * 60 * 60 * 24));
+                  const isOverdue = daysDiff > 7;
+                  return (
+                    <span className={cn("text-xs font-medium", isOverdue ? "text-destructive" : "text-muted-foreground")}>
+                      {daysDiff} {daysDiff === 1 ? "dia" : "dias"}
+                    </span>
+                  );
+                })()}
+              </TableCell>
+            );
+
+          default: {
+            // Custom campaign field column (isSystem: false), keyed by its
+            // own field_key rather than one of the fixed system keys above.
+            const value = lead.field_values?.[column.key];
+            return (
+              <TableCell key={column.id}>
+                <span className="text-sm">{resolveFieldValue(column.key, value)}</span>
+              </TableCell>
+            );
+          }
+        }
+      })}
 
       {/* Actions - Last column */}
       <TableCell className="text-right sticky right-0 bg-background z-10" onClick={e => e.stopPropagation()}>
@@ -393,6 +502,8 @@ export const LeadTableRow = memo(function LeadTableRow({
     prev.name === next.name &&
     prev.phone === next.phone &&
     prev.email === next.email &&
-    prev.campaignFilter === next.campaignFilter
+    prev.campaignFilter === next.campaignFilter &&
+    prev.visibleColumns === next.visibleColumns &&
+    prev.pipelineData === next.pipelineData
   );
 });
