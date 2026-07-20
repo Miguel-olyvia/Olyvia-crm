@@ -1010,7 +1010,7 @@ const Deals = () => {
         try {
           const { data: lead, error } = await (supabase
             .from("anew_leads") as any)
-            .select("id, organization_id, client_id, entity_id")
+            .select("id, organization_id, entity_id")
             .eq("id", createFromLeadId)
             .single();
           

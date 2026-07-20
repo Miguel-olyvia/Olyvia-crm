@@ -551,7 +551,16 @@ serve(async (req) => {
       if (psn === "accepted" && proposal) {
         try {
           // Create client_contract from proposal
-          const resolvedEntityId = proposal.entity_id || null;
+          // Resolve entity_id: from proposal, then deal (some proposals are
+          // created from a deal and only carry entity_id via deal_id, not on
+          // the proposal row itself — without this fallback the contract is
+          // created with entity_id = null and the client name can't be
+          // resolved anywhere downstream, showing as "?" in the UI).
+          let resolvedEntityId = proposal.entity_id || null;
+          if (!resolvedEntityId && proposal.deal_id) {
+            const { data: dealForEntity } = await supabase.from("deals").select("entity_id").eq("id", proposal.deal_id).single();
+            resolvedEntityId = dealForEntity?.entity_id || null;
+          }
           const resolvedOrgId = proposal.organization_id || orgId;
           const resolvedRootOrgId = proposal.root_organization_id || resolvedOrgId;
 

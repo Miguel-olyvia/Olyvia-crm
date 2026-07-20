@@ -24,6 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
@@ -1055,7 +1056,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                   </TabsTrigger>
                   <TabsTrigger value="notes">📝 Notas</TabsTrigger>
                   <TabsTrigger value="journey">🗺 Percurso</TabsTrigger>
-                  <TabsTrigger value="edit">✏️ Editar</TabsTrigger>
+                  <PermissionGate permission="clients.edit">
+                    <TabsTrigger value="edit">✏️ Editar</TabsTrigger>
+                  </PermissionGate>
                 </TabsList>
               </div>
 
@@ -1131,7 +1134,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <TabsContent value="proposals" className="space-y-4 mt-4">
                 {!showProposalForm ? (
                   <>
-                    <Button onClick={() => setShowProposalForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Nova Proposta</Button>
+                    <PermissionGate permission="proposals.create">
+                      <Button onClick={() => setShowProposalForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Nova Proposta</Button>
+                    </PermissionGate>
                     {proposals.length === 0 ? (
                       <div className="text-center py-8"><FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" /><p className="text-muted-foreground">Sem propostas</p></div>
                     ) : (
@@ -1195,6 +1200,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* EDIT */}
               <TabsContent value="edit" className="space-y-4 mt-4">
+              <PermissionGate
+                permission="clients.edit"
+                fallback={<p className="text-sm text-muted-foreground py-8 text-center">Sem permissão para editar clientes.</p>}
+              >
                 <form onSubmit={handleUpdateClient} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
@@ -1246,6 +1255,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                     <Button type="submit">Guardar Alterações</Button>
                   </div>
                 </form>
+              </PermissionGate>
               </TabsContent>
             </Tabs>
           </div>

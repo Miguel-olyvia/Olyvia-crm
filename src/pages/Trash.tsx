@@ -13,6 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { usePermissions } from "@/hooks/usePermissions";
 import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 
@@ -38,6 +39,24 @@ const BUSINESS_KINDS: Record<"deals" | "quotes" | "proposals" | "contracts", "de
 };
 const isBusiness = (k: Kind): k is keyof typeof BUSINESS_KINDS => k in BUSINESS_KINDS;
 
+// Permission required to actually purge (RPC-level, "Sem permissao" check) per
+// tab, confirmed against the live purge_business_entity / purge_entity_facet
+// function bodies (supabase/migrations/20260818010000_fix_anon_exposed_destructive_functions_record.sql,
+// unchanged by later migrations). Each RPC checks a single fixed permission
+// code regardless of p_kind — not a per-entity-type code:
+//   purge_business_entity (deal/quote/proposal/contract) -> 'deals.delete'
+//   purge_entity_facet (lead/contact/client)              -> 'organizations.delete'
+// This must stay in lockstep with those RPCs; if they ever add per-kind
+// checks, update this map to match.
+const PURGE_PERMISSION: Record<Kind, string> = {
+  clients: "organizations.delete",
+  leads: "organizations.delete",
+  deals: "deals.delete",
+  quotes: "deals.delete",
+  proposals: "deals.delete",
+  contracts: "deals.delete",
+};
+
 type DataState = Record<Kind, Row[]>;
 const EMPTY_DATA: DataState = { clients: [], leads: [], deals: [], quotes: [], proposals: [], contracts: [] };
 
@@ -57,6 +76,7 @@ export default function Trash() {
     teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
+  const { hasPermission } = usePermissions();
 
   const orgId = activeCompany?.id;
 
@@ -314,9 +334,11 @@ export default function Trash() {
               <Button size="sm" variant="outline" onClick={() => restore(kind, r.id)}>
                 <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restaurar
               </Button>
-              <Button size="sm" variant="destructive" onClick={() => setPurgeTarget({ kind, id: r.id, name: r.display_name })}>
-                <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar definitivamente
-              </Button>
+              {hasPermission(PURGE_PERMISSION[kind]) && (
+                <Button size="sm" variant="destructive" onClick={() => setPurgeTarget({ kind, id: r.id, name: r.display_name })}>
+                  <Trash2 className="h-3.5 w-3.5 mr-1" /> Eliminar definitivamente
+                </Button>
+              )}
             </TableCell>
           </TableRow>
         ))}

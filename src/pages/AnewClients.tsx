@@ -1961,7 +1961,9 @@ const AnewClients = () => {
                 setShowEmailDialog(true);
                 setEmailTarget({ id: "", name: `${selectedIds.size} clientes`, email: "" });
               }}><Mail className="w-3.5 h-3.5" />Enviar email</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkMarkVip}><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
+              <PermissionGate permission="clients.edit">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkMarkVip}><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
+              </PermissionGate>
               <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkCreateDeals}><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
               <PermissionGate permission="clients.export">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleExport}><Download className="w-3.5 h-3.5" />Exportar</Button>
@@ -2267,10 +2269,12 @@ const AnewClients = () => {
                                   <DropdownMenuItem onClick={() => navigate(`/deals?newDeal=true&entityId=${client.entity_id}&entityName=${encodeURIComponent(identity?.display_name || "")}`)}>
                                     <FileText className="w-3.5 h-3.5 mr-2" />Novo Pedido de Proposta
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => {
-                                    setProposalPresetEntityId(client.entity_id);
-                                    setShowProposalDialog(true);
-                                  }}><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
+                                  <PermissionGate permission="proposals.create">
+                                    <DropdownMenuItem onClick={() => {
+                                      setProposalPresetEntityId(client.entity_id);
+                                      setShowProposalDialog(true);
+                                    }}><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
+                                  </PermissionGate>
                                   <DropdownMenuItem onClick={() => {
                                     navigate(`/client-contracts?newContract=true&clientId=${client.id}`);
                                   }}><FileText className="w-3.5 h-3.5 mr-2" />Criar contrato</DropdownMenuItem>
@@ -2280,16 +2284,20 @@ const AnewClients = () => {
                                   <DropdownMenuItem onClick={() => openClientDetails(client)}>
                                     <Eye className="w-3.5 h-3.5 mr-2" />Ver ficha completa
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => {
-                                    setTagsEntityId(client.entity_id);
-                                    setTagsEntityName(identity?.display_name || "");
-                                    setTagsOrganizationId(client.organization_id || activeCompany?.id || "");
-                                    setTagsDialogOpen(true);
-                                  }}><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={vipTogglingClientId === client.id}
-                                    onClick={() => handleToggleVip(client)}
-                                  ><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
+                                  <PermissionGate permission="contacts.edit">
+                                    <DropdownMenuItem onClick={() => {
+                                      setTagsEntityId(client.entity_id);
+                                      setTagsEntityName(identity?.display_name || "");
+                                      setTagsOrganizationId(client.organization_id || activeCompany?.id || "");
+                                      setTagsDialogOpen(true);
+                                    }}><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
+                                  </PermissionGate>
+                                  <PermissionGate permission="clients.edit">
+                                    <DropdownMenuItem
+                                      disabled={vipTogglingClientId === client.id}
+                                      onClick={() => handleToggleVip(client)}
+                                    ><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
+                                  </PermissionGate>
                                   <DropdownMenuItem onClick={() => {
                                     setMeetingTarget({
                                       clientId: client.id,

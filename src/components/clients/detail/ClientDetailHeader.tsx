@@ -126,9 +126,11 @@ export function ClientDetailHeader({
         <Button size="sm" variant="outline" onClick={onWhatsApp} className="gap-1">
           <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
         </Button>
-        <Button size="sm" variant="outline" onClick={onEdit}>
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+        <PermissionGate permission="clients.edit">
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </PermissionGate>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline"><MoreHorizontal className="h-3.5 w-3.5" /></Button>

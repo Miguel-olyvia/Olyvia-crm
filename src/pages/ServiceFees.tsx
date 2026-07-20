@@ -48,6 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useCompany } from "@/contexts/CompanyContext";
 import { serviceFeeSchema } from "@/lib/validations";
+import { PermissionGate } from "@/components/PermissionGate";
 
 interface ServiceFeeType {
   id: string;
@@ -361,10 +362,17 @@ export default function ServiceFees() {
       fetchFeeTypes();
     } catch (error: any) {
       const isUniqueViolation = error?.code === "23505" || /service_fee_types_one_line_percentage_per_org/i.test(error?.message || "");
+      const isPermissionDenied = /row-level security|row violates/i.test(error?.message || "");
       toast({
-        title: isUniqueViolation ? "Já existe uma taxa por linha activa" : t('serviceFees.toast.saveError'),
+        title: isUniqueViolation
+          ? "Já existe uma taxa por linha activa"
+          : isPermissionDenied
+          ? "Sem permissão"
+          : t('serviceFees.toast.saveError'),
         description: isUniqueViolation
           ? "Esta organização já tem uma taxa de serviço activa com modo 'Percentagem por linha'. Desactive ou apague a existente antes de criar outra."
+          : isPermissionDenied
+          ? "Sem permissão para criar taxas de serviço."
           : error.message,
         variant: "destructive",
       });
@@ -444,15 +452,17 @@ export default function ServiceFees() {
               <Trash2 className="mr-2 h-4 w-4" />
               {showDeleted ? "Ver ativas" : "Ver eliminadas"}
             </Button>
-            <Button
-              onClick={() => {
-                resetForm();
-                setShowDialog(true);
-              }}
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              {t('serviceFees.newFee')}
-            </Button>
+            <PermissionGate permission="service_fees.create">
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setShowDialog(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                {t('serviceFees.newFee')}
+              </Button>
+            </PermissionGate>
           </div>
         </div>
 
@@ -466,10 +476,12 @@ export default function ServiceFees() {
               <p className="text-muted-foreground">
                 {t('serviceFees.noFees')}
               </p>
-              <Button onClick={() => { resetForm(); setShowDialog(true); }}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('serviceFees.createFirstFee')}
-              </Button>
+              <PermissionGate permission="service_fees.create">
+                <Button onClick={() => { resetForm(); setShowDialog(true); }}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t('serviceFees.createFirstFee')}
+                </Button>
+              </PermissionGate>
             </div>
           ) : (
             <Table>
