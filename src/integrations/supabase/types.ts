@@ -39,6 +39,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      _migration_contacts_to_leads_map: {
+        Row: {
+          contact_id: string
+          entity_id: string
+          lead_id: string
+          migrated_at: string
+          organization_id: string
+          was_new_lead: boolean
+        }
+        Insert: {
+          contact_id: string
+          entity_id: string
+          lead_id: string
+          migrated_at?: string
+          organization_id: string
+          was_new_lead: boolean
+        }
+        Update: {
+          contact_id?: string
+          entity_id?: string
+          lead_id?: string
+          migrated_at?: string
+          organization_id?: string
+          was_new_lead?: boolean
+        }
+        Relationships: []
+      }
       account_deletion_requests: {
         Row: {
           created_at: string
@@ -1206,6 +1233,10 @@ export type Database = {
           last_contact_result: string | null
           notes: string | null
           organization_id: string
+          pipeline_dirty_at: string | null
+          qualification_set_by: string | null
+          qualification_type: string | null
+          qualified_at: string | null
           root_organization_id: string
           scheduled_visit_id: string | null
           search_text: string | null
@@ -1238,6 +1269,10 @@ export type Database = {
           last_contact_result?: string | null
           notes?: string | null
           organization_id: string
+          pipeline_dirty_at?: string | null
+          qualification_set_by?: string | null
+          qualification_type?: string | null
+          qualified_at?: string | null
           root_organization_id: string
           scheduled_visit_id?: string | null
           search_text?: string | null
@@ -1270,6 +1305,10 @@ export type Database = {
           last_contact_result?: string | null
           notes?: string | null
           organization_id?: string
+          pipeline_dirty_at?: string | null
+          qualification_set_by?: string | null
+          qualification_type?: string | null
+          qualified_at?: string | null
           root_organization_id?: string
           scheduled_visit_id?: string | null
           search_text?: string | null
@@ -1342,6 +1381,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anew_leads_qualification_set_by_fkey"
+            columns: ["qualification_set_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
             referencedColumns: ["id"]
           },
           {
@@ -2043,8 +2089,33 @@ export type Database = {
           },
         ]
       }
+      auth_account_changes: {
+        Row: {
+          auth_user_id: string | null
+          change_type: string
+          created_at: string
+          id: string
+          old_email: string | null
+        }
+        Insert: {
+          auth_user_id?: string | null
+          change_type: string
+          created_at?: string
+          id?: string
+          old_email?: string | null
+        }
+        Update: {
+          auth_user_id?: string | null
+          change_type?: string
+          created_at?: string
+          id?: string
+          old_email?: string | null
+        }
+        Relationships: []
+      }
       auth_login_attempts: {
         Row: {
+          auth_user_id: string | null
           created_at: string
           id: string
           identifier: string
@@ -2053,6 +2124,7 @@ export type Database = {
           user_agent: string | null
         }
         Insert: {
+          auth_user_id?: string | null
           created_at?: string
           id?: string
           identifier: string
@@ -2061,6 +2133,7 @@ export type Database = {
           user_agent?: string | null
         }
         Update: {
+          auth_user_id?: string | null
           created_at?: string
           id?: string
           identifier?: string
@@ -2174,6 +2247,80 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_account_work_orgs: {
+        Row: {
+          added_at: string
+          billing_account_id: string
+          organization_id: string
+        }
+        Insert: {
+          added_at?: string
+          billing_account_id: string
+          organization_id: string
+        }
+        Update: {
+          added_at?: string
+          billing_account_id?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_account_work_orgs_billing_account_id_fkey"
+            columns: ["billing_account_id"]
+            isOneToOne: false
+            referencedRelation: "billing_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_account_work_orgs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      billing_accounts: {
+        Row: {
+          created_at: string
+          id: string
+          max_work_orgs: number | null
+          owner_user_id: string
+          plan_tier: string | null
+          stripe_customer_id: string | null
+          subscription_status: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          max_work_orgs?: number | null
+          owner_user_id: string
+          plan_tier?: string | null
+          stripe_customer_id?: string | null
+          subscription_status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          max_work_orgs?: number | null
+          owner_user_id?: string
+          plan_tier?: string | null
+          stripe_customer_id?: string | null
+          subscription_status?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_accounts_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
             referencedColumns: ["id"]
           },
         ]
@@ -4699,6 +4846,7 @@ export type Database = {
           first_login_at: string | null
           id: string
           last_login_at: string | null
+          lead_id: string | null
           organization_id: string
           password_changed_at: string | null
           portal_status: string
@@ -4718,6 +4866,7 @@ export type Database = {
           first_login_at?: string | null
           id?: string
           last_login_at?: string | null
+          lead_id?: string | null
           organization_id: string
           password_changed_at?: string | null
           portal_status?: string
@@ -4737,6 +4886,7 @@ export type Database = {
           first_login_at?: string | null
           id?: string
           last_login_at?: string | null
+          lead_id?: string | null
           organization_id?: string
           password_changed_at?: string | null
           portal_status?: string
@@ -4771,6 +4921,20 @@ export type Database = {
             columns: ["entity_id"]
             isOneToOne: false
             referencedRelation: "anew_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_portal_users_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "anew_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_portal_users_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
             referencedColumns: ["id"]
           },
           {
@@ -5708,6 +5872,7 @@ export type Database = {
           title: string
           updated_at: string
           value: number | null
+          value_max: number | null
         }
         Insert: {
           assigned_to?: string | null
@@ -5731,6 +5896,7 @@ export type Database = {
           title: string
           updated_at?: string
           value?: number | null
+          value_max?: number | null
         }
         Update: {
           assigned_to?: string | null
@@ -5754,6 +5920,7 @@ export type Database = {
           title?: string
           updated_at?: string
           value?: number | null
+          value_max?: number | null
         }
         Relationships: [
           {
@@ -7812,6 +7979,58 @@ export type Database = {
           },
         ]
       }
+      lead_qualification_rules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          mql_when: Json | null
+          organization_id: string
+          sql_when: Json | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          mql_when?: Json | null
+          organization_id: string
+          sql_when?: Json | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          mql_when?: Json | null
+          organization_id?: string
+          sql_when?: Json | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_qualification_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_qualification_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_qualification_rules_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_sources: {
         Row: {
           color: string | null
@@ -7939,7 +8158,12 @@ export type Database = {
       }
       lead_workflow_stages: {
         Row: {
+          auto_advance: boolean
           color: string | null
+          counts_as_converted: boolean
+          counts_as_lost: boolean
+          counts_as_negotiation: boolean
+          counts_as_qualified: boolean
           created_at: string
           created_by: string
           default_status: string | null
@@ -7949,13 +8173,21 @@ export type Database = {
           is_final: boolean | null
           is_rejection: boolean | null
           label: string
+          matching_statuses: string[] | null
           name: string
           organization_id: string | null
+          qualification_hint: string | null
+          reached_when: Json | null
           stage_order: number
           updated_at: string
         }
         Insert: {
+          auto_advance?: boolean
           color?: string | null
+          counts_as_converted?: boolean
+          counts_as_lost?: boolean
+          counts_as_negotiation?: boolean
+          counts_as_qualified?: boolean
           created_at?: string
           created_by: string
           default_status?: string | null
@@ -7965,13 +8197,21 @@ export type Database = {
           is_final?: boolean | null
           is_rejection?: boolean | null
           label: string
+          matching_statuses?: string[] | null
           name: string
           organization_id?: string | null
+          qualification_hint?: string | null
+          reached_when?: Json | null
           stage_order?: number
           updated_at?: string
         }
         Update: {
+          auto_advance?: boolean
           color?: string | null
+          counts_as_converted?: boolean
+          counts_as_lost?: boolean
+          counts_as_negotiation?: boolean
+          counts_as_qualified?: boolean
           created_at?: string
           created_by?: string
           default_status?: string | null
@@ -7981,8 +8221,11 @@ export type Database = {
           is_final?: boolean | null
           is_rejection?: boolean | null
           label?: string
+          matching_statuses?: string[] | null
           name?: string
           organization_id?: string | null
+          qualification_hint?: string | null
+          reached_when?: Json | null
           stage_order?: number
           updated_at?: string
         }
@@ -13072,6 +13315,63 @@ export type Database = {
           },
         ]
       }
+      signup_profile: {
+        Row: {
+          company_name: string | null
+          created_at: string
+          deleted_at: string | null
+          deleted_by: string | null
+          employee_count_range: string | null
+          id: string
+          industry: string | null
+          job_title: string | null
+          signup_source: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          company_name?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
+          employee_count_range?: string | null
+          id?: string
+          industry?: string | null
+          job_title?: string | null
+          signup_source?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          company_name?: string | null
+          created_at?: string
+          deleted_at?: string | null
+          deleted_by?: string | null
+          employee_count_range?: string | null
+          id?: string
+          industry?: string | null
+          job_title?: string | null
+          signup_source?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signup_profile_deleted_by_fkey"
+            columns: ["deleted_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signup_profile_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_otp_codes: {
         Row: {
           attempts: number
@@ -14309,6 +14609,7 @@ export type Database = {
       cleanup_duplicate_notifications: { Args: never; Returns: number }
       cleanup_orphan_notifications: { Args: never; Returns: number }
       clear_audit_context: { Args: never; Returns: undefined }
+      compute_lead_stage_v2: { Args: { p_lead_id: string }; Returns: string }
       convert_contact_to_client: {
         Args: { p_contact_id: string }
         Returns: Json
@@ -14391,6 +14692,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      evaluate_lead_signals_v2: { Args: { p_lead_id: string }; Returns: Json }
       execute_entity_erasure: { Args: { p_request_id: string }; Returns: Json }
       filter_visible_entity_ids: {
         Args: { p_auth_uid: string; p_entity_ids: string[] }
@@ -14488,6 +14790,7 @@ export type Database = {
           p_entity_id: string
           p_operation: string
           p_organization_id: string
+          p_record_id?: string
           p_source?: string
           p_table_name: string
         }
@@ -14519,8 +14822,22 @@ export type Database = {
       }
       generate_api_key: { Args: never; Returns: string }
       generate_client_contract_number: { Args: never; Returns: string }
-      generate_po_number: { Args: never; Returns: string }
+      generate_po_number: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
       generate_quote_number: { Args: never; Returns: string }
+      get_account_changes_audit_log: {
+        Args: { p_auth_user_id?: string; p_limit?: number; p_offset?: number }
+        Returns: {
+          auth_user_id: string
+          change_type: string
+          created_at: string
+          id: string
+          old_email: string
+          user_display_name: string
+        }[]
+      }
       get_admin_business_area_ids: {
         Args: { _user_id: string }
         Returns: {
@@ -14566,6 +14883,7 @@ export type Database = {
           payload: Json
         }[]
       }
+      get_auth_user_id_by_email: { Args: { p_email: string }; Returns: string }
       get_bundle_available_stock: {
         Args: { p_bundle_id: string }
         Returns: number
@@ -14668,6 +14986,25 @@ export type Database = {
           interaction_count: number
         }[]
       }
+      get_lead_page_pipeline: {
+        Args: {
+          p_entity_ids: string[]
+          p_is_root?: boolean
+          p_org_id: string
+          p_scope?: string
+        }
+        Returns: {
+          deal_count: number
+          deal_value: number
+          entity_id: string
+          proposal_count: number
+          proposal_value: number
+          proposal_value_with_iva: number
+          quote_count: number
+          quote_value: number
+          quote_value_with_iva: number
+        }[]
+      }
       get_lead_source_options: {
         Args: { p_is_root?: boolean; p_org_id: string; p_scope?: string }
         Returns: {
@@ -14695,6 +15032,35 @@ export type Database = {
         Returns: {
           count: number
           status: string
+        }[]
+      }
+      get_leads_v2_ids_by_pipeline_status: {
+        Args: {
+          p_filter: string
+          p_is_root?: boolean
+          p_org_id: string
+          p_scope?: string
+        }
+        Returns: {
+          lead_id: string
+        }[]
+      }
+      get_login_attempts_audit_log: {
+        Args: {
+          p_identifier?: string
+          p_limit?: number
+          p_offset?: number
+          p_success?: boolean
+        }
+        Returns: {
+          auth_user_id: string
+          created_at: string
+          id: string
+          identifier: string
+          ip_address: string
+          success: boolean
+          user_agent: string
+          user_display_name: string
         }[]
       }
       get_month_availability: {
@@ -14738,6 +15104,13 @@ export type Database = {
         Returns: {
           slot_end: string
           slot_start: string
+        }[]
+      }
+      get_schedule_item_scope_context: {
+        Args: { p_org_id: string; p_permission_code: string }
+        Returns: {
+          applied_scope: string
+          owner_ids: string[]
         }[]
       }
       get_scoped_leads_base: {
@@ -14871,9 +15244,16 @@ export type Database = {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
       }
+      purge_old_account_changes: { Args: never; Returns: undefined }
       purge_old_login_attempts: { Args: never; Returns: undefined }
       purge_old_otp_codes: { Args: never; Returns: undefined }
       purge_old_rate_limit_attempts: { Args: never; Returns: undefined }
+      recompute_leads_v2_buckets: {
+        Args: { p_org: string }
+        Returns: {
+          updated_count: number
+        }[]
+      }
       reject_proposal_atomic: {
         Args: {
           p_proposal_id: string
@@ -15459,6 +15839,7 @@ export type Database = {
           title: string
           updated_at: string
           value: number | null
+          value_max: number | null
         }
         SetofOptions: {
           from: "*"
@@ -15503,6 +15884,10 @@ export type Database = {
           last_contact_result: string | null
           notes: string | null
           organization_id: string
+          pipeline_dirty_at: string | null
+          qualification_set_by: string | null
+          qualification_type: string | null
+          qualified_at: string | null
           root_organization_id: string
           scheduled_visit_id: string | null
           search_text: string | null
@@ -15556,6 +15941,10 @@ export type Database = {
           last_contact_result: string | null
           notes: string | null
           organization_id: string
+          pipeline_dirty_at: string | null
+          qualification_set_by: string | null
+          qualification_type: string | null
+          qualified_at: string | null
           root_organization_id: string
           scheduled_visit_id: string | null
           search_text: string | null
@@ -16193,6 +16582,7 @@ export type Database = {
           title: string
           updated_at: string
           value: number | null
+          value_max: number | null
         }
         SetofOptions: {
           from: "*"
@@ -16540,7 +16930,12 @@ export type Database = {
       rpc_save_lead_workflow_stages: {
         Args: { p_organization_id: string; p_stages: Json }
         Returns: {
+          auto_advance: boolean
           color: string | null
+          counts_as_converted: boolean
+          counts_as_lost: boolean
+          counts_as_negotiation: boolean
+          counts_as_qualified: boolean
           created_at: string
           created_by: string
           default_status: string | null
@@ -16550,8 +16945,11 @@ export type Database = {
           is_final: boolean | null
           is_rejection: boolean | null
           label: string
+          matching_statuses: string[] | null
           name: string
           organization_id: string | null
+          qualification_hint: string | null
+          reached_when: Json | null
           stage_order: number
           updated_at: string
         }[]
@@ -16937,6 +17335,7 @@ export type Database = {
           title: string
           updated_at: string
           value: number | null
+          value_max: number | null
         }
         SetofOptions: {
           from: "*"
@@ -17013,6 +17412,7 @@ export type Database = {
           title: string
           updated_at: string
           value: number | null
+          value_max: number | null
         }
         SetofOptions: {
           from: "*"
@@ -17021,59 +17421,123 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_update_lead: {
-        Args: {
-          p_assigned_to: string
-          p_display_name: string
-          p_field_values: Json
-          p_first_name: string
-          p_last_name: string
-          p_lead_id: string
-          p_notes: string
-          p_source: string
-          p_status: string
-          p_status_changed: boolean
-          p_workflow_stage_id: string
-        }
-        Returns: {
-          assigned_to: string | null
-          callback_notes: string | null
-          callback_scheduled_at: string | null
-          campaign_id: string | null
-          contact_attempts: number | null
-          converted_at: string | null
-          converted_by: string | null
-          converted_to_client_id: string | null
-          converted_to_contact_id: string | null
-          created_at: string
-          created_by: string | null
-          deleted_at: string | null
-          deleted_by: string | null
-          entity_id: string | null
-          field_values: Json
-          id: string
-          last_contact_at: string | null
-          last_contact_by: string | null
-          last_contact_result: string | null
-          notes: string | null
-          organization_id: string
-          root_organization_id: string
-          scheduled_visit_id: string | null
-          search_text: string | null
-          source: string | null
-          source_id: string | null
-          status: string | null
-          tags: string[] | null
-          updated_at: string
-          workflow_stage_id: string | null
-        }
-        SetofOptions: {
-          from: "*"
-          to: "anew_leads"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
+      rpc_update_lead:
+        | {
+            Args: {
+              p_assigned_to: string
+              p_display_name: string
+              p_field_values: Json
+              p_first_name: string
+              p_last_name: string
+              p_lead_id: string
+              p_notes: string
+              p_source: string
+              p_status: string
+              p_status_changed: boolean
+              p_workflow_stage_id: string
+            }
+            Returns: {
+              assigned_to: string | null
+              callback_notes: string | null
+              callback_scheduled_at: string | null
+              campaign_id: string | null
+              contact_attempts: number | null
+              converted_at: string | null
+              converted_by: string | null
+              converted_to_client_id: string | null
+              converted_to_contact_id: string | null
+              created_at: string
+              created_by: string | null
+              deleted_at: string | null
+              deleted_by: string | null
+              entity_id: string | null
+              field_values: Json
+              id: string
+              last_contact_at: string | null
+              last_contact_by: string | null
+              last_contact_result: string | null
+              notes: string | null
+              organization_id: string
+              pipeline_dirty_at: string | null
+              qualification_set_by: string | null
+              qualification_type: string | null
+              qualified_at: string | null
+              root_organization_id: string
+              scheduled_visit_id: string | null
+              search_text: string | null
+              source: string | null
+              source_id: string | null
+              status: string | null
+              tags: string[] | null
+              updated_at: string
+              workflow_stage_id: string | null
+            }
+            SetofOptions: {
+              from: "*"
+              to: "anew_leads"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: {
+              p_assigned_to: string
+              p_display_name: string
+              p_field_values: Json
+              p_first_name: string
+              p_last_name: string
+              p_lead_id: string
+              p_notes: string
+              p_qualification_changed?: boolean
+              p_qualification_type?: string
+              p_source: string
+              p_status: string
+              p_status_changed: boolean
+              p_workflow_stage_id: string
+            }
+            Returns: {
+              assigned_to: string | null
+              callback_notes: string | null
+              callback_scheduled_at: string | null
+              campaign_id: string | null
+              contact_attempts: number | null
+              converted_at: string | null
+              converted_by: string | null
+              converted_to_client_id: string | null
+              converted_to_contact_id: string | null
+              created_at: string
+              created_by: string | null
+              deleted_at: string | null
+              deleted_by: string | null
+              entity_id: string | null
+              field_values: Json
+              id: string
+              last_contact_at: string | null
+              last_contact_by: string | null
+              last_contact_result: string | null
+              notes: string | null
+              organization_id: string
+              pipeline_dirty_at: string | null
+              qualification_set_by: string | null
+              qualification_type: string | null
+              qualified_at: string | null
+              root_organization_id: string
+              scheduled_visit_id: string | null
+              search_text: string | null
+              source: string | null
+              source_id: string | null
+              status: string | null
+              tags: string[] | null
+              updated_at: string
+              workflow_stage_id: string | null
+            }
+            SetofOptions: {
+              from: "*"
+              to: "anew_leads"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
       rpc_update_organization: {
         Args: {
           p_addresses: Json
@@ -17641,6 +18105,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_upsert_signup_profile: {
+        Args: {
+          p_company_name?: string
+          p_employee_count_range?: string
+          p_industry?: string
+          p_job_title?: string
+          p_signup_source?: string
+        }
+        Returns: {
+          company_name: string | null
+          created_at: string
+          deleted_at: string | null
+          deleted_by: string | null
+          employee_count_range: string | null
+          id: string
+          industry: string | null
+          job_title: string | null
+          signup_source: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "signup_profile"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       search_proposal_entities:
         | {
             Args: { p_limit?: number; p_search: string }
@@ -17684,12 +18176,25 @@ export type Database = {
         Args: { is_work_org: boolean; organization_id: string }
         Returns: Json
       }
+      simulate_lead_v2_bucket_changes: {
+        Args: { p_org: string; p_qual?: Json; p_stages: Json }
+        Returns: Json
+      }
       soft_delete_business_entity: {
         Args: { p_actor_id?: string; p_id: string; p_kind: string }
         Returns: boolean
       }
       soft_delete_entity_facet: {
         Args: { p_id: string; p_kind: string }
+        Returns: boolean
+      }
+      stage_reached: {
+        Args: {
+          p_lead_status: string
+          p_matching: string[]
+          p_rule: Json
+          p_signals: Json
+        }
         Returns: boolean
       }
       sync_client_contact_roles: {
