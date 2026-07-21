@@ -53,6 +53,17 @@ export interface DashboardStats {
   /** SQL/MQL classification, orthogonal to `status_counts` — see migration 20261110480000. */
   qualification_counts?: Record<string, number> | null;
   avg_days_to_qualify?: AvgDaysToQualify | null;
+  /**
+   * Rule-driven bucket counts from compute_lead_stage_v2 (configurable
+   * per-organization pipeline stages), see migration 20261110520000.
+   * Falls back to raw status_counts/converted_in_period below when absent.
+   */
+  resolved_stage_counts?: {
+    qualified?: number;
+    negotiation?: number;
+    converted?: number;
+    lost?: number;
+  } | null;
 }
 
 export type DashboardRenderState = "missing_query" | "loading" | "error" | "ready";
@@ -187,7 +198,7 @@ export function deriveDashboardKpis({
   const leadsInPeriod = readNumber(stats?.leads_in_period);
   const comparisonTotal = readNumber(comparisonStats?.leads_in_period);
   const leadsToday = readNumber(stats?.leads_today);
-  const convertedLeads = readNumber(stats?.converted_in_period);
+  const convertedLeads = readNumber(stats?.resolved_stage_counts?.converted) ?? readNumber(stats?.converted_in_period);
   const cohortConversions = readNumber(stats?.cohort_conversions);
   const totalContactAttempts =
     readNumber(stats?.contact_attempts_in_period) ?? readNumber(stats?.contact_attempts);
@@ -218,7 +229,8 @@ export function deriveDashboardKpis({
     leadsToday,
     pendingLeads: readStatusCount(stats, ["pending", "new", "novo"]),
     contactedLeads: readStatusCount(stats, ["contacted", "contactado"]),
-    qualifiedLeads: readStatusCount(stats, ["qualified", "qualificado"]),
+    qualifiedLeads:
+      readNumber(stats?.resolved_stage_counts?.qualified) ?? readStatusCount(stats, ["qualified", "qualificado"]),
     convertedLeads,
     cohortConversions,
     conversionRate,
