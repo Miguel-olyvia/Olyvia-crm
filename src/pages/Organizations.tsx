@@ -685,7 +685,11 @@ export default function Organizations() {
 
   const openCreatePanel = (parentId?: string) => {
     resetForm();
-    if (parentId) setFormData(prev => ({ ...prev, parentId }));
+    // Default the parent to the org currently in scope so top-level "Create Organization"
+    // never produces an orphaned, invisible row. Explicit parentId (row's "Add Sub-organization")
+    // always wins; otherwise fall back to the active company as the sensible root context.
+    const defaultParentId = parentId ?? (activeCompany?.id || "");
+    if (defaultParentId) setFormData(prev => ({ ...prev, parentId: defaultParentId }));
     setPanelMode('create');
   };
 
@@ -1027,7 +1031,10 @@ export default function Organizations() {
               countries={countries} districts={districts} municipalities={municipalities}
               onDistrictChange={fetchMunicipalities} fiscalDistricts={fiscalDistricts}
               fiscalMunicipalities={fiscalMunicipalities} onFiscalDistrictChange={fetchFiscalMunicipalities}
-              selectedOrg={selectedOrg} isEdit={panelMode === 'edit'} t={t} getTypeLabel={getTypeLabel}
+              selectedOrg={selectedOrg} isEdit={panelMode === 'edit'}
+              showParentSelector
+              allowNoParent={userType === "system_admin" || !activeCompany}
+              t={t} getTypeLabel={getTypeLabel}
               onSave={panelMode === 'edit' ? handleUpdate : handleCreate} isSaving={isSubmitting}
               onCancel={() => { setPanelMode('closed'); resetForm(); }}
               onUseTemplate={handleSelectTemplate} selectedTemplateId={selectedTemplateId}

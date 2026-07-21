@@ -64,6 +64,16 @@ export function EntitySearchInput({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  // Monotonically increasing id for the in-flight search request. `search()`
+  // does several sequential/parallel network round-trips, so overlapping
+  // calls (fired by fast re-typing before an older call has resolved) are
+  // expected. Without this guard, whichever call happens to resolve LAST
+  // wins the final setResults/setOpen/setLoading — even if it's for a term
+  // the user already changed away from — which is exactly what produced the
+  // "spinner never clears" / "results never render" symptom: a slow, stale
+  // response clobbering (or redundantly re-triggering) state after a newer,
+  // faster response already rendered correctly.
+  const latestRequestIdRef = useRef(0);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -78,9 +88,15 @@ export function EntitySearchInput({
 
   const search = useCallback(
     async (term: string) => {
+      // Claim this call as the latest. Any earlier call that resolves after
+      // this point will see its own id no longer match and must not touch
+      // state (see guards below and in the finally block).
+      const requestId = ++latestRequestIdRef.current;
+
       if (term.length < 2) {
         setResults([]);
         setOpen(false);
+        setLoading(false);
         return;
       }
 
@@ -322,14 +338,30 @@ export function EntitySearchInput({
           seen.add(key);
           return true;
         });
+        // Stale guard: a newer search() call may have already started (and
+        // possibly already resolved) while this one was awaiting its
+        // network round-trips. Only the latest call is allowed to write
+        // results/open state — otherwise a slow, superseded response for an
+        // old search term could overwrite the correct, already-rendered
+        // results for the current term.
+        if (requestId !== latestRequestIdRef.current) return;
         setResults(deduped.slice(0, 50));
         setOpen(true);
 
       } catch (err) {
+        if (requestId !== latestRequestIdRef.current) return;
         console.error("Entity search error:", err);
         setOpen(true);
       } finally {
-        setLoading(false);
+        // Only the latest call may clear (or set) the loading flag. If this
+        // call is stale, a newer call either already cleared it after
+        // rendering its own results, or is still in flight and owns the
+        // flag — either way this stale call must not touch it, which is
+        // what previously allowed the spinner to get stuck or clear at the
+        // wrong time depending on resolution order.
+        if (requestId === latestRequestIdRef.current) {
+          setLoading(false);
+        }
       }
     },
     [

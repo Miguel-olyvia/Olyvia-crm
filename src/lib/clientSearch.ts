@@ -2,7 +2,10 @@ import { supabase } from "@/integrations/supabase/client";
 
 const MAX_MATCHED_IDS = 1000;
 const NAME_MATCH_LIMIT = 200;
-const NIF_SEARCH_LIMIT = 200;
+// Must stay <= the search-entities Edge Function's own MAX_LIMIT (100,
+// supabase/functions/search-entities/handler.ts) — sending more trips its
+// zod validation ("Too big: expected number to be <=100") on every call.
+const NIF_SEARCH_LIMIT = 100;
 
 interface SearchEntitiesResponse {
   success: boolean;

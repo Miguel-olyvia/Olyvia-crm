@@ -6006,7 +6006,7 @@ export type Database = {
           changed_by: string | null
           changed_fields: Json | null
           created_at: string
-          entity_id: string
+          entity_id: string | null
           full_record: Json | null
           id: string
           operation: string
@@ -6019,7 +6019,7 @@ export type Database = {
           changed_by?: string | null
           changed_fields?: Json | null
           created_at?: string
-          entity_id: string
+          entity_id?: string | null
           full_record?: Json | null
           id?: string
           operation: string
@@ -6032,7 +6032,7 @@ export type Database = {
           changed_by?: string | null
           changed_fields?: Json | null
           created_at?: string
-          entity_id?: string
+          entity_id?: string | null
           full_record?: Json | null
           id?: string
           operation?: string

@@ -122,6 +122,15 @@ export interface OrganizationFormProps {
   onFiscalDistrictChange?: (districtId: string | null) => void;
   selectedOrg: Organization | null;
   isEdit?: boolean;
+  /**
+   * When true, renders a "parent organization" selector on create and requires a
+   * selection (unless `allowNoParent` is also set). Callers that already wire the new
+   * org into the hierarchy through a different mechanism (e.g. a dedicated hierarchy
+   * RPC) should leave this false/unset so they are unaffected.
+   */
+  showParentSelector?: boolean;
+  /** When true, allows leaving the parent organization unset (creates a new top-level/root org). Only relevant when `showParentSelector` is true. */
+  allowNoParent?: boolean;
   t: (key: string) => string;
   getTypeLabel: (type: string) => string;
   onSave: () => void;
@@ -147,6 +156,8 @@ export function OrganizationForm({
   onFiscalDistrictChange,
   selectedOrg,
   isEdit = false,
+  showParentSelector = false,
+  allowNoParent = false,
   t,
   getTypeLabel,
   onSave,
@@ -268,6 +279,13 @@ export function OrganizationForm({
       return;
     }
 
+    if (showParentSelector && !isEdit && !allowNoParent && !formData.parentId) {
+      const message = t("organizations.parentRequired");
+      setFormErrors(prev => ({ ...prev, parentId: message }));
+      toast({ title: t("common.error") || "Validation Error", description: message, variant: "destructive" });
+      return;
+    }
+
     if (formData.isFiscal && formData.fiscalAddressOption === "new") {
       const fiscalValidation = organizationFiscalAddressSchema.safeParse({
         street: formData.fiscalAddress.street,
@@ -362,6 +380,39 @@ export function OrganizationForm({
                   onChange={(e) => setFormData(prev => ({ ...prev, customType: e.target.value }))}
                   placeholder={t("organizations.customTypePlaceholder")}
                 />
+              </div>
+            )}
+
+            {showParentSelector && !isEdit && (
+              <div className="space-y-2">
+                <Label htmlFor="parentOrg">
+                  {t("organizations.parentOrg")}{!allowNoParent && " *"}
+                </Label>
+                <Select
+                  value={formData.parentId || "__none__"}
+                  onValueChange={(value) => {
+                    setFormData(prev => ({ ...prev, parentId: value === "__none__" ? "" : value }));
+                    setFormErrors(prev => { const next = { ...prev }; delete next.parentId; return next; });
+                  }}
+                >
+                  <SelectTrigger id="parentOrg" aria-invalid={!!formErrors.parentId}>
+                    <SelectValue placeholder={t("organizations.selectParent")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allowNoParent && (
+                      <SelectItem value="__none__">
+                        {t("organizations.noParent")}
+                      </SelectItem>
+                    )}
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.parentId && <p className="text-xs text-destructive">{formErrors.parentId}</p>}
+                <p className="text-xs text-muted-foreground">
+                  {t("organizations.parentOrgHint")}
+                </p>
               </div>
             )}
 

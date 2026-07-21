@@ -534,6 +534,8 @@ const Proposals = () => {
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
   const [dealEntityIds, setDealEntityIds] = useState<Record<string, string>>({}); // deal_id -> entity_id, for proposals without a direct entity_id
   const submitLockRef = useRef(false);
+  const acceptProposalLockRef = useRef(false);
+  const [isAcceptingProposal, setIsAcceptingProposal] = useState(false);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !isSystemAdmin && !hasPermission("proposals.view")) {
@@ -1617,8 +1619,11 @@ const Proposals = () => {
   };
 
   const handleAcceptProposal = async (proposalToAccept?: Proposal) => {
+    if (acceptProposalLockRef.current) return;
     const targetProposal = proposalToAccept ?? selectedProposal;
     if (!targetProposal) return;
+    acceptProposalLockRef.current = true;
+    setIsAcceptingProposal(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -1648,6 +1653,9 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      acceptProposalLockRef.current = false;
+      setIsAcceptingProposal(false);
     }
   };
 
@@ -3346,6 +3354,7 @@ const Proposals = () => {
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
         onAccept={() => handleAcceptProposal(selectedProposal ?? undefined)}
         onReject={() => setRejectReasonDialogOpen(true)}
+        isAccepting={isAcceptingProposal}
       />
 
       <ProposalRejectReasonDialog

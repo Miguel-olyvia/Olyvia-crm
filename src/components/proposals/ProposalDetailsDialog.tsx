@@ -181,6 +181,7 @@ interface ProposalDetailsDialogProps {
   onViewHistory?: () => void;
   onAccept?: () => void;
   onReject?: () => void;
+  isAccepting?: boolean;
 }
 
 export function ProposalDetailsDialog({
@@ -191,6 +192,7 @@ export function ProposalDetailsDialog({
   onViewHistory,
   onAccept,
   onReject,
+  isAccepting = false,
 }: ProposalDetailsDialogProps) {
   const [items, setItems] = useState<ProposalItem[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
@@ -505,6 +507,7 @@ export function ProposalDetailsDialog({
                       variant="outline"
                       className="border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all duration-200 font-semibold px-6 rounded-full"
                       onClick={onReject}
+                      disabled={isAccepting}
                     >
                       <XCircle className="w-5 h-5 mr-2" />
                       Recusar
@@ -515,9 +518,10 @@ export function ProposalDetailsDialog({
                       size="lg"
                       className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg shadow-green-500/25 hover:shadow-green-500/40 transition-all duration-200 font-semibold px-6 rounded-full"
                       onClick={onAccept}
+                      disabled={isAccepting}
                     >
                       <CheckCircle2 className="w-5 h-5 mr-2" />
-                      Aceitar Proposta
+                      {isAccepting ? "A aceitar..." : "Aceitar Proposta"}
                     </Button>
                   )}
                 </div>

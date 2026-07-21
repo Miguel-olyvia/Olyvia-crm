@@ -6261,7 +6261,23 @@ export default function AnewLeads() {
                   variant="outline"
                   size="sm"
                   className="gap-1.5 text-xs"
-                  onClick={() => navigate('/forms')}
+                  onClick={() => {
+                    // Navigating away abandons this dialog and any data already
+                    // typed into the lead form — this button lives inside the
+                    // "New Lead" dialog and is easy to hit by mistake while
+                    // reaching for the real submit button below, so guard
+                    // against silent data loss when fields are already filled.
+                    const hasUnsavedInput = Object.values(newLeadValues).some(
+                      (v) => v !== undefined && v !== null && v !== ""
+                    );
+                    if (hasUnsavedInput && !window.confirm(
+                      t('leads.confirmLeaveCreateForm') ||
+                      'Vai saltar para a criação de formulários e perder os dados já preenchidos nesta lead. Continuar?'
+                    )) {
+                      return;
+                    }
+                    navigate('/forms');
+                  }}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   {t('leads.createNewForm') || 'Criar Formulário'}
@@ -6477,7 +6493,7 @@ export default function AnewLeads() {
               })()}
             </div>
 
-            <DialogFooter className="mt-4">
+            <DialogFooter className="sticky bottom-0 -mx-6 -mb-6 mt-4 px-6 py-4 bg-background border-t z-10">
               <Button variant="outline" onClick={() => {
                 setShowCreateLead(false);
                 setNewLeadValues({});
@@ -6486,8 +6502,9 @@ export default function AnewLeads() {
               }}>
                 {t('common.cancel') || 'Cancelar'}
               </Button>
-              <Button 
-                onClick={handleCreateLead} 
+              <Button
+                data-testid="create-lead-submit"
+                onClick={handleCreateLead}
                 disabled={creatingLead}
               >
                 {creatingLead ? (t('common.creating') || 'A criar...') : (t('leads.createLead') || 'Criar Lead')}
