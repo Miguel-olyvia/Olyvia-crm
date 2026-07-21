@@ -236,6 +236,7 @@ const LEADS_LIST_COLUMNS = `
   last_contact_at, last_contact_result, contact_attempts,
   callback_scheduled_at, callback_notes,
   tags, search_text,
+  qualification_type, qualified_at,
   campaigns(id, name)
 `;
 
@@ -248,6 +249,10 @@ interface LeadsQueryFilters {
   dateTo?: Date;
   effectiveSearch: string;
   sourceFilter: string;
+  // Orthogonal to statusFilter: qualification_type is sticky and survives
+  // status changes, so it's filtered independently (AND'ed with the other
+  // clauses) rather than folded into the status filter above.
+  qualificationFilter?: string;
 }
 
 // Single source of truth for the filter clauses applied to anew_leads —
@@ -257,7 +262,7 @@ interface LeadsQueryFilters {
 function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   const {
     statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-    dateFrom, dateTo, effectiveSearch, sourceFilter,
+    dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
   } = filters;
 
   if (statusFilter !== "all") {
@@ -293,6 +298,13 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
     q = q.is("source", null);
   } else if (sourceFilter !== "all") {
     q = q.eq("source", sourceFilter);
+  }
+  if (qualificationFilter && qualificationFilter !== "all") {
+    if (qualificationFilter === "unclassified") {
+      q = q.is("qualification_type", null);
+    } else {
+      q = q.eq("qualification_type", qualificationFilter);
+    }
   }
   return q;
 }
@@ -381,6 +393,9 @@ export default function AnewLeads() {
   const [campaignFilter, setCampaignFilter] = useState<string>("all");
   const [contactResultFilter, setContactResultFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // Orthogonal to statusFilter: qualification_type (SQL/MQL) is sticky and
+  // survives status changes, so it's a separate, AND'ed filter dimension.
+  const [qualificationFilter, setQualificationFilter] = useState<string>("all");
   const [onlyMine, setOnlyMine] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -427,6 +442,7 @@ export default function AnewLeads() {
               field_values, notes, source, source_id,
               last_contact_at, last_contact_result, contact_attempts,
               callback_scheduled_at, callback_notes, tags,
+              qualification_type, qualified_at,
               campaigns(id, name)
             `)
             .eq("id", openId)
@@ -806,7 +822,7 @@ export default function AnewLeads() {
     // is safe here because initialLoadDoneRef.current prevents re-entry, and
     // the org-change path resets that ref via the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
 
 
@@ -1739,7 +1755,7 @@ export default function AnewLeads() {
       teamMemberIds,
       filters: {
         statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-        dateFrom, dateTo, effectiveSearch, sourceFilter,
+        dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
       },
     });
 
@@ -1911,7 +1927,7 @@ export default function AnewLeads() {
     isLoadingRef.current = false;
     setLoading(false);
     setLoadingMore(false);
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
   const KANBAN_LEADS_LIMIT = 500;
 
@@ -1940,7 +1956,7 @@ export default function AnewLeads() {
         teamMemberIds,
         filters: {
           statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-          dateFrom, dateTo, effectiveSearch, sourceFilter,
+          dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
         },
       });
 
@@ -1999,7 +2015,7 @@ export default function AnewLeads() {
     } finally {
       setKanbanLoading(false);
     }
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
 
   // Persist a kanban drag: same status + workflow_stage_id update and
   // execute-workflow automation trigger as handleBulkStatusChange, for a
@@ -2069,7 +2085,7 @@ export default function AnewLeads() {
     if (activeTab !== "kanban" || !activeCompanyId || scopeLoading) return;
     loadKanbanLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeTab, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -2089,6 +2105,7 @@ export default function AnewLeads() {
         last_contact_at, last_contact_result, contact_attempts,
         callback_scheduled_at, callback_notes,
         tags,
+        qualification_type, qualified_at,
         campaigns(id, name)
       `)
       .eq("id", leadId)
@@ -4512,6 +4529,7 @@ export default function AnewLeads() {
                   setAssignedToFilter("all");
                   setContactResultFilter("all");
                   setSourceFilter("all");
+                  setQualificationFilter("all");
                   setOnlyMine(false);
                   setDateFrom(undefined);
                   setDateTo(undefined);
@@ -4750,7 +4768,7 @@ export default function AnewLeads() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {(searchTerm || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || dateFrom || dateTo) && (
+                    {(searchTerm || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || qualificationFilter !== "all" || dateFrom || dateTo) && (
                       <Badge variant="secondary" className="gap-1">
                         <span className="text-xs">
                           {[
@@ -4758,6 +4776,7 @@ export default function AnewLeads() {
                             campaignFilter !== "all" && "Campanha",
                             statusFilter !== "all" && "Status",
                             contactResultFilter !== "all" && "Resultado",
+                            qualificationFilter !== "all" && t('leads.qualificationType.label'),
                             (dateFrom || dateTo) && "Data"
                           ].filter(Boolean).length} filtros ativos
                         </span>
@@ -4773,6 +4792,7 @@ export default function AnewLeads() {
                         setStatusFilter("all");
                         setContactResultFilter("all");
                         setSourceFilter("all");
+                        setQualificationFilter("all");
                         setDateFrom(undefined);
                         setDateTo(undefined);
                       }}
@@ -4932,6 +4952,23 @@ export default function AnewLeads() {
                     </Select>
                   </div>
 
+                  {/* Qualification Type Filter (SQL/MQL) — orthogonal to Status,
+                      applied additionally (AND'ed) via applyLeadsServerFilters. */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">{t('leads.qualificationType.label')}</Label>
+                    <Select value={qualificationFilter} onValueChange={setQualificationFilter}>
+                      <SelectTrigger className="h-9 bg-background">
+                        <SelectValue placeholder="Todos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="sql">{t('leads.qualificationType.sql')}</SelectItem>
+                        <SelectItem value="mql">{t('leads.qualificationType.mql')}</SelectItem>
+                        <SelectItem value="unclassified">{t('leads.qualificationType.unclassified')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Date From */}
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Data Início</Label>
@@ -4990,7 +5027,7 @@ export default function AnewLeads() {
                 </div>
 
                 {/* Active Filters Pills */}
-                {(searchTerm || onlyMine || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || dateFrom || dateTo) && (
+                {(searchTerm || onlyMine || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || qualificationFilter !== "all" || dateFrom || dateTo) && (
                   <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t">
                     {onlyMine && (
                       <Badge variant="secondary" className="gap-1 pr-1">
@@ -5028,6 +5065,14 @@ export default function AnewLeads() {
                       <Badge variant="secondary" className="gap-1 pr-1">
                         <span>Resultado: {contactResultFilter === "none" ? "Sem Contacto" : contactResults.find(r => r.id === contactResultFilter)?.name}</span>
                         <Button variant="ghost" size="icon" className="h-4 w-4 hover:bg-transparent" onClick={() => setContactResultFilter("all")}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    )}
+                    {qualificationFilter !== "all" && (
+                      <Badge variant="secondary" className="gap-1 pr-1">
+                        <span>{t('leads.qualificationType.label')}: {t(`leads.qualificationType.${qualificationFilter}`)}</span>
+                        <Button variant="ghost" size="icon" className="h-4 w-4 hover:bg-transparent" onClick={() => setQualificationFilter("all")}>
                           <X className="h-3 w-3" />
                         </Button>
                       </Badge>
@@ -5433,6 +5478,7 @@ export default function AnewLeads() {
                     tags={selectedLead.tags}
                     healthScore={healthScore}
                     campaignName={selectedLead.campaigns?.name || null}
+                    qualificationType={selectedLead.qualification_type || null}
                     getStatusLabel={getStatusLabel}
                     getStatusColor={getStatusColorLocal}
                     onClose={() => setShowDetails(false)}

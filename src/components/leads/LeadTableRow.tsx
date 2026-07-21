@@ -278,9 +278,23 @@ export const LeadTableRow = memo(function LeadTableRow({
           case "status":
             return (
               <TableCell key={column.id}>
-                <Badge style={getStatusColor(getEffectiveStatus(lead))}>
-                  {getStatusLabel(getEffectiveStatus(lead))}
-                </Badge>
+                <div className="flex items-center gap-1 flex-wrap">
+                  <Badge style={getStatusColor(getEffectiveStatus(lead))}>
+                    {getStatusLabel(getEffectiveStatus(lead))}
+                  </Badge>
+                  {lead.status === "qualified" && lead.qualification_type && (
+                    <Badge
+                      variant="outline"
+                      className={
+                        lead.qualification_type === "sql"
+                          ? "text-[10px] px-1 py-0 border-purple-300 text-purple-700 bg-purple-50 dark:border-purple-700 dark:text-purple-300 dark:bg-purple-900/30 font-semibold"
+                          : "text-[10px] px-1 py-0 border-blue-300 text-blue-700 bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:bg-blue-900/30 font-semibold"
+                      }
+                    >
+                      {String(lead.qualification_type).toUpperCase()}
+                    </Badge>
+                  )}
+                </div>
               </TableCell>
             );
 
@@ -496,6 +510,7 @@ export const LeadTableRow = memo(function LeadTableRow({
     prev.lead.status === next.lead.status &&
     prev.lead.last_contact_at === next.lead.last_contact_at &&
     prev.lead.last_contact_result === next.lead.last_contact_result &&
+    prev.lead.qualification_type === next.lead.qualification_type &&
     prev.lead.assigned_user?.name === next.lead.assigned_user?.name &&
     prev.lead.updated_at === next.lead.updated_at &&
     prev.isSelected === next.isSelected &&

@@ -301,12 +301,13 @@ export const updateLeadStatusDef: ToolDef = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LEAD_STATUSES = ["new","contacted","callback_scheduled","no_answer","qualified","scheduled","visit_scheduled","rejected","incomplete"] as const;
 const CONTACT_STATUSES = ["active","inactive"] as const;
+const QUALIFICATION_TYPES = ["sql", "mql"] as const;
 
 export const updateLeadDef: ToolDef = {
   type: "function",
   function: {
     name: "update_lead",
-    description: "Edita um lead (assigned_to, status e/ou workflow_stage_id). 'status' é o enum CRM em inglês (new|contacted|...); 'workflow_stage_id' é o UUID definido pela organização em lead_workflow_stages — são independentes. Para mover um lead no pipeline visual usa workflow_stage_id (NÃO update_lead_status). Quando workflow_stage_id muda, dispara automaticamente execute-workflow (stage_actions + workflow_rules). 'converted' não é aceite — usa convert_lead.",
+    description: "Edita um lead (assigned_to, status, workflow_stage_id e/ou qualification_type). 'status' é o enum CRM em inglês (new|contacted|...); 'workflow_stage_id' é o UUID definido pela organização em lead_workflow_stages; 'qualification_type' ('sql'|'mql'|null) classifica o lead como Sales/Marketing Qualified Lead — os três são totalmente independentes entre si. Para mover um lead no pipeline visual usa workflow_stage_id (NÃO update_lead_status). Quando workflow_stage_id muda, dispara automaticamente execute-workflow (stage_actions + workflow_rules). qualification_type só faz sentido depois do lead estar 'qualified'; omitir o parâmetro mantém a classificação atual, enviar null limpa-a. 'converted' não é aceite — usa convert_lead.",
     parameters: {
       type: "object",
       properties: {
@@ -314,6 +315,7 @@ export const updateLeadDef: ToolDef = {
         assigned_to: { type: "string", description: "UUID anew_users.id" },
         status: { type: "string", enum: [...LEAD_STATUSES] },
         workflow_stage_id: { type: "string", description: "UUID de lead_workflow_stages — obter via list_workflow_stages({module:'lead'})" },
+        qualification_type: { type: ["string", "null"], enum: [...QUALIFICATION_TYPES, null], description: "Classificação SQL/MQL do lead. Omitir = não alterar; null = limpar classificação existente." },
       },
       required: ["id"],
     },
@@ -626,6 +628,16 @@ const updateLead: Handler = async (ctx, args): Promise<ToolResult> => {
     patch.assigned_to = args.assigned_to;
   }
 
+  // qualification_type: validado aqui, mas NÃO entra no `patch` directo — é
+  // escrito via rpc_update_lead (chamada mais abaixo), que implementa a regra
+  // sticky de qualified_at e o histórico dedicado em anew_entity_history.
+  const hasQualificationChange = args.qualification_type !== undefined;
+  if (hasQualificationChange) {
+    if (args.qualification_type !== null && !QUALIFICATION_TYPES.includes(args.qualification_type)) {
+      return { success: false, message: `qualification_type inválido. Aceites: ${QUALIFICATION_TYPES.join(", ")} ou null.` };
+    }
+  }
+
   // workflow_stage_id: validar pertença à org + activo, capturar old, e disparar execute-workflow se mudou.
   let oldStageId: string | null = null;
   let newStageId: string | null = null;
@@ -660,17 +672,64 @@ const updateLead: Handler = async (ctx, args): Promise<ToolResult> => {
     willTriggerWorkflow = oldStageId !== newStageId;
   }
 
-  if (Object.keys(patch).length === 0) return { success: false, message: "Nada para atualizar." };
-  const { data, error } = await supabase
-    .from("anew_leads")
-    .update(patch)
-    .eq("id", args.id)
-    .eq("organization_id", organizationId)
-    .is("deleted_at", null)
-    .select("id, status, assigned_to, workflow_stage_id")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return { success: false, message: "Lead não encontrado ou fora de scope." };
+  if (Object.keys(patch).length === 0 && !hasQualificationChange) return { success: false, message: "Nada para atualizar." };
+
+  // Selecionar field_values/source/notes só quando necessário (ecoados,
+  // sem alteração, na chamada a rpc_update_lead abaixo).
+  const selectCols = hasQualificationChange
+    ? "id, status, assigned_to, workflow_stage_id, field_values, source, notes"
+    : "id, status, assigned_to, workflow_stage_id";
+
+  let row: Record<string, any> | null = null;
+  if (Object.keys(patch).length > 0) {
+    const { data: updated, error } = await supabase
+      .from("anew_leads")
+      .update(patch)
+      .eq("id", args.id)
+      .eq("organization_id", organizationId)
+      .is("deleted_at", null)
+      .select(selectCols)
+      .maybeSingle();
+    if (error) throw error;
+    if (!updated) return { success: false, message: "Lead não encontrado ou fora de scope." };
+    row = updated;
+  } else {
+    const { data: cur, error } = await supabase
+      .from("anew_leads")
+      .select(selectCols)
+      .eq("id", args.id)
+      .eq("organization_id", organizationId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (!cur) return { success: false, message: "Lead não encontrado ou fora de scope." };
+    row = cur;
+  }
+  if (!row) return { success: false, message: "Lead não encontrado ou fora de scope." };
+
+  let data: Record<string, any> = { id: row.id, status: row.status, assigned_to: row.assigned_to, workflow_stage_id: row.workflow_stage_id };
+
+  if (hasQualificationChange) {
+    const { error: qualErr } = await supabase.rpc("rpc_update_lead", {
+      p_lead_id: args.id,
+      p_field_values: row.field_values ?? null,
+      p_status: row.status,
+      p_source: row.source ?? null,
+      p_notes: row.notes ?? null,
+      p_assigned_to: row.assigned_to ?? null,
+      p_status_changed: false,
+      p_workflow_stage_id: null,
+      p_display_name: null,
+      p_first_name: null,
+      p_last_name: null,
+      p_qualification_type: args.qualification_type,
+      p_qualification_changed: true,
+    });
+    if (qualErr) {
+      return { success: true, message: `Lead atualizado, mas qualificação SQL/MQL falhou: ${String(qualErr.message).slice(0, 160)}`, data };
+    }
+    data = { ...data, qualification_type: args.qualification_type };
+  }
 
   // Disparar execute-workflow se stage mudou e há sessão.
   if (willTriggerWorkflow && newStageId) {

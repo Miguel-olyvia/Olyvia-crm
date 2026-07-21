@@ -3,6 +3,10 @@ import { pt } from "date-fns/locale";
 import { Check, Star, HelpCircle } from "lucide-react";
 
 interface LeadJourneyTabProps {
+  // `any` kept intentionally: this prop is the raw selectedLead row from
+  // AnewLeads.tsx, which already carries qualification_type/qualified_at
+  // (see LEADS_LIST_COLUMNS) — no separate shared Lead interface exists to
+  // extend here.
   lead: any;
   hasClient: boolean;
   clientCreatedAt: string | null;
@@ -16,6 +20,14 @@ export function LeadJourneyTab({
   interactionCount, dealCount, dealValue,
 }: LeadJourneyTabProps) {
   const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
+
+  // qualification_type (SQL/MQL) is sticky and orthogonal to status — once
+  // set it survives later status changes, so it's shown as a suffix on the
+  // "Qualificado" node rather than tied to the live status value.
+  const qualificationSuffix =
+    lead.qualification_type === "sql" ? " · SQL"
+    : lead.qualification_type === "mql" ? " · MQL"
+    : "";
 
   const steps = [
     {
@@ -88,6 +100,11 @@ export function LeadJourneyTab({
               <p className="text-[10px] text-muted-foreground">
                 {step.date ? format(new Date(step.date), "dd/MM/yyyy", { locale: pt }) : "—"}
               </p>
+              {step.key === "qualified" && step.date && (
+                <p className="text-[10px] text-muted-foreground/80">
+                  {step.label} — {format(new Date(step.date), "dd/MM/yyyy", { locale: pt })}{qualificationSuffix}
+                </p>
+              )}
             </div>
             {i < steps.length - 1 && (
               <div className={`flex-1 h-0.5 mx-2 ${

@@ -46,13 +46,18 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   buildDashboardScopedRpcParams,
   buildNegotiationScopeFilter,
+  computeMqlToSqlConversionRate,
   daysBetween,
   deriveCampaignDistribution,
   deriveDashboardKpis,
   deriveLeadsOverTime,
+  deriveMonthlyQualificationTrend,
+  deriveQualificationBreakdown,
   deriveSourceDistribution,
   deriveStageFunnel,
   deriveStatusDistribution,
+  formatDaysMetric,
+  QUALIFICATION_COLORS,
   getAssigneeIds,
   getComparisonPeriod,
   getDashboardRenderState,
@@ -61,6 +66,8 @@ import {
   type DashboardStats,
   type LeadsDashboardQuery,
   type NegotiationLeadRow,
+  type QualificationHistoryRow,
+  type QualificationLeadRow,
 } from "./leadsDashboardHelpers";
 
 const NEGOTIATION_LIST_LIMIT = 20;
@@ -438,6 +445,95 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   // Memoized for the same reason as negotiationRows above -- see that comment.
   const activityFeedRows = useMemo(() => activityRows ?? [], [activityRows]);
 
+  // MQL -> SQL conversion KPI: sourced from anew_entity_history's dedicated
+  // qualification_changed feed (see migration 20261110480000), not from the
+  // scoped RPC. RLS on anew_entity_history (is_entity_in_user_scope) already
+  // narrows visibility for the caller, so no extra org/scope filter is added
+  // here beyond the change_type + period filters.
+  const {
+    data: qualificationHistoryRows,
+    isLoading: qualificationHistoryLoading,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-qualification-history",
+      query?.orgId,
+      dateRange.from.toISOString(),
+      dateRange.to.toISOString(),
+    ],
+    queryFn: async (): Promise<QualificationHistoryRow[]> => {
+      if (!query) return [];
+
+      const { data, error: historyError } = await supabase
+        .from("anew_entity_history")
+        .select("entity_id, new_value, created_at")
+        .eq("change_type", "qualification_changed")
+        .gte("created_at", dateRange.from.toISOString())
+        .lte("created_at", dateRange.to.toISOString())
+        .order("created_at", { ascending: true });
+
+      if (historyError) {
+        throw new Error(historyError.message || "Erro ao carregar histórico de qualificação.");
+      }
+
+      return (data ?? []) as QualificationHistoryRow[];
+    },
+    enabled: !!query && dashboardView === "leads",
+    staleTime: 60_000,
+  });
+
+  const mqlToSqlConversion = useMemo(
+    () => computeMqlToSqlConversionRate(qualificationHistoryRows ?? []),
+    [qualificationHistoryRows],
+  );
+
+  // Monthly SQL vs MQL cohort trend: derived client-side from anew_leads
+  // (qualification_type/qualified_at), scoped the same way as the
+  // negotiation-leads query above (buildNegotiationScopeFilter), since the
+  // scoped RPC does not return a monthly breakdown of qualification.
+  const {
+    data: qualificationTrendRows,
+    isLoading: qualificationTrendLoading,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-qualification-trend",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+    ],
+    queryFn: async (): Promise<QualificationLeadRow[]> => {
+      if (!query) return [];
+
+      let trendQuery = supabase
+        .from("anew_leads")
+        .select("qualification_type, qualified_at")
+        .eq("organization_id", query.orgId)
+        .is("deleted_at", null)
+        .not("qualified_at", "is", null)
+        .order("qualified_at", { ascending: true });
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        trendQuery = trendQuery.or(scopeFilter);
+      }
+
+      const { data, error: trendError } = await trendQuery;
+      if (trendError) {
+        throw new Error(trendError.message || "Erro ao carregar tendência de qualificação.");
+      }
+
+      return (data ?? []) as QualificationLeadRow[];
+    },
+    enabled: !!query && dashboardView === "leads",
+    staleTime: 60_000,
+  });
+
+  const qualificationTrend = useMemo(
+    () => deriveMonthlyQualificationTrend(qualificationTrendRows ?? []),
+    [qualificationTrendRows],
+  );
+
   useEffect(() => {
     const entityIds = negotiationRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
     if (entityIds.length > 0) {
@@ -520,6 +616,11 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   );
 
   const statusDistribution = useMemo(() => deriveStatusDistribution(stats), [stats]);
+  const qualificationBreakdown = useMemo(() => deriveQualificationBreakdown(stats), [stats]);
+  const qualificationBreakdownTotal = useMemo(
+    () => qualificationBreakdown.reduce((sum, entry) => sum + entry.value, 0),
+    [qualificationBreakdown],
+  );
   const leadsByCampaign = useMemo(() => deriveCampaignDistribution(stats), [stats]);
   const sourceDistribution = useMemo(() => deriveSourceDistribution(stats), [stats]);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
@@ -715,7 +816,48 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               subtitle={`${formatMetricValue(kpis.cohortConversions)} dos ${formatMetricValue(kpis.leadsInPeriod)} novos converteram`}
               icon={Target}
             />
+            <KPICard
+              title="Conversão MQL → SQL"
+              value={
+                qualificationHistoryLoading
+                  ? "--"
+                  : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")
+              }
+              subtitle={
+                mqlToSqlConversion.totalMql > 0
+                  ? `${mqlToSqlConversion.convertedToSql} de ${mqlToSqlConversion.totalMql} MQL viraram SQL`
+                  : "Sem leads MQL no período"
+              }
+              icon={Zap}
+            />
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Tempo médio até qualificar</CardTitle>
+              <CardDescription>Dias entre a criação do lead e a primeira classificação SQL/MQL</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">SQL</p>
+                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.sql }}>
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.sql)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">MQL</p>
+                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.mql }}>
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.mql)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Global</p>
+                  <p className="text-xl font-bold">{formatDaysMetric(stats?.avg_days_to_qualify?.overall)}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {Object.keys(kpis.leadsByAssignee).length > 0 && (
             <Card>
@@ -853,6 +995,34 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                     </div>
                   ))}
                 </div>
+
+                {qualificationBreakdown.length > 0 && (
+                  <div className="mt-4 border-t pt-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">
+                      Classificação SQL / MQL (independente do estado)
+                    </p>
+                    <div className="space-y-1.5">
+                      {qualificationBreakdown.map((item) => {
+                        const widthPercent =
+                          qualificationBreakdownTotal > 0
+                            ? Math.max(2, Math.round((item.value / qualificationBreakdownTotal) * 100))
+                            : 0;
+                        return (
+                          <div key={item.key} className="flex items-center gap-2 text-xs">
+                            <span className="w-24 shrink-0 text-muted-foreground">{item.label}</span>
+                            <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${widthPercent}%`, backgroundColor: item.color }}
+                              />
+                            </div>
+                            <span className="w-8 shrink-0 text-right font-medium">{item.value}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -928,6 +1098,43 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Tendência mensal SQL vs MQL</CardTitle>
+              <CardDescription>Novas qualificações por mês (coorte por data de qualificação)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[250px]">
+                {qualificationTrendLoading && qualificationTrend.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    A carregar tendência…
+                  </div>
+                ) : qualificationTrend.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    Sem dados de qualificação para o período.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={qualificationTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="monthLabel" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--background))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                        }}
+                      />
+                      <Bar dataKey="sql" stackId="qualification" fill={QUALIFICATION_COLORS.sql} name="SQL" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="mql" stackId="qualification" fill={QUALIFICATION_COLORS.mql} name="MQL" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-200/50 dark:border-blue-800/50">

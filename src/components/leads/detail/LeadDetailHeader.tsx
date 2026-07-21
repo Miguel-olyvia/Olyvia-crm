@@ -11,6 +11,9 @@ interface LeadDetailHeaderProps {
   tags: string[] | null;
   healthScore: LeadHealthScore;
   campaignName: string | null;
+  // Sticky classification set once status reaches "qualified" — survives
+  // later status changes, so it's shown independently of the status badge.
+  qualificationType?: "sql" | "mql" | null;
   getStatusLabel: (status: string) => string;
   getStatusColor: (status: string) => string;
   onClose: () => void;
@@ -25,7 +28,7 @@ const HEALTH_COLORS: Record<string, string> = {
 };
 
 export function LeadDetailHeader({
-  leadName, status, source, tags, healthScore, campaignName,
+  leadName, status, source, tags, healthScore, campaignName, qualificationType,
   getStatusLabel, getStatusColor, onClose,
 }: LeadDetailHeaderProps) {
   const initials = leadName
@@ -53,6 +56,18 @@ export function LeadDetailHeader({
             {getStatusLabel(status)}
           </Badge>
           <Badge variant="secondary" className="text-xs">Lead</Badge>
+          {status === "qualified" && qualificationType && (
+            <Badge
+              variant="outline"
+              className={
+                qualificationType === "sql"
+                  ? "text-xs border-purple-300 text-purple-700 bg-purple-50 dark:border-purple-700 dark:text-purple-300 dark:bg-purple-900/30 font-semibold"
+                  : "text-xs border-blue-300 text-blue-700 bg-blue-50 dark:border-blue-700 dark:text-blue-300 dark:bg-blue-900/30 font-semibold"
+              }
+            >
+              {qualificationType.toUpperCase()}
+            </Badge>
+          )}
           {source && (
             <Badge variant="outline" className="text-xs border-primary text-primary font-semibold">
               {source.toUpperCase()}

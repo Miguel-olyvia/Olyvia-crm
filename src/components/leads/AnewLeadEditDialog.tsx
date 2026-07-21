@@ -43,6 +43,7 @@ interface Lead {
   notes: string | null;
   assigned_to: string | null;
   workflow_stage_id?: string | null;
+  qualification_type?: string | null;
 }
 
 export interface LeadEditDialogUpdate {
@@ -127,6 +128,7 @@ export function AnewLeadEditDialog({
   const [source, setSource] = useState("");
   const [notes, setNotes] = useState("");
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
+  const [qualificationType, setQualificationType] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -172,6 +174,7 @@ export function AnewLeadEditDialog({
     setSource(lead.source || "");
     setNotes(lead.notes || "");
     setAssignedTo(lead.assigned_to);
+    setQualificationType(lead.qualification_type ?? null);
     setFieldErrors({});
   };
 
@@ -265,6 +268,7 @@ export function AnewLeadEditDialog({
       };
 
       const statusChanged = status !== lead.status;
+      const qualificationChanged = qualificationType !== (lead.qualification_type ?? null);
 
       let workflowStageId = lead.workflow_stage_id || null;
       if (statusChanged) {
@@ -302,6 +306,9 @@ export function AnewLeadEditDialog({
           p_display_name: displayName ?? null,
           p_first_name: entityFirstName ?? null,
           p_last_name: entityLastName ?? null,
+          ...(qualificationChanged
+            ? { p_qualification_type: qualificationType, p_qualification_changed: true }
+            : {}),
         });
 
         if (error) throw error;
@@ -374,6 +381,12 @@ export function AnewLeadEditDialog({
     { value: "incomplete", label: "Incompleta" },
   ];
 
+  const qualificationTypeOptions = [
+    { value: "sql", label: t("leads.qualificationType.sql") },
+    { value: "mql", label: t("leads.qualificationType.mql") },
+    { value: "unclassified", label: t("leads.qualificationType.unclassified") },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -434,6 +447,29 @@ export function AnewLeadEditDialog({
                 </Select>
               </div>
             </div>
+
+            {status === "qualified" && (
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>{t("leads.qualificationType.label")}</Label>
+                  <Select
+                    value={qualificationType || "unclassified"}
+                    onValueChange={(v) => setQualificationType(v === "unclassified" ? null : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {qualificationTypeOptions.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4">
               <h4 className="text-sm font-semibold border-b pb-2">Dados da Lead</h4>
