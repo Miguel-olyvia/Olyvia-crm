@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +15,7 @@ import { LEAD_STATUS_OPTIONS } from "@/components/leads/LeadWorkflowConfig";
 import {
   CONDITION_CATALOG,
   defaultConditionForType,
+  type ContactResultOption,
   type RuleCondition,
   type RuleConditionType,
   type RuleGroup,
@@ -21,16 +24,34 @@ import {
 interface StageRulesEditorProps {
   value: RuleGroup | null;
   onChange: (value: RuleGroup | null) => void;
+  companyId: string | null;
 }
 
 /**
  * Reusable AND/OR condition-block builder for reached_when (per stage) and
  * mql_when/sql_when (org-level qualification rules) - same shape, same
  * catalog, per the Fase 3 spec ("usando o mesmo builder de blocos acima").
+ *
+ * Loads lead_contact_results (global templates + org-specific) so every
+ * contact result an org has configured is selectable as a
+ * "last_contact_result" condition - no hardcoded triggers_lost flag.
  */
-export function StageRulesEditor({ value, onChange }: StageRulesEditorProps) {
+export function StageRulesEditor({ value, onChange, companyId }: StageRulesEditorProps) {
   const conditions = value?.conditions ?? [];
   const op = value?.op ?? "AND";
+  const [contactResults, setContactResults] = useState<ContactResultOption[]>([]);
+
+  useEffect(() => {
+    (supabase as any)
+      .from("lead_contact_results")
+      .select("id, name, organization_id")
+      .eq("is_active", true)
+      .or(companyId ? `organization_id.eq.${companyId},organization_id.is.null` : "organization_id.is.null")
+      .order("sort_order")
+      .then(({ data }: any) => {
+        setContactResults((data ?? []).map((r: any) => ({ id: r.id, name: r.name })));
+      });
+  }, [companyId]);
 
   const updateConditions = (next: RuleCondition[]) => {
     if (next.length === 0) {
@@ -41,7 +62,7 @@ export function StageRulesEditor({ value, onChange }: StageRulesEditorProps) {
   };
 
   const addCondition = (type: RuleConditionType) => {
-    updateConditions([...conditions, defaultConditionForType(type)]);
+    updateConditions([...conditions, defaultConditionForType(type, contactResults[0]?.id)]);
   };
 
   const removeCondition = (index: number) => {
@@ -81,7 +102,7 @@ export function StageRulesEditor({ value, onChange }: StageRulesEditorProps) {
               <div className="flex-1 space-y-2">
                 <Select
                   value={condition.type}
-                  onValueChange={(v: RuleConditionType) => updateCondition(index, defaultConditionForType(v))}
+                  onValueChange={(v: RuleConditionType) => updateCondition(index, defaultConditionForType(v, contactResults[0]?.id))}
                 >
                   <SelectTrigger className="h-8">
                     <SelectValue />
@@ -131,6 +152,36 @@ export function StageRulesEditor({ value, onChange }: StageRulesEditorProps) {
                       <SelectItem value="sql">SQL</SelectItem>
                     </SelectContent>
                   </Select>
+                )}
+
+                {condition.type === "last_contact_result" && (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      value={condition.is ? "is" : "is_not"}
+                      onValueChange={(v: "is" | "is_not") => updateCondition(index, { ...condition, is: v === "is" })}
+                    >
+                      <SelectTrigger className="h-8 w-20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="is">é</SelectItem>
+                        <SelectItem value="is_not">não é</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={condition.result_id}
+                      onValueChange={(v: string) => updateCondition(index, { ...condition, result_id: v })}
+                    >
+                      <SelectTrigger className="h-8 flex-1">
+                        <SelectValue placeholder="Selecione o resultado" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {contactResults.map(r => (
+                          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 )}
               </div>
               <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => removeCondition(index)}>
