@@ -68,6 +68,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { WorkflowAutomationRules } from "@/components/workflows/WorkflowAutomationRules";
 import { WorkflowFlowchart } from "./WorkflowFlowchart";
 import { LeadStageActionsConfig } from "./LeadStageActionsConfig";
+import { StageRulesEditor } from "./workflow/StageRulesEditor";
+import { QualificationRulesTab } from "./workflow/QualificationRulesTab";
+import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
+import type { RuleGroup } from "./workflow/conditionCatalog";
 
 export interface WorkflowStage {
   id: string;
@@ -83,6 +87,14 @@ export interface WorkflowStage {
   created_at: string;
   created_by: string;
   default_status: string | null;
+  matching_statuses?: string[] | null;
+  reached_when?: RuleGroup | null;
+  auto_advance?: boolean;
+  qualification_hint?: "none" | "mql" | "sql";
+  counts_as_qualified?: boolean;
+  counts_as_negotiation?: boolean;
+  counts_as_converted?: boolean;
+  counts_as_lost?: boolean;
 }
 
 export const LEAD_STATUS_OPTIONS = [
@@ -271,7 +283,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editingStage, setEditingStage] = useState<WorkflowStage | null>(null);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [activeTab, setActiveTab] = useState("stages");
+  const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
 
   const [deletingStage, setDeletingStage] = useState<WorkflowStage | null>(null);
   const [migrationTargetId, setMigrationTargetId] = useState<string>("");
@@ -356,6 +370,14 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     is_conversion: boolean;
     is_rejection: boolean;
     default_status: string | null;
+    matching_statuses: string[];
+    reached_when: RuleGroup | null;
+    auto_advance: boolean;
+    qualification_hint: "none" | "mql" | "sql";
+    counts_as_qualified: boolean;
+    counts_as_negotiation: boolean;
+    counts_as_converted: boolean;
+    counts_as_lost: boolean;
   }
 
   const toStagePayload = (s: WorkflowStage): StagePayload => ({
@@ -367,6 +389,14 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     is_conversion: s.is_conversion,
     is_rejection: s.is_rejection,
     default_status: s.default_status ?? null,
+    matching_statuses: s.matching_statuses ?? [s.name],
+    reached_when: s.reached_when ?? null,
+    auto_advance: s.auto_advance ?? false,
+    qualification_hint: s.qualification_hint ?? "none",
+    counts_as_qualified: s.counts_as_qualified ?? false,
+    counts_as_negotiation: s.counts_as_negotiation ?? false,
+    counts_as_converted: s.counts_as_converted ?? false,
+    counts_as_lost: s.counts_as_lost ?? false,
   });
 
   const saveStages = async (payload: StagePayload[]) => {
@@ -394,6 +424,14 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         is_conversion: newStage.is_conversion,
         is_rejection: newStage.is_rejection,
         default_status: newStage.default_status || null,
+        matching_statuses: [newStage.name.toLowerCase().replace(/\s+/g, '_')],
+        reached_when: null,
+        auto_advance: false,
+        qualification_hint: "none",
+        counts_as_qualified: false,
+        counts_as_negotiation: false,
+        counts_as_converted: newStage.is_conversion,
+        counts_as_lost: newStage.is_rejection,
       },
     ];
 
@@ -476,6 +514,14 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         is_conversion: false,
         is_rejection: false,
         default_status: null,
+        matching_statuses: [stage.name + "_copy"],
+        reached_when: stage.reached_when ?? null,
+        auto_advance: stage.auto_advance ?? false,
+        qualification_hint: stage.qualification_hint ?? "none",
+        counts_as_qualified: stage.counts_as_qualified ?? false,
+        counts_as_negotiation: stage.counts_as_negotiation ?? false,
+        counts_as_converted: false,
+        counts_as_lost: false,
       },
     ];
 
@@ -487,6 +533,24 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       loadStages();
       onStagesUpdated?.();
     }
+  };
+
+  const handleRecompute = async () => {
+    if (!companyId) return;
+    setRecomputing(true);
+    const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
+      p_org: companyId,
+    });
+    setRecomputing(false);
+
+    if (error) {
+      toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
+      return;
+    }
+    const updatedCount = data?.[0]?.updated_count ?? 0;
+    toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
+    loadLeadCounts();
+    onStagesUpdated?.();
   };
 
   // ─── Drag & Drop ──────────────────────────────────────────
@@ -578,7 +642,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="stages">Estágios</TabsTrigger>
               <TabsTrigger value="flow" className="gap-1.5">
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -591,6 +655,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               <TabsTrigger value="automations" className="gap-1.5">
                 <Zap className="w-3.5 h-3.5" />
                 Automações
+              </TabsTrigger>
+              <TabsTrigger value="qualification" className="gap-1.5">
+                <Target className="w-3.5 h-3.5" />
+                Qualificação
               </TabsTrigger>
             </TabsList>
 
@@ -679,6 +747,36 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   Adicionar Estágio
                 </Button>
               )}
+
+              {!isUsingTemplate && displayStages.length > 0 && (
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Regras de resolução de etapa</p>
+                      <p className="text-xs text-muted-foreground">
+                        Simule o impacto das regras configuradas acima antes de recalcular as leads existentes.
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={handleRecompute} disabled={recomputing}>
+                      {recomputing ? "A recalcular..." : "Guardar & Recalcular"}
+                    </Button>
+                  </div>
+                  <DryRunPanel
+                    companyId={companyId}
+                    stages={displayStages.map(s => ({
+                      id: s.id,
+                      label: s.label,
+                      stage_order: s.stage_order,
+                      reached_when: s.reached_when ?? null,
+                      matching_statuses: s.matching_statuses ?? [s.name],
+                      counts_as_qualified: s.counts_as_qualified ?? false,
+                      counts_as_negotiation: s.counts_as_negotiation ?? false,
+                      counts_as_converted: s.counts_as_converted ?? false,
+                      counts_as_lost: s.counts_as_lost ?? false,
+                    }))}
+                  />
+                </div>
+              )}
             </TabsContent>
 
             {/* ─── Flow Tab ────────────────────────────────── */}
@@ -689,6 +787,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
             {/* ─── Actions Tab ───────────────────────────────── */}
             <TabsContent value="actions" className="mt-4">
               <LeadStageActionsConfig stages={displayStages} companyId={companyId} />
+            </TabsContent>
+
+            {/* ─── Qualification Tab ─────────────────────────── */}
+            <TabsContent value="qualification" className="mt-4">
+              <QualificationRulesTab companyId={companyId} />
             </TabsContent>
 
             {/* ─── Automations Tab ───────────────────────────── */}
@@ -786,74 +889,175 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
       {/* ─── Edit Stage Dialog ──────────────────────────────── */}
       <Dialog open={!!editingStage} onOpenChange={() => setEditingStage(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Editar Estágio</DialogTitle>
           </DialogHeader>
           {editingStage && (
-            <div className="space-y-4">
-              <div>
-                <Label>Nome (key)</Label>
-                <Input value={editingStage.name} disabled className="bg-muted" />
-              </div>
-              <div>
-                <Label>Label</Label>
-                <Input
-                  value={editingStage.label}
-                  onChange={e => setEditingStage({ ...editingStage, label: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Cor</Label>
-                <div className="flex gap-2 mt-2">
-                  {DEFAULT_COLORS.map(color => (
-                    <button
-                      key={color}
-                      className={`w-8 h-8 rounded-full border-2 transition-all ${
-                        editingStage.color === color ? 'border-foreground scale-110' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: color }}
-                      onClick={() => setEditingStage({ ...editingStage, color })}
-                    />
-                  ))}
+            <Tabs value={editStageTab} onValueChange={setEditStageTab}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="general">Geral</TabsTrigger>
+                <TabsTrigger value="rules">Regras</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="general" className="space-y-4 mt-4">
+                <div>
+                  <Label>Nome (key)</Label>
+                  <Input value={editingStage.name} disabled className="bg-muted" />
+                </div>
+                <div>
+                  <Label>Label</Label>
                   <Input
-                    type="color"
-                    value={editingStage.color}
-                    onChange={e => setEditingStage({ ...editingStage, color: e.target.value })}
-                    className="w-8 h-8 p-0 border-0"
+                    value={editingStage.label}
+                    onChange={e => setEditingStage({ ...editingStage, label: e.target.value })}
                   />
                 </div>
-              </div>
-              <div>
-                <Label>Status automático da Lead</Label>
-                <Select value={(editingStage as any).default_status || "none"} onValueChange={v => setEditingStage({ ...editingStage, default_status: v === "none" ? null : v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Nenhum (sem alteração)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {LEAD_STATUS_OPTIONS.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <div>
+                  <Label>Cor</Label>
+                  <div className="flex gap-2 mt-2">
+                    {DEFAULT_COLORS.map(color => (
+                      <button
+                        key={color}
+                        className={`w-8 h-8 rounded-full border-2 transition-all ${
+                          editingStage.color === color ? 'border-foreground scale-110' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setEditingStage({ ...editingStage, color })}
+                      />
                     ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">Status que a lead recebe ao entrar neste estágio</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_final} onCheckedChange={v => setEditingStage({ ...editingStage, is_final: v })} />
-                  <Label>Final</Label>
+                    <Input
+                      type="color"
+                      value={editingStage.color}
+                      onChange={e => setEditingStage({ ...editingStage, color: e.target.value })}
+                      className="w-8 h-8 p-0 border-0"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_conversion} onCheckedChange={v => setEditingStage({ ...editingStage, is_conversion: v, is_rejection: v ? false : editingStage.is_rejection })} />
-                  <Label>Win (Conversão)</Label>
+                <div>
+                  <Label>Status automático da Lead</Label>
+                  <Select value={(editingStage as any).default_status || "none"} onValueChange={v => setEditingStage({ ...editingStage, default_status: v === "none" ? null : v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Nenhum (sem alteração)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhum</SelectItem>
+                      {LEAD_STATUS_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">Status que a lead recebe ao entrar neste estágio</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
-                  <Label>Lost</Label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_final} onCheckedChange={v => setEditingStage({ ...editingStage, is_final: v })} />
+                    <Label>Final</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_conversion} onCheckedChange={v => setEditingStage({ ...editingStage, is_conversion: v, is_rejection: v ? false : editingStage.is_rejection })} />
+                    <Label>Win (Conversão)</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
+                    <Label>Lost</Label>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </TabsContent>
+
+              <TabsContent value="rules" className="space-y-4 mt-4">
+                <div>
+                  <Label className="text-sm">Status literais associados</Label>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {LEAD_STATUS_OPTIONS.map(opt => {
+                      const selected = (editingStage.matching_statuses ?? [editingStage.name]).includes(opt.value);
+                      return (
+                        <Badge
+                          key={opt.value}
+                          variant={selected ? "default" : "outline"}
+                          className="cursor-pointer text-xs"
+                          onClick={() => {
+                            const current = editingStage.matching_statuses ?? [editingStage.name];
+                            const next = selected ? current.filter(v => v !== opt.value) : [...current, opt.value];
+                            setEditingStage({ ...editingStage, matching_statuses: next });
+                          }}
+                        >
+                          {opt.label}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Condições de entrada</Label>
+                  <div className="mt-2">
+                    <StageRulesEditor
+                      value={editingStage.reached_when ?? null}
+                      onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={editingStage.auto_advance ?? false}
+                    onCheckedChange={v => setEditingStage({ ...editingStage, auto_advance: v })}
+                  />
+                  <Label>Auto-avançar quando as condições forem cumpridas</Label>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Contabiliza como</Label>
+                  <div className="flex flex-wrap items-center gap-4 mt-2">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_qualified ?? false}
+                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_qualified: v })}
+                      />
+                      <Label className="text-sm">Qualificado</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_negotiation ?? false}
+                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_negotiation: v })}
+                      />
+                      <Label className="text-sm">Negociação</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_converted ?? false}
+                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_converted: v })}
+                      />
+                      <Label className="text-sm">Convertido</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_lost ?? false}
+                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_lost: v })}
+                      />
+                      <Label className="text-sm">Perdido</Label>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Sugestão de qualificação</Label>
+                  <Select
+                    value={editingStage.qualification_hint ?? "none"}
+                    onValueChange={(v: "none" | "mql" | "sql") => setEditingStage({ ...editingStage, qualification_hint: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhuma</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </TabsContent>
+            </Tabs>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingStage(null)}>Cancelar</Button>
