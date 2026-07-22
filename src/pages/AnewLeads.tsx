@@ -4693,7 +4693,9 @@ export default function AnewLeads() {
             {/* Quick Status Cards */}
             <div className="flex gap-3 overflow-x-auto pb-2">
               {workflowStages.length > 0 ? (
-                workflowStages.filter(stage => stage.name !== 'converted').map(stage => (
+                workflowStages
+                  .filter(stage => !['converted', 'callback_scheduled', 'proposal'].includes(stage.name))
+                  .map(stage => (
                   <Card 
                     key={stage.id} 
                     className={`cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0 ${
