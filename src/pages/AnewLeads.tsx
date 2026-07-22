@@ -4655,6 +4655,16 @@ export default function AnewLeads() {
                 getStageIdForLead={(leadId) => {
                   const lead = kanbanLeads.find(l => l.id === leadId);
                   if (!lead) return undefined;
+                  // Prefer workflow_stage_id (kept in sync with the configurable rule
+                  // engine by recompute_leads_v2_buckets / auto_advance - see
+                  // migrations 20261110540000/20261110570000) so the Kanban obeys
+                  // whatever reached_when rules the org has configured, not just the
+                  // raw literal status. Falls back to a literal-status match only for
+                  // leads that were never resolved (workflow_stage_id still null).
+                  const stageId = (lead as any).workflow_stage_id as string | null | undefined;
+                  if (stageId && workflowStages.some(s => s.id === stageId)) {
+                    return stageId;
+                  }
                   const effectiveStatus = getEffectiveStatus(lead);
                   return workflowStages.find(s => s.name === effectiveStatus)?.id;
                 }}
