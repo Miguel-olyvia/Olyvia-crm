@@ -425,6 +425,7 @@ interface FormStep {
   scheduling_duration_minutes?: number;
   scheduling_board_id?: string | null;
   scheduling_postal_code_field_key?: string | null;
+  scheduling_district_field_key?: string | null;
   fields: FormField[];
   info_blocks?: InfoBlock[];
   sections?: FormSection[];
@@ -1085,6 +1086,10 @@ export default function PublicLeadForm() {
         postal_code: (() => {
           const pcKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key;
           return pcKey ? formValues[pcKey] : undefined;
+        })(),
+        district_id: (() => {
+          const districtKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key;
+          return districtKey ? formValues[districtKey] : undefined;
         })(),
         field_values: formValues,
         campaign_id: formConfig.campaign_id || campaignId || undefined,
@@ -2323,6 +2328,10 @@ export default function PublicLeadForm() {
                     postalCode={(() => {
                       const pcKey = currentStepData.scheduling_postal_code_field_key;
                       return pcKey ? formValues[pcKey] : undefined;
+                    })()}
+                    districtId={(() => {
+                      const districtKey = currentStepData.scheduling_district_field_key;
+                      return districtKey ? formValues[districtKey] : undefined;
                     })()}
                     primaryColor={primaryColor}
                     textColor={branding?.text_color}

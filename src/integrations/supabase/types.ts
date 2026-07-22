@@ -1231,6 +1231,7 @@ export type Database = {
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
+          lead_district_id: string | null
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -1267,6 +1268,7 @@ export type Database = {
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null
+          lead_district_id?: string | null
           notes?: string | null
           organization_id: string
           pipeline_dirty_at?: string | null
@@ -1303,6 +1305,7 @@ export type Database = {
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null
+          lead_district_id?: string | null
           notes?: string | null
           organization_id?: string
           pipeline_dirty_at?: string | null
@@ -1374,6 +1377,13 @@ export type Database = {
             columns: ["last_contact_by"]
             isOneToOne: false
             referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anew_leads_lead_district_id_fkey"
+            columns: ["lead_district_id"]
+            isOneToOne: false
+            referencedRelation: "administrative_divisions"
             referencedColumns: ["id"]
           },
           {
@@ -6975,6 +6985,7 @@ export type Database = {
           next_button_text: string | null
           previous_button_text: string | null
           scheduling_board_id: string | null
+          scheduling_district_field_key: string | null
           scheduling_duration_minutes: number | null
           scheduling_postal_code_field_key: string | null
           sort_order: number | null
@@ -6992,6 +7003,7 @@ export type Database = {
           next_button_text?: string | null
           previous_button_text?: string | null
           scheduling_board_id?: string | null
+          scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
           scheduling_postal_code_field_key?: string | null
           sort_order?: number | null
@@ -7009,6 +7021,7 @@ export type Database = {
           next_button_text?: string | null
           previous_button_text?: string | null
           scheduling_board_id?: string | null
+          scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
           scheduling_postal_code_field_key?: string | null
           sort_order?: number | null
@@ -12064,6 +12077,54 @@ export type Database = {
           },
         ]
       }
+      resource_districts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          district_id: string
+          id: string
+          is_active: boolean
+          priority: number
+          resource_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          district_id: string
+          id?: string
+          is_active?: boolean
+          priority?: number
+          resource_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          district_id?: string
+          id?: string
+          is_active?: boolean
+          priority?: number
+          resource_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "resource_districts_district_id_fkey"
+            columns: ["district_id"]
+            isOneToOne: false
+            referencedRelation: "administrative_divisions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "resource_districts_resource_id_fkey"
+            columns: ["resource_id"]
+            isOneToOne: false
+            referencedRelation: "schedule_resources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       resource_service_areas: {
         Row: {
           created_at: string | null
@@ -14692,6 +14753,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      evaluate_condition: {
+        Args: { p_condition: Json; p_lead_status: string; p_signals: Json }
+        Returns: boolean
+      }
       evaluate_lead_signals_v2: { Args: { p_lead_id: string }; Returns: Json }
       execute_entity_erasure: { Args: { p_request_id: string }; Returns: Json }
       filter_visible_entity_ids: {
@@ -14741,10 +14806,11 @@ export type Database = {
       find_nearest_resources: {
         Args: {
           p_board_id: string
+          p_district_id?: string
           p_duration_minutes?: number
           p_limit?: number
-          p_target_date: string
-          p_target_postal_code: string
+          p_target_date?: string
+          p_target_postal_code?: string
         }
         Returns: {
           available_slots: Json
@@ -15066,6 +15132,7 @@ export type Database = {
       get_month_availability: {
         Args: {
           p_board_id: string
+          p_district_id?: string
           p_duration_minutes?: number
           p_end_date: string
           p_postal_code?: string
@@ -15366,6 +15433,7 @@ export type Database = {
         Args: { p_org_id: string }
         Returns: string
       }
+      resolve_stage_bucket: { Args: { p_stage_id: string }; Returns: string }
       restore_business_entity: {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
@@ -15882,6 +15950,7 @@ export type Database = {
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
+          lead_district_id: string | null
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -15939,6 +16008,7 @@ export type Database = {
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
+          lead_district_id: string | null
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -17456,6 +17526,7 @@ export type Database = {
               last_contact_at: string | null
               last_contact_by: string | null
               last_contact_result: string | null
+              lead_district_id: string | null
               notes: string | null
               organization_id: string
               pipeline_dirty_at: string | null
@@ -17515,6 +17586,7 @@ export type Database = {
               last_contact_at: string | null
               last_contact_by: string | null
               last_contact_result: string | null
+              lead_district_id: string | null
               notes: string | null
               organization_id: string
               pipeline_dirty_at: string | null

@@ -1,20 +1,20 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Plus, Trash2, MapPin } from 'lucide-react';
+import { MapPin } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useTranslation } from '@/hooks/useTranslation';
+import { useAdministrativeDivisions } from '@/hooks/useAdministrativeDivisions';
 import { toast } from 'sonner';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 
-interface ServiceArea {
-  id?: string;
-  postal_code_prefix: string;
+interface DistrictCoverage {
+  district_id: string;
   priority: number;
-  max_distance_km: number | null;
   is_active: boolean;
-  _isNew?: boolean;
 }
 
 interface ResourceServiceAreasProps {
@@ -22,107 +22,95 @@ interface ResourceServiceAreasProps {
   disabled?: boolean;
 }
 
+/**
+ * "Distritos de atuação" — replaces the free-text postal_code_prefix based
+ * resource_service_areas UI with a district checklist backed by
+ * resource_districts. resource_service_areas stays in the schema untouched,
+ * as a fallback, until this new flow is validated in production.
+ */
 export function ResourceServiceAreas({ resourceId, disabled }: ResourceServiceAreasProps) {
   const { t } = useTranslation();
-  const [areas, setAreas] = useState<ServiceArea[]>([]);
+  const { districts, loading: loadingDistricts } = useAdministrativeDivisions('PT');
+  const [coverage, setCoverage] = useState<Map<string, DistrictCoverage>>(new Map());
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!resourceId) {
-      setAreas([]);
+      setCoverage(new Map());
       return;
     }
-    loadAreas();
+    loadCoverage();
   }, [resourceId]);
 
-  const loadAreas = async () => {
+  const loadCoverage = async () => {
     if (!resourceId) return;
     setLoading(true);
     const { data, error } = await supabase
-      .from('resource_service_areas')
-      .select('id, postal_code_prefix, priority, max_distance_km, is_active')
-      .eq('resource_id', resourceId)
-      .order('priority', { ascending: false });
-    
+      .from('resource_districts')
+      .select('district_id, priority, is_active')
+      .eq('resource_id', resourceId);
+
     if (!error && data) {
-      setAreas(data.map(a => ({
-        ...a,
-        postal_code_prefix: a.postal_code_prefix || '',
-        priority: a.priority ?? 1,
-        max_distance_km: a.max_distance_km ?? null,
-        is_active: a.is_active ?? true,
-      })));
+      setCoverage(new Map(data.map(d => [d.district_id, d])));
     }
     setLoading(false);
   };
 
-  const addArea = () => {
-    setAreas(prev => [...prev, {
-      postal_code_prefix: '',
-      priority: 1,
-      max_distance_km: null,
-      is_active: true,
-      _isNew: true,
-    }]);
-  };
-
-  const removeArea = async (index: number) => {
-    const area = areas[index];
-    if (area.id) {
-      const { error } = await supabase
-        .from('resource_service_areas')
-        .delete()
-        .eq('id', area.id);
-      if (error) {
-        toast.error(t('common.error'));
-        return;
+  const toggleDistrict = (districtId: string) => {
+    setCoverage(prev => {
+      const next = new Map(prev);
+      if (next.has(districtId)) {
+        next.delete(districtId);
+      } else {
+        next.set(districtId, { district_id: districtId, priority: 1, is_active: true });
       }
-    }
-    setAreas(prev => prev.filter((_, i) => i !== index));
+      return next;
+    });
   };
 
-  const updateArea = (index: number, field: keyof ServiceArea, value: any) => {
-    setAreas(prev => prev.map((a, i) => i === index ? { ...a, [field]: value } : a));
+  const updatePriority = (districtId: string, priority: number) => {
+    setCoverage(prev => {
+      const existing = prev.get(districtId);
+      if (!existing) return prev;
+      const next = new Map(prev);
+      next.set(districtId, { ...existing, priority });
+      return next;
+    });
   };
 
-  const saveAreas = async () => {
+  const save = async () => {
     if (!resourceId) return;
-    setLoading(true);
-
+    setSaving(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error('Business user not resolved');
 
-      for (const area of areas) {
-        if (!area.postal_code_prefix.trim()) continue;
-        
-        const base = {
-          resource_id: resourceId,
-          postal_code_prefix: area.postal_code_prefix.trim(),
-          priority: area.priority,
-          max_distance_km: area.max_distance_km,
-          is_active: area.is_active,
-        };
+      const { error: deleteError } = await supabase
+        .from('resource_districts')
+        .delete()
+        .eq('resource_id', resourceId);
+      if (deleteError) throw deleteError;
 
-        if (area.id) {
-          const { error } = await supabase
-            .from('resource_service_areas')
-            .update(base)
-            .eq('id', area.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase
-            .from('resource_service_areas')
-            .insert([{ ...base, created_by: businessUserId }]);
-          if (error) throw error;
-        }
+      const rows = Array.from(coverage.values()).map(c => ({
+        resource_id: resourceId,
+        district_id: c.district_id,
+        priority: c.priority,
+        is_active: c.is_active,
+        created_by: businessUserId,
+      }));
+
+      if (rows.length > 0) {
+        const { error: insertError } = await supabase.from('resource_districts').insert(rows);
+        if (insertError) throw insertError;
       }
+
       toast.success(t('common.saved'));
-      await loadAreas();
+      await loadCoverage();
     } catch {
       toast.error(t('common.error'));
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
@@ -136,82 +124,54 @@ export function ResourceServiceAreas({ resourceId, disabled }: ResourceServiceAr
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <Label className="flex items-center gap-1.5">
-          <MapPin className="h-4 w-4" />
-          {t('scheduling.resource.serviceAreas')}
-        </Label>
-        {!disabled && (
-          <Button type="button" variant="outline" size="sm" onClick={addArea}>
-            <Plus className="h-3 w-3 mr-1" />
-            {t('common.add')}
-          </Button>
-        )}
-      </div>
+      <Label className="flex items-center gap-1.5">
+        <MapPin className="h-4 w-4" />
+        Distritos de atuação
+      </Label>
 
-      {areas.length === 0 && !loading && (
-        <p className="text-xs text-muted-foreground">
-          {t('scheduling.resource.noServiceAreas')}
-        </p>
+      {(loading || loadingDistricts) && (
+        <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
       )}
 
-      <div className="space-y-2 max-h-48 overflow-y-auto">
-        {areas.map((area, index) => (
-          <div key={area.id || `new-${index}`} className="flex items-center gap-2 bg-muted/50 rounded-md p-2">
-            <Input
-              className="w-24 h-8 text-sm"
-              placeholder="1000"
-              value={area.postal_code_prefix}
-              onChange={(e) => updateArea(index, 'postal_code_prefix', e.target.value.replace(/\D/g, '').slice(0, 4))}
-              disabled={disabled}
-            />
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground">P:</span>
-              <Input
-                type="number"
-                className="w-14 h-8 text-sm"
-                min={1}
-                max={10}
-                value={area.priority}
-                onChange={(e) => updateArea(index, 'priority', Number(e.target.value))}
-                disabled={disabled}
-              />
-            </div>
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-muted-foreground">km:</span>
-              <Input
-                type="number"
-                className="w-16 h-8 text-sm"
-                placeholder="∞"
-                value={area.max_distance_km ?? ''}
-                onChange={(e) => updateArea(index, 'max_distance_km', e.target.value ? Number(e.target.value) : null)}
-                disabled={disabled}
-              />
-            </div>
-            {!disabled && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                onClick={() => removeArea(index)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            )}
+      {!loading && !loadingDistricts && (
+        <ScrollArea className="h-48 border rounded-lg p-2">
+          <div className="space-y-1.5">
+            {districts.map(district => {
+              const selected = coverage.get(district.id);
+              return (
+                <div key={district.id} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`resource-district-${district.id}`}
+                    checked={!!selected}
+                    onCheckedChange={() => toggleDistrict(district.id)}
+                    disabled={disabled}
+                  />
+                  <label
+                    htmlFor={`resource-district-${district.id}`}
+                    className="text-sm flex-1 cursor-pointer"
+                  >
+                    {district.name}
+                  </label>
+                  {selected && (
+                    <Input
+                      type="number"
+                      className="w-14 h-7 text-xs"
+                      min={1}
+                      max={10}
+                      value={selected.priority}
+                      onChange={(e) => updatePriority(district.id, Number(e.target.value) || 1)}
+                      disabled={disabled}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </ScrollArea>
+      )}
 
-      {!disabled && areas.length > 0 && (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={saveAreas}
-          disabled={loading}
-          className="w-full"
-        >
+      {!disabled && (
+        <Button type="button" variant="secondary" size="sm" onClick={save} disabled={saving} className="w-full">
           {t('scheduling.resource.saveAreas')}
         </Button>
       )}
