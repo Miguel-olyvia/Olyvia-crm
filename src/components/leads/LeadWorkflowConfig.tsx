@@ -1009,32 +1009,59 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
                 <div>
                   <Label className="text-sm">Contabiliza como</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Cada estágio conta apenas para um bucket — ligar um desliga os outros.
+                  </p>
                   <div className="flex flex-wrap items-center gap-4 mt-2">
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={editingStage.counts_as_qualified ?? false}
-                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_qualified: v })}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_qualified: v,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
                       />
                       <Label className="text-sm">Qualificado</Label>
                     </div>
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={editingStage.counts_as_negotiation ?? false}
-                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_negotiation: v })}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_negotiation: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
                       />
                       <Label className="text-sm">Negociação</Label>
                     </div>
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={editingStage.counts_as_converted ?? false}
-                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_converted: v })}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_converted: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
                       />
                       <Label className="text-sm">Convertido</Label>
                     </div>
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={editingStage.counts_as_lost ?? false}
-                        onCheckedChange={v => setEditingStage({ ...editingStage, counts_as_lost: v })}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_lost: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                        })}
                       />
                       <Label className="text-sm">Perdido</Label>
                     </div>
