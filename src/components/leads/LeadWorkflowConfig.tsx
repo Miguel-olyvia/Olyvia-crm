@@ -889,7 +889,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
       {/* ─── Edit Stage Dialog ──────────────────────────────── */}
       <Dialog open={!!editingStage} onOpenChange={() => setEditingStage(null)}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Estágio</DialogTitle>
           </DialogHeader>
