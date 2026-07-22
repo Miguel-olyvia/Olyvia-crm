@@ -29,6 +29,7 @@ const requestSchema = z.object({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
   postal_code: z.string().optional(),
+  district_id: z.string().uuid().optional(),
   board_id: z.string().optional(),
   duration_minutes: z.number().optional(),
   include_settings: z.boolean().optional(),
@@ -74,7 +75,7 @@ Deno.serve(async (req: Request) => {
     }
     const {
       form_id, step_number, date, start_date, end_date,
-      postal_code, board_id: directBoardId, duration_minutes: directDuration,
+      postal_code, district_id, board_id: directBoardId, duration_minutes: directDuration,
       include_settings,
     } = parsed.data;
 
@@ -188,6 +189,7 @@ Deno.serve(async (req: Request) => {
         p_end_date: end_date,
         p_duration_minutes: durationMinutes,
         p_postal_code: postal_code || null,
+        p_district_id: district_id || null,
       });
 
       if (monthError) {
@@ -234,15 +236,17 @@ Deno.serve(async (req: Request) => {
       scheduleConfig = await fetchScheduleConfig();
     }
 
-    // With postal_code: use proximity-based search via find_nearest_resources RPC
-    if (postal_code) {
+    // With postal_code and/or district_id: use find_nearest_resources RPC,
+    // which already implements the district-coverage-with-fallback rule.
+    if (postal_code || district_id) {
       const { data: resources, error: rpcError } = await supabase
         .rpc('find_nearest_resources', {
-          p_target_postal_code: postal_code,
+          p_target_postal_code: postal_code || null,
           p_board_id: boardId,
           p_target_date: date,
           p_duration_minutes: durationMinutes,
           p_limit: 10,
+          p_district_id: district_id || null,
         });
 
       if (rpcError) {
@@ -279,7 +283,7 @@ Deno.serve(async (req: Request) => {
         new Date(a.start).getTime() - new Date(b.start).getTime()
       );
 
-      console.log(`public-availability: date=${date}, postal=${postal_code}, board=${boardId}, resources=${(resources || []).length}, slots=${aggregatedSlots.length}`);
+      console.log(`public-availability: date=${date}, postal=${postal_code || 'none'}, district=${district_id || 'none'}, board=${boardId}, resources=${(resources || []).length}, slots=${aggregatedSlots.length}`);
 
       return new Response(
         JSON.stringify({

@@ -2,6 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { orderByLeastBusy, hasDailyCapacity } from "../_shared/leastBusy.ts";
 
 initSentry();
 
@@ -1076,34 +1077,17 @@ async function findAvailableSlot(
     }
 
     let orderedResources = [...resources];
-    
+
     if (strategy === 'round_robin') {
       orderedResources = orderedResources.sort(() => Math.random() - 0.5);
     } else if (strategy === 'least_busy') {
-      const workloads = await Promise.all(
-        resources.map(async (resource) => {
-          const { count } = await supabase
-            .from('schedule_item_assignees')
-            .select('*', { count: 'exact', head: true })
-            .eq('resource_id', resource.id);
-          return { resource, count: count || 0 };
-        })
-      );
-      orderedResources = workloads
-        .sort((a, b) => a.count - b.count)
-        .map(w => w.resource);
+      orderedResources = await orderByLeastBusy(supabase, resources);
     }
 
     for (const resource of orderedResources) {
-      if (rule?.respect_capacity && resource.max_daily_capacity) {
-        const { count } = await supabase
-          .from('schedule_item_assignees')
-          .select('item_id!inner(start_datetime)', { count: 'exact', head: true })
-          .eq('resource_id', resource.id)
-          .gte('item_id.start_datetime', `${dateStr}T00:00:00`)
-          .lt('item_id.start_datetime', `${dateStr}T23:59:59`);
-
-        if ((count || 0) >= resource.max_daily_capacity) {
+      if (rule?.respect_capacity) {
+        const hasCapacity = await hasDailyCapacity(supabase, resource.id, resource.max_daily_capacity, dateStr);
+        if (!hasCapacity) {
           continue;
         }
       }
