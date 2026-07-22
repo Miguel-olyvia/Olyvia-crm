@@ -994,7 +994,6 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <StageRulesEditor
                       value={editingStage.reached_when ?? null}
                       onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
-                      companyId={companyId}
                     />
                   </div>
                 </div>

@@ -72,14 +72,14 @@ export function QualificationRulesTab({ companyId }: QualificationRulesTabProps)
       <Card>
         <CardContent className="py-4 space-y-3">
           <Label className="text-sm font-medium">Condições para MQL</Label>
-          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} companyId={companyId} />
+          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} />
         </CardContent>
       </Card>
 
       <Card>
         <CardContent className="py-4 space-y-3">
           <Label className="text-sm font-medium">Condições para SQL</Label>
-          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} companyId={companyId} />
+          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} />
         </CardContent>
       </Card>
 
