@@ -125,7 +125,9 @@ export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps
           smtp_host: item.smtp_host,
           smtp_port: item.smtp_port,
           smtp_username: item.smtp_username,
-          smtp_password: item.smtp_password,
+          // Never returned by the API — stored in Supabase Vault, only
+          // decrypted server-side. Editing always starts with it blank.
+          smtp_password: '',
           smtp_secure: item.smtp_secure ?? true,
           from_email: item.from_email,
           from_name: item.from_name,
@@ -245,53 +247,55 @@ export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not found");
 
+      const encryption = smtpSettings.smtp_secure ? 'tls' : 'none';
+
       if (smtpSettings.id) {
-        // Update existing
-        const { error } = await supabase
-          .from('user_smtp_settings')
-          .update({
-            name: smtpSettings.name,
-            smtp_host: smtpSettings.smtp_host,
-            smtp_port: smtpSettings.smtp_port,
-            smtp_username: smtpSettings.smtp_username,
-            smtp_password: smtpSettings.smtp_password,
-            smtp_secure: smtpSettings.smtp_secure,
-            from_email: smtpSettings.from_email,
-            from_name: smtpSettings.from_name,
-            is_active: smtpSettings.is_active,
-            is_default: smtpSettings.is_default,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', smtpSettings.id);
+        // Update existing. Blank password means "keep the existing vaulted
+        // password" — the RPC only rotates the vault secret when non-empty.
+        const { error } = await supabase.rpc('rpc_upsert_user_smtp_settings' as any, {
+          p_id: smtpSettings.id,
+          p_organization_id: null,
+          p_name: smtpSettings.name,
+          p_smtp_host: smtpSettings.smtp_host,
+          p_smtp_port: smtpSettings.smtp_port,
+          p_smtp_username: smtpSettings.smtp_username,
+          p_smtp_password: smtpSettings.smtp_password || null,
+          p_smtp_secure: smtpSettings.smtp_secure,
+          p_encryption: encryption,
+          p_from_email: smtpSettings.from_email,
+          p_from_name: smtpSettings.from_name,
+          p_reply_to: null,
+          p_daily_limit: 500,
+          p_is_default: smtpSettings.is_default,
+        });
 
         if (error) throw error;
-        
+
         // Update local list
-        setSmtpList(prev => prev.map(s => 
-          s.id === smtpSettings.id 
-            ? smtpSettings 
+        setSmtpList(prev => prev.map(s =>
+          s.id === smtpSettings.id
+            ? smtpSettings
             : smtpSettings.is_default ? { ...s, is_default: false } : s
         ));
       } else {
         // Insert new - set as default if first one
         const isFirst = smtpList.length === 0;
-        const { data, error } = await supabase
-          .from('user_smtp_settings')
-          .insert({
-            user_id: user.id,
-            name: smtpSettings.name || 'Novo SMTP',
-            smtp_host: smtpSettings.smtp_host,
-            smtp_port: smtpSettings.smtp_port,
-            smtp_username: smtpSettings.smtp_username,
-            smtp_password: smtpSettings.smtp_password,
-            smtp_secure: smtpSettings.smtp_secure,
-            from_email: smtpSettings.from_email,
-            from_name: smtpSettings.from_name,
-            is_active: smtpSettings.is_active,
-            is_default: isFirst || smtpSettings.is_default,
-          })
-          .select()
-          .single();
+        const { data, error } = await supabase.rpc('rpc_upsert_user_smtp_settings' as any, {
+          p_id: null,
+          p_organization_id: null,
+          p_name: smtpSettings.name || 'Novo SMTP',
+          p_smtp_host: smtpSettings.smtp_host,
+          p_smtp_port: smtpSettings.smtp_port,
+          p_smtp_username: smtpSettings.smtp_username,
+          p_smtp_password: smtpSettings.smtp_password,
+          p_smtp_secure: smtpSettings.smtp_secure,
+          p_encryption: encryption,
+          p_from_email: smtpSettings.from_email,
+          p_from_name: smtpSettings.from_name,
+          p_reply_to: null,
+          p_daily_limit: 500,
+          p_is_default: isFirst || smtpSettings.is_default,
+        });
 
         if (error) throw error;
         if (data) {

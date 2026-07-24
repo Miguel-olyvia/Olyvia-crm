@@ -282,7 +282,16 @@ const handler = async (req: Request): Promise<Response> => {
       senderName = sender?.display_name || null;
     }
 
-    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseClient, {
+    // SMTP resolution needs a service-role client: passwords are stored in
+    // Supabase Vault (organization_smtp_settings/user_smtp_settings only
+    // carry a smtp_password_secret_id), and vault.decrypted_secrets is only
+    // readable by service_role — the caller's own RLS-scoped supabaseClient
+    // above would resolve the row but never see the decrypted password.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
       authUserId: userId,
       organizationId: proposal.organization_id,
     });

@@ -239,7 +239,9 @@ export default function TechnicalSettings() {
         smtp_host: data.smtp_host,
         smtp_port: data.smtp_port,
         smtp_username: data.smtp_username,
-        smtp_password: data.smtp_password,
+        // Never returned by the API — stored in Supabase Vault, only
+        // decrypted server-side. Editing always starts with it blank.
+        smtp_password: "",
         smtp_secure: data.smtp_secure,
         from_email: data.from_email,
         from_name: data.from_name,
@@ -344,48 +346,35 @@ export default function TechnicalSettings() {
     }
 
     setSavingSmtp(true);
-    const businessUserId = await resolveCurrentBusinessUserId();
+
+    // All 3 scope levels resolve to an anew_organizations ID, matching
+    // handleCreateToken's currentOrgId resolution above.
+    const smtpOrgId = scopeLevel === "company" ? activeCompany?.id
+      : scopeLevel === "business_unit" ? selectedBusinessUnit
+      : scopeLevel === "department" ? selectedBusinessArea
+      : null;
 
     try {
-      if (scopeLevel === "company" && activeCompany) {
-        const payload = {
-          organization_id: activeCompany.id,
-          ...smtpSettings,
-          created_by: businessUserId,
-        };
-        delete (payload as Record<string, unknown>).id;
-
-        if (smtpSettings.id) {
-          await supabase.from("organization_smtp_settings").update(payload).eq("id", smtpSettings.id);
-        } else {
-          await supabase.from("organization_smtp_settings").insert(payload);
-        }
-      } else if (scopeLevel === "business_unit" && selectedBusinessUnit) {
-        const payload = {
-          organization_id: selectedBusinessUnit,
-          ...smtpSettings,
-          created_by: businessUserId,
-        };
-        delete (payload as Record<string, unknown>).id;
-
-        if (smtpSettings.id) {
-          await supabase.from("organization_smtp_settings").update(payload).eq("id", smtpSettings.id);
-        } else {
-          await supabase.from("organization_smtp_settings").insert(payload);
-        }
-      } else if (scopeLevel === "department" && selectedBusinessArea) {
-        const payload = {
-          organization_id: selectedBusinessArea,
-          ...smtpSettings,
-          created_by: businessUserId,
-        };
-        delete (payload as Record<string, unknown>).id;
-
-        if (smtpSettings.id) {
-          await supabase.from("organization_smtp_settings").update(payload).eq("id", smtpSettings.id);
-        } else {
-          await supabase.from("organization_smtp_settings").insert(payload);
-        }
+      if (smtpOrgId) {
+        const encryption = smtpSettings.smtp_secure ? "tls" : "none";
+        // Blank password means "keep the existing vaulted password" — the
+        // RPC only rotates the vault secret when non-empty.
+        const { error } = await supabase.rpc("rpc_upsert_org_smtp_settings" as any, {
+          p_id: smtpSettings.id || null,
+          p_organization_id: smtpOrgId,
+          p_name: "SMTP",
+          p_smtp_host: smtpSettings.smtp_host,
+          p_smtp_port: smtpSettings.smtp_port,
+          p_smtp_username: smtpSettings.smtp_username,
+          p_smtp_password: smtpSettings.smtp_password || null,
+          p_smtp_secure: smtpSettings.smtp_secure,
+          p_encryption: encryption,
+          p_from_email: smtpSettings.from_email,
+          p_from_name: smtpSettings.from_name,
+          p_daily_limit: 500,
+          p_is_default: true,
+        });
+        if (error) throw error;
       }
 
       toast({ title: t('common.success'), description: t('techSettings.smtp.saveSuccess') });
