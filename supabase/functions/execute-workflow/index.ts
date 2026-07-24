@@ -160,9 +160,51 @@ serve(async (req) => {
       );
     }
 
+    // ── Workflow execution grouping ──
+    // One execution_id per invocation groups every workflow_execution_log row
+    // (hardcoded cascades below and the configurable automation-rule engine)
+    // produced by this single request together.
+    const executionId = crypto.randomUUID();
+    // Verified identity for workflow_execution_log.executed_by — never trust
+    // the client-supplied triggered_by field as the identity source. Falls
+    // back to the resolved internalUserId (itself only derived from
+    // triggered_by via a verified anew_users lookup) when acting as service role.
+    const workflowExecutedBy: string | null = caller?.isServiceRole ? (internalUserId ?? null) : (caller?.anewUserId ?? null);
+
     const results = { automationRules: 0, stageActions: 0, logs: [] as Array<{ type: string; status: string; message: string }> };
 
     // Helper functions
+    interface WorkflowExecutionLogParams {
+      ruleId: string | null;
+      sourceEntity: string;
+      sourceRecordId: string;
+      targetEntity: string;
+      targetRecordId: string | null;
+      actionType: string;
+      status: "success" | "error";
+      errorMessage?: string | null;
+      executionData?: Record<string, unknown> | null;
+    }
+
+    async function logWorkflowExecution(params: WorkflowExecutionLogParams): Promise<void> {
+      const { error } = await supabase.from("workflow_execution_log").insert([{
+        execution_id: executionId,
+        rule_id: params.ruleId,
+        source_entity: params.sourceEntity,
+        source_record_id: params.sourceRecordId,
+        target_entity: params.targetEntity,
+        target_record_id: params.targetRecordId,
+        action_type: params.actionType,
+        status: params.status,
+        error_message: params.errorMessage ?? null,
+        execution_data: params.executionData ?? null,
+        executed_by: workflowExecutedBy,
+      }]);
+      if (error) {
+        console.error("logWorkflowExecution failed:", error.message);
+      }
+    }
+
     async function upsertPipelineLink(field: string, fieldId: string, updates: Record<string, any>) {
       const { data: existing } = await supabase.from("pipeline_links").select("id").eq(field, fieldId).eq("status", "active").maybeSingle();
       if (existing) await supabase.from("pipeline_links").update(updates).eq("id", existing.id);
@@ -424,7 +466,28 @@ serve(async (req) => {
               const { data: deal } = await supabase.from("deals").insert({ title: `Pedido - ${ent?.display_name || "Lead"}`, lead_id: entity_id, entity_id: lead.entity_id, organization_id: lead.organization_id, root_organization_id: lead.root_organization_id || lead.organization_id, stage_id: ns?.id || null, assigned_to: lead.assigned_to || internalUserId, created_by: internalUserId, value: 0 }).select("id").single();
               await upsertPipelineLink("lead_id", entity_id, { deal_id: deal!.id, organization_id: lead.organization_id, root_organization_id: lead.root_organization_id });
               results.stageActions++;
-            } catch (e: any) { results.logs.push({ type: "create_deal_from_lead", status: "error", message: e.message }); }
+              await logWorkflowExecution({
+                ruleId: null,
+                sourceEntity: "lead",
+                sourceRecordId: entity_id,
+                targetEntity: "deal",
+                targetRecordId: deal!.id,
+                actionType: "hardcoded:lead_proposta_create_deal",
+                status: "success",
+              });
+            } catch (e: any) {
+              results.logs.push({ type: "create_deal_from_lead", status: "error", message: e.message });
+              await logWorkflowExecution({
+                ruleId: null,
+                sourceEntity: "lead",
+                sourceRecordId: entity_id,
+                targetEntity: "deal",
+                targetRecordId: null,
+                actionType: "hardcoded:lead_proposta_create_deal",
+                status: "error",
+                errorMessage: e.message,
+              });
+            }
           } else {
             console.log(`Skipping deal creation for lead ${entity_id} — ${existingDeals.length} deal(s) already exist`);
           }
@@ -658,13 +721,70 @@ serve(async (req) => {
 
           results.stageActions++;
           results.logs.push({ type: "create_contract_from_proposal", status: "success", message: `Contract ${contract!.id} created` });
-        } catch (e: any) { results.logs.push({ type: "create_contract_from_proposal", status: "error", message: e.message }); }
+          await logWorkflowExecution({
+            ruleId: null,
+            sourceEntity: "proposal",
+            sourceRecordId: proposal.id,
+            targetEntity: "contract",
+            targetRecordId: contract!.id,
+            actionType: "hardcoded:proposal_accepted_create_contract",
+            status: "success",
+          });
+          if (lid) {
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "proposal",
+              sourceRecordId: proposal.id,
+              targetEntity: "lead",
+              targetRecordId: lid,
+              actionType: "hardcoded:proposal_accepted_lead_sync_ganho",
+              status: "success",
+            });
+          }
+        } catch (e: any) {
+          results.logs.push({ type: "create_contract_from_proposal", status: "error", message: e.message });
+          await logWorkflowExecution({
+            ruleId: null,
+            sourceEntity: "proposal",
+            sourceRecordId: proposal.id,
+            targetEntity: "contract",
+            targetRecordId: null,
+            actionType: "hardcoded:proposal_accepted_create_contract",
+            status: "error",
+            errorMessage: e.message,
+          });
+        }
       }
 
       if (psn === "rejected" && proposal) {
-        if (proposal.deal_id) { const { data: ds } = await supabase.from("deal_stages").select("id").eq("name", "Desqualificado").maybeSingle(); if (ds) await supabase.from("deals").update({ stage_id: ds.id }).eq("id", proposal.deal_id); }
-        const lid = await resolveLeadFromPipeline("proposal", proposal.id); if (lid) await syncLeadToStage(lid, "perdido");
-        await supabase.from("pipeline_links").update({ status: "rejected" }).eq("proposal_id", proposal.id).eq("status", "active");
+        try {
+          if (proposal.deal_id) { const { data: ds } = await supabase.from("deal_stages").select("id").eq("name", "Desqualificado").maybeSingle(); if (ds) await supabase.from("deals").update({ stage_id: ds.id }).eq("id", proposal.deal_id); }
+          const lid = await resolveLeadFromPipeline("proposal", proposal.id); if (lid) await syncLeadToStage(lid, "perdido");
+          await supabase.from("pipeline_links").update({ status: "rejected" }).eq("proposal_id", proposal.id).eq("status", "active");
+          if (lid) {
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "proposal",
+              sourceRecordId: proposal.id,
+              targetEntity: "lead",
+              targetRecordId: lid,
+              actionType: "hardcoded:proposal_rejected_lead_sync_perdido",
+              status: "success",
+            });
+          }
+        } catch (e: any) {
+          results.logs.push({ type: "proposal_rejected_lead_sync", status: "error", message: e.message });
+          await logWorkflowExecution({
+            ruleId: null,
+            sourceEntity: "proposal",
+            sourceRecordId: proposal.id,
+            targetEntity: "lead",
+            targetRecordId: null,
+            actionType: "hardcoded:proposal_rejected_lead_sync_perdido",
+            status: "error",
+            errorMessage: e.message,
+          });
+        }
       }
     }
 
@@ -813,6 +933,7 @@ serve(async (req) => {
           if (!lid) lid = await resolveLeadFromPipeline("contract", contract.id);
           console.log("[execute-workflow] Contract conversion - entity_id:", eId, "lead_id:", lid, "contract_id:", contract.id);
           if (eId) {
+            try {
             const nowIso = new Date().toISOString();
             let resolvedClientId: string | null = contract.client_id || null;
             let fallbackContactOrgId: string | null = null;
@@ -935,12 +1056,58 @@ serve(async (req) => {
                 console.warn("[execute-workflow] Could not set converted_to_client_id on anew_contacts:", convertedRefError.message);
               }
             }
+
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "contract",
+              sourceRecordId: contract.id,
+              targetEntity: "client",
+              targetRecordId: resolvedClientId,
+              actionType: "hardcoded:contract_signed_client_conversion",
+              status: "success",
+            });
+            } catch (e: any) {
+              console.error("[execute-workflow] Contract signed client conversion failed:", e.message);
+              await logWorkflowExecution({
+                ruleId: null,
+                sourceEntity: "contract",
+                sourceRecordId: contract.id,
+                targetEntity: "client",
+                targetRecordId: null,
+                actionType: "hardcoded:contract_signed_client_conversion",
+                status: "error",
+                errorMessage: e.message,
+              });
+            }
           }
-          if (lid) { await supabase.from("anew_leads").update({ status: "converted" }).eq("id", lid); await syncLeadToStage(lid, "ganho"); }
+          if (lid) {
+            await supabase.from("anew_leads").update({ status: "converted" }).eq("id", lid);
+            await syncLeadToStage(lid, "ganho");
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "contract",
+              sourceRecordId: contract.id,
+              targetEntity: "lead",
+              targetRecordId: lid,
+              actionType: "hardcoded:contract_signed_lead_sync_ganho",
+              status: "success",
+            });
+          }
         }
         if (new_stage_id === "cancelled" || new_stage_id === "cancelado") {
           const lid = await resolveLeadFromPipeline("contract", contract.id); if (lid) await syncLeadToStage(lid, "perdido");
           await supabase.from("pipeline_links").update({ status: "rejected" }).eq("contract_id", contract.id).eq("status", "active");
+          if (lid) {
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "contract",
+              sourceRecordId: contract.id,
+              targetEntity: "lead",
+              targetRecordId: lid,
+              actionType: "hardcoded:contract_cancelled_lead_sync_perdido",
+              status: "success",
+            });
+          }
         }
       }
     }
@@ -965,7 +1132,22 @@ serve(async (req) => {
           if (rule.action_type === "change_stage") {
             let tsid = rule.action_stage_id;
             if (!tsid) { const tst = rule.target_entity === "proposal" ? "proposal_workflow_stages" : rule.target_entity === "lead" ? "lead_workflow_stages" : "deal_stages"; if (si?.is_won) { const { data: w } = await supabase.from(tst).select("id").eq("is_won", true).maybeSingle(); tsid = w?.id; } else if (si?.is_lost) { const { data: l } = await supabase.from(tst).select("id").eq("is_lost", true).maybeSingle(); tsid = l?.id; } }
-            if (tsid) { const tt = rule.target_entity === "proposal" ? "proposals" : rule.target_entity === "lead" ? "anew_leads" : "deals"; const sf = rule.target_entity === "lead" ? "workflow_stage_id" : "stage_id"; const { error } = await supabase.from(tt).update({ [sf]: tsid } as any).eq("id", tid); if (!error) results.automationRules++; await supabase.from("workflow_execution_log").insert([{ rule_id: rule.id, source_entity: source_entity, source_record_id: entity_id, target_entity: rule.target_entity, target_record_id: tid, action_type: rule.action_type, status: error ? "error" : "success", error_message: error?.message || null, executed_by: triggered_by }]); }
+            if (tsid) {
+              const tt = rule.target_entity === "proposal" ? "proposals" : rule.target_entity === "lead" ? "anew_leads" : "deals";
+              const sf = rule.target_entity === "lead" ? "workflow_stage_id" : "stage_id";
+              const { error } = await supabase.from(tt).update({ [sf]: tsid } as any).eq("id", tid);
+              if (!error) results.automationRules++;
+              await logWorkflowExecution({
+                ruleId: rule.id,
+                sourceEntity: source_entity,
+                sourceRecordId: entity_id,
+                targetEntity: rule.target_entity,
+                targetRecordId: tid,
+                actionType: rule.action_type,
+                status: error ? "error" : "success",
+                errorMessage: error?.message || null,
+              });
+            }
           }
         }
       }
