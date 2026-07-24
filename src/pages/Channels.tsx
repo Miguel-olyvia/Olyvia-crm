@@ -549,14 +549,21 @@ const Channels = () => {
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Radio className="w-12 h-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground mb-4">{t('channels.empty.title')}</p>
-              <Dialog open={open} onOpenChange={setOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t('channels.empty.create')}
-                  </Button>
-                </DialogTrigger>
-              </Dialog>
+              {/* This button shares `open`/setOpen with the main Dialog above,
+                  but that Dialog's DialogContent only mounts inside the
+                  campaigns.create PermissionGate — without that permission
+                  there's no content anywhere to display, so clicking this
+                  silently did nothing. Gate it the same way instead. */}
+              <PermissionGate permission="campaigns.create">
+                <Dialog open={open} onOpenChange={setOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="w-4 h-4 mr-2" />
+                      {t('channels.empty.create')}
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              </PermissionGate>
             </CardContent>
           </Card>
         ) : filteredChannels.length === 0 ? (

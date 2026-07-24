@@ -360,7 +360,7 @@ const LeadSources = () => {
               {t('leadSources.subtitle')}
             </p>
           </div>
-          <PermissionGate permission="channels.create">
+          <PermissionGate permission="lead_sources.create">
             <Button onClick={() => setOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
               {t('leadSources.newSource')}
@@ -381,10 +381,12 @@ const LeadSources = () => {
             <p className="text-muted-foreground mb-4">
               {t('leadSources.noSourcesDesc')}
             </p>
-            <Button onClick={() => setOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('leadSources.createSource')}
-            </Button>
+            <PermissionGate permission="lead_sources.create">
+              <Button onClick={() => setOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('leadSources.createSource')}
+              </Button>
+            </PermissionGate>
           </div>
         ) : (
           <div className="border rounded-lg overflow-hidden">
@@ -445,7 +447,7 @@ const LeadSources = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <PermissionGate permission="channels.edit">
+                          <PermissionGate permission="lead_sources.edit">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -454,7 +456,7 @@ const LeadSources = () => {
                               <Pencil className="w-4 h-4" />
                             </Button>
                           </PermissionGate>
-                          <PermissionGate permission="channels.delete">
+                          <PermissionGate permission="lead_sources.delete">
                             <Button
                               variant="ghost"
                               size="icon"

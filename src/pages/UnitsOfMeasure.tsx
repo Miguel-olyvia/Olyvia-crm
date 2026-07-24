@@ -42,6 +42,17 @@ interface UnitOfMeasure {
   organization_id: string | null;
 }
 
+// Supabase's PostgrestError (e.g. an RLS 403) is a plain object, not an
+// Error instance, so `error instanceof Error` misses it and falls through
+// to `String(error)` -> "[object Object]".
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error);
+}
+
 export default function UnitsOfMeasure() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -78,7 +89,7 @@ export default function UnitsOfMeasure() {
     } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error instanceof Error ? error.message : String(error),
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -161,7 +172,7 @@ export default function UnitsOfMeasure() {
     } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error instanceof Error ? error.message : String(error),
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -196,7 +207,7 @@ export default function UnitsOfMeasure() {
     } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error instanceof Error ? error.message : String(error),
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     }
