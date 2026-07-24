@@ -243,19 +243,61 @@ export function EntitySearchInput({
               orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
             }
             const like = `%${term.trim()}%`;
-            const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
-              supabase
-                .from("anew_entities")
-                .select("id")
-                .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
-                .limit(100),
-              supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(100),
-              supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(100),
-            ]);
+            let leadEntityIds: string[] = [];
+            if (needsLeads) {
+              // SECURITY/PERF: this used to hit anew_entities/anew_entity_emails/
+              // anew_entity_phones directly with a plain ILIKE under RLS. RLS on
+              // those tables defeats the trigram GIN indexes (planner can't
+              // prove the policy check is leakproof), so the query could take
+              // 6-9s and surface as a hard HTTP 500 (Postgres statement_timeout,
+              // 57014) — confirmed live against org Nike. Fixed by moving the
+              // lead name/email/phone matching into search_lead_entities, a
+              // SECURITY DEFINER RPC (same locked-down pattern as
+              // search_proposal_entities) that bypasses RLS internally to keep
+              // the indexes usable, then explicitly re-applies visibility
+              // server-side by intersecting p_org_ids with
+              // get_user_visible_org_ids(auth.uid()) before matching against
+              // anew_leads — so a caller cannot use this search box to read
+              // leads outside their own org visibility.
+              const { data: leadEntityRows, error: leadEntityError } = orgIds.length > 0
+                ? await (supabase as any).rpc("search_lead_entities", {
+                    p_search: term,
+                    p_org_ids: orgIds,
+                    p_limit: 100,
+                  })
+                : { data: [], error: null };
+              if (leadEntityError) {
+                console.error("search_lead_entities RPC error, lead entity matching skipped:", leadEntityError);
+              }
+              leadEntityIds = (leadEntityRows || []).map((r: any) => r.entity_id).filter(Boolean);
+            }
+
+            // Client-fallback-only entity matching (RPC-covered client search
+            // already failed upstream, or we still need to union NIF-only
+            // matches). This direct-table path is unchanged from before: it's
+            // the pre-existing, narrower-risk fallback, not the confirmed-500
+            // lead case this fix targets.
+            let clientFallbackEntityIds: string[] = [];
+            if (needsClientFallback) {
+              const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
+                supabase
+                  .from("anew_entities")
+                  .select("id")
+                  .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
+                  .limit(100),
+                supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(100),
+                supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(100),
+              ]);
+              clientFallbackEntityIds = [
+                ...(nameMatches.data || []).map((r: any) => r.id),
+                ...(emailMatches.data || []).map((r: any) => r.entity_id),
+                ...(phoneMatches.data || []).map((r: any) => r.entity_id),
+              ].filter(Boolean);
+            }
+
             matchedEntityIds = Array.from(new Set([
-              ...(nameMatches.data || []).map((r: any) => r.id),
-              ...(emailMatches.data || []).map((r: any) => r.entity_id),
-              ...(phoneMatches.data || []).map((r: any) => r.entity_id),
+              ...leadEntityIds,
+              ...clientFallbackEntityIds,
               ...nifEntityIds,
             ].filter(Boolean))) as string[];
           }
