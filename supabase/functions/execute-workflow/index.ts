@@ -919,7 +919,33 @@ serve(async (req) => {
     if (source_entity === "contract" && new_stage_id) {
       const { data: contract } = await supabase.from("client_contracts").select("*").eq("id", entity_id).single();
       if (contract) {
-        if (new_stage_id === "signed" || new_stage_id === "assinado") {
+        // "signed" (English, sent by pipeline-automation's finalize_contract) and
+        // "assinado" (Portuguese, the only value the UI ever writes into
+        // contract_stage_actions.stage_id) refer to the same logical stage.
+        const signedAliases = ["signed", "assinado"];
+        if (signedAliases.includes(new_stage_id)) {
+          // Resolve configured contract_stage_actions for this org/stage, falling
+          // back to a global (organization_id IS NULL) default row — same
+          // org-then-global pattern used by lead/deal/quote stage actions above.
+          let { data: csa } = await supabase
+            .from("contract_stage_actions")
+            .select("*")
+            .eq("organization_id", contract.organization_id)
+            .in("stage_id", signedAliases)
+            .eq("is_active", true)
+            .order("execution_order");
+          if (!csa || csa.length === 0) {
+            const { data: globalCsa } = await supabase
+              .from("contract_stage_actions")
+              .select("*")
+              .is("organization_id", null)
+              .in("stage_id", signedAliases)
+              .eq("is_active", true)
+              .order("execution_order");
+            if (globalCsa && globalCsa.length > 0) csa = globalCsa;
+          }
+          const hasConvertToClient = (csa || []).some((a: any) => a.action_type === "convert_to_client");
+
           let eId: string | null = null; let lid: string | null = null;
           // 1. Direct entity_id on contract
           if (contract.entity_id) eId = contract.entity_id;
@@ -931,8 +957,27 @@ serve(async (req) => {
           // 3. Try pipeline_links → deals
           if (!eId) { const { data: l } = await supabase.from("pipeline_links").select("lead_id, deal_id").eq("contract_id", contract.id).eq("status", "active").maybeSingle(); if (l?.deal_id) { const { data: d } = await supabase.from("deals").select("entity_id, lead_id").eq("id", l.deal_id).single(); if (d) { eId = d.entity_id; lid = d.lead_id; } } if (l?.lead_id) lid = l.lead_id; }
           if (!lid) lid = await resolveLeadFromPipeline("contract", contract.id);
-          console.log("[execute-workflow] Contract conversion - entity_id:", eId, "lead_id:", lid, "contract_id:", contract.id);
-          if (eId) {
+          console.log("[execute-workflow] Contract conversion - entity_id:", eId, "lead_id:", lid, "contract_id:", contract.id, "hasConvertToClient:", hasConvertToClient);
+          if (eId && !hasConvertToClient) {
+            // No active contract_stage_actions row (org-specific or global) configures
+            // convert_to_client for this stage — skip the conversion, but log it clearly
+            // so this isn't a silent no-op.
+            await logWorkflowExecution({
+              ruleId: null,
+              sourceEntity: "contract",
+              sourceRecordId: contract.id,
+              targetEntity: "client",
+              targetRecordId: null,
+              actionType: "config:contract_signed_client_conversion_skipped",
+              status: "success",
+              executionData: {
+                reason: "No active contract_stage_actions row with action_type=convert_to_client for this organization/stage (nor a global fallback)",
+                stage_id: new_stage_id,
+                resolved_action_types: (csa || []).map((a: any) => a.action_type),
+              },
+            });
+          }
+          if (eId && hasConvertToClient) {
             try {
             const nowIso = new Date().toISOString();
             let resolvedClientId: string | null = contract.client_id || null;
@@ -1063,7 +1108,7 @@ serve(async (req) => {
               sourceRecordId: contract.id,
               targetEntity: "client",
               targetRecordId: resolvedClientId,
-              actionType: "hardcoded:contract_signed_client_conversion",
+              actionType: "config:contract_signed_client_conversion",
               status: "success",
             });
             } catch (e: any) {
@@ -1074,7 +1119,7 @@ serve(async (req) => {
                 sourceRecordId: contract.id,
                 targetEntity: "client",
                 targetRecordId: null,
-                actionType: "hardcoded:contract_signed_client_conversion",
+                actionType: "config:contract_signed_client_conversion",
                 status: "error",
                 errorMessage: e.message,
               });
