@@ -91,16 +91,27 @@ const Channels = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [activeCompany?.id]);
 
   const loadData = async () => {
     try {
+      // campaigns is filtered to the active org: RLS (get_user_visible_org_ids)
+      // already allows any org the user is a real member of, which for a
+      // multi-org user includes campaigns from orgs other than the one
+      // currently active — without this filter, the create-channel picker
+      // listed campaigns from every org the user belongs to, risking a
+      // channel meant for the active org getting attached to a different one.
+      let campaignsQuery = supabase.from("campaigns").select("id, name, status").order("name");
+      if (activeCompany?.id) {
+        campaignsQuery = campaignsQuery.eq("organization_id", activeCompany.id);
+      }
+
       const [channelsRes, campaignsRes, channelTypesRes] = await Promise.all([
         supabase
           .from("channels")
           .select("*, campaigns(name)")
           .order("created_at", { ascending: false }),
-        supabase.from("campaigns").select("id, name, status").order("name"),
+        campaignsQuery,
         supabase.from("channel_types").select("*").eq("is_active", true).order("label"),
       ]);
 
