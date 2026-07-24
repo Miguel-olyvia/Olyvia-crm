@@ -203,6 +203,24 @@ export function EntitySearchInput({
           }
         }
 
+        // Fast path: paint whatever the RPC/NIF section above already found
+        // right away, before running the slower lead/entity-matching
+        // fallback below. That fallback hits anew_entities/anew_entity_emails/
+        // anew_entity_phones with a plain ILIKE, which — under RLS — can take
+        // several seconds (see investigation notes). It must never delay or
+        // discard these already-correct results.
+        if (requestId === latestRequestIdRef.current && allResults.length > 0) {
+          const seenFast = new Set<string>();
+          const fastResults = allResults.filter((r) => {
+            const key = `${r.type}-${r.id}`;
+            if (seenFast.has(key)) return false;
+            seenFast.add(key);
+            return true;
+          });
+          setResults(fastResults.slice(0, 50));
+          setOpen(true);
+        }
+
         // Leads still need entity-id matching across the visible org scope.
         const needsLeads = searchTypes.includes("lead");
         // Fallback for clients (only used when RPC failed) must also match by entity id.
@@ -213,121 +231,138 @@ export function EntitySearchInput({
           searchTypes.includes("client") && (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0);
         let matchedEntityIds: string[] = [];
         let orgIds: string[] = orgId ? [orgId] : [];
-        if (needsLeads || needsClientFallback) {
-          if (needsLeads && user?.id) {
-            const { data: visibleOrgIds } = await (supabase as any).rpc("get_user_visible_org_ids", { _auth_uid: user.id });
-            orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
-          }
-          const like = `%${term.trim()}%`;
-          const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
-            supabase
-              .from("anew_entities")
-              .select("id")
-              .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
-              .limit(100),
-            supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(100),
-            supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(100),
-          ]);
-          matchedEntityIds = Array.from(new Set([
-            ...(nameMatches.data || []).map((r: any) => r.id),
-            ...(emailMatches.data || []).map((r: any) => r.entity_id),
-            ...(phoneMatches.data || []).map((r: any) => r.entity_id),
-            ...nifEntityIds,
-          ].filter(Boolean))) as string[];
-        }
-
-        // Helper: process rows of leads/clients and collect matching results.
-        const collectFromRows = async (
-          rows: any[] | null | undefined,
-          type: "lead" | "client",
-          idLabel: string,
-        ) => {
-          if (!rows?.length) return;
-          const eIds = Array.from(new Set(rows.map((r) => r.entity_id).filter(Boolean))) as string[];
-          if (!eIds.length) return;
-          const [ents, emails, phones] = await Promise.all([
-            supabase.from("anew_entities").select("id, display_name, first_name, last_name").in("id", eIds),
-            supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", eIds).eq("is_primary", true),
-            supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", eIds).eq("is_primary", true),
-          ]);
-          const nm = new Map((ents.data || []).map((e: any) => [
-            e.id,
-            e.display_name || [e.first_name, e.last_name].filter(Boolean).join(" ").trim() || null,
-          ]));
-          const em = new Map((emails.data || []).map((e: any) => [e.entity_id, e.email]));
-          const ph = new Map((phones.data || []).map((p: any) => [p.entity_id, p.phone_number]));
-
-          rows.forEach((row: any) => {
-            const name = (row.entity_id ? nm.get(row.entity_id) : null) || `${idLabel} #${row.id.slice(0, 8)}`;
-            const email = row.entity_id ? em.get(row.entity_id) : undefined;
-            const phone = row.entity_id ? ph.get(row.entity_id) : undefined;
-            // NIF matches are already confirmed server-side (search-entities);
-            // they don't need to also match name/email/phone substrings.
-            const matchedByNif = Boolean(row.entity_id && nifMatchedEntityIds.has(row.entity_id));
-            if (
-              matchedByNif ||
-              (name && name.toLowerCase().includes(searchLower)) ||
-              (email && email.toLowerCase().includes(searchLower)) ||
-              (phone && phone.includes(searchLower))
-            ) {
-              allResults.push({
-                type,
-                id: row.id,
-                name: name || `${idLabel} #${row.id.slice(0, 8)}`,
-                email: email || undefined,
-                phone: phone || undefined,
-                entityId: row.entity_id || undefined,
-                status: row.status || undefined,
-              });
+        // This whole fallback (entity/lead matching) gets its own try/catch,
+        // deliberately separate from the outer one: a failure or slow
+        // rejection here (network/proxy timeout under RLS-heavy ILIKE
+        // queries) must only skip the lead/client-fallback additions, never
+        // bubble up and discard the RPC results already painted above.
+        try {
+          if (needsLeads || needsClientFallback) {
+            if (needsLeads && user?.id) {
+              const { data: visibleOrgIds } = await (supabase as any).rpc("get_user_visible_org_ids", { _auth_uid: user.id });
+              orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
             }
-          });
-        };
-
-        // ── Search Leads ──
-        if (searchTypes.includes("lead") && matchedEntityIds.length > 0 && leadsScope !== "NONE") {
-          let q = (supabase.from("anew_leads") as any).select("id, entity_id, assigned_to, status").in("entity_id", matchedEntityIds).is("deleted_at", null).limit(50);
-          if (orgIds.length > 0) q = q.in("organization_id", orgIds);
-          if (leadsScope !== "ORG") {
-            if (leadScopeUserIds.length === 0) {
-              // No resolvable owner ids for a non-ORG scope: fail closed
-              // instead of returning unscoped results.
-              q = q.eq("id", "00000000-0000-0000-0000-000000000000");
-            } else {
-              q = q.or(`assigned_to.in.(${leadScopeUserIds.join(",")}),created_by.in.(${leadScopeUserIds.join(",")})`);
-            }
+            const like = `%${term.trim()}%`;
+            const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
+              supabase
+                .from("anew_entities")
+                .select("id")
+                .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
+                .limit(100),
+              supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(100),
+              supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(100),
+            ]);
+            matchedEntityIds = Array.from(new Set([
+              ...(nameMatches.data || []).map((r: any) => r.id),
+              ...(emailMatches.data || []).map((r: any) => r.entity_id),
+              ...(phoneMatches.data || []).map((r: any) => r.entity_id),
+              ...nifEntityIds,
+            ].filter(Boolean))) as string[];
           }
-          q = q.not("status", "eq", "converted");
-          const { data: leads } = await q;
-          await collectFromRows(leads, "lead", "Lead");
-        }
 
-        // ── Search Clients (fallback when RPC failed, or to union NIF-only matches) ──
-        if (
-          searchTypes.includes("client") &&
-          (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0) &&
-          matchedEntityIds.length > 0 &&
-          orgId &&
-          clientsScope !== "NONE"
-        ) {
-          let clientsQuery = (supabase as any)
-            .from("anew_clients")
-            .select("id, entity_id, status")
-            .in("entity_id", matchedEntityIds)
-            .is("deleted_at", null)
-            .eq("status", "active")
-            .eq("organization_id", orgId)
-            .limit(50);
-          if (clientsScope !== "ORG") {
-            const orFilter = buildContactScopeOrFilter(clientsScope, clientScopeUserIds);
-            if (!orFilter) {
-              // No resolvable owner ids for a non-ORG scope: fail closed.
-              clientsQuery = clientsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
-            } else {
-              clientsQuery = clientsQuery.or(orFilter);
+          // Helper: process rows of leads/clients and collect matching results.
+          const collectFromRows = async (
+            rows: any[] | null | undefined,
+            type: "lead" | "client",
+            idLabel: string,
+          ) => {
+            if (!rows?.length) return;
+            const eIds = Array.from(new Set(rows.map((r) => r.entity_id).filter(Boolean))) as string[];
+            if (!eIds.length) return;
+            const [ents, emails, phones] = await Promise.all([
+              supabase.from("anew_entities").select("id, display_name, first_name, last_name").in("id", eIds),
+              supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", eIds).eq("is_primary", true),
+              supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", eIds).eq("is_primary", true),
+            ]);
+            const nm = new Map((ents.data || []).map((e: any) => [
+              e.id,
+              e.display_name || [e.first_name, e.last_name].filter(Boolean).join(" ").trim() || null,
+            ]));
+            const em = new Map((emails.data || []).map((e: any) => [e.entity_id, e.email]));
+            const ph = new Map((phones.data || []).map((p: any) => [p.entity_id, p.phone_number]));
+
+            rows.forEach((row: any) => {
+              const name = (row.entity_id ? nm.get(row.entity_id) : null) || `${idLabel} #${row.id.slice(0, 8)}`;
+              const email = row.entity_id ? em.get(row.entity_id) : undefined;
+              const phone = row.entity_id ? ph.get(row.entity_id) : undefined;
+              // NIF matches are already confirmed server-side (search-entities);
+              // they don't need to also match name/email/phone substrings.
+              const matchedByNif = Boolean(row.entity_id && nifMatchedEntityIds.has(row.entity_id));
+              if (
+                matchedByNif ||
+                (name && name.toLowerCase().includes(searchLower)) ||
+                (email && email.toLowerCase().includes(searchLower)) ||
+                (phone && phone.includes(searchLower))
+              ) {
+                allResults.push({
+                  type,
+                  id: row.id,
+                  name: name || `${idLabel} #${row.id.slice(0, 8)}`,
+                  email: email || undefined,
+                  phone: phone || undefined,
+                  entityId: row.entity_id || undefined,
+                  status: row.status || undefined,
+                });
+              }
+            });
+          };
+
+          // ── Search Leads ──
+          if (searchTypes.includes("lead") && matchedEntityIds.length > 0 && leadsScope !== "NONE") {
+            let q = (supabase.from("anew_leads") as any).select("id, entity_id, assigned_to, status").in("entity_id", matchedEntityIds).is("deleted_at", null).limit(50);
+            if (orgIds.length > 0) q = q.in("organization_id", orgIds);
+            if (leadsScope !== "ORG") {
+              if (leadScopeUserIds.length === 0) {
+                // No resolvable owner ids for a non-ORG scope: fail closed
+                // instead of returning unscoped results.
+                q = q.eq("id", "00000000-0000-0000-0000-000000000000");
+              } else {
+                q = q.or(`assigned_to.in.(${leadScopeUserIds.join(",")}),created_by.in.(${leadScopeUserIds.join(",")})`);
+              }
             }
+            q = q.not("status", "eq", "converted");
+            const { data: leads } = await q;
+            await collectFromRows(leads, "lead", "Lead");
           }
-          const { data: clients } = await clientsQuery;
-          await collectFromRows(clients, "client", "Cliente");
+
+          // ── Search Clients (fallback when RPC failed, or to union NIF-only matches) ──
+          if (
+            searchTypes.includes("client") &&
+            (!rpcCoveredTypes.includes("client") || nifMatchedEntityIds.size > 0) &&
+            matchedEntityIds.length > 0 &&
+            orgId &&
+            clientsScope !== "NONE"
+          ) {
+            let clientsQuery = (supabase as any)
+              .from("anew_clients")
+              .select("id, entity_id, status")
+              .in("entity_id", matchedEntityIds)
+              .is("deleted_at", null)
+              .eq("status", "active")
+              .eq("organization_id", orgId)
+              .limit(50);
+            if (clientsScope !== "ORG") {
+              const orFilter = buildContactScopeOrFilter(clientsScope, clientScopeUserIds);
+              if (!orFilter) {
+                // No resolvable owner ids for a non-ORG scope: fail closed.
+                clientsQuery = clientsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+              } else {
+                clientsQuery = clientsQuery.or(orFilter);
+              }
+            }
+            const { data: clients } = await clientsQuery;
+            await collectFromRows(clients, "client", "Cliente");
+          }
+        } catch (fallbackErr) {
+          // A slow or failed lead/entity-matching fallback must never wipe
+          // out RPC/NIF client results already collected in `allResults`
+          // (and possibly already painted by the fast path above). Log and
+          // fall through to the final dedupe/setResults below with whatever
+          // was gathered so far.
+          console.error(
+            "Entity search fallback (lead/entity matching) error, RPC client results are preserved:",
+            fallbackErr,
+          );
         }
 
         // Dedupe by type+id (RPC + fallback could overlap in rare cases)
