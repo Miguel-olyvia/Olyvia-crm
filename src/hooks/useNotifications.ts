@@ -58,28 +58,23 @@ export function useNotifications(activeOrgId?: string | null) {
     return notifs.filter(n => !n.is_read && !n.is_dismissed && !n.is_resolved).length;
   }, []);
 
-  // Resolve subtree whenever activeOrgId changes
-  useEffect(() => {
-    if (!activeOrgId) {
-      subtreeRef.current = [];
-      return;
-    }
-    resolveOrgSubtree(activeOrgId).then(ids => {
-      subtreeRef.current = ids;
-    });
-  }, [activeOrgId]);
-
   const fetchNotifications = useCallback(async () => {
     try {
       const { data: user } = await getCachedAuthUser();
       if (!user.user) return;
 
-      // Resolve subtree if needed (might not be ready from effect yet)
-      let orgIds = subtreeRef.current;
-      if (activeOrgId && orgIds.length === 0) {
+      // Always resolve fresh against the CURRENT activeOrgId — this used to
+      // read a separately-populated ref that a sibling effect updated
+      // asynchronously on the same activeOrgId change, so switching orgs
+      // could fetch with the previous org's subtree still cached in the ref
+      // (a race, not just a "not ready yet" gap: the stale ref was never
+      // empty, so the old guard never re-resolved it). markAllAsRead below
+      // relies on this same ref staying in sync, so keep populating it too.
+      let orgIds: string[] = [];
+      if (activeOrgId) {
         orgIds = await resolveOrgSubtree(activeOrgId);
-        subtreeRef.current = orgIds;
       }
+      subtreeRef.current = orgIds;
 
       // Build org filter for reuse
       const applyOrgFilter = (query: any) => {
