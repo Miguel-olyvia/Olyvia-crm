@@ -229,7 +229,7 @@ const App = () => (
                       <Route path="/service-catalog-items" element={<ServiceCatalogItems />} />
                       <Route path="/service-fees" element={<ServiceFees />} />
                       <Route path="/settings" element={<ProtectedRoute permission="settings.update"><Settings /></ProtectedRoute>} />
-                      <Route path="/alert-settings" element={<AlertSettings />} />
+                      <Route path="/alert-settings" element={<ProtectedRoute permission="settings.update"><AlertSettings /></ProtectedRoute>} />
                       <Route path="/docs/architecture" element={<DocsArchitecture />} />
                       <Route path="/docs/user-model" element={<DocsUserModel />} />
                       <Route path="/docs/api" element={<DocsApi />} />
