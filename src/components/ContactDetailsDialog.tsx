@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -115,6 +116,18 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
     return canActOnEntity(editScope, contact || {}, scopeAnewUserId, scopeAuthUserId, teamMemberIds);
   }, [getPermissionScope, contact, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
 
+  // SECURITY: the "Comercial Atribuído" picker must not leak other users' identities
+  // beyond the viewer's contacts.edit scope (see src/lib/contacts/scope.ts). ORG keeps
+  // the full roster; TEAM/OWNED/NONE are filtered in-memory from the already-fetched list.
+  const visibleTeamMembers = useMemo(() => {
+    const editScope = getPermissionScope("contacts.edit");
+    if (editScope === "ORG") return teamMembers;
+    const allowedIds = new Set(
+      [scopeAnewUserId, scopeAuthUserId, ...(editScope === "TEAM" ? teamMemberIds : [])].filter(Boolean) as string[],
+    );
+    return teamMembers.filter((m) => allowedIds.has(m.id));
+  }, [teamMembers, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
+
   // New state
   const [interactions, setInteractions] = useState<any[]>([]);
   const [portalSends, setPortalSends] = useState<any[]>([]);
@@ -135,6 +148,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
     vat: "", position: "", status: "", notes: "", organization_id: "", address: "", city: "", postal_code: "",
     assigned_to: "",
   });
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
 
   const [dealFormData, setDealFormData] = useState({ title: "", description: "", value: "", stage_id: "", expected_close_date: "" });
   const [proposalFormData, setProposalFormData] = useState({ title: "", description: "", value: "", valid_until: "" });
@@ -168,6 +182,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       });
       setSelectedNewListIds(new Set());
       setShowAddListForm(false);
+      setEditFormErrors({});
       // Detect entity type
       if (contact.entity_id) {
         supabase.from("anew_entities").select("type").eq("id", contact.entity_id).maybeSingle().then(({ data }) => {
@@ -506,9 +521,16 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
     const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
     const validation = schema.safeParse(editFormData);
     if (!validation.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of validation.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setEditFormErrors(nextErrors);
       toast({ title: "Validation Error", description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    setEditFormErrors({});
     setSavingContact(true);
 
     try {
@@ -516,110 +538,33 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       if (!user) throw new Error("User not authenticated");
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not found for current auth user");
+
       const entityId = contact.entity_id;
+      const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
+      const displayName = composeDisplayName(normalized.first, normalized.last);
 
-      if (entityId) {
-        const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
-        const displayName = composeDisplayName(normalized.first, normalized.last);
-        await (supabase as any).from("anew_entities").update({ display_name: displayName, first_name: normalized.first, last_name: normalized.last, updated_at: new Date().toISOString() }).eq("id", entityId);
-
-        // Email: upsert primary
-        if (editFormData.email) {
-          const { data: existingEmail } = await (supabase as any).from("anew_entity_emails").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingEmail) {
-            await (supabase as any).from("anew_entity_emails").update({ email: editFormData.email }).eq("id", existingEmail.id);
-          } else {
-            await (supabase as any).from("anew_entity_emails").insert({ entity_id: entityId, email: editFormData.email, is_primary: true, email_type: "personal", created_by: businessUserId });
-          }
-        }
-
-        // Phone: upsert primary
-        if (editFormData.phone) {
-          const { data: existingPhone } = await (supabase as any).from("anew_entity_phones").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingPhone) {
-            await (supabase as any).from("anew_entity_phones").update({ phone_number: editFormData.phone, country_code: editFormData.phone_country_code }).eq("id", existingPhone.id);
-          } else {
-            await (supabase as any).from("anew_entity_phones").insert({ entity_id: entityId, phone_number: editFormData.phone, country_code: editFormData.phone_country_code, is_primary: true, phone_type: "mobile", created_by: businessUserId });
-          }
-        }
-
-        // NIF/VAT: upsert fiscal entity link
-        if (editFormData.vat) {
-          const { data: existingFiscalLink } = await (supabase as any).from("anew_entity_fiscal_entities").select("id, fiscal_entity_id").eq("entity_id", entityId).is("valid_to", null).maybeSingle();
-          if (existingFiscalLink) {
-            await (supabase as any).from("fiscal_entities").update({ tax_id: editFormData.vat, updated_at: new Date().toISOString() }).eq("id", existingFiscalLink.fiscal_entity_id);
-          } else {
-            const { data: newFiscal } = await (supabase as any).from("fiscal_entities").insert({ tax_id: editFormData.vat, entity_type: entityType === "organization" ? "company" : "individual", created_by: businessUserId }).select("id").single();
-            if (newFiscal) {
-              await (supabase as any).from("anew_entity_fiscal_entities").insert({ entity_id: entityId, fiscal_entity_id: newFiscal.id, is_primary: true, created_by: businessUserId });
-            }
-          }
-        }
-
-        // Address: upsert primary address (errors are surfaced, not swallowed)
-        if (editFormData.address || editFormData.city || editFormData.postal_code) {
-          const { data: existingAddrLink, error: addrLinkErr } = await (supabase as any)
-            .from("anew_entity_addresses")
-            .select("id, address_id")
-            .eq("entity_id", entityId)
-            .eq("is_primary", true)
-            .is("valid_to", null)
-            .maybeSingle();
-          if (addrLinkErr) throw addrLinkErr;
-          const street = editFormData.address || "";
-          const postal = editFormData.postal_code || "";
-          const city = editFormData.city || "";
-          const addressPayload = {
-            street,
-            number: "",
-            city,
-            postal_code: postal,
-            country: "PT",
-            address_key: `${street}-${postal}-${city}`.toLowerCase().replace(/\s+/g, "-"),
-            updated_at: new Date().toISOString(),
-          };
-          if (existingAddrLink) {
-            const { error: updErr } = await (supabase as any)
-              .from("anew_addresses")
-              .update(addressPayload)
-              .eq("id", existingAddrLink.address_id);
-            if (updErr) throw updErr;
-          } else {
-            const newAddressId = crypto.randomUUID();
-            const { error: insAddrErr } = await (supabase as any)
-              .from("anew_addresses")
-              .insert({ id: newAddressId, ...addressPayload, created_by: businessUserId });
-            if (insAddrErr) throw insAddrErr;
-            const { error: linkErr } = await (supabase as any)
-              .from("anew_entity_addresses")
-              .insert({ entity_id: entityId, address_id: newAddressId, is_primary: true, address_type: "main", created_by: businessUserId });
-            if (linkErr) throw linkErr;
-          }
-        }
-
-        const { error: contactErr } = await (supabase as any).from("anew_contacts").update({ status: editFormData.status, notes: editFormData.notes || null, position: editFormData.position || null, assigned_to: editFormData.assigned_to || null, updated_at: new Date().toISOString() }).eq("id", contact.id);
-        if (contactErr) throw contactErr;
-
-        // Sync status to anew_entity_roles so listings reflect the change
-        if (entityId) {
-          const orgId = contact.root_organization_id || contact.organization_id;
-          if (orgId) {
-            await (supabase as any).from("anew_entity_roles").update({ status: editFormData.status, updated_at: new Date().toISOString() }).eq("entity_id", entityId).eq("role", "contact").eq("organization_id", orgId);
-          }
-        }
-      } else {
-        // No entity_id: only update fields that actually exist on anew_contacts
-        // (the legacy first_name/email/phone/vat columns have been removed from this table).
-        const { error } = await (supabase as any).from("anew_contacts").update({
-          position: editFormData.position || null,
-          status: editFormData.status,
-          notes: editFormData.notes || null,
-          organization_id: editFormData.organization_id || null,
-          assigned_to: editFormData.assigned_to || null,
-          updated_at: new Date().toISOString(),
-        }).eq("id", contact.id);
-        if (error) throw error;
-      }
+      const updateContactNif = editFormData.vat || null;
+      const { error: rpcErr } = await callNifWriteProxy('rpc_update_contact', {
+        p_contact_id: contact.id,
+        p_entity_id: entityId || null,
+        p_display_name: displayName,
+        p_norm_first: normalized.first,
+        p_norm_last: normalized.last,
+        p_email: editFormData.email || null,
+        p_phone: editFormData.phone || null,
+        p_phone_country: editFormData.phone_country_code,
+        p_vat: editFormData.vat || null,
+        p_position: editFormData.position || null,
+        p_status: editFormData.status,
+        p_notes: editFormData.notes || null,
+        p_organization_id: editFormData.organization_id || null,
+        p_assigned_to: editFormData.assigned_to || null,
+        p_address: editFormData.address || null,
+        p_city: editFormData.city || null,
+        p_postal_code: editFormData.postal_code || null,
+        p_entity_type: entityType,
+      }, updateContactNif);
+      if (rpcErr) throw rpcErr;
 
       toast({ title: t('contacts.details.contactUpdated') });
       onOpenChange(false);
@@ -863,22 +808,27 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="first_name">{t('contacts.details.firstName')} *</Label>
-                      <Input id="first_name" value={editFormData.first_name} onChange={(e) => setEditFormData({ ...editFormData, first_name: e.target.value })} required />
+                      <Input id="first_name" value={editFormData.first_name} onChange={(e) => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />
+                      {editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="last_name">{t('contacts.details.lastName')}{entityType !== "organization" ? " *" : ""}</Label>
-                      <Input id="last_name" value={editFormData.last_name} onChange={(e) => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} />
+                      <Input id="last_name" value={editFormData.last_name} onChange={(e) => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} aria-invalid={!!editFormErrors.last_name} />
+                      {editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">{t('contacts.details.email')}</Label>
-                      <Input id="email" type="email" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} />
+                      <Input id="email" type="email" value={editFormData.email} onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />
+                      {editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}
                     </div>
                     <div className="space-y-2">
                       <PhoneInput label={t('contacts.details.phone')} phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={(value) => setEditFormData({ ...editFormData, phone: value })} onCountryCodeChange={(value) => setEditFormData({ ...editFormData, phone_country_code: value })} />
+                      {editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="vat">{t('contacts.form.vat')}</Label>
-                      <Input id="vat" value={editFormData.vat} onChange={(e) => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" />
+                      <Input id="vat" value={editFormData.vat} onChange={(e) => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />
+                      {editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="position">{t('contacts.details.position')}</Label>
@@ -910,7 +860,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
                         <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Nenhum</SelectItem>
-                          {teamMembers.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
+                          {visibleTeamMembers.map((m) => (<SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -1035,7 +985,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
 
               {/* TAB: TIMELINE (enhanced, replaces old history) */}
               <TabsContent value="timeline">
-                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} />
+                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} contactId={contactId} entityId={contact?.entity_id} />
               </TabsContent>
 
               {/* TAB: SCORING (new) */}

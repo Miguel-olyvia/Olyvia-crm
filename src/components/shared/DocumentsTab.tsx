@@ -13,6 +13,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
+import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 export type DocumentEntityType = "quote" | "proposal" | "contract";
 
@@ -52,13 +55,42 @@ function getFileIcon(fileName: string) {
   return <File className="h-5 w-5 text-muted-foreground" />;
 }
 
+const ALLOWED_UPLOAD_EXTENSIONS = ["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png", "gif", "webp"];
+const ALLOWED_UPLOAD_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+const MAX_FILES_PER_BATCH = 10;
+
+function validateFile(file: File): string | null {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "";
+  const isExtAllowed = ALLOWED_UPLOAD_EXTENSIONS.includes(ext);
+  const isMimeAllowed = !file.type || ALLOWED_UPLOAD_MIME_TYPES.includes(file.type);
+  if (!isExtAllowed || !isMimeAllowed) {
+    return "Tipo de ficheiro não permitido. Utilize PDF, Word, Excel ou imagem (jpg, png, gif, webp).";
+  }
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    return "Ficheiro demasiado grande. O tamanho máximo permitido é 20 MB.";
+  }
+  return null;
+}
+
 export function DocumentsTab({ entityId, entityType, organizationId, readOnly }: DocumentsTabProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null);
   const [uploadData, setUploadData] = useState({ document_type: "other", notes: "" });
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<{ id: string; file: File }[]>([]);
   const [uploading, setUploading] = useState(false);
 
   const queryKey = ["documents", entityType, entityId];
@@ -78,8 +110,49 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
     enabled: !!entityId && !!entityType,
   });
 
+  const uploadSingleFile = async (file: File, uploadedBy: string | null): Promise<string | null> => {
+    const validationError = validateFile(file);
+    if (validationError) return validationError;
+
+    const filePath = `${organizationId}/${entityType}/${entityId}/${generateSecureFileName(file)}`;
+    const { error: uploadError } = await supabase.storage
+      .from("documents-quarantine")
+      .upload(filePath, file);
+    if (uploadError) return getUploadErrorMessage(uploadError);
+
+    const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+      body: { quarantineBucket: "documents-quarantine", finalBucket: "documents", path: filePath },
+    });
+    const validateResult = parseValidateUploadResponse(validateData);
+    if (validateError || !validateResult.ok) {
+      return await resolveValidateUploadErrorMessage(validateResult, validateError);
+    }
+
+    const { error: dbError } = await (supabase as any)
+      .from("documents")
+      .insert({
+        organization_id: organizationId,
+        entity_type: entityType,
+        entity_id: entityId,
+        file_name: file.name,
+        file_url: filePath,
+        file_type: file.type || file.name.split(".").pop(),
+        file_size: file.size,
+        document_type: uploadData.document_type,
+        notes: uploadData.notes || null,
+        uploaded_by: uploadedBy,
+      });
+    if (dbError) {
+      // Rollback do ficheiro se a row falhar
+      await supabase.storage.from("documents").remove([filePath]);
+      return getUploadErrorMessage(dbError);
+    }
+
+    return null;
+  };
+
   const handleUpload = async () => {
-    if (!selectedFile) return;
+    if (selectedFiles.length === 0) return;
     setUploading(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -92,43 +165,59 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         .eq("auth_user_id", authData.user.id)
         .maybeSingle();
       if (userErr) throw userErr;
+      const uploadedBy = businessUser?.id ?? null;
 
-      const filePath = `${organizationId}/${entityType}/${entityId}/${Date.now()}_${selectedFile.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("documents")
-        .upload(filePath, selectedFile);
-      if (uploadError) throw uploadError;
+      const failures: { fileName: string; reason: string }[] = [];
+      let successCount = 0;
 
-      const { error: dbError } = await (supabase as any)
-        .from("documents")
-        .insert({
-          organization_id: organizationId,
-          entity_type: entityType,
-          entity_id: entityId,
-          file_name: selectedFile.name,
-          file_url: filePath,
-          file_type: selectedFile.type || selectedFile.name.split(".").pop(),
-          file_size: selectedFile.size,
-          document_type: uploadData.document_type,
-          notes: uploadData.notes || null,
-          uploaded_by: businessUser?.id ?? null,
-        });
-      if (dbError) {
-        // Rollback do ficheiro se a row falhar
-        await supabase.storage.from("documents").remove([filePath]);
-        throw dbError;
+      for (const { file } of selectedFiles) {
+        const failureReason = await uploadSingleFile(file, uploadedBy);
+        if (failureReason) {
+          failures.push({ fileName: file.name, reason: failureReason });
+        } else {
+          successCount += 1;
+        }
       }
 
-      queryClient.invalidateQueries({ queryKey });
-      toast.success("Documento anexado com sucesso");
-      setIsUploadOpen(false);
-      setSelectedFile(null);
-      setUploadData({ document_type: "other", notes: "" });
-    } catch (err: any) {
-      toast.error("Erro ao anexar documento: " + err.message);
+      if (successCount > 0) {
+        queryClient.invalidateQueries({ queryKey });
+      }
+
+      if (failures.length === 0) {
+        toast.success(`${successCount} documento${successCount === 1 ? "" : "s"} anexado${successCount === 1 ? "" : "s"} com sucesso`);
+      } else if (successCount > 0) {
+        toast.warning(`${successCount} de ${selectedFiles.length} documentos anexados. ${failures.length} falharam.`);
+        failures.forEach(failure => toast.error(`${failure.fileName}: ${failure.reason}`));
+      } else {
+        toast.error(`Nenhum documento foi anexado. ${failures.length} falharam.`);
+        failures.forEach(failure => toast.error(`${failure.fileName}: ${failure.reason}`));
+      }
+
+      if (successCount > 0) {
+        setIsUploadOpen(false);
+        setSelectedFiles([]);
+        setUploadData({ document_type: "other", notes: "" });
+      }
+    } catch (err: unknown) {
+      toast.error(t("documentsTab.toast.attachError") + ": " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    e.target.value = "";
+    if (!fileList) return;
+    const files = Array.from(fileList);
+    if (files.length > MAX_FILES_PER_BATCH) {
+      toast.warning(`Só pode anexar até ${MAX_FILES_PER_BATCH} ficheiros de cada vez. Foram selecionados apenas os primeiros ${MAX_FILES_PER_BATCH}.`);
+    }
+    setSelectedFiles(files.slice(0, MAX_FILES_PER_BATCH).map(file => ({ id: crypto.randomUUID(), file })));
+  };
+
+  const handleRemoveSelectedFile = (id: string) => {
+    setSelectedFiles(prev => prev.filter(entry => entry.id !== id));
   };
 
   const handleDelete = async (docId: string) => {
@@ -157,7 +246,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
   const handleView = async (doc: any) => {
     const { data, error } = await supabase.storage
       .from("documents")
-      .createSignedUrl(doc.file_url, 3600);
+      .createSignedUrl(doc.file_url, 3600, { download: true });
     if (error || !data?.signedUrl) { toast.error("Erro ao abrir ficheiro"); return; }
     window.open(data.signedUrl, "_blank");
   };
@@ -238,32 +327,53 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Ficheiro *</Label>
+              <Label>Ficheiros *</Label>
               <div
-                className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                role="button"
+                tabIndex={0}
+                className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                 onClick={() => fileInputRef.current?.click()}
+                onKeyDown={e => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
               >
-                {selectedFile ? (
-                  <div className="flex items-center justify-center gap-2">
-                    {getFileIcon(selectedFile.name)}
-                    <span className="text-sm font-medium">{selectedFile.name}</span>
-                    <span className="text-xs text-muted-foreground">({formatFileSize(selectedFile.size)})</span>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Arraste o ficheiro para aqui ou clique para seleccionar</p>
-                    <p className="text-xs text-muted-foreground mt-1">PDF, Word, Excel, imagens · Máx. 25 MB</p>
-                  </>
-                )}
+                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Arraste os ficheiros para aqui ou clique para seleccionar</p>
+                <p className="text-xs text-muted-foreground mt-1">PDF, Word, Excel, imagens · Máx. 20 MB por ficheiro · Máx. {MAX_FILES_PER_BATCH} ficheiros</p>
               </div>
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 className="hidden"
                 accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp"
-                onChange={e => setSelectedFile(e.target.files?.[0] || null)}
+                onChange={handleFilesSelected}
               />
+              {selectedFiles.length > 0 && (
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {selectedFiles.map(({ id, file }) => (
+                    <div key={id} className="flex items-center gap-2 p-2 border rounded-md text-sm">
+                      {getFileIcon(file.name)}
+                      <span className="font-medium truncate flex-1">{file.name}</span>
+                      <span className="text-xs text-muted-foreground shrink-0">({formatFileSize(file.size)})</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => handleRemoveSelectedFile(id)}
+                        title="Remover"
+                      >
+                        <span aria-hidden="true">×</span>
+                        <span className="sr-only">Remover {file.name}</span>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Notas (opcional)</Label>
@@ -277,10 +387,10 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsUploadOpen(false)} disabled={uploading}>Cancelar</Button>
-            <Button onClick={handleUpload} disabled={!selectedFile || uploading}>
+            <Button onClick={handleUpload} disabled={selectedFiles.length === 0 || uploading}>
               {uploading && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <Paperclip className="h-4 w-4 mr-1.5" />
-              Fazer Upload
+              Fazer Upload{selectedFiles.length > 0 ? ` (${selectedFiles.length})` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

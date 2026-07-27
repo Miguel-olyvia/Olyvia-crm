@@ -59,6 +59,8 @@ export interface OrgChartCardProps {
   canAdd?: boolean;
   canEdit?: boolean;
   canRemove?: boolean;
+  /** Overrides the default per-type color palette (see OrgChartColorPicker). */
+  colors?: OrgChartColors;
 }
 
 const iconMap: Record<OrgType, any> = {
@@ -117,13 +119,14 @@ export function OrgChartCard({
   canAdd = true,
   canEdit = true,
   canRemove = true,
+  colors: colorsOverride,
 }: OrgChartCardProps) {
   const { t, language } = useTranslation();
   const [isHovered, setIsHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  
+
   const Icon = iconMap[orgType] || Building2;
-  const colors = getOrgTypeColors(orgType);
+  const colors = colorsOverride || getOrgTypeColors(orgType);
   const typeLabel = getOrgTypeLabel(orgType, language);
 
   const {

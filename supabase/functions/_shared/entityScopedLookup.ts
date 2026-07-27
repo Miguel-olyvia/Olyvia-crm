@@ -22,10 +22,26 @@ export async function findLocalEntityForOrg(params: {
   organizationId: string;
   email?: string | null;
   phone?: string | null;
+  /**
+   * @deprecated Plaintext NIF is no longer used for matching — pass
+   * `nifHash` instead. This field is ignored: when no `nifHash` is supplied
+   * (missing or hashing failed upstream), the NIF-matching clause is skipped
+   * entirely rather than falling back to a plaintext `fiscal_entities.nif`
+   * comparison. Kept only so existing callers don't need an immediate
+   * signature change.
+   */
   nif?: string | null;
+  /**
+   * Precomputed HMAC-SHA256 hash of the normalized NIF (see
+   * `_shared/nifCrypto.ts` hashNif). The NIF match is done against
+   * `fiscal_entities.nif_hash` only. When this is not supplied (e.g. hashing
+   * failed upstream), no NIF-based match is attempted at all — never fall
+   * back to comparing plaintext NIF.
+   */
+  nifHash?: string | null;
   countryCode?: string;
 }): Promise<ScopedLookupHit | null> {
-  const { supabase, organizationId, email, phone, nif, countryCode = "PT" } = params;
+  const { supabase, organizationId, email, phone, nifHash, countryCode = "PT" } = params;
   if (!organizationId) return null;
 
   // --- 1. Resolve candidate entity_ids from each identifier ---
@@ -59,25 +75,26 @@ export async function findLocalEntityForOrg(params: {
     }
   }
 
-  if (nif) {
-    const cleanNif = String(nif).trim().toUpperCase();
-    if (cleanNif) {
-      const { data: fes } = await supabase
-        .from("fiscal_entities")
-        .select("id")
-        .eq("nif", cleanNif)
-        .eq("country_code", countryCode)
-        .limit(5);
-      const feIds = (fes ?? []).map((f: any) => f.id);
-      if (feIds.length) {
-        const { data: links } = await supabase
-          .from("anew_entity_fiscal_entities")
-          .select("entity_id")
-          .in("fiscal_entity_id", feIds)
-          .limit(20);
-        for (const r of links ?? []) {
-          if (r?.entity_id) candidates.push({ entityId: r.entity_id, matchField: "nif" });
-        }
+  const cleanNifHash = nifHash ? String(nifHash).trim() : null;
+  if (cleanNifHash) {
+    // NIF match is only ever done against the hashed column. No `nifHash`
+    // (missing or hashing failed upstream) means no NIF-based match is
+    // attempted — never fall back to comparing plaintext `fiscal_entities.nif`.
+    const { data: fes } = await supabase
+      .from("fiscal_entities")
+      .select("id")
+      .eq("country_code", countryCode)
+      .eq("nif_hash", cleanNifHash)
+      .limit(5);
+    const feIds = (fes ?? []).map((f: any) => f.id);
+    if (feIds.length) {
+      const { data: links } = await supabase
+        .from("anew_entity_fiscal_entities")
+        .select("entity_id")
+        .in("fiscal_entity_id", feIds)
+        .limit(20);
+      for (const r of links ?? []) {
+        if (r?.entity_id) candidates.push({ entityId: r.entity_id, matchField: "nif" });
       }
     }
   }
@@ -324,12 +341,14 @@ export async function mergeFieldValuesNonDestructive(params: {
   const { supabase, table, rowId, newFieldValues } = params;
   if (!newFieldValues || Object.keys(newFieldValues).length === 0) return {};
 
+  const column = table === "anew_leads" ? "field_values" : "custom_fields";
+
   const { data: existing } = await supabase
     .from(table)
-    .select("field_values")
+    .select(column)
     .eq("id", rowId)
     .maybeSingle();
-  const current = (existing?.field_values || {}) as Record<string, any>;
+  const current = (existing?.[column] || {}) as Record<string, any>;
 
   const merged: Record<string, any> = { ...current };
   const diff: Record<string, any> = {};
@@ -345,7 +364,7 @@ export async function mergeFieldValuesNonDestructive(params: {
   if (Object.keys(diff).length > 0) {
     await supabase
       .from(table)
-      .update({ field_values: merged })
+      .update({ [column]: merged })
       .eq("id", rowId);
   }
   return diff;

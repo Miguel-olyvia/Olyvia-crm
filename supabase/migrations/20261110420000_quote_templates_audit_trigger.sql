@@ -1,0 +1,70 @@
+-- Fix: quote_templates has no audit trigger, so entity_audit_log never sees
+-- INSERT/UPDATE/DELETE activity on this table.
+--
+-- PROBLEM (confirmed live against the linked remote DB, not just code reading):
+--   `SELECT * FROM pg_trigger WHERE tgrelid = 'quote_templates'::regclass`
+--   returns exactly one row: `update_quote_templates_updated_at`
+--   (function `update_updated_at_column`) — a plain updated_at maintenance
+--   trigger, not an audit trigger.
+--
+--   `SELECT count(*) FROM entity_audit_log WHERE table_name = 'quote_templates'`
+--   returns 0 rows, and always has — every create/rename/deactivate/duplicate
+--   of a quote template (via "Orçamentos" → Duplicar Template, or Builder
+--   "Guardar como Template" — src/pages/QuoteTemplates.tsx,
+--   src/pages/QuoteModels.tsx) is completely invisible to the audit log.
+--
+--   Notably, the RPC `duplicate_quote_template()` (added in
+--   20261110290000_add_duplicate_quote_template_rpc.sql, ~line 105) already
+--   calls `public.set_audit_context(p_user_id, 'web_app')` immediately before
+--   its INSERT into quote_templates, anticipating that an audit trigger would
+--   pick up that context (actor + source). Because no trigger exists on this
+--   table, that call is currently a silent no-op — it sets GUCs that nothing
+--   reads. Adding the trigger below makes that pre-existing call start
+--   working correctly; no RPC change is needed.
+--
+-- WHY THIS IS "Group A":
+--   quote_templates carries organization_id directly on the row (confirmed
+--   live via information_schema.columns:
+--     id uuid, name text, codigo text, description text, active boolean,
+--     created_at timestamptz, updated_at timestamptz, created_by uuid,
+--     organization_id uuid
+--   ). This is the same shape as public.quotes (see
+--   20260627100000_quotes_audit_triggers.sql, section 3, trg_audit_quotes),
+--   which simply attaches the existing generic trigger function
+--   public.fn_generic_entity_audit() — no bespoke per-table function needed,
+--   no child-row org/entity resolution via a parent table required, since
+--   this table isn't a child of anything.
+--
+-- FIX:
+--   Attach the existing, unmodified public.fn_generic_entity_audit() to
+--   quote_templates via a simple AFTER INSERT OR UPDATE OR DELETE trigger,
+--   using the DROP TRIGGER IF EXISTS + CREATE TRIGGER idiom used throughout
+--   this repo's audit migrations. No new function is defined here, and
+--   fn_generic_entity_audit() itself is not touched.
+
+DROP TRIGGER IF EXISTS trg_audit_quote_templates ON public.quote_templates;
+CREATE TRIGGER trg_audit_quote_templates
+  AFTER INSERT OR UPDATE OR DELETE ON public.quote_templates
+  FOR EACH ROW EXECUTE FUNCTION public.fn_generic_entity_audit();
+
+-- ============================================================
+-- Verification notes (not executed)
+-- ============================================================
+-- 1. After this migration, creating a quote template (manually, via "Guardar
+--    como Template" in the Builder, or via duplicate_quote_template()) should
+--    produce exactly one INSERT row in entity_audit_log with
+--    table_name = 'quote_templates', organization_id populated from the row,
+--    and changed_by populated from either the app.audit_user_id GUC (set by
+--    duplicate_quote_template()'s existing set_audit_context() call) or
+--    current_business_user_id() as fallback.
+-- 2. Renaming, activating/deactivating, or editing the codigo/description of
+--    an existing template should produce one UPDATE row with changed_fields
+--    reflecting only the columns that actually changed (fn_generic_entity_audit
+--    already excludes updated_at as a noise column).
+-- 3. Deleting a quote template should produce one DELETE row with the full
+--    pre-delete record in full_record.
+-- 4. `SELECT * FROM pg_trigger WHERE tgrelid = 'quote_templates'::regclass`
+--    should now return two rows: the pre-existing
+--    update_quote_templates_updated_at and the new trg_audit_quote_templates.
+-- 5. This migration does not modify duplicate_quote_template() or any other
+--    RPC — its existing set_audit_context() call now has a consumer.

@@ -39,7 +39,7 @@ vi.mock("@/integrations/supabase/client", () => {
 
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "../resolveBusinessUserId";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const { __mocks } = (await import("@/integrations/supabase/client")) as any;
 
 /**
@@ -53,7 +53,7 @@ async function writerGuarded(payload: Record<string, unknown>, toast: (a: unknow
     return { ok: false as const };
   }
   payload.created_by = businessUserId;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   await (supabase.from("products") as any).insert(payload);
   return { ok: true as const };
 }

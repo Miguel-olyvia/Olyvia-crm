@@ -5,6 +5,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
 import { CONTRACT_VARIABLES, substituteVariables, SAMPLE_VARIABLE_DATA } from "@/utils/contractVariables";
-import { applyQuoteItemsToken, applyFormulaChips, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
+import { applyQuoteItemsToken, applyFormulaChips, injectSignatoryIntoSignatureBlock, hasSignatoryHook, SIGNATORY_BLOCK_MARKER_HTML } from "@/components/contracts/contractDocument";
 import { useOrgHeaderData, applyOrgHeaderOverrides } from "@/components/contracts/useOrgHeaderData";
 import { upsertQuoteItemsChipInHtml, readQuoteItemsChipConfig } from "@/components/contracts/TableInsertPopover";
 import { DEFAULT_QUOTE_ITEMS_CONFIG, type QuoteItemsChipConfig } from "@/components/contracts/DataTableConfigForm";
@@ -42,6 +44,7 @@ import { SignatoriesPanel, type Signatory } from "@/components/contracts/Signato
 import { SignatoryOtpDialog } from "@/components/contracts/SignatoryOtpDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { DocumentPreview } from "@/components/document-editor/DocumentPreview";
+import { contractTemplateFormSchema } from "@/lib/validations";
 
 interface ContractTemplate {
   id: string;
@@ -62,6 +65,7 @@ interface ContractTemplate {
 const ContractTemplates = () => {
   const { activeCompany } = useCompany();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const queryClient = useQueryClient();
   const [editingTemplate, setEditingTemplate] = useState<ContractTemplate | null>(null);
@@ -233,7 +237,20 @@ const ContractTemplates = () => {
     if (nextBody !== formData.body_html) {
       setFormData(fd => ({ ...fd, body_html: nextBody }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // formData.body_html and formData.doc_settings (as a whole object) are
+  // intentionally excluded from the dep array below.
+  //
+  // • body_html: this effect mutates body_html to reflect doc_settings changes.
+  //   Including it would create an infinite loop:
+  //   effect writes body_html → body_html changes → effect fires again.
+  //   The effect reads the current body_html via closure — safe because it only
+  //   fires when an individual doc_settings field listed below changes.
+  //
+  // • formData.doc_settings (object reference): we list each individual field
+  //   explicitly so that only relevant changes trigger the effect.
+  //   Using the object reference would fire on every keystroke in the editor.
+  //
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isEditorOpen,
     formData.doc_settings?.show_quote_items,
@@ -243,6 +260,8 @@ const ContractTemplates = () => {
     formData.doc_settings?.quote_items_show_unit,
     formData.doc_settings?.quote_items_show_price,
     formData.doc_settings?.quote_items_show_total,
+    // JSON.stringify is used here to get a stable value comparison for an array dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(formData.doc_settings?.quote_items_column_order || []),
     formData.doc_settings?.table_header_color,
     formData.doc_settings?.table_header_text_color,
@@ -312,10 +331,13 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta criada com sucesso");
+      toast.success(t('contractTemplates.toast.createSuccess'));
       handleCloseEditor();
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.createError'), { description });
+    },
   });
 
   const updateMutation = useMutation({
@@ -333,25 +355,31 @@ const ContractTemplates = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta actualizada");
+      toast.success(t('contractTemplates.toast.updateSuccess'));
       handleCloseEditor();
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.updateError'), { description });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { data: deleted, error } = await (supabase as any).from("client_contract_templates").delete().eq("id", id).select("id");
+      const { data: deleted, error } = await (supabase as any).from("client_contract_templates").delete().eq("id", id).eq("organization_id", activeCompany?.id).select("id");
       if (error) throw error;
       if (!deleted || deleted.length === 0) throw new Error("Sem permissão para eliminar minuta");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta eliminada");
+      toast.success(t('contractTemplates.toast.deleteSuccess'));
       setIsDeleteOpen(false);
       setDeleteId(null);
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.deleteError'), { description });
+    },
   });
 
   const duplicateMutation = useMutation({
@@ -363,15 +391,20 @@ const ContractTemplates = () => {
       const { data: inserted, error } = await (supabase as any).from("client_contract_templates").insert({
         name: `${template.name} (cópia)`, body_html: template.body_html, is_active: false, is_default: false,
         organization_id: activeCompany?.id, created_by: businessUserId,
+        signatory_user_id: template.signatory_user_id, signatory_role_id: template.signatory_role_id,
+        doc_settings: template.doc_settings,
       }).select("id");
       if (error) throw error;
       if (!inserted || inserted.length === 0) throw new Error("Sem permissão para duplicar minuta");
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
-      toast.success("Minuta duplicada");
+      toast.success(t('contractTemplates.toast.duplicateSuccess'));
     },
-    onError: (error) => toast.error("Erro: " + error.message),
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('contractTemplates.toast.duplicateError'), { description });
+    },
   });
 
   const handleCloseEditor = () => {
@@ -402,7 +435,7 @@ const ContractTemplates = () => {
     setFormData({ ...formData, name: formData.name || baseName, body_html: html });
     setIsEditorOpen(true);
     if (isFromPdf) {
-      toast.info("Texto extraído do PDF — reveja a formatação e insira as variáveis", { duration: 5000 });
+      toast.info(t('contractTemplates.toast.pdfImported'), { duration: 5000 });
     }
     // Open variable detection assistant after a brief delay
     setTimeout(() => setIsVariableAssistantOpen(true), 500);
@@ -429,7 +462,18 @@ const ContractTemplates = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.body_html) { toast.error("Preencha o nome e o corpo da minuta"); return; }
+    const validation = contractTemplateFormSchema.safeParse({
+      name: formData.name,
+      body_html: formData.body_html,
+      is_active: formData.is_active,
+      is_default: formData.is_default,
+      signatory_user_id: formData.signatory_user_id,
+      signatory_role_id: formData.signatory_role_id,
+    });
+    if (!validation.success) {
+      toast.error(validation.error.issues[0].message);
+      return;
+    }
     if (editingTemplate) {
       updateMutation.mutate({ ...formData, id: editingTemplate.id });
     } else {
@@ -437,13 +481,21 @@ const ContractTemplates = () => {
     }
   };
 
+  // Redirect when user lacks view permission. Must be in an effect — calling
+  // navigate() during render is a side effect and causes undefined behaviour.
+  useEffect(() => {
+    if (!permissionsLoading && !canView && !isSystemAdmin && activeCompany) {
+      navigate("/dashboard");
+    }
+  }, [permissionsLoading, canView, isSystemAdmin, activeCompany, navigate]);
+
   if (permissionsLoading) {
     return <><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></>;
   }
 
+  // Show loader while the redirect effect is about to fire.
   if (!canView && !isSystemAdmin && activeCompany) {
-    navigate("/dashboard");
-    return null;
+    return <><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></>;
   }
 
   const wordCount = formData.body_html ? formData.body_html.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length : 0;
@@ -747,6 +799,27 @@ const ContractTemplates = () => {
                   </TabsContent>
 
                   <TabsContent value="signatures" className="flex-1 min-h-0 overflow-y-auto space-y-4">
+                    {formData.signatory_user_id && !hasSignatoryHook(formData.body_html) && (
+                      <div className="border rounded-lg p-3 bg-amber-50 border-amber-200 text-sm flex items-start gap-3">
+                        <div className="flex-1 text-amber-900">
+                          O corpo da minuta não tem nenhum local para mostrar o signatário (sem
+                          variável <code className="font-mono">{"{{signatario_nome}}"}</code> nem bloco de
+                          assinatura). Insere um marcador no sítio que preferires.
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            const nextBody = `${formData.body_html || ""}${SIGNATORY_BLOCK_MARKER_HTML}`;
+                            setFormData({ ...formData, body_html: nextBody });
+                            toast.success(t('contractTemplates.toast.signatureBlockAdded'));
+                          }}
+                        >
+                          Inserir bloco de assinatura
+                        </Button>
+                      </div>
+                    )}
                     <SignatoriesPanel
                       companyId={activeCompany?.id}
                       selectable

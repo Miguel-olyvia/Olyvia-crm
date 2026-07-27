@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -27,12 +27,19 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem('language', language);
   }, [language]);
 
-  const setLanguage = (lang: Language) => {
+  const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
-  };
+  }, []);
+
+  // Memoized so consumers of useLanguage() only see a new context value when
+  // one of these actually changes, instead of on every LanguageProvider
+  // render -- this is the outermost provider wrapping the whole app, so an
+  // unmemoized value here forced every consumer everywhere to re-evaluate
+  // on every render.
+  const value = useMemo(() => ({ language, setLanguage }), [language, setLanguage]);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   );

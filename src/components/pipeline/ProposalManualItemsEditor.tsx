@@ -53,11 +53,11 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
       <div className="flex items-center justify-between">
         <h4 className="text-sm font-semibold text-foreground">Itens Manuais</h4>
         <div className="flex items-center gap-2">
-          <Tooltip><TooltipTrigger asChild><Button variant="outline" size="sm" disabled className="opacity-50"><Package className="h-4 w-4 mr-1" />Adicionar do Catálogo</Button></TooltipTrigger><TooltipContent>Em breve</TooltipContent></Tooltip>
+          <Tooltip><TooltipTrigger asChild><Button type="button" variant="outline" size="sm" disabled className="opacity-50"><Package className="h-4 w-4 mr-1" />Adicionar do Catálogo</Button></TooltipTrigger><TooltipContent>Em breve</TooltipContent></Tooltip>
           {!readOnly && (
             <>
-              <Button variant="outline" size="sm" onClick={addItem}><Plus className="h-4 w-4 mr-1" /> Adicionar Linha</Button>
-              {hasDirty && <Button size="sm" onClick={saveAll} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}Guardar</Button>}
+              <Button type="button" variant="outline" size="sm" onClick={addItem}><Plus className="h-4 w-4 mr-1" /> Adicionar Linha</Button>
+              {hasDirty && <Button type="button" size="sm" onClick={saveAll} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}Guardar</Button>}
             </>
           )}
         </div>
@@ -74,7 +74,7 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
                 <TableCell>{readOnly ? <span>{item.quantity}</span> : <Input type="number" min="0" step="0.01" value={item.quantity} onChange={e => updateItem(index, "quantity", Number(e.target.value))} />}</TableCell>
                 <TableCell>{readOnly ? <span>€{item.unit_price.toFixed(2)}</span> : <Input type="number" min="0" step="0.01" value={item.unit_price} onChange={e => updateItem(index, "unit_price", Number(e.target.value))} />}</TableCell>
                 <TableCell className="text-right font-medium">€{(item.quantity * item.unit_price).toFixed(2)}</TableCell>
-                {!readOnly && <TableCell><Button variant="ghost" size="icon" onClick={() => removeItem(index)} className="h-8 w-8 text-destructive"><Trash2 className="h-4 w-4" /></Button></TableCell>}
+                {!readOnly && <TableCell><Button type="button" variant="ghost" size="icon" onClick={() => removeItem(index)} className="h-8 w-8 text-destructive"><Trash2 className="h-4 w-4" /></Button></TableCell>}
               </TableRow>
             ))}
           </TableBody>

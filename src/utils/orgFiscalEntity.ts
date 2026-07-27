@@ -1,5 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { ensureOrgEntity } from "@/utils/orgEntity";
+import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 export async function upsertOrgFiscalEntity(
   orgId: string,
@@ -24,34 +26,15 @@ export async function upsertOrgFiscalEntity(
     countryCode,
   });
 
-  const { data: existing, error: existingError } = await (supabase as any)
-    .from("fiscal_entities")
-    .select("id")
-    .eq("nif", nif)
-    .eq("country_code", countryCode)
-    .limit(2);
+  const { data: resolved, error: resolveError } = await callFiscalEntityResolve({
+    nif,
+    countryCode,
+    commercialName,
+  });
+  if (resolveError) throw resolveError;
+  if (!resolved) throw new Error("Failed to resolve fiscal entity");
 
-  if (existingError) throw existingError;
-  if (existing && existing.length > 1) throw new Error("Fiscal entity match is ambiguous");
-
-  let fiscalEntityId: string;
-
-  if (existing?.[0]) {
-    fiscalEntityId = existing[0].id;
-    const { error: updateError } = await (supabase as any)
-      .from("fiscal_entities")
-      .update({ commercial_name: commercialName, updated_at: new Date().toISOString() })
-      .eq("id", fiscalEntityId);
-    if (updateError) throw updateError;
-  } else {
-    const { data: created, error } = await (supabase as any)
-      .from("fiscal_entities")
-      .insert({ nif, commercial_name: commercialName, country_code: countryCode, created_by: createdBy })
-      .select("id")
-      .single();
-    if (error) throw error;
-    fiscalEntityId = created.id;
-  }
+  const fiscalEntityId = resolved.fiscalEntityId;
 
   const { error: deleteError } = await (supabase as any).from("anew_entity_fiscal_entities").delete().eq("entity_id", entityId);
   if (deleteError) throw deleteError;
@@ -88,14 +71,16 @@ export async function loadOrgFiscalEntity(
 
   const { data: fe } = await (supabase as any)
     .from("fiscal_entities")
-    .select("nif, commercial_name, country_code")
+    .select("commercial_name, country_code")
     .eq("id", link.fiscal_entity_id)
     .maybeSingle();
 
   if (!fe) return null;
 
+  const nif = await callNifRevealSingle(link.fiscal_entity_id);
+
   return {
-    nif: fe.nif || "",
+    nif: nif || "",
     commercialName: fe.commercial_name || "",
     countryCode: fe.country_code || "PT",
   };

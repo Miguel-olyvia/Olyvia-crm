@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
@@ -175,6 +176,28 @@ export function injectSignatoryIntoSignatureBlock(
   return template.innerHTML;
 }
 
+/**
+ * HTML do marcador determinístico de bloco de assinatura. Quando este marcador
+ * está presente no `body_html` do template/contrato, serve de âncora visível
+ * para o utilizador saber onde o signatário vai ser mostrado.
+ */
+export const SIGNATORY_BLOCK_MARKER_HTML =
+  '<div data-signatory-block="primary" style="margin-top:32px"></div>';
+
+/**
+ * Devolve true se o `body_html` já contém um gancho que mostra o signatário:
+ * marcador determinístico, chip {{signatario_nome}}, ou a frase reconhecida
+ * pela heurística legacy usada por `injectSignatoryIntoSignatureBlock`.
+ */
+export function hasSignatoryHook(html: string | null | undefined): boolean {
+  if (!html) return false;
+  if (/data-signatory-block\s*=\s*"primary"/i.test(html)) return true;
+  if (/\{\{\s*signatario_nome\s*\}\}/i.test(html)) return true;
+  return (
+    /A PRIMEIRA CONTRATANTE/i.test(html) &&
+    /O SEGUNDO CONTRATANTE/i.test(html)
+  );
+}
 
 /**
  * Carrega nome + cargo do signatário escolhido numa minuta (`signatory_user_id`,
@@ -249,16 +272,20 @@ async function fetchPrimaryFiscalEntity(entityId: string): Promise<{ nif?: strin
 
   if (fiscalLinkError || !fiscalLinks?.[0]?.fiscal_entity_id) return {};
 
+  const fiscalEntityId = fiscalLinks[0].fiscal_entity_id;
+
   const { data: fiscalEntity, error: fiscalEntityError } = await (supabase as any)
     .from("fiscal_entities")
-    .select("nif, commercial_name, country_code")
-    .eq("id", fiscalLinks[0].fiscal_entity_id)
+    .select("commercial_name, country_code")
+    .eq("id", fiscalEntityId)
     .maybeSingle();
 
   if (fiscalEntityError || !fiscalEntity) return {};
 
+  const nif = await callNifRevealSingle(fiscalEntityId);
+
   return {
-    nif: String(fiscalEntity.nif || "").trim(),
+    nif: String(nif || "").trim(),
     commercial_name: fiscalEntity.commercial_name,
     country_code: fiscalEntity.country_code,
   };

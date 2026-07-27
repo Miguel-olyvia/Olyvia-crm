@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 
 import {
   downloadStandardXlsx,
@@ -35,6 +36,12 @@ export interface RequestControlledExportOptions {
     status?: string;
     dateFrom?: string;
     dateTo?: string;
+    /** Free-text search, matched server-side against quote number, client name and site address. */
+    search?: string;
+    /** Assigned-to (comercial) filter: an anew_users.id, or the sentinel "none" for unassigned. */
+    assignedTo?: string;
+    /** Restrict to quotes created by or assigned to the calling user (mirrors the "só os meus" toggle). */
+    onlyMine?: boolean;
   };
   download?: (payload: StandardExportPayload, filename: string) => void;
 }
@@ -66,7 +73,8 @@ export async function requestControlledExport(
   });
 
   if (error || !isControlledExportResponse(data)) {
-    throw new Error("Não foi possível exportar os dados");
+    const message = await getFriendlyErrorMessage(error, getLocalizedFallback("friendlyError.exportFailed"));
+    throw new Error(message);
   }
 
   download(

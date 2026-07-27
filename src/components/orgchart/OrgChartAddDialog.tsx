@@ -9,6 +9,17 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Link as LinkIcon } from 'lucide-react';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
+import { withAuditContext } from '@/utils/auditContext';
+import { callNifWriteProxy } from '@/lib/nif/callNifWriteProxy';
+import { z } from 'zod';
+
+const createOrgSchema = z.object({
+  newName: z.string().trim().min(1, "O nome é obrigatório").max(200, "O nome deve ter menos de 200 caracteres"),
+});
+
+const associateOrgSchema = z.object({
+  selectedId: z.string().trim().min(1, "Selecione uma organização"),
+});
 
 interface OrgChartAddDialogProps {
   open: boolean;
@@ -104,7 +115,11 @@ export function OrgChartAddDialog({
   };
 
   const handleCreateNew = async () => {
-    if (!newName.trim()) return;
+    const validation = createOrgSchema.safeParse({ newName });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -112,21 +127,27 @@ export function OrgChartAddDialog({
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
-      // Create new org
-      const { data: newOrg, error: orgError } = await (supabase as any)
-        .from("anew_organizations")
-        .insert({ name: newName.trim(), type: 'unit', created_by: businessUserId })
-        .select("id")
-        .single();
+      // Create new org atomically as a child of parentId, using the same
+      // transactional RPC used in OrganizationDetail.tsx (avoids leaving an
+      // orphan organization row if the hierarchy insert were to fail).
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy("rpc_create_organization_with_hierarchy", {
+          p_current_org_id: parentId,
+          p_hierarchy_type: "child",
+          p_name: newName.trim(),
+          p_type: 'unit',
+          p_description: null,
+          p_status: "active",
+          p_sector: null,
+          p_is_fiscal: false,
+          p_nif: null,
+          p_commercial_name: null,
+          p_country_code: "PT",
+          p_addresses: [],
+        }, null)
+      );
 
-      if (orgError) throw orgError;
-
-      // Create hierarchy relationship
-      const { error: hierError } = await (supabase as any)
-        .from("anew_hierarchy")
-        .insert({ parent_org_id: parentId, child_org_id: newOrg.id, created_by: businessUserId });
-
-      if (hierError) throw hierError;
+      if (error) throw error;
 
       toast({ title: t('common.success'), description: t('orgChart.entityAdded') });
       onSuccess();
@@ -139,7 +160,11 @@ export function OrgChartAddDialog({
   };
 
   const handleAssociateExisting = async () => {
-    if (!selectedId) return;
+    const validation = associateOrgSchema.safeParse({ selectedId });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();

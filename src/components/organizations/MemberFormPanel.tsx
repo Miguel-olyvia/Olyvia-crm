@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { PhoneInput } from "@/components/PhoneInput";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { UserCombobox } from "@/components/users/UserCombobox";
@@ -23,11 +24,11 @@ import { cn } from "@/lib/utils";
 import { TemplateTabSelector } from "@/components/users/TemplateTabSelector";
 import { FieldConfig } from "@/components/users/TemplateFieldsConfig";
 import { UserFormEnhanced } from "@/components/users/UserFormEnhanced";
-import { EmailEntry } from "@/components/users/MultiValueEmailInput";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { NativeSelect } from "@/components/ui/native-select";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface AnewUser {
   id: string;
@@ -125,7 +126,6 @@ export function MemberFormPanel({
     position: "",
     location: "",
   });
-  const [emails, setEmails] = useState<EmailEntry[]>([]);
   const [phones, setPhones] = useState<PhoneEntry[]>([]);
   const [socialLinks, setSocialLinks] = useState({ angellist: "", facebook: "", linkedin: "" });
   const [newUserMemberships, setNewUserMemberships] = useState<Array<{ organization_id: string; relationship_type: string; role_id: string }>>([
@@ -239,22 +239,38 @@ export function MemberFormPanel({
     if (data) setTemplateOrganizations(data);
   };
   
+  // If the organization we defaulted a membership to turns out to be invalid/unreachable,
+  // clear that selection instead of silently letting the UI keep an unconfirmed org id.
+  const clearUnreachableDefaultMembership = () => {
+    setNewUserMemberships((prev) =>
+      prev.map((m) =>
+        m.organization_id === organizationId ? { ...m, organization_id: "" } : m
+      )
+    );
+  };
+
   // Fetch current org + all descendant organizations
   const fetchAllowedOrganizations = async () => {
-    // First fetch current org
-    const { data: currentOrg } = await supabase
+    // First fetch current org - must be active and actually resolvable, otherwise it is
+    // not safe to trust as a default selection or as the scope root for the org list.
+    const { data: currentOrg, error: currentOrgError } = await supabase
       .from("anew_organizations")
       .select("id, name, type")
       .eq("id", organizationId)
-      .single();
-    
-    if (!currentOrg) return;
-    
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (currentOrgError || !currentOrg) {
+      setAllowedOrganizations([]);
+      clearUnreachableDefaultMembership();
+      return;
+    }
+
     // Fetch all hierarchy relationships
     const { data: allHierarchy } = await supabase
       .from("anew_hierarchy")
       .select("parent_org_id, child_org_id");
-    
+
     if (!allHierarchy) {
       setAllowedOrganizations([{ ...currentOrg, parent_id: null }]);
       return;
@@ -289,17 +305,20 @@ export function MemberFormPanel({
       .eq("status", "active")
       .order("name");
     
-    if (orgs) {
-      // Add parent_id info for hierarchy display
-      const orgsWithParent = orgs.map(org => {
-        const parentRel = allHierarchy.find(h => h.child_org_id === org.id);
-        return {
-          ...org,
-          parent_id: parentRel?.parent_org_id || null,
-        };
-      });
-      setAllowedOrganizations(orgsWithParent);
+    if (!orgs) {
+      setAllowedOrganizations([{ ...currentOrg, parent_id: null }]);
+      return;
     }
+
+    // Add parent_id info for hierarchy display
+    const orgsWithParent = orgs.map(org => {
+      const parentRel = allHierarchy.find(h => h.child_org_id === org.id);
+      return {
+        ...org,
+        parent_id: parentRel?.parent_org_id || null,
+      };
+    });
+    setAllowedOrganizations(orgsWithParent);
   };
   
   const loadMemberData = async () => {
@@ -334,15 +353,16 @@ export function MemberFormPanel({
     const entityId = userData?.entity_id;
     const { data: fiscalData } = entityId ? await (supabase as any)
       .from("anew_entity_fiscal_entities")
-      .select("fiscal_entity_id, fiscal_entities(nif, country_code)")
+      .select("fiscal_entity_id, fiscal_entities(country_code)")
       .eq("entity_id", entityId)
       .eq("is_primary", true)
       .maybeSingle() : { data: null };
-    
+
     if (fiscalData?.fiscal_entities) {
+      const nif = await callNifRevealSingle(fiscalData.fiscal_entity_id);
       setEditUserData(prev => ({
         ...prev,
-        nif: fiscalData.fiscal_entities.nif || "",
+        nif: nif || "",
         nif_country: fiscalData.fiscal_entities.country_code || "PT",
       }));
     }
@@ -413,7 +433,7 @@ export function MemberFormPanel({
     const { validateMembershipHierarchy } = await import("@/utils/validateMembershipHierarchy");
     const validation = await validateMembershipHierarchy(memberForm.user_id, organizationId, memberForm.role_id);
     if (!validation.allowed) {
-      toast.error(validation.reason || "Não é permitido atribuir um cargo inferior ao que o utilizador já possui numa organização superior.");
+      toast.error(validation.reason || t("organizations.roleDowngradeNotAllowed"));
       setLoading(false);
       return;
     }
@@ -421,7 +441,7 @@ export function MemberFormPanel({
     const { data: userData } = await supabase.auth.getUser();
     const createdBy = await resolveBusinessUserId(userData.user?.id);
     if (!createdBy) {
-      toast.error("Não foi possível resolver o utilizador de negócio do operador.");
+      toast.error(t("organizations.businessUserNotResolved"));
       setLoading(false);
       return;
     }
@@ -439,17 +459,17 @@ export function MemberFormPanel({
       if (error.code === '23505') {
         toast.error(t("organizations.memberAlreadyExists"));
       } else {
-        toast.error(error.message);
+        toast.error(await getFriendlyErrorMessage(error));
       }
       setLoading(false);
       return;
     }
-    
+
     toast.success(t("common.created"));
     setLoading(false);
     onSaved();
   };
-  
+
   // NEW: Create user using UserFormEnhanced data
   const handleCreateNewUser = async () => {
     if (!formData.name || !formData.email || !formData.password) {
@@ -458,10 +478,20 @@ export function MemberFormPanel({
     }
 
     if (newUserMemberships.some((m) => m.organization_id && !m.role_id)) {
-      toast.error("É obrigatório selecionar uma role para cada organização.");
+      toast.error(t("organizations.roleRequiredPerOrg"));
       return;
     }
-    
+
+    // clearUnreachableDefaultMembership() (see fetchAllowedOrganizations) may have
+    // blanked the organization_id of the default membership if the org turned out to
+    // be unreachable/inactive. Never let a user be created with zero valid
+    // memberships — that would silently leave them without any organization access.
+    const hasValidMembership = newUserMemberships.some((m) => m.organization_id && m.role_id);
+    if (!hasValidMembership) {
+      toast.error(t("users.membershipRequired"));
+      return;
+    }
+
     setSavingNewUser(true);
     
     try {
@@ -480,7 +510,6 @@ export function MemberFormPanel({
       if (socialLinks.linkedin) filteredCustomAttributes['social_linkedin'] = socialLinks.linkedin;
       if (socialLinks.angellist) filteredCustomAttributes['social_angellist'] = socialLinks.angellist;
       
-      const primaryEmail = formData.email.toLowerCase().trim();
       const primaryPhoneKey = formData.phone.replace(/\s+/g, "");
 
       const { data: functionData, error: functionError } = await supabase.functions.invoke('create-user', {
@@ -497,11 +526,9 @@ export function MemberFormPanel({
           position: formData.position || null,
           location: formData.location || null,
           description: formData.description || null,
-          additional_emails: emails.filter(e => e.email && e.email.toLowerCase().trim() !== primaryEmail).map(e => ({
-            email: e.email,
-            email_type: e.email_type,
-            is_primary: false,
-          })),
+          // Internal users have exactly one login email (formData.email) —
+          // there are no additional emails to send here.
+          additional_emails: [],
           additional_phones: phones.filter(p => p.phone_number && `${p.country_code || ""}${p.phone_number || ""}`.replace(/\s+/g, "") !== primaryPhoneKey).map(p => ({
             phone_number: p.phone_number,
             country_code: p.country_code,
@@ -512,23 +539,23 @@ export function MemberFormPanel({
       });
       
       if (functionError) {
-        toast.error(functionError.message);
+        toast.error(await getFriendlyErrorMessage(functionError));
         setSavingNewUser(false);
         return;
       }
-      
+
       if (functionData?.error) {
-        toast.error(functionData.error);
+        toast.error(await getFriendlyErrorMessage(functionData.error));
         setSavingNewUser(false);
         return;
       }
-      
+
       toast.success(t("common.created"));
       setSavingNewUser(false);
       setCreateUserSheetOpen(false);
       onSaved();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao criar utilizador");
+      toast.error(await getFriendlyErrorMessage(err, t("users.toast.createError")));
       setSavingNewUser(false);
     }
   };
@@ -554,11 +581,11 @@ export function MemberFormPanel({
       .eq("id", member.user_id);
     
     if (userError) {
-      toast.error(userError.message);
+      toast.error(await getFriendlyErrorMessage(userError));
       setLoading(false);
       return;
     }
-    
+
     // Update membership
     const { error: memberError } = await (supabase as any)
       .from("anew_memberships")
@@ -566,20 +593,20 @@ export function MemberFormPanel({
         relationship_type: editMembershipType,
       })
       .eq("id", member.id);
-    
+
     if (memberError) {
-      toast.error(memberError.message);
+      toast.error(await getFriendlyErrorMessage(memberError));
       setLoading(false);
       return;
     }
-    
+
     // Update password if provided
     if (editPassword) {
       const { error: pwError } = await supabase.functions.invoke('update-user-password', {
         body: { targetUserId: member.user_id, newPassword: editPassword },
       });
       if (pwError) {
-        toast.error(pwError.message);
+        toast.error(await getFriendlyErrorMessage(pwError));
       }
     }
     
@@ -639,7 +666,6 @@ export function MemberFormPanel({
       position: "",
       location: "",
     });
-    setEmails([]);
     setPhones([]);
     setSocialLinks({ angellist: "", facebook: "", linkedin: "" });
     setNewUserMemberships([{ organization_id: organizationId, relationship_type: "BELONGS_TO", role_id: "" }]);
@@ -974,8 +1000,6 @@ export function MemberFormPanel({
             <UserFormEnhanced
               formData={formData}
               setFormData={setFormData}
-              emails={emails}
-              setEmails={setEmails}
               phones={phones}
               setPhones={setPhones}
               socialLinks={socialLinks}

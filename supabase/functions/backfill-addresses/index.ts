@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
+import { requireServiceRole } from "../_shared/auth.ts";
 import {
   sanitizeAddressFields,
   isSuspiciousAddress,
@@ -8,10 +9,10 @@ import {
   type AddressRow,
 } from "../_shared/addressSanitization.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   mode: z.enum(["preview", "apply"]).optional(),
@@ -55,7 +56,15 @@ function mergeSources(sources: SanitizedAddress[]): { merged: SanitizedAddress; 
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  if (!requireServiceRole(req)) {
+    return new Response(
+      JSON.stringify({ error: "Service role required" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -301,6 +310,8 @@ Deno.serve(async (req) => {
       errorDetails: errorDetails.slice(0, 50),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err: any) {
+    console.error("Error in backfill-addresses:", err);
+    await captureError(err, { function: "backfill-addresses" });
     return new Response(JSON.stringify({ error: err?.message ?? String(err) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

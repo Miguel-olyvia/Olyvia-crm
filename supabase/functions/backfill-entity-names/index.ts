@@ -2,10 +2,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "npm:zod";
 import { resolveCallerIdentity, requireAdminRole, authErrorResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   dry_run: z.boolean().optional(),
@@ -22,9 +22,11 @@ const requestSchema = z.object({
  * POST /backfill-entity-names
  * Body: { dry_run?: boolean, limit?: number }
  * 
- * Requires admin role (system_admin or super_admin).
+ * Requires the global system_admin role (super_admin is tenant-scoped and
+ * is intentionally excluded — this operates across all tenants).
  */
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -172,6 +174,7 @@ Deno.serve(async (req) => {
     );
   } catch (error: any) {
     console.error("Error in backfill-entity-names:", error);
+    await captureError(error, { function: "backfill-entity-names" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { expandPermissions, permissionSetHas } from "@/lib/permissionAliases";
@@ -68,17 +68,30 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         }
 
         // P2.a — Single RPC replaces: anew_users + anew_hierarchy chain + anew_memberships + anew_roles + anew_role_permissions
-        const { data: rawCtx, error: ctxError } = await (supabase as any).rpc("get_user_context");
+        // Transient network blips (e.g. a dropped fetch) have no retry at the
+        // supabase-js layer for rpc() calls, so a single retry with a short
+        // backoff is done here before failing closed.
+        let rawCtx: unknown = null;
+        let ctxError: unknown = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const result = await (supabase as any).rpc("get_user_context");
+          rawCtx = result.data;
+          ctxError = result.error;
+          if (version !== versionRef.current) return;
+          if (!ctxError) break;
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 300));
+        }
         const ctx = rawCtx as UserContextRpcResult | null;
-        if (version !== versionRef.current) return;
         if (ctxError) {
           console.error("get_user_context RPC error:", ctxError);
-          setPermissions([]); setPermissionSet(new Set());
+          // Fail closed: don't leave a stale isSystemAdmin/permissions state
+          // from a previous successful fetch in effect after this one failed.
+          setPermissions([]); setPermissionSet(new Set()); setIsSystemAdmin(false);
           return;
         }
 
         if (!ctx || !ctx.business_user_id) {
-          setPermissions([]); setPermissionSet(new Set());
+          setPermissions([]); setPermissionSet(new Set()); setIsSystemAdmin(false);
           return;
         }
 
@@ -105,27 +118,34 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, [activeCompany?.id, userType, refreshCounter]);
 
   const hasPermission = useCallback((permissionCode: string): boolean => {
+    if (isSystemAdmin) return true;
     return permissionSetHas(permissionSet, permissionCode);
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
+    if (isSystemAdmin) return true;
     return permissionCodes.some(code => permissionSetHas(permissionSet, code));
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const hasModuleAccess = useCallback((module: string): boolean => {
+    if (isSystemAdmin) return true;
     for (const p of permissionSet) {
       if (p.startsWith(module)) return true;
     }
     return false;
-  }, [permissionSet]);
+  }, [permissionSet, isSystemAdmin]);
 
   const refreshPermissions = useCallback(() => {
     permissionsCache.clear();
     setRefreshCounter(c => c + 1);
   }, []);
 
-  return (
-    <PermissionsContext.Provider value={{
+  // Memoized so consumers of usePermissions() only see a new context value
+  // when one of these actually changes, instead of on every
+  // PermissionsProvider render (all the function fields are already stable
+  // via useCallback above, so this memo only recomputes on real changes).
+  const value = useMemo(
+    () => ({
       permissions,
       loading,
       isSystemAdmin,
@@ -133,7 +153,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       hasAnyPermission,
       hasModuleAccess,
       refreshPermissions,
-    }}>
+    }),
+    [permissions, loading, isSystemAdmin, hasPermission, hasAnyPermission, hasModuleAccess, refreshPermissions],
+  );
+
+  return (
+    <PermissionsContext.Provider value={value}>
       {children}
     </PermissionsContext.Provider>
   );

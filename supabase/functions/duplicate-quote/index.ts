@@ -9,11 +9,10 @@ const requestSchema = z.object({
   apply_discount_percent: z.number().optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface DuplicateRequest {
   quote_id: string;
@@ -22,6 +21,7 @@ interface DuplicateRequest {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -34,9 +34,23 @@ serve(async (req) => {
       });
     }
 
+    const authHeader = req.headers.get("Authorization") ?? "";
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation, every read below (quotes, quote_lines,
+    // quote_fees) and the rpc_duplicate_quote_insert call itself run under
+    // the caller's real RLS/authorization instead of a service_role bypass.
+    // rpc_duplicate_quote_insert now validates organization_id and
+    // p_actor_id itself when called with a real auth.uid()
+    // (20261107030000_authorize_rpc_duplicate_quote_insert.sql), so it is
+    // safe to call as `authenticated` here.
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const caller = await resolveCallerIdentity(req, supabaseAdmin);
@@ -112,7 +126,6 @@ serve(async (req) => {
     // Build new quote payload — strip identity/state/lifecycle fields
     const newQuote: Record<string, unknown> = {
       cliente_id: src.cliente_id,
-      business_unit_id: src.business_unit_id,
       obra_endereco: src.obra_endereco,
       obra_notas: src.obra_notas,
       modelo_base: src.modelo_base,
@@ -141,10 +154,53 @@ serve(async (req) => {
       total: src.total,
     };
 
+    const auditUserId = caller.isServiceRole ? null : caller.anewUserId;
+
+    // Fetch source quote_lines / quote_fees up-front so the whole duplicate
+    // (quote + lines + fees) can be inserted atomically in one RPC call — see
+    // rpc_duplicate_quote_insert (20261012010000_fix_duplicate_quote_audit_attribution.sql).
+    // This also fixes audit attribution: set_audit_context() and the INSERTs
+    // now share a single transaction, so its SET LOCAL context is still in
+    // effect when the audit triggers fire.
+    const { data: lines, error: linesErr } = await supabaseAdmin
+      .from("quote_lines")
+      .select("*")
+      .eq("quote_id", quoteId);
+
+    if (linesErr) {
+      console.error("[duplicate-quote] read lines error", linesErr);
+    }
+
+    const newLines = (lines || []).map((l: any) => {
+      const { id: _id, created_at: _ca, quote_id: _qid, total_com_desconto: _tcd, ...rest } = l;
+      // Recompute total_com_desconto if discount override changed
+      const recomputed = discountOverride !== null && typeof rest.total_com_iva === "number"
+        ? Number((rest.total_com_iva * (1 - discountOverride / 100)).toFixed(2))
+        : _tcd;
+      return {
+        ...rest,
+        total_com_desconto: recomputed,
+      };
+    });
+
+    const { data: fees } = await supabaseAdmin
+      .from("quote_fees")
+      .select("*")
+      .eq("quote_id", quoteId);
+
+    const newFees = (fees || []).map((f: any) => {
+      const { id: _id, created_at: _ca, quote_id: _qid, ...rest } = f;
+      return rest;
+    });
+
     const { data: inserted, error: insErr } = await supabaseAdmin
-      .from("quotes")
-      .insert(newQuote)
-      .select("id")
+      .rpc("rpc_duplicate_quote_insert", {
+        p_actor_id: auditUserId,
+        p_source: "web_app",
+        p_quote: newQuote,
+        p_lines: newLines,
+        p_fees: newFees,
+      })
       .single();
 
     if (insErr || !inserted) {
@@ -155,64 +211,7 @@ serve(async (req) => {
       });
     }
 
-    const newQuoteId = inserted.id as string;
-
-    // Copy quote_lines
-    const { data: lines, error: linesErr } = await supabaseAdmin
-      .from("quote_lines")
-      .select("*")
-      .eq("quote_id", quoteId);
-
-    if (linesErr) {
-      console.error("[duplicate-quote] read lines error", linesErr);
-    }
-
-    if (lines && lines.length > 0) {
-      const newLines = lines.map((l: any) => {
-        const { id: _id, created_at: _ca, quote_id: _qid, total_com_desconto: _tcd, ...rest } = l;
-        // Recompute total_com_desconto if discount override changed
-        const recomputed = discountOverride !== null && typeof rest.total_com_iva === "number"
-          ? Number((rest.total_com_iva * (1 - discountOverride / 100)).toFixed(2))
-          : _tcd;
-        return {
-          ...rest,
-          quote_id: newQuoteId,
-          total_com_desconto: recomputed,
-        };
-      });
-
-      const { error: insLinesErr } = await supabaseAdmin
-        .from("quote_lines")
-        .insert(newLines);
-
-      if (insLinesErr) {
-        console.error("[duplicate-quote] insert lines error", insLinesErr);
-        // Rollback: delete new quote
-        await supabaseAdmin.from("quotes").delete().eq("id", newQuoteId);
-        return new Response(JSON.stringify({ error: insLinesErr.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // Copy quote_fees
-    const { data: fees } = await supabaseAdmin
-      .from("quote_fees")
-      .select("*")
-      .eq("quote_id", quoteId);
-
-    if (fees && fees.length > 0) {
-      const newFees = fees.map((f: any) => {
-        const { id: _id, created_at: _ca, quote_id: _qid, ...rest } = f;
-        return { ...rest, quote_id: newQuoteId };
-      });
-      const { error: feesErr } = await supabaseAdmin.from("quote_fees").insert(newFees);
-      if (feesErr) {
-        console.error("[duplicate-quote] insert fees error", feesErr);
-        // Non-fatal; keep the duplicated quote, but report
-      }
-    }
+    const newQuoteId = (inserted as { id: string }).id;
 
     return new Response(
       JSON.stringify({ id: newQuoteId, quote_number: newNumber }),
@@ -224,6 +223,7 @@ serve(async (req) => {
     } catch {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[duplicate-quote] unhandled", err);
+      await captureError(err, { function: "duplicate-quote" });
       return new Response(JSON.stringify({ error: msg }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { productKindDialogSchema } from "@/lib/validations";
 
 export type ProductKind = "simple" | "component" | "configurable";
 const VALID_KINDS: ProductKind[] = ["simple", "component", "configurable"];
@@ -42,6 +44,7 @@ export function ProductKindDialog({
   saving,
   onSave,
 }: Props) {
+  const { toast } = useToast();
   const [pending, setPending] = useState<ProductKind | "">("");
 
   useEffect(() => {
@@ -51,6 +54,19 @@ export function ProductKindDialog({
   }, [open, currentKind]);
 
   const dirty = (currentKind ?? "") !== pending;
+
+  const handleSave = () => {
+    const result = productKindDialogSchema.safeParse({ kind: pending === "" ? null : pending });
+    if (!result.success) {
+      toast({
+        title: "Tipo inválido",
+        description: result.error.issues[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    onSave(result.data.kind);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -114,7 +130,7 @@ export function ProductKindDialog({
           </Button>
           <Button
             disabled={!dirty || saving}
-            onClick={() => onSave(pending === "" ? null : pending)}
+            onClick={handleSave}
           >
             {saving ? "A guardar..." : "Guardar"}
           </Button>

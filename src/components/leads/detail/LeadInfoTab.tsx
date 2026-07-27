@@ -31,11 +31,8 @@ interface LeadInfoTabProps {
   onCreateDeal: () => void;
   onScheduleAction: () => void;
   // Association handlers
-  contactOptions: any[];
   clientOptions: any[];
-  searchingContacts: boolean;
   searchingClients: boolean;
-  onSearchContacts: (term: string) => void;
   onSearchClients: (term: string) => void;
   onAssociateContact: (leadId: string, contactId: string | null) => void;
   onAssociateClient: (leadId: string, clientId: string | null) => void;
@@ -57,8 +54,8 @@ export function LeadInfoTab({
   status, source, assignedUserName, resolveFieldValue, deals, nextAction,
   contactAssociation, clientAssociation, getIdentity,
   onCreateDeal, onScheduleAction,
-  contactOptions, clientOptions, searchingContacts, searchingClients,
-  onSearchContacts, onSearchClients, onAssociateContact, onAssociateClient, leadId,
+  clientOptions, searchingClients,
+  onSearchClients, onAssociateContact, onAssociateClient, leadId,
 }: LeadInfoTabProps) {
   const [visitDate, setVisitDate] = useState<string | null>(null);
 

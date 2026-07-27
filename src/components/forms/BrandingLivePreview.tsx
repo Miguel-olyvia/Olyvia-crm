@@ -80,14 +80,14 @@ export function BrandingLivePreview({
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, []);
 
   // Debounced push of branding/i18n changes — always send (iframe ignores if no listener yet).
   useEffect(() => {
     const t = setTimeout(sendToIframe, 150);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [branding, i18nConfig]);
 
   return (

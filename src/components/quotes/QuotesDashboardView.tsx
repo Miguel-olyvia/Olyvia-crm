@@ -34,6 +34,11 @@ interface QuotesDashboardViewProps {
   errorMessage?: string;
   rpcStatusCounts?: RpcStatusCounts;
   rpcStatusValues?: RpcStatusValues;
+  /** Global count of quotes matching the current filters (from the RPC), used
+   * to detect when `quotes` (capped to the most-recent sample) doesn't cover
+   * every quote — so KPIs derived only from `quotes` (wonCount/wonValue/
+   * lostSummary/etc.) can be flagged as sample-scoped instead of global. */
+  totalQuotes?: number;
 }
 
 const normalizeStatus = (status?: string | null) => status || "sem_estado";
@@ -56,7 +61,14 @@ const OPEN_STATUSES = ["rascunho", "enviado"];
 // quotes.total is the authoritative DB value. Zero is a valid value.
 const valueOf = (q: Quote) => Number(q.total ?? 0);
 
-export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage, rpcStatusCounts, rpcStatusValues }: QuotesDashboardViewProps) {
+export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage, rpcStatusCounts, rpcStatusValues, totalQuotes }: QuotesDashboardViewProps) {
+  // `funnelData`'s stage-0 total comes from rpcStatusCounts (true global count),
+  // but wonCount/wonValue/lostSummary/funnelKpis below are derived only from
+  // `quotes`, which the caller caps to the most-recent sample. When totalQuotes
+  // (the global count) exceeds that sample, every KPI on this page other than
+  // the funnel stage counts themselves is scoped to the sample, not the full
+  // filtered set.
+  const isSampleScoped = typeof totalQuotes === "number" && totalQuotes > quotes.length;
   const wonQuotes = useMemo(
     () => quotes.filter(q => WON_STATUSES.has(normalizeStatus(q.estado))),
     [quotes]
@@ -226,6 +238,12 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
             Permite identificar onde se perde negócio, quanto valor está em risco e qual a
             eficiência comercial em transformar pedidos em receita.
           </p>
+          {isSampleScoped && (
+            <Badge variant="outline" className="mt-2 w-fit gap-1 text-[10px] font-normal text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700">
+              <AlertCircle className="h-3 w-3" />
+              Receita ganha, ticket médio e perdas calculados sobre os {quotes.length} de {totalQuotes} orçamentos carregados (apenas amostra, não o total filtrado)
+            </Badge>
+          )}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">

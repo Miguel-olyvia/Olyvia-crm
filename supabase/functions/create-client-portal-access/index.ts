@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { validateOrgScope, checkUserPermission } from "../_shared/auth.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 const requestSchema = z.object({
   document_type: z.enum(["proposal", "contract", "quote"]),
@@ -11,10 +13,46 @@ const requestSchema = z.object({
   force_new_password: z.boolean().optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
+
+// anew_memberships has no FK constraints (contype='f' returns zero rows in
+// pg_constraint), so PostgREST cannot resolve an embedded
+// `anew_roles!inner(code)` select — it fails with PGRST200 ("Could not find
+// a relationship..."). Resolve role codes with a decoupled two-step lookup
+// instead, same pattern as create-user's resolveCallerAdmin().
+// SECURITY: fails CLOSED — throws on any query error instead of returning
+// false, so callers must treat a lookup failure as "cannot verify" rather
+// than silently proceeding as if the user held no CRM role.
+async function hasNonClientRole(supabase: any, anewUserId: string): Promise<boolean> {
+  const { data: memberships, error: membershipsError } = await supabase
+    .from("anew_memberships")
+    .select("role_id")
+    .eq("user_id", anewUserId)
+    .eq("status", "active");
+
+  if (membershipsError) {
+    console.error("hasNonClientRole: error fetching memberships:", membershipsError);
+    throw new Error("Unable to verify user role, try again");
+  }
+
+  const roleIds = [...new Set((memberships || []).map((m: any) => m.role_id).filter(Boolean))];
+  if (roleIds.length === 0) return false;
+
+  const { data: roles, error: rolesError } = await supabase
+    .from("anew_roles")
+    .select("code")
+    .in("id", roleIds);
+
+  if (rolesError) {
+    console.error("hasNonClientRole: error fetching role codes:", rolesError);
+    throw new Error("Unable to verify user role, try again");
+  }
+
+  return (roles || []).some((r: any) => r.code && r.code !== "client");
+}
 
 function generateTempPassword(length = 8): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
@@ -27,7 +65,17 @@ function generateTempPassword(length = 8): string {
   return result;
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -66,6 +114,27 @@ serve(async (req: Request) => {
     }
     const { document_type, document_id, organization_id, login_url, force_new_password } = parsedBody.data;
 
+    // ── Scope check: verify caller belongs to the target organization ──
+    if (!callerAnew) {
+      return new Response(JSON.stringify({ error: "Utilizador não encontrado no sistema" }), { status: 403, headers: corsHeaders });
+    }
+    const callerIdentity = { authUid: caller.id, anewUserId: callerAnew.id, isServiceRole: false };
+    const hasAccess = await validateOrgScope(supabase, callerIdentity, organization_id);
+    if (!hasAccess) {
+      return new Response(JSON.stringify({ error: "Sem permissão para aceder a esta organização" }), { status: 403, headers: corsHeaders });
+    }
+
+    // ── RBAC gate: caller must hold portal.manage OR client_contracts.edit ──
+    const hasPermission =
+      await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id) ||
+      await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id);
+    if (!hasPermission) {
+      return new Response(
+        JSON.stringify({ error: "Sem permissão para gerir acessos ao portal de clientes" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // 1. Get document and its entity
     let entityId: string | null = null;
     let documentTitle = "";
@@ -75,6 +144,7 @@ serve(async (req: Request) => {
         .from("proposals")
         .select("id, title, entity_id, deal_id, client_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!proposal) {
@@ -111,6 +181,7 @@ serve(async (req: Request) => {
         .from("quotes")
         .select("id, quote_number, title, entity_id, cliente_id, deal_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!quote) {
@@ -142,6 +213,7 @@ serve(async (req: Request) => {
         .from("client_contracts")
         .select("id, contract_number, entity_id, client_id")
         .eq("id", document_id)
+        .eq("organization_id", organization_id)
         .maybeSingle();
 
       if (!contract) {
@@ -216,14 +288,16 @@ serve(async (req: Request) => {
         .maybeSingle();
 
       if (crmAnewUser?.auth_user_id) {
-        const { data: crmRoles } = await supabase
-          .from("anew_memberships")
-          .select("anew_roles!inner(code)")
-          .eq("user_id", crmAnewUser.id)
-          .eq("status", "active");
-        const hasCrmRole = (crmRoles || []).some(
-          (m: any) => m.anew_roles?.code && m.anew_roles.code !== "client"
-        );
+        let hasCrmRole: boolean;
+        try {
+          hasCrmRole = await hasNonClientRole(supabase, crmAnewUser.id);
+        } catch (roleCheckErr) {
+          console.error("Failed to verify CRM role (pre-check), refusing to proceed:", roleCheckErr);
+          return new Response(
+            JSON.stringify({ error: "Unable to verify user role, try again" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
         if (hasCrmRole) {
           return new Response(
             JSON.stringify({ error: "portal_email_is_crm_user" }),
@@ -310,15 +384,16 @@ serve(async (req: Request) => {
       }
 
       // 1a. Block CRM accounts: any active role != 'client' anywhere
-      const { data: existingMemberships } = await supabase
-        .from("anew_memberships")
-        .select("role_id, anew_roles!inner(code)")
-        .eq("user_id", existingAnewUser.id)
-        .eq("status", "active");
-
-      const hasCrmRole = (existingMemberships || []).some(
-        (m: any) => m.anew_roles?.code && m.anew_roles.code !== "client"
-      );
+      let hasCrmRole: boolean;
+      try {
+        hasCrmRole = await hasNonClientRole(supabase, existingAnewUser.id);
+      } catch (roleCheckErr) {
+        console.error("Failed to verify CRM role (existing user), refusing to proceed:", roleCheckErr);
+        return new Response(
+          JSON.stringify({ error: "Unable to verify user role, try again" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
       if (hasCrmRole) {
         return new Response(
           JSON.stringify({ error: "portal_email_is_crm_user" }),
@@ -363,9 +438,9 @@ serve(async (req: Request) => {
         tempPassword = generateTempPassword();
         isNewAccount = !existingPortalUser;
 
-        const { error: updateErr } = await supabase.auth.admin.updateUserById(authUserId, {
+        const { error: updateErr } = await withRetryResult(() => supabase.auth.admin.updateUserById(authUserId, {
           password: tempPassword,
-        });
+        }));
 
         if (updateErr) {
           console.error("Error setting portal password:", updateErr);
@@ -391,13 +466,13 @@ serve(async (req: Request) => {
           .maybeSingle();
 
         if (!existingMembership) {
-          await supabase.from("anew_memberships").insert({
+          await withRetryResult(() => supabase.from("anew_memberships").insert({
             user_id: anewUser.id,
             organization_id,
             role_id: clientRole.id,
             status: "active",
             relationship_type: "member",
-          });
+          }));
         }
       }
     } else {
@@ -405,12 +480,12 @@ serve(async (req: Request) => {
       isNewAccount = true;
       tempPassword = generateTempPassword();
 
-      const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+      const { data: newUser, error: createError } = await withRetryResult(() => supabase.auth.admin.createUser({
         email,
         password: tempPassword,
         email_confirm: true,
         user_metadata: { full_name: entity?.display_name || contactName },
-      });
+      }));
 
       if (createError || !newUser?.user) {
         console.error("Error creating user:", createError);
@@ -445,13 +520,13 @@ serve(async (req: Request) => {
       }
 
       if (anewUser) {
-        await supabase.from("anew_memberships").insert({
+        await withRetryResult(() => supabase.from("anew_memberships").insert({
           user_id: anewUser.id,
           organization_id,
           role_id: clientRole.id,
           status: "active",
           relationship_type: "member",
-        });
+        }));
       }
     }
 
@@ -509,17 +584,17 @@ serve(async (req: Request) => {
         portalUpdatePayload.first_login = true;
       }
 
-      await supabase
+      await withRetryResult(() => supabase
         .from("client_portal_users")
         .update(portalUpdatePayload)
-        .eq("id", existingPortalUser.id);
+        .eq("id", existingPortalUser.id));
       portalUserId = existingPortalUser.id;
     } else {
-      const { data: insertedPortalUser } = await supabase
+      const { data: insertedPortalUser } = await withRetryResult(() => supabase
         .from("client_portal_users")
         .insert(portalUserPayload)
         .select("id")
-        .maybeSingle();
+        .maybeSingle());
       portalUserId = insertedPortalUser?.id || null;
     }
 
@@ -564,6 +639,7 @@ serve(async (req: Request) => {
     }
 
     // Record in proposal_sends / quote_sends / contract_sends for history tracking
+    await supabase.rpc('set_audit_context', { p_user_id: callerAnew!.id, p_source: 'web_app' });
     try {
       const sendRecord = {
         organization_id: organization_id,
@@ -584,6 +660,12 @@ serve(async (req: Request) => {
       }
     } catch (e) {
       console.error("Error recording send history:", e);
+    } finally {
+      try {
+        await supabase.rpc('clear_audit_context');
+      } catch {
+        // best-effort cleanup only
+      }
     }
 
     // 5. Resolve SMTP and send email
@@ -598,17 +680,19 @@ serve(async (req: Request) => {
     if (!resolvedSmtp) {
       const safeMessage = smtpNotFoundMessage();
       console.warn("Portal access created without SMTP", { organization_id, auth_user_id: caller.id, reason: safeMessage });
-      return new Response(JSON.stringify({ 
+      // BASE-USR-012: never include temp_password in the response — SMTP was not
+      // sent, so the password was not delivered to the client. Returning it here
+      // would expose it to whoever reads the API response (browser, proxy logs).
+      return new Response(JSON.stringify({
         success: true,
         is_new_account: isNewAccount,
         email,
-        temp_password: hasCredentials ? tempPassword : undefined,
         login_url: finalLoginUrl,
         message: hasCredentials
           ? `Acesso criado para ${email}. ${safeMessage}`
           : `Acesso atualizado para ${email}. ${safeMessage}`,
         smtp_status: "not_found",
-        smtp_warning: safeMessage,
+        smtp_warning: true,
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -616,40 +700,47 @@ serve(async (req: Request) => {
     const callerName = callerAnew?.name || caller.email || "A equipa";
     const docLabel = document_type === "proposal" ? "proposta" : document_type === "quote" ? "orçamento" : "contrato";
 
+    // BASE-USR-012: escape all user-controlled strings before interpolating into HTML
+    const safeContactName = escapeHtml(contactName);
+    const safeDocumentTitle = escapeHtml(documentTitle);
+    const safeOrgName = escapeHtml(orgName);
+    const safeCallerName = escapeHtml(callerName);
+    const safeDocLabel = escapeHtml(docLabel);
+
     let emailSubject: string;
     let emailHtml: string;
 
     if (hasCredentials) {
-      emailSubject = `Acesso ao Portal — ${orgName}`;
+      emailSubject = `Acesso ao Portal — ${safeOrgName}`;
       emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #333;">Olá, ${contactName}!</h2>
-          <p>Foi-lhe criado um acesso ao portal de <strong>${orgName}</strong>.</p>
-          <p>Tem uma <strong>${docLabel}</strong> disponível para consulta: <em>${documentTitle}</em></p>
-          
+          <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
+          <p>Foi-lhe criado um acesso ao portal de <strong>${safeOrgName}</strong>.</p>
+          <p>Tem uma <strong>${safeDocLabel}</strong> dispon&iacute;vel para consulta: <em>${safeDocumentTitle}</em></p>
+
           <div style="background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="margin: 0 0 8px;"><strong>Aceda ao portal:</strong></p>
-            <p style="margin: 0 0 4px;">🔗 <a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
-            <p style="margin: 0 0 4px;">📧 <strong>Email:</strong> ${email}</p>
-            <p style="margin: 0;">🔑 <strong>Password temporária:</strong> ${tempPassword}</p>
+            <p style="margin: 0 0 4px;"><a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
+            <p style="margin: 0 0 4px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
+            <p style="margin: 0;"><strong>Password tempor&aacute;ria:</strong> ${tempPassword}</p>
           </div>
-          
-          <p style="color: #666; font-size: 14px;">⚠️ Recomendamos que altere a password no primeiro acesso.</p>
-          
+
+          <p style="color: #666; font-size: 14px;">Recomendamos que altere a password no primeiro acesso.</p>
+
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #999; font-size: 13px;">Enviado por ${callerName} — ${orgName}</p>
+          <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>
         </div>
       `;
     } else {
-      emailSubject = `Nova ${docLabel} disponível — ${orgName}`;
+      emailSubject = `Nova ${safeDocLabel} dispon&iacute;vel — ${safeOrgName}`;
       emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #333;">Olá, ${contactName}!</h2>
-          <p>Tem uma nova <strong>${docLabel}</strong> disponível no seu portal: <em>${documentTitle}</em></p>
+          <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
+          <p>Tem uma nova <strong>${safeDocLabel}</strong> dispon&iacute;vel no seu portal: <em>${safeDocumentTitle}</em></p>
           <p>Aceda em: <a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
-          
+
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #999; font-size: 13px;">Enviado por ${callerName} — ${orgName}</p>
+          <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>
         </div>
       `;
     }
@@ -671,22 +762,24 @@ serve(async (req: Request) => {
       email,
       login_url: finalLoginUrl,
     };
-    if (hasCredentials) {
-      response.temp_password = tempPassword;
-    }
 
     if (emailSent) {
+      // BASE-USR-012: password was delivered via email — do NOT echo it back in
+      // the API response. The caller can display a generic success message.
       response.smtp_status = "sent";
       response.smtp_source = resolvedSmtp.source;
       response.message = hasCredentials
         ? `Credenciais e email enviados para ${email}`
         : `Email enviado para ${email}`;
     } else {
+      // SMTP send failed: password was NOT delivered. Return smtp_warning flag
+      // so the UI can prompt the user to copy and share the credentials manually,
+      // but do NOT include the raw password in the response body.
       response.smtp_status = "send_failed";
       response.message = hasCredentials
         ? `Acesso criado para ${email}. O email de notificação não foi enviado (erro SMTP).`
         : `Acesso atualizado para ${email}. O email de notificação não foi enviado (erro SMTP).`;
-      response.smtp_warning = emailError;
+      response.smtp_warning = true;
       response.smtp_error_safe = emailError;
     }
 
@@ -695,6 +788,7 @@ serve(async (req: Request) => {
   } catch (err: any) {
     const safeError = sanitizeSmtpError(err);
     console.error("create-client-portal-access error:", safeError);
+    await captureError(err, { function: "create-client-portal-access" });
     return new Response(JSON.stringify({ error: safeError }), { status: 500, headers: corsHeaders });
   }
 });

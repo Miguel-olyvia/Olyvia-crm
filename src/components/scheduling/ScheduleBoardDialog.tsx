@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
+import { scheduleBoardSchema } from '@/lib/validations';
 import type { ScheduleBoard, BoardModule } from '@/types/scheduling';
 
 const ALL_MODULES: { value: BoardModule; labelKey: string }[] = [
@@ -35,8 +37,10 @@ export function ScheduleBoardDialog({
 }: ScheduleBoardDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   const canEdit = board 
     ? hasPermission('scheduling.boards.edit') 
     : hasPermission('scheduling.boards.create');
@@ -66,6 +70,7 @@ export function ScheduleBoardDialog({
       setAllowedModules(modules || ALL_MODULES.map(m => m.value));
       setAutoFillAddress(settings?.auto_fill_address === true);
       setMaxDailySlots(settings?.max_daily_slots ?? null);
+      setFieldErrors({});
     }
   }, [board, open]);
 
@@ -88,7 +93,22 @@ export function ScheduleBoardDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || isViewOnly) return;
+    if (isViewOnly) return;
+
+    const validation = scheduleBoardSchema.safeParse({
+      name: formData.name,
+      description: formData.description,
+      color: formData.color,
+      max_daily_slots: maxDailySlots,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast({ title: validation.error.errors[0].message, variant: 'destructive' });
+      return;
+    }
+    setFieldErrors({});
 
     setLoading(true);
     try {
@@ -189,7 +209,9 @@ export function ScheduleBoardDialog({
               onChange={(e) => setFormData(f => ({ ...f, name: e.target.value }))}
               placeholder={t('scheduling.board.namePlaceholder')}
               required
+              className={fieldErrors.name ? 'border-destructive' : ''}
             />
+            {fieldErrors.name && <p className="text-sm text-destructive mt-1">{fieldErrors.name}</p>}
           </div>
 
           <div className="space-y-2">

@@ -8,8 +8,11 @@ import { AlignLeft, AlignCenter, AlignRight, Upload, Image as ImageIcon, Loader2
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { toast } from "sonner";
+import { useTranslation } from "@/hooks/useTranslation";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
 
 interface Props {
   settings: DocumentSettings;
@@ -23,7 +26,21 @@ const LOGO_SIZES = [
   { value: "large", label: "Grande" },
 ] as const;
 
+const ALLOWED_LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function validateFile(file: File): string | null {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type)) {
+    return "Formato inválido. Selecione um ficheiro PNG, JPG ou WEBP.";
+  }
+  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+    return "Imagem demasiado grande (máx. 5MB)";
+  }
+  return null;
+}
+
 export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
   const { activeCompany } = useCompany();
@@ -36,27 +53,35 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Selecione um ficheiro de imagem (PNG, JPG)");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("Imagem demasiado grande (máx. 5MB)");
+    const validationError = validateFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
     uploadingRef.current = true;
     try {
       const orgId = activeCompany?.id || settings.organization_id;
-      const ext = file.name.split(".").pop() || "png";
-      const filePath = `${orgId}/doc-logo-${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/doc-logo-${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast.error(t("documentHeader.toast.logoError") + ": " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
+        return;
+      }
+
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       onChange({ logo_url: urlData.publicUrl });
       toast.success("Logotipo carregado com sucesso");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Logo upload error:", err);
-      toast.error("Erro ao carregar logotipo: " + (err.message || "erro desconhecido"));
+      toast.error(t("documentHeader.toast.logoError") + ": " + getUploadErrorMessage(err));
     } finally {
       uploadingRef.current = false;
       if (fileInputRef.current) fileInputRef.current.value = "";

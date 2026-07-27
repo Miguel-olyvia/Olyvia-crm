@@ -19,6 +19,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
@@ -36,6 +37,7 @@ import { QuoteConditions } from "@/components/quote/QuoteConditions";
 import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog";
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveQuotePdfEntityId } from "@/utils/quotePdfClient";
@@ -275,7 +277,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // Deal/contact/client search with @
   type SearchResult =
     | { kind: "deal"; id: string; title: string; client_id: string | null; lead_id: string | null; contact_id?: string | null; organization_id: string | null; entity_id?: string | null; assigned_to?: string | null; entity_name?: string | null }
-    | { kind: "contact"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null }
     | { kind: "client"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null };
   const [dealSearch, setDealSearch] = useState("");
   const [dealSearchResults, setDealSearchResults] = useState<SearchResult[]>([]);
@@ -286,8 +287,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
-  const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("quotes.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   
 
   // Resolve descendant org IDs for the active company subtree
@@ -348,6 +354,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [savedQuoteData, setSavedQuoteData] = useState<{ id: string; quote_number: string | null; cliente_id: string | null; deal_id: string | null; organization_id: string | null } | null>(null);
   const [whatsAppCtx, setWhatsAppCtx] = useState<WhatsAppContext | null>(null);
+  const [showSaveAsTemplateDialog, setShowSaveAsTemplateDialog] = useState(false);
+  const [saveAsTemplateName, setSaveAsTemplateName] = useState("");
+  const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
   useEffect(() => {
     if (quoteId || !activeCompany?.id || draftRestoredRef.current || typeof window === "undefined") return;
@@ -646,6 +655,131 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setTemplates(Array.from(new Map((data || []).map((template: any) => [template.id, template])).values()));
     } catch (error: any) {
       console.error("Error fetching templates:", error);
+    }
+  };
+
+  const handleOpenSaveAsTemplateDialog = () => {
+    if (lines.length === 0) {
+      toast({
+        title: "Sem itens para guardar",
+        description: "Adicione pelo menos uma linha ao orçamento antes de guardar como template.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSaveAsTemplateName(formData.title || "");
+    setShowSaveAsTemplateDialog(true);
+  };
+
+  const handleConfirmSaveAsTemplate = async () => {
+    const name = saveAsTemplateName.trim();
+    if (!name) {
+      toast({ title: "Nome obrigatório", description: "Indique um nome para o template.", variant: "destructive" });
+      return;
+    }
+
+    // Only product/service/bundle lines can be represented in quote_template_items.
+    // Merge duplicate product/service/bundle references so we never violate the
+    // (template_id, product_id) unique constraint.
+    const mergedItems = new Map<string, { item_type: "product" | "service" | "bundle"; product_id: string | null; service_id: string | null; bundle_id: string | null; default_qt: number; default_attributes: Record<string, any> }>();
+    lines.forEach((line) => {
+      let itemType: "product" | "service" | "bundle" | null = null;
+      if (line.product_id) itemType = "product";
+      else if (line.service_id) itemType = "service";
+      else if (line.bundle_id) itemType = "bundle";
+      if (!itemType) return;
+
+      const key = `${itemType}:${line.product_id || line.service_id || line.bundle_id}`;
+      const existing = mergedItems.get(key);
+      if (existing) {
+        existing.default_qt += line.qt || 0;
+      } else {
+        mergedItems.set(key, {
+          item_type: itemType,
+          product_id: itemType === "product" ? line.product_id! : null,
+          service_id: itemType === "service" ? line.service_id! : null,
+          bundle_id: itemType === "bundle" ? line.bundle_id! : null,
+          default_qt: line.qt || 0,
+          default_attributes: line.selected_attributes || {},
+        });
+      }
+    });
+
+    if (mergedItems.size === 0) {
+      toast({
+        title: "Sem itens de catálogo",
+        description: "O template só pode guardar linhas de produtos, serviços ou bundles do catálogo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingAsTemplate(true);
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador. Faça login novamente.", variant: "destructive" });
+        return;
+      }
+
+      const orgId = formData.organization_id || activeCompany?.id || null;
+      const diacriticsPattern = new RegExp("[\\u0300-\\u036f]", "g");
+      const slug = name
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(diacriticsPattern, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+      const codigo = `${slug}-${Date.now()}`;
+
+      const { data: newTemplate, error: templateError } = await supabase
+        .from("quote_templates")
+        .insert({
+          name,
+          codigo,
+          description: null,
+          organization_id: orgId,
+          active: true,
+          created_by: businessUserId,
+        })
+        .select()
+        .single();
+
+      if (templateError) throw templateError;
+
+      const itemsToInsert = Array.from(mergedItems.values()).map((item, index) => ({
+        template_id: newTemplate.id,
+        product_id: item.product_id,
+        service_id: item.service_id,
+        bundle_id: item.bundle_id,
+        item_type: item.item_type,
+        default_qt: item.default_qt,
+        ordem: index,
+        default_attributes: item.default_attributes,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("quote_template_items")
+        .insert(itemsToInsert);
+
+      if (itemsError) {
+        await supabase.from("quote_templates").delete().eq("id", newTemplate.id);
+        throw itemsError;
+      }
+
+      toast({ title: "Template guardado", description: `"${name}" foi adicionado aos Templates Rápidos.` });
+      setShowSaveAsTemplateDialog(false);
+      setSaveAsTemplateName("");
+      await fetchTemplates();
+    } catch (error: any) {
+      console.error("Error saving quote as template:", error);
+      toast({
+        title: "Erro ao guardar template",
+        description: error?.message || "Não foi possível guardar o template. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAsTemplate(false);
     }
   };
 
@@ -1863,191 +1997,86 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         template_id: formData.pdf_template_id || null,
       };
 
-      if (quoteId) {
-        const { error } = await supabase
-          .from("quotes")
-          .update(quoteData)
-          .eq("id", quoteId);
+      // Build the fully-computed lines/fees/totals payloads exactly as before —
+      // the RPC persists them verbatim (business math stays in JS, single-transaction
+      // persistence + single audit row happens server-side).
+      const linesToInsert = lines
+        .filter((line) => line.qt > 0)
+        .map((line) => {
+          const custoUnit =
+            line.custo_material_unit + line.custo_mao_obra_unit;
+          const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
+          const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+          const precoSemIvaBase = unitPrice * line.qt;
+          const lineDiscount = line.discount_percent || 0;
+          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const ivaValor = precoSemIva * (line.iva_percent / 100);
+          const totalComIva = precoSemIva + ivaValor;
+          const totalComDesconto =
+            totalComIva * (1 - formData.desconto_global_percent / 100);
 
-        if (error) throw error;
+          return {
+            catalog_item_id: line.catalog_item_id || null,
+            product_id: line.product_id || null,
+            service_id: line.service_id || null,
+            bundle_id: line.bundle_id || null,
+            selected_attributes: line.selected_attributes || {},
+            categoria: line.categoria,
+            descricao_snapshot: line.descricao_snapshot,
+            qt: line.qt,
+            custo_material_unit: line.custo_material_unit,
+            custo_mao_obra_unit: line.custo_mao_obra_unit,
+            margem_percent: line.margem_percent,
+            iva_percent: line.iva_percent,
+            int_percent: line.int_percent,
+            discount_percent: lineDiscount,
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+            ordem: line.ordem,
+            section_name: line.section_name || "Geral",
+            unidade: line.unidade || null,
+            item_description: line.item_description || null,
+            cost_price: line.cost_price || 0,
+          };
+        });
 
-        await supabase.from("quote_lines").delete().eq("quote_id", quoteId);
-      } else {
-        const { data, error } = await supabase
-          .from("quotes")
-          .insert({
-            ...quoteData,
-            created_by: businessUserId,
-          })
-          .select()
-          .single();
+      const feesToInsert = (totals.fees && totals.fees.length > 0)
+        ? totals.fees.map(fee => ({
+            fee_type_id: fee.id,
+            base_amount: fee.baseAmount,
+            calculated_value: fee.calculatedValue,
+            vat_rate: fee.vatRate,
+            vat_amount: fee.vatAmount,
+          }))
+        : [];
 
-        if (error) throw error;
-        savedQuoteId = data.id;
-      }
+      const totalsPayload = {
+        subtotal: totals.totalSemIva,
+        total_fees: totals.totalFeesWithVat,
+        total: totals.grandTotal,
+      };
 
-      if (lines.length > 0) {
-        const linesToInsert = lines
-          .filter((line) => line.qt > 0)
-          .map((line) => {
-            const custoUnit =
-              line.custo_material_unit + line.custo_mao_obra_unit;
-            const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-            const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-            const precoSemIvaBase = unitPrice * line.qt;
-            const lineDiscount = line.discount_percent || 0;
-            const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
-            const ivaValor = precoSemIva * (line.iva_percent / 100);
-            const totalComIva = precoSemIva + ivaValor;
-            const totalComDesconto =
-              totalComIva * (1 - formData.desconto_global_percent / 100);
+      // Inline quotes (additional quotes created within the builder) — same shape
+      // handleSave() used to build per-iteration, now batched into one RPC argument.
+      const inlineQuotesPayload = inlineQuotes
+        .filter((iq) => iq.lines.length > 0 && iq.lines.filter(l => l.qt > 0).length > 0)
+        .map((iq) => {
+          const iqData = {
+            deal_id: formData.deal_id || null,
+            organization_id: dealOrgId || activeCompany?.id || null,
+            root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
+            title: iq.title || null,
+            obra_notas: iq.obra_notas || null,
+            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
+            desconto_global_percent: iq.desconto_global_percent,
+            estado: "rascunho",
+            validade_dias: iq.validade_dias,
+            iva_rate: iq.iva_rate,
+            client_notes: iq.client_notes || null,
+            conditions: iq.conditions || null,
+          };
 
-            return {
-              quote_id: savedQuoteId,
-              catalog_item_id: line.catalog_item_id || null,
-              product_id: line.product_id || null,
-              service_id: line.service_id || null,
-              bundle_id: line.bundle_id || null,
-              selected_attributes: line.selected_attributes || {},
-              categoria: line.categoria,
-              descricao_snapshot: line.descricao_snapshot,
-              qt: line.qt,
-              custo_material_unit: line.custo_material_unit,
-              custo_mao_obra_unit: line.custo_mao_obra_unit,
-              margem_percent: line.margem_percent,
-              iva_percent: line.iva_percent,
-              int_percent: line.int_percent,
-              discount_percent: lineDiscount,
-              total_sem_iva: precoSemIva,
-              total_com_iva: totalComIva,
-              total_com_desconto: totalComDesconto,
-              ordem: line.ordem,
-              section_name: line.section_name || "Geral",
-              unidade: line.unidade || null,
-              item_description: line.item_description || null,
-              cost_price: line.cost_price || 0,
-            };
-          });
-
-        const { error: linesError } = await supabase
-          .from("quote_lines")
-          .insert(linesToInsert);
-
-        if (linesError) throw linesError;
-      }
-
-      // Sempre limpar fees existentes em modo edição (mesmo quando o utilizador
-      // remove todas as taxas — caso contrário ficariam órfãs em quote_fees).
-      if (quoteId) {
-        const { error: delFeesError } = await supabase
-          .from("quote_fees")
-          .delete()
-          .eq("quote_id", savedQuoteId);
-        if (delFeesError) throw delFeesError;
-      }
-
-      if (totals.fees && totals.fees.length > 0) {
-        const feesToInsert = totals.fees.map(fee => ({
-          quote_id: savedQuoteId,
-          fee_type_id: fee.id,
-          base_amount: fee.baseAmount,
-          calculated_value: fee.calculatedValue,
-          vat_rate: fee.vatRate,
-          vat_amount: fee.vatAmount,
-        }));
-
-        const { error: feesError } = await supabase
-          .from("quote_fees")
-          .insert(feesToInsert);
-
-        if (feesError) throw feesError;
-      }
-
-
-      const { error: updateError } = await supabase
-        .from("quotes")
-        .update({
-          subtotal: totals.totalSemIva,
-          total_fees: totals.totalFeesWithVat,
-          total: totals.grandTotal,
-        })
-        .eq("id", savedQuoteId);
-
-      if (updateError) throw updateError;
-
-      // Sync proposal value when this quote is linked to a proposal.
-      // Must sum ALL quotes linked to the proposal, not just this one —
-      // otherwise saving any single quote overwrites the proposal total.
-      if (savedQuoteId && formData.proposal_id) {
-        try {
-          const { data: linkedQuotes, error: linkedQuotesError } = await supabase
-            .from("quotes")
-            .select("total")
-            .eq("proposal_id", formData.proposal_id)
-            .is("deleted_at", null);
-          if (linkedQuotesError) throw linkedQuotesError;
-          const proposalValue = (linkedQuotes || []).reduce((sum, q) => sum + (Number(q.total) || 0), 0);
-          await (supabase.from("proposals") as any)
-            .update({ value: proposalValue })
-            .eq("id", formData.proposal_id);
-        } catch (propErr) {
-          console.error("Proposal value sync error:", propErr);
-        }
-      }
-
-      if (savedQuoteId && formData.deal_id) {
-        try {
-          const { data: existingLink } = await (supabase.from("pipeline_links") as any)
-            .select("id")
-            .eq("deal_id", formData.deal_id)
-            .eq("status", "active")
-            .maybeSingle();
-          if (existingLink) {
-            await (supabase.from("pipeline_links") as any)
-              .update({ quote_id: savedQuoteId, updated_at: new Date().toISOString() })
-              .eq("id", existingLink.id);
-          } else {
-            await (supabase.from("pipeline_links") as any).insert({
-              deal_id: formData.deal_id,
-              quote_id: savedQuoteId,
-              organization_id: dealOrgId || activeCompany?.id,
-              root_organization_id: resolvedRootOrgId || activeCompany?.id,
-              status: "active",
-            });
-          }
-        } catch (linkErr) {
-          console.error("Pipeline link creation error:", linkErr);
-        }
-      }
-
-      // Save inline quotes (additional quotes created within the builder)
-      for (const iq of inlineQuotes) {
-        if (iq.lines.length === 0) continue;
-        
-        const iqData = {
-          deal_id: formData.deal_id || null,
-          organization_id: dealOrgId || activeCompany?.id || null,
-          root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
-          title: iq.title || null,
-          obra_notas: iq.obra_notas || null,
-          modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-          desconto_global_percent: iq.desconto_global_percent,
-          estado: "rascunho",
-          validade_dias: iq.validade_dias,
-          iva_rate: iq.iva_rate,
-          client_notes: iq.client_notes || null,
-          conditions: iq.conditions || null,
-          created_by: businessUserId,
-        };
-
-        const { data: newIQ, error: iqError } = await (supabase.from("quotes") as any)
-          .insert(iqData)
-          .select("id")
-          .single();
-
-        if (iqError) throw iqError;
-
-        if (iq.lines.filter(l => l.qt > 0).length > 0) {
           const iqLinesToInsert = iq.lines
             .filter(l => l.qt > 0)
             .map(l => {
@@ -2062,7 +2091,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
 
               return {
-                quote_id: newIQ.id,
                 catalog_item_id: l.catalog_item_id || null,
                 product_id: l.product_id || null,
                 service_id: l.service_id || null,
@@ -2088,16 +2116,34 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               };
             });
 
-          const { error: iqLinesError } = await supabase.from("quote_lines").insert(iqLinesToInsert);
-          if (iqLinesError) throw iqLinesError;
-
           const iqTotalSemIva = iqLinesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
           const iqGrandTotal = iqLinesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
-          await (supabase.from("quotes") as any)
-            .update({ subtotal: iqTotalSemIva, total: iqGrandTotal })
-            .eq("id", newIQ.id);
-        }
-      }
+
+          return {
+            data: iqData,
+            lines: iqLinesToInsert,
+            totals: { subtotal: iqTotalSemIva, total: iqGrandTotal },
+          };
+        });
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+
+      const { data: savedQuote, error: saveError } = await supabase.rpc('rpc_save_quote', {
+        // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
+        // updates an existing one) but the generated RPC Args type widens it
+        // to `string` since the SQL parameter has no default value.
+        p_quote_id: (quoteId || null) as unknown as string,
+        p_quote_data: quoteData,
+        p_lines: linesToInsert,
+        p_fees: feesToInsert,
+        p_totals: totalsPayload,
+        p_inline_quotes: inlineQuotesPayload,
+      });
+
+      if (saveError) throw saveError;
+
+      const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
+      savedQuoteId = savedQuoteRow?.id || savedQuoteId;
 
       // Clear inline quotes after saving
       setInlineQuotes([]);
@@ -2850,9 +2896,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         linesBase.push({ line, precoSemIva });
       });
 
+    const round2 = (n: number) => Math.round(n * 100) / 100;
     const totalSemIvaComDesconto = totalSemIva * globalDiscountFactor;
-    const totalComIva = totalSemIvaComDesconto + totalIva; // grand sub+VAT (post-discount)
-    const totalComDesconto = totalSemIvaComDesconto + totalIva;
+
+    // Convert vatByRate to sorted array for display (arredondar cada parcela
+    // antes de somar para o total bater com a soma visual).
+    const vatBreakdown = Object.entries(vatByRate)
+      .map(([rate, data]) => ({ rate: Number(rate), base: data.base, vat: round2(data.vat) }))
+      .sort((a, b) => b.rate - a.rate); // Sort by rate descending (23% first)
+    const totalIvaRounded = vatBreakdown.reduce((s, v) => s + v.vat, 0);
+    const totalComIva = round2(totalSemIvaComDesconto) + totalIvaRounded; // grand sub+VAT (post-discount)
+    const totalComDesconto = totalComIva;
 
     // Cálculo de taxas via helper canónico (supabase/functions/_shared/calculateQuoteFees).
     // Fonte ÚNICA partilhada com a Olyvia (Edge Functions). Não duplicar lógica aqui.
@@ -2880,15 +2934,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const totalFeesVat = feesResult.totalFeesVat;
     const totalFeesWithVat = feesResult.totalFeesWithVat;
     const grandTotal = totalComDesconto + totalFeesWithVat;
-    
-    // Convert vatByRate to sorted array for display
-    const vatBreakdown = Object.entries(vatByRate)
-      .map(([rate, data]) => ({ rate: Number(rate), base: data.base, vat: data.vat }))
-      .sort((a, b) => b.rate - a.rate); // Sort by rate descending (23% first)
 
     return {
       totalSemIva,
-      totalIva,
+      totalIva: totalIvaRounded,
       totalComIva,
       totalComDesconto,
       fees: calculatedFees,
@@ -3109,15 +3158,33 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         <div className="flex items-center gap-2">
 
 
-          <Button variant="outline" size="sm">
-            <FileDown className="w-4 h-4 mr-1" /> Importar Template
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button variant="outline" size="sm" disabled>
+                    <FileDown className="w-4 h-4 mr-1" /> Importar Template
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Use o campo "Template Base" no formulário abaixo para carregar um template</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button variant="outline" size="sm" onClick={() => setShowPdfPreview(true)}>
             <Eye className="w-4 h-4 mr-1" /> Pré-visualizar PDF
           </Button>
-          <Button variant="outline" size="sm">
-            <Copy className="w-4 h-4 mr-1" /> Duplicar
-          </Button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button variant="outline" size="sm" disabled>
+                    <Copy className="w-4 h-4 mr-1" /> Duplicar
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Em breve — para duplicar, guarde o orçamento e use "Duplicar" na lista de Orçamentos</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button onClick={handleSave} disabled={loading}>
             <Save className="w-4 h-4 mr-2" />
             {loading ? t('quoteBuilder.saving') : "Guardar Orçamento"}
@@ -3140,9 +3207,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               <CardTitle className="flex items-center gap-2">📋 Detalhes do Orçamento</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Deal / Contact / Client Search */}
+              {/* Deal / Lead / Client Search */}
               <div className="space-y-2">
-                <Label>Pedido / Contacto / Cliente</Label>
+                <Label>Pedido / Lead / Cliente</Label>
                 {selectedDeal ? (
                   <QuoteDealCard
                     deal={{
@@ -3168,7 +3235,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm text-primary truncate">{selectedSource.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Contacto"} ligado ao orçamento</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Lead"} ligado ao orçamento</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <Badge variant="default" className="bg-green-600 text-xs">✅ Ligado</Badge>
@@ -3190,7 +3257,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 ) : (
                   <div className="relative">
                     <Input
-                      placeholder="Digite @ para pesquisar pedidos, contactos ou clientes..."
+                      placeholder="Digite @ para pesquisar pedidos, leads ou clientes..."
                       value={dealSearch}
                       onChange={async (e) => {
                         const value = e.target.value;
@@ -3254,19 +3321,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                           (byEntity || []).forEach((d: any) => { if (!seenIds.has(d.id)) dealsData.push(d); });
                         }
 
-                        // --- Search contacts ---
-                        let contactsData: any[] = [];
-                        if (matchingEntityIds.length > 0) {
-                          const { data } = await (supabase as any)
-                            .from("anew_contacts")
-                            .select("id, entity_id, organization_id, assigned_to")
-                            .in("organization_id", orgIds)
-                            .in("entity_id", matchingEntityIds)
-                            .is("deleted_at", null)
-                            .limit(25);
-                          contactsData = data || [];
-                        }
-
                         // --- Search clients ---
                         let clientsData: any[] = [];
                         if (matchingEntityIds.length > 0) {
@@ -3283,9 +3337,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         // Build entity name map
                         const allEntityIds = new Set<string>();
                         dealsData.forEach((d: any) => d.entity_id && allEntityIds.add(d.entity_id));
-                        contactsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
                         clientsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
-                        let entityMap: Record<string, any> = {};
+                        const entityMap: Record<string, any> = {};
                         if (allEntityIds.size > 0) {
                           const { data: entities } = await (supabase as any)
                             .from("anew_entities").select("id, display_name")
@@ -3301,14 +3354,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             organization_id: d.organization_id, entity_id: d.entity_id,
                             assigned_to: d.assigned_to,
                             entity_name: d.entity_id ? entityMap[d.entity_id]?.display_name || null : null,
-                          })),
-                          ...contactsData.map((c: any) => ({
-                            kind: "contact" as const,
-                            id: c.id,
-                            name: entityMap[c.entity_id]?.display_name || "Contacto",
-                            entity_id: c.entity_id,
-                            organization_id: c.organization_id,
-                            assigned_to: c.assigned_to,
                           })),
                           ...clientsData.map((c: any) => ({
                             kind: "client" as const,
@@ -3378,7 +3423,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                               setDealSearch(""); setShowDealDropdown(false); setDealSearchResults([]);
                             }}>
                             <Badge variant="secondary" className="text-xs">
-                              {r.kind === "deal" ? "Pedido" : r.kind === "client" ? "Cliente" : "Contacto"}
+                              {r.kind === "deal" ? "Pedido" : "Cliente"}
                             </Badge>
                             <div className="flex flex-col min-w-0">
                               <span className="text-sm truncate">{r.kind === "deal" ? r.title : r.name}</span>
@@ -3390,7 +3435,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta, contactos ou clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta ou clientes</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
@@ -4161,6 +4206,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               onDownloadPdf={handleDownloadPdf}
               downloadingPdf={downloadingPdf}
               inlineQuotes={inlineQuotes}
+              onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
             />
           </div>
         </div>
@@ -4391,6 +4437,38 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                   setNewSectionName("");
                 }
               }}>Criar Secção</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save as Template Dialog */}
+      <Dialog open={showSaveAsTemplateDialog} onOpenChange={setShowSaveAsTemplateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Guardar como Template</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Nome do template</Label>
+              <Input
+                value={saveAsTemplateName}
+                onChange={e => setSaveAsTemplateName(e.target.value)}
+                placeholder="Nome do template..."
+                autoFocus
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !savingAsTemplate) {
+                    e.preventDefault();
+                    handleConfirmSaveAsTemplate();
+                  }
+                }}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowSaveAsTemplateDialog(false)} disabled={savingAsTemplate}>Cancelar</Button>
+              <Button onClick={handleConfirmSaveAsTemplate} disabled={savingAsTemplate}>
+                {savingAsTemplate ? "A guardar..." : "Guardar Template"}
+              </Button>
             </div>
           </div>
         </DialogContent>

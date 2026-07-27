@@ -20,6 +20,8 @@ import {
 } from '@/components/ui/select';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useToast } from '@/hooks/use-toast';
+import { autoScheduleRuleSchema } from '@/lib/validations';
 import type { ScheduleBoard, ScheduleResource } from '@/types/scheduling';
 
 interface AutoScheduleRuleForm {
@@ -82,8 +84,10 @@ export function AutoScheduleRuleDialog({
 }: AutoScheduleRuleDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  
-  const canSave = rule 
+  const { toast } = useToast();
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const canSave = rule
     ? hasPermission('scheduling.rules.edit') 
     : hasPermission('scheduling.rules.create');
   
@@ -178,7 +182,25 @@ export function AutoScheduleRuleDialog({
   };
 
   const handleSubmit = () => {
-    if (!formData.name.trim()) return;
+    const validation = autoScheduleRuleSchema.safeParse({
+      name: formData.name,
+      trigger_type: formData.trigger_type,
+      duration_minutes: formData.duration_minutes ?? 60,
+      buffer_before_minutes: formData.buffer_before_minutes ?? 0,
+      buffer_after_minutes: formData.buffer_after_minutes ?? 0,
+      earliest_time: formData.earliest_time || '09:00',
+      latest_time: formData.latest_time || '18:00',
+      max_items_per_day: formData.max_items_per_day ?? null,
+      priority: formData.priority ?? 0,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast({ title: validation.error.errors[0].message, variant: 'destructive' });
+      return;
+    }
+    setFieldErrors({});
 
     onSave({
       ...formData,
@@ -205,7 +227,9 @@ export function AutoScheduleRuleDialog({
                   value={formData.name}
                   onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                   placeholder={t('scheduling.autoRules.ruleNamePlaceholder')}
+                  className={fieldErrors.name ? 'border-destructive' : ''}
                 />
+                {fieldErrors.name && <p className="text-sm text-destructive mt-1">{fieldErrors.name}</p>}
               </div>
 
               <div>
@@ -235,7 +259,9 @@ export function AutoScheduleRuleDialog({
                   type="number"
                   value={formData.priority || 0}
                   onChange={e => setFormData(prev => ({ ...prev, priority: parseInt(e.target.value) || 0 }))}
+                  className={fieldErrors.priority ? 'border-destructive' : ''}
                 />
+                {fieldErrors.priority && <p className="text-sm text-destructive mt-1">{fieldErrors.priority}</p>}
               </div>
             </div>
 
@@ -286,7 +312,9 @@ export function AutoScheduleRuleDialog({
                   type="number"
                   value={formData.duration_minutes || 60}
                   onChange={e => setFormData(prev => ({ ...prev, duration_minutes: parseInt(e.target.value) || 60 }))}
+                  className={fieldErrors.duration_minutes ? 'border-destructive' : ''}
                 />
+                {fieldErrors.duration_minutes && <p className="text-sm text-destructive mt-1">{fieldErrors.duration_minutes}</p>}
               </div>
               <div>
                 <Label htmlFor="earliest">{t('scheduling.autoRules.timeWindow')}</Label>
@@ -295,7 +323,9 @@ export function AutoScheduleRuleDialog({
                   type="time"
                   value={formData.earliest_time || '09:00'}
                   onChange={e => setFormData(prev => ({ ...prev, earliest_time: e.target.value }))}
+                  className={fieldErrors.earliest_time ? 'border-destructive' : ''}
                 />
+                {fieldErrors.earliest_time && <p className="text-sm text-destructive mt-1">{fieldErrors.earliest_time}</p>}
               </div>
               <div>
                 <Label htmlFor="latest">&nbsp;</Label>
@@ -304,7 +334,9 @@ export function AutoScheduleRuleDialog({
                   type="time"
                   value={formData.latest_time || '18:00'}
                   onChange={e => setFormData(prev => ({ ...prev, latest_time: e.target.value }))}
+                  className={fieldErrors.latest_time ? 'border-destructive' : ''}
                 />
+                {fieldErrors.latest_time && <p className="text-sm text-destructive mt-1">{fieldErrors.latest_time}</p>}
               </div>
             </div>
 

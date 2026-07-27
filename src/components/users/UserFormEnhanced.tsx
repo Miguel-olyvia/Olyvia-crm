@@ -41,11 +41,11 @@ import {
   Wand2,
   Shield,
   Lock,
+  Mail,
 } from "lucide-react";
 import { MembershipScopesDialog, PendingScopeEntry } from "./MembershipScopesDialog";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationCombobox } from "./OrganizationCombobox";
-import { MultiValueEmailInput, EmailEntry } from "./MultiValueEmailInput";
 import { MultiValuePhoneInput, PhoneEntry } from "./MultiValuePhoneInput";
 // SocialLinksInput removed - social links are now template-configurable fields
 import { TemplateTabSelector } from "./TemplateTabSelector";
@@ -58,6 +58,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
+import { userFormSchema } from "@/lib/validations";
 
 interface RoleOption {
   id: string;
@@ -122,8 +123,6 @@ interface UserFormData {
 interface UserFormEnhancedProps {
   formData: UserFormData;
   setFormData: (data: UserFormData) => void;
-  emails: EmailEntry[];
-  setEmails: (emails: EmailEntry[]) => void;
   phones: PhoneEntry[];
   setPhones: (phones: PhoneEntry[]) => void;
   socialLinks: SocialLinks;
@@ -158,8 +157,6 @@ interface UserFormEnhancedProps {
 export function UserFormEnhanced({
   formData,
   setFormData,
-  emails,
-  setEmails,
   phones,
   setPhones,
   socialLinks,
@@ -207,6 +204,7 @@ export function UserFormEnhanced({
   const [rolesByOrg, setRolesByOrg] = useState<Record<string, RoleOption[]>>({});
   const [scopesDialogOpen, setScopesDialogOpen] = useState(false);
   const [selectedMembershipForScopes, setSelectedMembershipForScopes] = useState<{id: string; orgName: string; roleId: string} | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   // Sync with initialTemplateId when it changes (e.g., when editing a different user)
 
@@ -341,6 +339,21 @@ export function UserFormEnhanced({
               }
             }
           });
+        });
+        // Fallback: a membership's currently assigned ORG-SCOPED role must always
+        // be visible in the selector, even when the current editor's own
+        // permissions are not a superset of that role's permissions (the editor
+        // just can't newly assign it from scratch — the existing selection must
+        // still reflect the true current state instead of appearing blank).
+        const allCandidateRolesById = new Map<string, any>(data.map((r: any) => [r.id, r]));
+        memberships.forEach(m => {
+          if (!m.role_id || !m.organization_id) return;
+          if (!map[m.organization_id]) map[m.organization_id] = [];
+          if (map[m.organization_id].some(r => r.id === m.role_id)) return;
+          const assignedRole = allCandidateRolesById.get(m.role_id);
+          if (assignedRole) {
+            map[m.organization_id].push({ id: assignedRole.id, code: assignedRole.code, name: assignedRole.name });
+          }
         });
         setRolesByOrg(map);
       }
@@ -952,6 +965,46 @@ export function UserFormEnhanced({
     });
   };
 
+  /**
+   * Validates the basic profile fields (name, email, password format) with
+   * Zod before delegating to the parent's onSave. Password is required on
+   * create but optional on edit (blank keeps the current one), so that rule
+   * is enforced here rather than in the shared Zod schema.
+   */
+  const validateForm = (): boolean => {
+    const result = userFormSchema.safeParse({
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+    });
+
+    const nextErrors: Record<string, string> = {};
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+    }
+    if (!isEdit && !formData.password.trim()) {
+      nextErrors.password = t("users.passwordRequired") || "A password é obrigatória";
+    }
+
+    setFieldErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) {
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({ title: "Dados inválidos", description: firstMessage, variant: "destructive" });
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveClick = () => {
+    if (!validateForm()) return;
+    onSave();
+  };
+
   return (
     <>
     <Card className="h-full flex flex-col">
@@ -1042,7 +1095,9 @@ export function UserFormEnhanced({
                   setFormData({ ...formData, name: e.target.value })
                 }
                 placeholder={t("users.namePlaceholder")}
+                aria-invalid={!!fieldErrors.name}
               />
+              {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
             </div>
 
             {/* Status - only show in edit mode */}
@@ -1068,11 +1123,22 @@ export function UserFormEnhanced({
               </div>
             )}
 
-            {/* Emails - Multi-value - Required */}
-            <MultiValueEmailInput
-              emails={emails}
-              onChange={setEmails}
-            />
+            {/* Email - Single value (login email) - Required */}
+            <div className="space-y-2">
+              <Label htmlFor="email" className="flex items-center gap-2">
+                <Mail className="w-4 h-4 text-muted-foreground" />
+                {t("common.email")} *
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="email@exemplo.com"
+                aria-invalid={!!fieldErrors.email}
+              />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+            </div>
 
             {/* Description - Optional (not controlled by templates) */}
             <div className="space-y-2">
@@ -1108,6 +1174,7 @@ export function UserFormEnhanced({
                     }
                     placeholder={isEdit ? t("users.leaveEmptyToKeep") : t("users.passwordPlaceholder")}
                     className="pr-10"
+                    aria-invalid={!!fieldErrors.password}
                   />
                   <Button
                     type="button"
@@ -1138,6 +1205,7 @@ export function UserFormEnhanced({
                   Gerar
                 </Button>
               </div>
+              {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
               {isEdit && (
                 <p className="text-xs text-muted-foreground">
                   {t("users.passwordChangeHint")}
@@ -1824,7 +1892,7 @@ export function UserFormEnhanced({
             <Button variant="outline" onClick={onCancel}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={onSave} disabled={saving}>
+            <Button onClick={handleSaveClick} disabled={saving}>
               {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {isEdit ? t("common.save") : t("common.create")}
             </Button>

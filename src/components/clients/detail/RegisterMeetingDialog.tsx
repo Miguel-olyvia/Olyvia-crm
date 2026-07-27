@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { clientMeetingRegisterSchema } from "@/lib/validations";
 
 
 interface RegisterMeetingDialogProps {
@@ -62,6 +63,18 @@ export function RegisterMeetingDialog({
   };
 
   const handleSave = async () => {
+    const validation = clientMeetingRegisterSchema.safeParse({
+      subject,
+      location,
+      sentiment,
+    });
+
+    if (!validation.success) {
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
+      return;
+    }
+
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -78,7 +91,7 @@ export function RegisterMeetingDialog({
         notes,
       ].filter(Boolean).join("\n\n");
 
-      await supabase.from("entity_interactions").insert({
+      const { error: insertError } = await supabase.from("entity_interactions").insert({
         entity_id: entityId,
         interaction_type: "meeting",
         subject: `Reunião com ${entityName}`,
@@ -92,11 +105,13 @@ export function RegisterMeetingDialog({
         created_by: createdBy,
         organization_id: organizationId,
       });
+      if (insertError) throw insertError;
 
       // Update last_interaction_at
-      await (supabase as any).from("anew_clients").update({
+      const { error: updateError } = await (supabase as any).from("anew_clients").update({
         last_interaction_at: new Date(meetingDate).toISOString(),
       }).eq("id", contactId);
+      if (updateError) throw updateError;
 
       // Open channel if selected
       const selectedChannel = needsChannel ? nextActionChannel : null;

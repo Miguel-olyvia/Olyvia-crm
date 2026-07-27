@@ -129,20 +129,6 @@ export default function DocsEdgeFunctions() {
               </div>
             </div>
 
-            {/* register-company */}
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <Badge>POST</Badge>
-                <code className="font-medium">/register-company</code>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Auto-registo de nova empresa + utilizador admin
-              </p>
-              <div className="bg-muted p-3 rounded text-sm">
-                <strong>Requer:</strong> Nenhum (endpoint público)
-              </div>
-            </div>
-
             {/* api-proxy */}
             <div className="border rounded-lg p-4 space-y-2">
               <div className="flex items-center gap-2">

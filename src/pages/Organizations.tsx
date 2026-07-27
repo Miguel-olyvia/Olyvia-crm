@@ -14,9 +14,8 @@ import { OrganizationsHelpDialog } from "@/components/organizations/Organization
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { assignCreatorAsOrgAdmin, assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
-import { upsertOrgFiscalEntity, removeOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
-import { ensureOrgEntity, resolveOrganizationEntityId } from "@/utils/orgEntity";
+import { assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
+import { upsertOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { useTranslation } from "@/hooks/useTranslation";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { OrganizationMembersDialog } from "@/components/organizations/OrganizationMembersDialog";
@@ -28,6 +27,9 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Organization {
   id: string;
@@ -35,6 +37,7 @@ interface Organization {
   type: string;
   description: string | null;
   status: string;
+  deleted_at?: string | null;
   created_at: string;
   created_by?: string | null;
   member_count?: number;
@@ -97,6 +100,9 @@ export default function Organizations() {
   const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
   const [sortField, setSortField] = useState<'name' | 'type' | 'members' | 'status'>('type');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [orgToRestore, setOrgToRestore] = useState<Organization | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [panelMode, setPanelMode] = useState<'closed' | 'create' | 'edit'>('closed');
   
@@ -126,7 +132,7 @@ export default function Organizations() {
       }
     };
     fetchUserName();
-  }, [activeCompany?.id, scopeLoading, viewScope, anewUserId, refreshCounter]);
+  }, [activeCompany?.id, scopeLoading, viewScope, anewUserId, refreshCounter, showDeleted]);
 
   // Auto-open create panel when navigated with ?action=new
   useEffect(() => {
@@ -143,6 +149,7 @@ export default function Organizations() {
       setCountries(data || []);
     } catch (error) {
       console.error("Error fetching countries:", error);
+      toast.error(t("common.error"));
     }
   };
 
@@ -176,7 +183,8 @@ export default function Organizations() {
         scopedOrgIds = Array.from(scopeSet);
       }
 
-      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
+      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, deleted_at, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
+      orgsQuery = showDeleted ? orgsQuery.not("deleted_at", "is", null) : orgsQuery.is("deleted_at", null);
       const isGlobalAdmin = userType === "system_admin";
       if (isGlobalAdmin) {
         // Fetch all orgs (RLS handles security), then post-filter
@@ -297,9 +305,11 @@ export default function Organizations() {
       if (selectedTemplateId) {
         const { data: userData } = await supabase.auth.getUser();
         const businessUserId = await resolveBusinessUserId(userData.user?.id);
-        const { data: rootOrgId, error } = await (supabase as any).rpc('create_orgs_from_template', {
-          p_template_id: selectedTemplateId, p_root_name: formData.name, p_created_by: businessUserId
-        });
+        const { data: rootOrgId, error } = await withAuditContext(supabase, businessUserId, () =>
+          (supabase as any).rpc('create_orgs_from_template', {
+            p_template_id: selectedTemplateId, p_root_name: formData.name, p_created_by: businessUserId
+          })
+        );
         if (error) throw error;
         if (userData.user?.id && rootOrgId) {
           await assignCreatorAsAdminToHierarchy(rootOrgId, formData.name, userData.user.id);
@@ -314,23 +324,24 @@ export default function Organizations() {
       const typeToUse = formData.type === "other" ? formData.customType : formData.type;
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const newOrgId = crypto.randomUUID();
       const newOrgName = formData.name;
       const hasFiscalData = formData.isFiscal && !!formData.nif?.trim();
       const isInitialOrganizationCreation = organizations.length === 0 && !hasPermission("organizations.create");
 
       if (isInitialOrganizationCreation) {
-        const { data: initialOrg, error: initialOrgError } = await (supabase as any).rpc(
-          "create_initial_organization",
-          {
-            p_name: newOrgName,
-            p_type: typeToUse,
-            p_description: formData.description || null,
-            p_status: formData.status,
-            p_sector: formData.sector || null,
-            p_phone: formData.phone?.trim() || null,
-            p_is_fiscal: formData.isFiscal,
-          },
+        const { data: initialOrg, error: initialOrgError } = await withAuditContext(supabase, businessUserId, () =>
+          (supabase as any).rpc(
+            "create_initial_organization",
+            {
+              p_name: newOrgName,
+              p_type: typeToUse,
+              p_description: formData.description || null,
+              p_status: formData.status,
+              p_sector: formData.sector || null,
+              p_phone: formData.phone?.trim() || null,
+              p_is_fiscal: formData.isFiscal,
+            },
+          )
         );
         if (initialOrgError) throw initialOrgError;
 
@@ -343,12 +354,14 @@ export default function Organizations() {
 
         for (const addr of formData.addresses) {
           if (addr.street && addr.number && addr.city && addr.postal_code) {
-            await (supabase as any).rpc("assign_address_to_org", {
-              p_org_id: initialOrgId, p_street: addr.street, p_number: addr.number,
-              p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-              p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-              p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-            });
+            await withAuditContext(supabase, businessUserId, () =>
+              (supabase as any).rpc("assign_address_to_org", {
+                p_org_id: initialOrgId, p_street: addr.street, p_number: addr.number,
+                p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
+                p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
+                p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
+              })
+            );
           }
         }
 
@@ -358,65 +371,39 @@ export default function Organizations() {
         return;
       }
 
-      const entityId = await resolveOrganizationEntityId({
-        orgName: newOrgName,
-        createdBy: businessUserId,
-        nif: hasFiscalData ? formData.nif : null,
-      });
+      const addressesPayload = formData.addresses
+        .filter(addr => addr.street && addr.number && addr.city && addr.postal_code)
+        .map(addr => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
 
-      const { error } = await (supabase as any).from("anew_organizations").insert({
-        id: newOrgId,
-        name: newOrgName,
-        type: typeToUse,
-        description: formData.description || null,
-        status: formData.status,
-        sector: !formData.parentId && formData.sector ? formData.sector : null,
-        phone: formData.phone?.trim() || null,
-        is_fiscal: formData.isFiscal,
-        entity_id: entityId,
-        created_by: businessUserId,
-      });
+      const nif = hasFiscalData ? formData.nif : null;
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy("rpc_create_organization", {
+          p_name: newOrgName,
+          p_type: typeToUse,
+          p_description: formData.description || null,
+          p_status: formData.status,
+          p_sector: !formData.parentId && formData.sector ? formData.sector : null,
+          p_phone: formData.phone?.trim() || null,
+          p_is_fiscal: formData.isFiscal,
+          p_parent_id: formData.parentId || null,
+          p_nif: nif,
+          p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
+        }, nif)
+      );
       if (error) throw error;
-
-      if (hasFiscalData) {
-        await upsertOrgFiscalEntity(newOrgId, formData.nif, formData.commercialName || null, "PT", businessUserId);
-      }
-
-      if (formData.parentId) {
-        await (supabase as any).from("anew_hierarchy").insert({
-          parent_org_id: formData.parentId, child_org_id: newOrgId,
-          relationship_type: "parent_child", is_primary: true, created_by: businessUserId,
-        });
-      }
-
-      if (userData.user?.id) {
-        const { error: bootstrapError } = await (supabase as any).rpc("bootstrap_org_creator", {
-          p_organization_id: newOrgId,
-          p_organization_name: newOrgName,
-        });
-        if (bootstrapError) {
-          console.error("Bootstrap error, falling back:", bootstrapError);
-          await assignCreatorAsOrgAdmin(newOrgId, newOrgName, userData.user.id);
-        }
-      }
-
-      for (const addr of formData.addresses) {
-        if (addr.street && addr.number && addr.city && addr.postal_code) {
-          await (supabase as any).rpc("assign_address_to_org", {
-            p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
-            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-          });
-        }
-      }
 
       toast.success(t("common.created"));
       setPanelMode('closed'); resetForm();
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
       console.error("Error creating organization:", error);
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }
@@ -428,59 +415,42 @@ export default function Organizations() {
       const typeToUse = formData.type === "other" ? formData.customType : formData.type;
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      await ensureOrgEntity({
-        orgId: selectedOrg.id,
-        orgName: formData.name,
-        createdBy: businessUserId,
-        nif: formData.isFiscal && formData.nif?.trim() ? formData.nif : null,
-      });
-      const { error } = await (supabase as any).from("anew_organizations").update({
-        name: formData.name, type: typeToUse, description: formData.description || null,
-        status: formData.status, sector: !formData.parentId && formData.sector ? formData.sector : null,
-        phone: formData.phone?.trim() || null,
-        is_fiscal: formData.isFiscal, updated_at: new Date().toISOString(),
-      }).eq("id", selectedOrg.id);
+      const hasFiscalData = formData.isFiscal && !!formData.nif?.trim();
 
-      if (!error) {
-        if (formData.isFiscal && formData.nif) {
-          await upsertOrgFiscalEntity(selectedOrg.id, formData.nif, formData.commercialName || null, "PT", businessUserId);
-        } else {
-          await removeOrgFiscalEntity(selectedOrg.id);
-        }
-      }
+      const addressesPayload = formData.addresses
+        .filter(addr => addr.street && addr.number && addr.city && addr.postal_code)
+        .map(addr => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
+
+      const nif = hasFiscalData ? formData.nif : null;
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy("rpc_update_organization", {
+          p_id: selectedOrg.id,
+          p_name: formData.name,
+          p_type: typeToUse,
+          p_description: formData.description || null,
+          p_status: formData.status,
+          p_sector: !formData.parentId && formData.sector ? formData.sector : null,
+          p_phone: formData.phone?.trim() || null,
+          p_is_fiscal: formData.isFiscal,
+          p_parent_id: formData.parentId || null,
+          p_nif: nif,
+          p_commercial_name: hasFiscalData ? (formData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
+        }, nif)
+      );
       if (error) throw error;
-
-      await (supabase as any).rpc("unlink_organization_node", {
-        p_child_org_id: selectedOrg.id,
-        p_created_by: businessUserId,
-      });
-      if (formData.parentId) {
-        await (supabase as any).rpc("move_organization_node", {
-          p_child_org_id: selectedOrg.id,
-          p_new_parent_org_id: formData.parentId,
-          p_created_by: businessUserId,
-        });
-      }
-
-      await (supabase as any).from("anew_org_addresses").delete().eq("org_id", selectedOrg.id);
-
-      for (const addr of formData.addresses) {
-        if (addr.street && addr.number && addr.city && addr.postal_code) {
-          await (supabase as any).rpc("assign_address_to_org", {
-            p_org_id: selectedOrg.id, p_street: addr.street, p_number: addr.number,
-            p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-            p_city: addr.city, p_district: addr.district || null, p_country: addr.country || "PT",
-            p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-          });
-        }
-      }
 
       toast.success(t("common.saved"));
       setPanelMode('closed'); resetForm();
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
       console.error("Error updating organization:", error);
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -497,9 +467,13 @@ export default function Organizations() {
         return [...childIds, ...grandchildren.flat()];
       };
       const descendantIds = await collectDescendants(orgToDelete.id);
-      const { error } = await (supabase as any).rpc("delete_organization_subtree", {
-        p_root_org_id: orgToDelete.id,
-      });
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_delete_organization", {
+          p_root_org_id: orgToDelete.id,
+        })
+      );
       if (error) throw error;
       toast.success(t("common.deleted"));
       setDeleteDialogOpen(false); setOrgToDelete(null);
@@ -508,7 +482,30 @@ export default function Organizations() {
       }
       await refreshCompanies(); setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error deleting organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
+    }
+  };
+
+  const handleRestoreClick = (org: Organization) => { setOrgToRestore(org); setRestoreDialogOpen(true); };
+
+  const handleConfirmRestore = async () => {
+    if (!orgToRestore) return;
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("rpc_restore_organization", {
+          p_root_org_id: orgToRestore.id,
+        })
+      );
+      if (error) throw error;
+      toast.success(t("common.restored") !== "common.restored" ? t("common.restored") : "Organização restaurada");
+      setRestoreDialogOpen(false); setOrgToRestore(null);
+      await refreshCompanies(); setRefreshCounter(c => c + 1);
+    } catch (error: any) {
+      console.error("Error restoring organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -517,6 +514,10 @@ export default function Organizations() {
   const handleConfirmUnlink = async () => {
     if (!orgToUnlink) return;
     try {
+      // 0. Resolve the acting business user once; reused for memberships and the unlink RPC below.
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+
       // 1. Find the current parent org before unlinking
       const { data: hierarchyLink } = await (supabase as any)
         .from("anew_hierarchy")
@@ -562,22 +563,24 @@ export default function Organizations() {
         for (const m of usersToAdd) {
           if (seenUsers.has(m.user_id)) continue;
           seenUsers.add(m.user_id);
-          await supabase.from("anew_memberships").insert({
-            user_id: m.user_id,
-            organization_id: orgToUnlink.id,
-            role_id: m.role_id,
-            status: "active",
-          });
+          await withAuditContext(supabase, businessUserId, () =>
+            supabase.from("anew_memberships").insert({
+              user_id: m.user_id,
+              organization_id: orgToUnlink.id,
+              role_id: m.role_id,
+              status: "active",
+            })
+          );
         }
       }
 
-      // 6. Now safe to delete the hierarchy link
-      const { data: userData } = await supabase.auth.getUser();
-      const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const { error } = await (supabase as any).rpc("unlink_organization_node", {
-        p_child_org_id: orgToUnlink.id,
-        p_created_by: businessUserId,
-      });
+      // 6. Now safe to delete the hierarchy link (actor already resolved above)
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("unlink_organization_node", {
+          p_child_org_id: orgToUnlink.id,
+          p_created_by: businessUserId,
+        })
+      );
       if (error) throw error;
       toast.success(t("organizations.unlinkSuccess") !== "organizations.unlinkSuccess" ? t("organizations.unlinkSuccess") : "Organização desassociada com sucesso");
       setUnlinkedOrgIds(prev => new Set(prev).add(orgToUnlink.id));
@@ -586,7 +589,8 @@ export default function Organizations() {
       await refreshCompanies();
       setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error unlinking organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -597,11 +601,13 @@ export default function Organizations() {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const { error } = await (supabase as any).rpc("move_organization_node", {
-        p_child_org_id: orgToLink.id,
-        p_new_parent_org_id: linkTargetParentId,
-        p_created_by: businessUserId,
-      });
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc("move_organization_node", {
+          p_child_org_id: orgToLink.id,
+          p_new_parent_org_id: linkTargetParentId,
+          p_created_by: businessUserId,
+        })
+      );
       if (error) throw error;
       toast.success("Organização associada com sucesso");
       setLinkDialogOpen(false);
@@ -611,7 +617,8 @@ export default function Organizations() {
       await refreshCompanies();
       setRefreshCounter(c => c + 1);
     } catch (error: any) {
-      toast.error(error.message);
+      console.error("Error linking organization:", error);
+      toast.error(await getFriendlyErrorMessage(error));
     }
   };
 
@@ -623,7 +630,9 @@ export default function Organizations() {
     try {
       const { data: hd } = await (supabase as any).from("anew_hierarchy").select("parent_org_id").eq("child_org_id", org.id).maybeSingle();
       if (hd?.parent_org_id) currentParentId = hd.parent_org_id;
-    } catch {}
+    } catch (error) {
+      console.error("Error fetching organization parent:", error);
+    }
 
     let fiscalNif = "", fiscalCommercialName = "";
     if ((org as any).is_fiscal) {
@@ -660,7 +669,9 @@ export default function Organizations() {
           };
         });
       }
-    } catch {}
+    } catch (error) {
+      console.error("Error fetching organization addresses:", error);
+    }
 
     setFormData({
       name: org.name, type: isCustomType ? "other" : org.type, customType: isCustomType ? org.type : "",
@@ -674,7 +685,11 @@ export default function Organizations() {
 
   const openCreatePanel = (parentId?: string) => {
     resetForm();
-    if (parentId) setFormData(prev => ({ ...prev, parentId }));
+    // Default the parent to the org currently in scope so top-level "Create Organization"
+    // never produces an orphaned, invisible row. Explicit parentId (row's "Add Sub-organization")
+    // always wins; otherwise fall back to the active company as the sensible root context.
+    const defaultParentId = parentId ?? (activeCompany?.id || "");
+    if (defaultParentId) setFormData(prev => ({ ...prev, parentId: defaultParentId }));
     setPanelMode('create');
   };
 
@@ -882,6 +897,15 @@ export default function Organizations() {
                   <Building className="h-4 w-4" />{t("organizations.flatView")}
                 </Button>
               </div>
+              <Button
+                variant={showDeleted ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowDeleted(v => !v)}
+                className="gap-1 whitespace-nowrap"
+              >
+                <Trash2 className="h-4 w-4" />
+                {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+              </Button>
             </div>
 
             <Card className="flex-1 overflow-hidden">
@@ -909,8 +933,8 @@ export default function Organizations() {
                       <TableRow><TableCell colSpan={5} className="text-center py-8">{t("common.noResults")}</TableCell></TableRow>
                     ) : (
                       (viewMode === 'tree' ? filteredHierarchicalOrgs : filteredOrganizations).map(org => (
-                        <TableRow key={org.id} className={`group hover:bg-muted/50 cursor-pointer ${selectedOrg?.id === org.id ? 'bg-muted' : ''}`}
-                          onClick={() => canEditOrg(org) ? openEditPanel(org) : navigate(`/organizations/${org.id}`)}>
+                        <TableRow key={org.id} className={`group hover:bg-muted/50 ${org.deleted_at ? '' : 'cursor-pointer'} ${selectedOrg?.id === org.id ? 'bg-muted' : ''}`}
+                          onClick={() => { if (org.deleted_at) return; canEditOrg(org) ? openEditPanel(org) : navigate(`/organizations/${org.id}`); }}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2" style={{ paddingLeft: viewMode === 'tree' ? `${(org.depth || 0) * 24}px` : 0 }}>
                               {viewMode === 'tree' && (org.children_count || 0) > 0 ? (
@@ -934,9 +958,13 @@ export default function Organizations() {
                             </button>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={org.status === "active" ? "default" : org.status === "draft" ? "outline" : "secondary"}>
-                              {org.status === "active" ? t("common.active") : org.status === "draft" ? t("common.draft") : t("common.inactive")}
-                            </Badge>
+                            {org.deleted_at ? (
+                              <Badge variant="destructive">Eliminada</Badge>
+                            ) : (
+                              <Badge variant={org.status === "active" ? "default" : org.status === "draft" ? "outline" : "secondary"}>
+                                {org.status === "active" ? t("common.active") : org.status === "draft" ? t("common.draft") : t("common.inactive")}
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
@@ -944,33 +972,43 @@ export default function Organizations() {
                                 <Button variant="ghost" size="icon"><MoreHorizontal className="w-4 h-4" /></Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={e => { e.stopPropagation(); navigate(`/organizations/${org.id}`); }}>
-                                  <Eye className="w-4 h-4 mr-2" />{t("common.view")}
-                                </DropdownMenuItem>
-                                {canEditOrg(org) && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); openEditPanel(org); }}>
-                                    <Pencil className="w-4 h-4 mr-2" />{t("common.edit")}
-                                  </DropdownMenuItem>
-                                )}
-                                {canCreate && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); openCreatePanel(org.id); }}>
-                                    <Plus className="w-4 h-4 mr-2" />{t("organizations.addChild")}
-                                  </DropdownMenuItem>
-                                )}
-                                {canEditOrg(org) && org.parent_id && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleUnlinkClick(org); }} className="text-orange-600">
-                                    <Link2Off className="w-4 h-4 mr-2" />{t("organizations.unlink") !== "organizations.unlink" ? t("organizations.unlink") : "Desassociar"}
-                                  </DropdownMenuItem>
-                                )}
-                                {canEditOrg(org) && !org.parent_id && org.id !== activeCompany?.id && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleLinkClick(org); }} className="text-primary">
-                                    <Link2 className="w-4 h-4 mr-2" />Associar a grupo
-                                  </DropdownMenuItem>
-                                )}
-                                {canDeleteOrg(org) && (
-                                  <DropdownMenuItem onClick={e => { e.stopPropagation(); handleDeleteClick(org); }} className="text-destructive">
-                                    <Trash2 className="w-4 h-4 mr-2" />{t("common.delete")}
-                                  </DropdownMenuItem>
+                                {org.deleted_at ? (
+                                  canDeleteOrg(org) && (
+                                    <DropdownMenuItem onClick={e => { e.stopPropagation(); handleRestoreClick(org); }} className="text-primary">
+                                      <Link2 className="w-4 h-4 mr-2" />Restaurar
+                                    </DropdownMenuItem>
+                                  )
+                                ) : (
+                                  <>
+                                    <DropdownMenuItem onClick={e => { e.stopPropagation(); navigate(`/organizations/${org.id}`); }}>
+                                      <Eye className="w-4 h-4 mr-2" />{t("common.view")}
+                                    </DropdownMenuItem>
+                                    {canEditOrg(org) && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); openEditPanel(org); }}>
+                                        <Pencil className="w-4 h-4 mr-2" />{t("common.edit")}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canCreate && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); openCreatePanel(org.id); }}>
+                                        <Plus className="w-4 h-4 mr-2" />{t("organizations.addChild")}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canEditOrg(org) && org.parent_id && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleUnlinkClick(org); }} className="text-orange-600">
+                                        <Link2Off className="w-4 h-4 mr-2" />{t("organizations.unlink") !== "organizations.unlink" ? t("organizations.unlink") : "Desassociar"}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canEditOrg(org) && !org.parent_id && org.id !== activeCompany?.id && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleLinkClick(org); }} className="text-primary">
+                                        <Link2 className="w-4 h-4 mr-2" />Associar a grupo
+                                      </DropdownMenuItem>
+                                    )}
+                                    {canDeleteOrg(org) && (
+                                      <DropdownMenuItem onClick={e => { e.stopPropagation(); handleDeleteClick(org); }} className="text-destructive">
+                                        <Trash2 className="w-4 h-4 mr-2" />{t("common.delete")}
+                                      </DropdownMenuItem>
+                                    )}
+                                  </>
                                 )}
                               </DropdownMenuContent>
                             </DropdownMenu>
@@ -993,7 +1031,10 @@ export default function Organizations() {
               countries={countries} districts={districts} municipalities={municipalities}
               onDistrictChange={fetchMunicipalities} fiscalDistricts={fiscalDistricts}
               fiscalMunicipalities={fiscalMunicipalities} onFiscalDistrictChange={fetchFiscalMunicipalities}
-              selectedOrg={selectedOrg} isEdit={panelMode === 'edit'} t={t} getTypeLabel={getTypeLabel}
+              selectedOrg={selectedOrg} isEdit={panelMode === 'edit'}
+              showParentSelector
+              allowNoParent={userType === "system_admin" || !activeCompany}
+              t={t} getTypeLabel={getTypeLabel}
               onSave={panelMode === 'edit' ? handleUpdate : handleCreate} isSaving={isSubmitting}
               onCancel={() => { setPanelMode('closed'); resetForm(); }}
               onUseTemplate={handleSelectTemplate} selectedTemplateId={selectedTemplateId}
@@ -1012,6 +1053,21 @@ export default function Organizations() {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setOrgToDelete(null)}>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t("common.delete")}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restaurar organização</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem a certeza que deseja restaurar <strong>{orgToRestore?.name}</strong>? A organização e toda a sua subárvore (sub-organizações/departamentos) voltarão a ficar ativas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setOrgToRestore(null)}>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmRestore}>Restaurar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

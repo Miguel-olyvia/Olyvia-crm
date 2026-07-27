@@ -13,6 +13,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
+import { generateSecureFileName } from "@/utils/secureFileUpload";
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
@@ -45,11 +48,39 @@ function getFileIcon(fileName: string) {
   return <File className="h-5 w-5 text-muted-foreground" />;
 }
 
+const ALLOWED_UPLOAD_EXTENSIONS = ["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png", "gif", "webp"];
+const ALLOWED_UPLOAD_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+];
+const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+
+function validateFile(file: File): string | null {
+  const ext = file.name.split(".").pop()?.toLowerCase() || "";
+  const isExtAllowed = ALLOWED_UPLOAD_EXTENSIONS.includes(ext);
+  const isMimeAllowed = !file.type || ALLOWED_UPLOAD_MIME_TYPES.includes(file.type);
+  if (!isExtAllowed || !isMimeAllowed) {
+    return "Tipo de ficheiro não permitido. Utilize PDF, Word, Excel ou imagem (jpg, png, gif, webp).";
+  }
+  if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+    return "Ficheiro demasiado grande. O tamanho máximo permitido é 20 MB.";
+  }
+  return null;
+}
+
 interface ContractsDocumentsViewProps {
   contracts: any[];
 }
 
 export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProps) {
+  const { t } = useTranslation();
   const { activeCompany } = useCompany();
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -123,6 +154,11 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
 
   const handleUpload = async () => {
     if (!selectedFile || !uploadData.contract_id) return;
+    const validationError = validateFile(selectedFile);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
     setUploading(true);
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -137,10 +173,20 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
 
       const contract = contractMap.get(uploadData.contract_id);
       const orgId = contract?.organization_id || activeCompany?.id;
-      const filePath = `${orgId}/contract/${uploadData.contract_id}/${Date.now()}_${selectedFile.name}`;
+      const safeFileName = generateSecureFileName(selectedFile);
+      const filePath = `${orgId}/contract/${uploadData.contract_id}/${safeFileName}`;
 
-      const { error: uploadError } = await supabase.storage.from("documents").upload(filePath, selectedFile);
+      const { error: uploadError } = await supabase.storage.from("documents-quarantine").upload(filePath, selectedFile);
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "documents-quarantine", finalBucket: "documents", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast.error(t("contracts.toast.attachError") + ": " + (await resolveValidateUploadErrorMessage(validateResult, validateError)));
+        return;
+      }
 
       const { error: dbError } = await (supabase as any)
         .from("documents")
@@ -166,8 +212,8 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       setIsUploadOpen(false);
       setSelectedFile(null);
       setUploadData({ contract_id: "", document_type: "other", notes: "" });
-    } catch (err: any) {
-      toast.error("Erro ao anexar documento: " + err.message);
+    } catch (err: unknown) {
+      toast.error(t("contracts.toast.attachError") + ": " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
@@ -195,7 +241,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   };
 
   const handleView = async (doc: any) => {
-    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600);
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(doc.file_url, 3600, { download: true });
     if (error || !data?.signedUrl) { toast.error("Erro ao abrir ficheiro"); return; }
     window.open(data.signedUrl, "_blank");
   };
@@ -395,7 +441,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                   <>
                     <Paperclip className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">Arraste o ficheiro para aqui ou clique para seleccionar</p>
-                    <p className="text-xs text-muted-foreground mt-1">PDF, Word, Excel, imagens · Máx. 25 MB</p>
+                    <p className="text-xs text-muted-foreground mt-1">PDF, Word, Excel, imagens · Máx. 20 MB</p>
                   </>
                 )}
               </div>

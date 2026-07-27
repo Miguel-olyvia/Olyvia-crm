@@ -12,10 +12,18 @@ const requestSchema = z.object({
   lead_postal_code: z.string().optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway } from "../_shared/aiGateway.ts";
+
+initSentry();
+
+// Authenticated, org-scoped internal AI tool — persistent (DB-backed) rate
+// limit per organization, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "suggest-schedule-assignee";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 interface AISchedulingRules {
   buffer_before_minutes: number;
@@ -36,13 +44,28 @@ interface AISchedulingRules {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+  // Scoped client — carries the caller's own JWT, so identity resolution,
+  // org-scope validation and every business-data read below run under the
+  // caller's real RLS/permissions (has_scheduling_permission,
+  // get_user_visible_org_ids), exactly as if the frontend had called them directly.
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  // Residual service-role client — ONLY for the persistent rate-limit table
+  // (RLS enabled, zero policies for "authenticated" by design).
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   try {
     // Auth: resolve caller and validate org scope
@@ -74,7 +97,17 @@ serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    // Rate limiting — persistent, DB-backed; scoped per organization.
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: organization_id || caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, organization_id || caller.anewUserId);
 
     // 1. Load AI Scheduling Rules (campaign-specific, then organization, then template)
     let rules: AISchedulingRules;
@@ -85,6 +118,7 @@ serve(async (req) => {
         .from("lead_ai_scheduling_rules")
         .select("*")
         .eq("campaign_id", campaign_id)
+        .eq("organization_id", organization_id)
         .eq("is_active", true)
         .order("priority", { ascending: false })
         .limit(1)
@@ -152,7 +186,8 @@ serve(async (req) => {
       .from("anew_memberships")
       .select("user_id")
       .eq("organization_id", organization_id)
-      .eq("status", "active");
+      .eq("status", "active")
+      .limit(500);
     
     if (membershipsError) {
       console.error("Error fetching memberships:", membershipsError);
@@ -174,7 +209,8 @@ serve(async (req) => {
       .from("schedule_resources")
       .select("id, user_id, name, metadata")
       .eq("is_active", true)
-      .eq("organization_id", organization_id);
+      .eq("organization_id", organization_id)
+      .limit(500);
 
     // Combine and deduplicate (priority: resources > memberships)
     // schedule_resources.user_id now stores anew_users.id directly (no auth UUID resolution needed)
@@ -350,7 +386,7 @@ serve(async (req) => {
     });
 
     // 6. Use AI to analyze and suggest best assignees
-    if (!LOVABLE_API_KEY) {
+    if (!Deno.env.get("GEMINI_API_KEY")) {
       // Fallback without AI
       const availableAssignees = assigneeSchedules
         .filter(assignee => {
@@ -461,20 +497,13 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
   }
 ]`;
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.3
-      }),
+    const aiResponse = await callAiGateway({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.3
     });
 
     if (!aiResponse.ok) {
@@ -538,8 +567,11 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error("Error:", error);
+    await captureError(error, { function: "suggest-schedule-assignee" });
+    // Never echo a raw internal exception (e.g. Postgres/RPC error) to the
+    // client — the real error is already logged above and sent to Sentry.
     return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
+      JSON.stringify({ error: "Internal server error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

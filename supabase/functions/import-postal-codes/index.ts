@@ -17,10 +17,18 @@ const importBodySchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+
+initSentry();
+
+// Authenticated, admin-only internal import tool — persistent (DB-backed)
+// rate limit per admin user, mainly to bound abuse of the external postal
+// code API this function fans out to.
+const RATE_LIMIT_BUCKET = "import-postal-codes";
+const RATE_LIMIT_MAX_ATTEMPTS = 60;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // Portuguese postal code ranges by district
 const POSTAL_CODE_RANGES = [
@@ -116,6 +124,7 @@ async function delay(ms: number): Promise<void> {
 }
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -134,6 +143,18 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per admin user.
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, caller.anewUserId);
 
     const rawBody = await req.json();
     const parsedBody = importBodySchema.safeParse(rawBody);
@@ -342,6 +363,7 @@ serve(async (req) => {
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error('Error:', error);
+    await captureError(error, { function: "import-postal-codes" });
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
       JSON.stringify({ error: errorMessage }),

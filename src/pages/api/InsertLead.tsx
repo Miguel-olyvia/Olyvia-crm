@@ -68,12 +68,4 @@ export default function InsertLead() {
       </div>
     </div>
   );
-<<<<<<< ours
-<<<<<<< ours
 }
-=======
-}
->>>>>>> theirs
-=======
-}
->>>>>>> theirs

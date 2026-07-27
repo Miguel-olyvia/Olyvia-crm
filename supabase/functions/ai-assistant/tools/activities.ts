@@ -127,6 +127,12 @@ const addNote: Handler = async (ctx, args): Promise<ToolResult> => {
   const perm = checkRolePerm(ctx, roles, "edit");
   if (!perm.ok) return { success: false, message: perm.message };
 
+  // Audit context: attribute this write to the AI assistant for the F1 trigger.
+  await supabase.rpc("set_audit_context", {
+    p_user_id: businessUserId ? String(businessUserId) : null,
+    p_source: "ai-assistant",
+  });
+
   const { data, error } = await supabase
     .from("entity_interactions")
     .insert({
@@ -213,6 +219,12 @@ const logCall: Handler = async (ctx, args): Promise<ToolResult> => {
   if (!roles.found) return { success: false, message: "Entidade sem papel activo na organização (ou apagada)." };
   const perm = checkRolePerm(ctx, roles, "edit");
   if (!perm.ok) return { success: false, message: perm.message };
+
+  // Audit context: attribute this write to the AI assistant for the F1 trigger.
+  await supabase.rpc("set_audit_context", {
+    p_user_id: businessUserId ? String(businessUserId) : null,
+    p_source: "ai-assistant",
+  });
 
   const { data, error } = await supabase
     .from("entity_interactions")

@@ -16,9 +16,11 @@ interface ClientsDashboardViewProps {
 const HEALTH_COLORS = { excellent: '#22c55e', good: '#3b82f6', attention: '#eab308', at_risk: '#f97316', critical: '#ef4444' };
 
 export function ClientsDashboardView({ clients, healthScores, contracts, identityMap, assignedUserMap, loading = false }: ClientsDashboardViewProps) {
-  // Health distribution
+  // Health distribution — exclude the synthetic `inactive: true` sentinel
+  // score (assigned to churned/lost clients), matching ClientsRetentionView's
+  // exclusion logic, so churned clients don't inflate the "Crítico" bucket.
   const healthDist = { excellent: 0, good: 0, attention: 0, at_risk: 0, critical: 0 };
-  healthScores.forEach(h => { healthDist[h.level]++; });
+  healthScores.forEach(h => { if (!h.inactive) healthDist[h.level]++; });
   const healthChartData = [
     { name: 'Excelente', value: healthDist.excellent, fill: HEALTH_COLORS.excellent },
     { name: 'Bom', value: healthDist.good, fill: HEALTH_COLORS.good },
@@ -51,11 +53,12 @@ export function ClientsDashboardView({ clients, healthScores, contracts, identit
     ...(unassignedCount > 0 ? [{ name: 'Sem atribuição', count: unassignedCount }] : []),
   ];
 
-  // At-risk clients sorted by value
+  // At-risk clients sorted by value — exclude the synthetic `inactive: true`
+  // sentinel score (churned/lost clients), matching ClientsRetentionView.
   const atRiskClients = clients
     .filter(c => {
       const h = healthScores.get(c.entity_id);
-      return h && h.score < 40;
+      return h && h.score < 40 && !h.inactive;
     })
     .map(c => ({
       name: identityMap[c.entity_id]?.display_name || 'N/A',

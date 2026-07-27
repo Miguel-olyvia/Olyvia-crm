@@ -1,13 +1,22 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+
+initSentry();
+
+const RATE_LIMIT_BUCKET = "track-proposal-view";
+const RATE_LIMIT_MAX_ATTEMPTS = 120;
+const RATE_LIMIT_WINDOW_MINUTES = 60;
 
 const requestSchema = z.object({
   proposal_id: z.string().optional(),
   tracking_token: z.string().optional(),
   send_id: z.string().optional(),
   event: z.enum(["view", "time", "pixel"]),
-  time_seconds: z.number().optional(),
+  // Cap time_seconds server-side to prevent unbounded inflation by unauthenticated callers
+  time_seconds: z.number().min(0).max(3600).optional(),
 });
 
 const corsHeaders = {
@@ -60,6 +69,18 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabaseClient, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabaseClient, RATE_LIMIT_BUCKET, clientIp);
+
     // Check if it's a pixel request (GET with tracking_token in query)
     const url = new URL(req.url);
     const pixelToken = url.searchParams.get("t");
@@ -101,11 +122,13 @@ const handler = async (req: Request): Promise<Response> => {
             updateData.os = deviceInfo.os;
           }
 
+          await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
           await supabaseClient
             .from("proposal_sends")
             .update(updateData)
             .eq("id", send.id);
 
+          await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
           // Also update proposal view count
           await supabaseClient
             .from("proposals")
@@ -148,10 +171,19 @@ const handler = async (req: Request): Promise<Response> => {
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0] || "unknown";
     const deviceInfo = parseUserAgent(userAgent);
 
+    // Require tracking_token for all POST tracking events — a raw proposal_id
+    // without a token would let unauthenticated callers mark arbitrary proposals as viewed.
+    if (!tracking_token) {
+      return new Response(
+        JSON.stringify({ error: "tracking_token required" }),
+        { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+      );
+    }
+
     let proposalIdToUse = proposal_id;
 
-    // If tracking_token provided, find proposal
-    if (tracking_token && !proposal_id) {
+    // Resolve proposal from tracking_token
+    if (!proposalIdToUse) {
       const { data: proposal } = await supabaseClient
         .from("proposals")
         .select("id")
@@ -160,6 +192,21 @@ const handler = async (req: Request): Promise<Response> => {
       
       if (proposal) {
         proposalIdToUse = proposal.id;
+      }
+    } else {
+      // When caller supplies proposal_id directly, verify the tracking_token matches
+      // that specific proposal so they cannot use a valid token to affect another proposal.
+      const { data: tokenProposal } = await supabaseClient
+        .from("proposals")
+        .select("id")
+        .eq("tracking_token", tracking_token)
+        .eq("id", proposalIdToUse)
+        .maybeSingle();
+      if (!tokenProposal) {
+        return new Response(
+          JSON.stringify({ error: "Invalid tracking_token for this proposal" }),
+          { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
       }
     }
 
@@ -197,12 +244,14 @@ const handler = async (req: Request): Promise<Response> => {
           updateData.os = deviceInfo.os;
         }
 
+        await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await supabaseClient
           .from("proposal_sends")
           .update(updateData)
           .eq("id", send.id);
       }
 
+      await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
       // Update proposal
       await supabaseClient
         .from("proposals")
@@ -220,6 +269,7 @@ const handler = async (req: Request): Promise<Response> => {
         .single();
 
       if (send) {
+        await supabaseClient.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await supabaseClient
           .from("proposal_sends")
           .update({
@@ -237,6 +287,7 @@ const handler = async (req: Request): Promise<Response> => {
 
   } catch (error: any) {
     console.error("Error tracking:", error);
+    await captureError(error, { function: "track-proposal-view" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }

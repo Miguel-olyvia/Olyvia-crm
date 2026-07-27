@@ -13,6 +13,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import type { InlineQuoteData } from "@/components/proposals/InlineQuoteBuilder";
+import { calculateInlineQuoteTotals } from "@/utils/quotes/inlineQuoteVatCalculation";
 
 interface SectionSummary {
   name: string;
@@ -29,15 +30,6 @@ interface QuoteTotals {
   fees?: any[];
   totalFeesWithVat?: number;
   vatBreakdown?: { rate: number; base: number; vat: number }[];
-}
-
-// Extract bundle components from a quote line, regardless of where they live
-// (top-level, selected_attributes, or selected_attributes.bundle_components_data).
-function getLineBundleComponents(line: any): any[] {
-  if (Array.isArray(line?.bundle_components)) return line.bundle_components;
-  if (Array.isArray(line?.selected_attributes?.bundle_components)) return line.selected_attributes.bundle_components;
-  if (Array.isArray(line?.selected_attributes?.bundle_components_data)) return line.selected_attributes.bundle_components_data;
-  return [];
 }
 
 interface QuoteBuilderSidebarProps {
@@ -57,76 +49,12 @@ interface QuoteBuilderSidebarProps {
   onDownloadPdf?: () => void;
   downloadingPdf?: boolean;
   inlineQuotes?: InlineQuoteData[];
+  onSaveAsTemplate?: () => void;
 }
 
 function MarginBadge({ margin }: { margin: number }) {
   const color = margin > 30 ? "bg-green-100 text-green-700 border-green-200" : margin >= 15 ? "bg-yellow-100 text-yellow-700 border-yellow-200" : "bg-red-100 text-red-700 border-red-200";
   return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${color}`}>{margin.toFixed(1)}%</span>;
-}
-
-// Calculate totals for an inline quote, splitting bundle component VAT
-// across each component's own rate (matches PDF + main quote logic).
-function calculateInlineQuoteTotals(iq: InlineQuoteData) {
-  let totalSemIva = 0;
-  let totalIva = 0;
-  const vatByRate: Record<number, { base: number; vat: number }> = {};
-
-  iq.lines.filter(l => l.qt > 0).forEach(line => {
-    const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-    const isManual = custoUnit === 0 && line.retail_price_unit != null;
-    const unitPrice = isManual
-      ? (line.retail_price_unit || 0)
-      : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-    const precoBase = unitPrice * line.qt;
-    const lineDiscount = line.discount_percent || 0;
-    const precoSemIva = precoBase * (1 - lineDiscount / 100);
-
-    const bundleComponents = getLineBundleComponents(line);
-    const componentsTotal = bundleComponents.reduce(
-      (s: number, c: any) => s + (parseFloat(String(c.unit_price || 0)) * parseFloat(String(c.quantity || 0))),
-      0,
-    );
-    const hasMixedVat = bundleComponents.length > 0 && componentsTotal > 0;
-
-    // Apply global discount to base BEFORE computing VAT (matches PDF + main quote logic).
-    const globalFactor = 1 - (iq.desconto_global_percent || 0) / 100;
-    const precoSemIvaDescontado = precoSemIva * globalFactor;
-
-    let ivaValor = 0;
-    if (hasMixedVat) {
-      bundleComponents.forEach((c: any) => {
-        const cUnit = parseFloat(String(c.unit_price || 0));
-        const cQty = parseFloat(String(c.quantity || 0));
-        const cRate = parseFloat(String(c.vat_rate ?? 23));
-        const share = (cUnit * cQty) / componentsTotal;
-        const base = precoSemIvaDescontado * share;
-        const vat = base * (cRate / 100);
-        ivaValor += vat;
-        if (!vatByRate[cRate]) vatByRate[cRate] = { base: 0, vat: 0 };
-        vatByRate[cRate].base += base;
-        vatByRate[cRate].vat += vat;
-      });
-    } else {
-      ivaValor = precoSemIvaDescontado * (line.iva_percent / 100);
-      const rate = line.iva_percent;
-      if (!vatByRate[rate]) vatByRate[rate] = { base: 0, vat: 0 };
-      vatByRate[rate].base += precoSemIvaDescontado;
-      vatByRate[rate].vat += ivaValor;
-    }
-
-    totalSemIva += precoSemIva;
-    totalIva += ivaValor;
-  });
-
-  const globalFactor = 1 - (iq.desconto_global_percent || 0) / 100;
-  const totalSemIvaComDesconto = totalSemIva * globalFactor;
-  const totalComIva = totalSemIvaComDesconto + totalIva;
-  const totalComDesconto = totalSemIvaComDesconto + totalIva;
-  const vatBreakdown = Object.entries(vatByRate)
-    .map(([rate, data]) => ({ rate: Number(rate), base: data.base, vat: data.vat }))
-    .sort((a, b) => b.rate - a.rate);
-
-  return { totalSemIva, totalIva, totalComIva, totalComDesconto, vatBreakdown };
 }
 
 export function QuoteBuilderSidebar({
@@ -146,6 +74,7 @@ export function QuoteBuilderSidebar({
   onDownloadPdf,
   downloadingPdf = false,
   inlineQuotes = [],
+  onSaveAsTemplate,
 }: QuoteBuilderSidebarProps) {
   const [dealBudget, setDealBudget] = useState<number | null>(null);
   const [dealEntityName, setDealEntityName] = useState<string>("");
@@ -196,11 +125,20 @@ export function QuoteBuilderSidebar({
   let totalCost = 0;
   let totalSales = 0;
   if (hasCostData) {
-    validLines.forEach((line: any) => {
+    // Only lines that actually carry cost data participate in the margin
+    // calculation — a no-cost line's full sale price must never be counted
+    // as 100%-margin revenue. Use the same retail-price fallback as
+    // sectionSummaries/calcLinePrice so manually-priced lines aren't
+    // treated as €0 revenue here.
+    linesWithCost.forEach((line: any) => {
       const costUnit = line.cost_price || 0;
       totalCost += costUnit * line.qt;
-      const preco = (line.custo_material_unit + line.custo_mao_obra_unit) * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-      const precoDesc = preco * (1 - (line.discount_percent || 0) / 100);
+      const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
+      const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
+      const unitPrice = isManual
+        ? (line.retail_price_unit || 0)
+        : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+      const precoDesc = unitPrice * (1 - (line.discount_percent || 0) / 100);
       totalSales += precoDesc * line.qt;
     });
   }
@@ -221,6 +159,10 @@ export function QuoteBuilderSidebar({
         totalComIva: iqTotals.totalComIva,
         totalIva: iqTotals.totalIva,
         vatBreakdown: iqTotals.vatBreakdown,
+        // Actual discount amount subtracted for this inline quote's own %
+        // (matches what calculateInlineQuoteTotals already applied above).
+        descontoValue: iqTotals.totalSemIva - iqTotals.totalSemIvaComDesconto,
+        descontoPercent: iq.desconto_global_percent || 0,
       };
     });
 
@@ -233,6 +175,18 @@ export function QuoteBuilderSidebar({
 
   const totalAllItems = validLines.length + inlineQuoteSummaries.reduce((s, iq) => s + iq.itemCount, 0);
   const totalQuoteCount = 1 + inlineQuoteSummaries.length;
+
+  // Discount amount actually subtracted overall: main quote's own % applied to
+  // its own subtotal, plus each inline quote's own % applied to its own subtotal.
+  // Never blend one percentage across the combined subtotal — each quote can
+  // carry a different desconto_global_percent.
+  const mainDescontoValue = totals.totalSemIva * (descontoPercent / 100);
+  const inlineDescontoValue = inlineQuoteSummaries.reduce((s, iq) => s + iq.descontoValue, 0);
+  const totalDescontoValue = mainDescontoValue + inlineDescontoValue;
+  const distinctDescontoRates = new Set<number>();
+  if (descontoPercent > 0) distinctDescontoRates.add(descontoPercent);
+  inlineQuoteSummaries.forEach(iq => { if (iq.descontoPercent > 0) distinctDescontoRates.add(iq.descontoPercent); });
+  const singleDescontoRate = distinctDescontoRates.size === 1 ? Array.from(distinctDescontoRates)[0] : null;
 
   const budgetPercent = dealBudget && dealBudget > 0 ? (consolidatedTotal / dealBudget) * 100 : null;
   const budgetExcessPercent = dealBudget && dealBudget > 0 ? ((consolidatedTotal - dealBudget) / dealBudget) * 100 : null;
@@ -294,10 +248,10 @@ export function QuoteBuilderSidebar({
                 {formatCurrency(totals.totalSemIva + inlineQuoteSummaries.reduce((s, iq) => s + iq.totalSemIva, 0))}
               </span>
             </div>
-            {descontoPercent > 0 && (
+            {totalDescontoValue > 0 && (
               <div className="flex justify-between text-sm text-green-600">
-                <span>Desconto ({descontoPercent}%)</span>
-                <span>-{formatCurrency((totals.totalSemIva + inlineQuoteSummaries.reduce((s, iq) => s + iq.totalSemIva, 0)) * (descontoPercent / 100))}</span>
+                <span>Desconto{singleDescontoRate !== null ? ` (${singleDescontoRate}%)` : ""}</span>
+                <span>-{formatCurrency(totalDescontoValue)}</span>
               </div>
             )}
             {(() => {
@@ -466,7 +420,7 @@ export function QuoteBuilderSidebar({
           <Download className="w-4 h-4 mr-2" />
           {downloadingPdf ? "A gerar PDF..." : "Download PDF"}
         </Button>
-        <Button variant="outline" className="w-full" size="sm">
+        <Button variant="outline" className="w-full" size="sm" onClick={onSaveAsTemplate} disabled={!onSaveAsTemplate || loading}>
           <ClipboardList className="w-4 h-4 mr-2" />
           Guardar como Template
         </Button>

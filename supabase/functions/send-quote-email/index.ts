@@ -3,10 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface EmailAttachmentInput {
   filename: string;
@@ -32,7 +32,7 @@ const requestSchema = z.object({
   recipients: z.array(z.string()).optional(),
   cc: z.array(z.string()).optional(),
   subject: z.string().optional(),
-  message: z.string().optional(),
+  message: z.string().max(2000).optional(),
   attachments: z.array(z.unknown()).optional(),
 });
 
@@ -54,6 +54,15 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
   return out;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function generateQuoteEmailHtml(quote: any, customMessage?: string, senderName?: string, logoUrl?: string | null): string {
   const primaryColor = "#7c3aed";
   const quoteNumber = quote.quote_number || quote.id.slice(0, 8);
@@ -69,7 +78,7 @@ function generateQuoteEmailHtml(quote: any, customMessage?: string, senderName?:
 <tr><td style="background:linear-gradient(135deg,${primaryColor},#4c1d95);padding:40px;text-align:center;">
 <h1 style="color:#ffffff;margin:0;font-size:24px;">Orçamento ${quoteNumber}</h1></td></tr>
 <tr><td style="padding:40px;">
-${customMessage ? `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;white-space:pre-line;">${customMessage}</p>` : 
+${customMessage ? `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;white-space:pre-line;">${escapeHtml(customMessage)}</p>` : 
 `<p style="color:#374151;font-size:16px;line-height:1.6;margin-bottom:24px;">${senderName ? `${senderName} enviou-lhe` : 'Foi-lhe enviado'} um orçamento para análise.</p>`}
 </td></tr>
 <tr><td style="background-color:#f9fafb;padding:24px;text-align:center;border-top:1px solid #e5e7eb;">
@@ -79,14 +88,33 @@ ${logoHtml}
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader) {
+    return new Response(JSON.stringify({ error: "Authentication required" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json", ...corsHeaders },
+    });
+  }
+
   try {
+    // Scoped client — carries the caller's own JWT, so every business-data
+    // read/write below (quotes, anew_users, anew_memberships, anew_hierarchy,
+    // quote_sends, email_logs, quotes update) runs under the caller's real
+    // RLS instead of bypassing it via service_role. quote_sends already had
+    // an INSERT policy; email_logs' was added specifically for this
+    // (20261107010000_add_insert_policies_email_logs_proposal_sends.sql).
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const rawBody = await req.json();
@@ -130,49 +158,59 @@ const handler = async (req: Request): Promise<Response> => {
       if (!safeAttachments.length) safeAttachments = undefined;
     }
 
-    let userId: string | undefined;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await supabaseClient.auth.getUser(token);
-      userId = user?.id;
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
+    const userId: string = user.id;
 
     const { data: quote, error: quoteError } = await supabaseClient
       .from("quotes").select("*").eq("id", quote_id).single();
     if (quoteError || !quote) throw new Error("Quote not found");
 
     // ── Scope check: verify caller has access to quote's organization ──
-    if (userId && quote.organization_id) {
+    if (quote.organization_id) {
       const { data: anewUser } = await supabaseClient.from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
-      if (anewUser) {
-        const { data: membership } = await supabaseClient
-          .from("anew_memberships")
-          .select("id")
-          .eq("user_id", anewUser.id)
-          .eq("status", "active")
-          .or(`organization_id.eq.${quote.organization_id}`)
-          .maybeSingle();
-        
-        if (!membership) {
-          const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
-          const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
-          const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", quote.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
-          if (!hierarchyMatch) {
-            throw new Error("Sem permissão para enviar este orçamento");
-          }
+      if (!anewUser) {
+        throw new Error("Utilizador não encontrado no sistema");
+      }
+      const { data: membership } = await supabaseClient
+        .from("anew_memberships")
+        .select("id")
+        .eq("user_id", anewUser.id)
+        .eq("status", "active")
+        .or(`organization_id.eq.${quote.organization_id}`)
+        .maybeSingle();
+
+      if (!membership) {
+        const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
+        const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
+        const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", quote.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
+        if (!hierarchyMatch) {
+          throw new Error("Sem permissão para enviar este orçamento");
         }
       }
     }
 
     let senderName: string | null = null;
-    if (userId) {
-      const { data: sender } = await supabaseClient
-        .from("anew_users").select("display_name").eq("auth_user_id", userId).maybeSingle();
-      senderName = sender?.display_name || null;
-    }
+    const { data: sender } = await supabaseClient
+      .from("anew_users").select("display_name").eq("auth_user_id", userId).maybeSingle();
+    senderName = sender?.display_name || null;
 
-    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseClient, {
+    // SMTP resolution needs a service-role client: passwords are stored in
+    // Supabase Vault (organization_smtp_settings/user_smtp_settings only
+    // carry a smtp_password_secret_id), and vault.decrypted_secrets is only
+    // readable by service_role — the caller's own RLS-scoped supabaseClient
+    // above would resolve the row but never see the decrypted password.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
       authUserId: userId,
       organizationId: quote.organization_id,
     });
@@ -199,18 +237,59 @@ const handler = async (req: Request): Promise<Response> => {
 
     const emailHtml = generateQuoteEmailHtml(quote, message, senderName || undefined, logoUrl);
 
-    await sendEmailViaSMTP(smtpConfig, { to: toListInput, cc: ccList.length ? ccList : undefined, subject: emailSubject, html: emailHtml, attachments: safeAttachments });
+    try {
+      await sendEmailViaSMTP(smtpConfig, { to: toListInput, cc: ccList.length ? ccList : undefined, subject: emailSubject, html: emailHtml, attachments: safeAttachments });
+    } catch (sendErr) {
+      // ── Audit trail on failed attempt (deliver still failed, but the attempt must not vanish) ──
+      try {
+        const { data: anewUserFailed } = await supabaseClient
+          .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
+        const senderAnewUserIdFailed: string | null = anewUserFailed?.id ?? null;
+        const safeSendError = sanitizeSmtpError(sendErr);
+
+        await supabaseClient.rpc('set_audit_context', {
+          p_user_id: senderAnewUserIdFailed,
+          p_source: 'email',
+        });
+        await supabaseClient.from("quote_sends").insert({
+          quote_id,
+          organization_id: quote.organization_id,
+          sent_by: senderAnewUserIdFailed,
+          recipient_email,
+          recipient_name: recipient_name || null,
+          subject: emailSubject,
+          message: ccList.length ? `${message || ""}${message ? "\n\n" : ""}CC: ${ccList.join(", ")}` : (message || null),
+          status: "failed",
+          sent_at: new Date().toISOString(),
+        });
+
+        await supabaseClient.from("email_logs").insert({
+          organization_id: quote.organization_id,
+          entity_id: quote.entity_id ?? null,
+          sent_by: senderAnewUserIdFailed,
+          body_html: emailHtml,
+          to_email: recipient_email,
+          from_email: smtpConfig.from_email,
+          subject: emailSubject,
+          status: "failed",
+          error_message: safeSendError,
+          smtp_source: resolvedSmtp.source,
+          smtp_id: smtpConfig.id,
+          sent_at: new Date().toISOString(),
+        });
+      } catch (auditErr) {
+        console.error("[send-quote-email] failed to record failed-send audit", auditErr);
+      }
+      throw sendErr;
+    }
 
     // ── Tracking pós-envio (não falhar caller se algo abaixo falhar) ──
     let trackingOk = true;
     try {
       // Resolve business sender id
-      let senderAnewUserId: string | null = null;
-      if (userId) {
-        const { data: anewUser } = await supabaseClient
-          .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
-        senderAnewUserId = anewUser?.id ?? null;
-      }
+      const { data: anewUserTracking } = await supabaseClient
+        .from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
+      const senderAnewUserId: string | null = anewUserTracking?.id ?? null;
 
       // Backfill quotes.entity_id se NULL via cliente_id
       let resolvedEntityId: string | null = quote.entity_id ?? null;
@@ -219,12 +298,24 @@ const handler = async (req: Request): Promise<Response> => {
           .from("anew_clients").select("entity_id, organization_id").eq("id", quote.cliente_id).maybeSingle();
         if (client?.entity_id && (!quote.organization_id || quote.organization_id === client.organization_id)) {
           resolvedEntityId = client.entity_id;
+          await supabaseClient.rpc('set_audit_context', {
+            p_user_id: senderAnewUserId,
+            p_source: 'email',
+          });
           await supabaseClient.from("quotes").update({ entity_id: resolvedEntityId }).eq("id", quote_id);
         }
       }
 
+      await supabaseClient.rpc('set_audit_context', {
+        p_user_id: senderAnewUserId,
+        p_source: 'email',
+      });
       await supabaseClient.from("quotes").update({ estado: "enviado" }).eq("id", quote_id);
 
+      await supabaseClient.rpc('set_audit_context', {
+        p_user_id: senderAnewUserId,
+        p_source: 'email',
+      });
       await supabaseClient.from("quote_sends").insert({
         quote_id,
         organization_id: quote.organization_id,
@@ -262,6 +353,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending quote email:", safeError);
+    await captureError(error, { function: "send-quote-email" });
     return new Response(
       JSON.stringify({ error: safeError }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }

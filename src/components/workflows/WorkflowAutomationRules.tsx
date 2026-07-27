@@ -244,10 +244,9 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
 
   const handleDelete = async (ruleId: string) => {
     try {
-      const { error } = await supabase
-        .from("workflow_automation_rules")
-        .delete()
-        .eq("id", ruleId);
+      const { error } = await (supabase as any).rpc("rpc_delete_lead_workflow_automation", {
+        p_id: ruleId,
+      });
 
       if (error) throw error;
 
@@ -264,10 +263,21 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
 
   const handleToggleActive = async (rule: WorkflowAutomationRule) => {
     try {
-      const { error } = await supabase
-        .from("workflow_automation_rules")
-        .update({ is_active: !rule.is_active })
-        .eq("id", rule.id);
+      const { error } = await (supabase as any).rpc("rpc_save_lead_workflow_automation", {
+        p_id: rule.id,
+        p_organization_id: rule.organization_id,
+        p_name: rule.name,
+        p_description: rule.description,
+        p_is_active: !rule.is_active,
+        p_source_entity: rule.source_entity,
+        p_trigger_type: rule.trigger_type,
+        p_trigger_stage_id: rule.trigger_stage_id,
+        p_target_entity: rule.target_entity,
+        p_action_type: rule.action_type,
+        p_action_stage_id: rule.action_stage_id,
+        p_relationship_field: rule.relationship_field,
+        p_execution_order: rule.execution_order,
+      });
 
       if (error) throw error;
 
@@ -289,35 +299,29 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
     }
 
     try {
-      const ruleData = {
-        organization_id: companyId,
-        name: formData.name,
-        description: formData.description || null,
-        is_active: formData.is_active,
-        source_entity: formData.source_entity,
-        trigger_type: formData.trigger_type,
-        trigger_stage_id: formData.trigger_stage_id || null,
-        target_entity: formData.target_entity,
-        action_type: formData.action_type,
-        action_stage_id: formData.action_stage_id || null,
-        relationship_field: formData.relationship_field || RELATIONSHIP_FIELDS[formData.source_entity]?.[formData.target_entity] || null,
-        execution_order: editingRule ? editingRule.execution_order : rules.length,
-      };
+      const relationshipField =
+        formData.relationship_field ||
+        RELATIONSHIP_FIELDS[formData.source_entity]?.[formData.target_entity] ||
+        null;
+      const executionOrder = editingRule ? editingRule.execution_order : rules.length;
 
-      if (editingRule) {
-        const { error } = await supabase
-          .from("workflow_automation_rules")
-          .update(ruleData)
-          .eq("id", editingRule.id);
-        if (error) throw error;
-        toast({ title: "Regra atualizada" });
-      } else {
-        const { error } = await supabase
-          .from("workflow_automation_rules")
-          .insert(ruleData);
-        if (error) throw error;
-        toast({ title: "Regra criada" });
-      }
+      const { error } = await (supabase as any).rpc("rpc_save_lead_workflow_automation", {
+        p_id: editingRule ? editingRule.id : null,
+        p_organization_id: companyId ?? null,
+        p_name: formData.name,
+        p_description: formData.description || null,
+        p_is_active: formData.is_active,
+        p_source_entity: formData.source_entity,
+        p_trigger_type: formData.trigger_type,
+        p_trigger_stage_id: formData.trigger_stage_id || null,
+        p_target_entity: formData.target_entity,
+        p_action_type: formData.action_type,
+        p_action_stage_id: formData.action_stage_id || null,
+        p_relationship_field: relationshipField,
+        p_execution_order: executionOrder,
+      });
+      if (error) throw error;
+      toast({ title: editingRule ? "Regra atualizada" : "Regra criada" });
 
       resetForm();
       loadRules();
@@ -355,6 +359,9 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
     }));
   };
 
+  const availableTargets = getAvailableTargets();
+  const hasAvailableTargets = availableTargets.length > 0;
+
   if (loading) {
     return (
       <div className="space-y-3">
@@ -377,14 +384,29 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
             Configure ações automáticas quando o estado mudar
           </p>
         </div>
-        <Button size="sm" onClick={() => setIsFormOpen(true)}>
+        <Button size="sm" onClick={() => setIsFormOpen(true)} disabled={!hasAvailableTargets}>
           <Plus className="w-4 h-4 mr-1" />
           Nova Regra
         </Button>
       </div>
 
+      {!hasAvailableTargets && (
+        <Card>
+          <CardContent className="py-6 text-center">
+            <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">
+              Ainda não existe nenhuma entidade alvo disponível para automações a partir de {ENTITY_LABELS[sourceEntity]}.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Esta funcionalidade requer uma relação direta (ex: chave estrangeira) entre as duas entidades.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Rules list */}
       {rules.length === 0 ? (
+        hasAvailableTargets && (
         <Card>
           <CardContent className="py-8 text-center">
             <AlertCircle className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
@@ -394,6 +416,7 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
             </p>
           </CardContent>
         </Card>
+        )
       ) : (
         <div className="space-y-2">
           {rules.map((rule) => (
@@ -569,7 +592,7 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
                       <SelectValue placeholder="Selecionar entidade..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {getAvailableTargets().map((target) => (
+                      {availableTargets.map((target) => (
                         <SelectItem key={target.value} value={target.value}>
                           {target.label}
                         </SelectItem>

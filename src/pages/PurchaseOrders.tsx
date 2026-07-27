@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument";
+import { purchaseOrderSchema } from "@/lib/validations";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -85,6 +87,8 @@ const PurchaseOrders = () => {
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
@@ -265,7 +269,7 @@ const PurchaseOrders = () => {
       setLoading(true);
       loadData();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const loadData = async () => {
     if (!activeCompany?.id) {
@@ -284,12 +288,20 @@ const PurchaseOrders = () => {
         directProductsRes,
         servicesRes,
       ] = await Promise.all([
-        supabase
-          .from("purchase_orders")
-          .select("*, suppliers(name)")
-          .eq("organization_id", companyId)
-          .order("created_at", { ascending: false }),
-        supabase.from("suppliers").select("id, name").eq("organization_id", companyId),
+        (showDeleted
+          ? supabase
+              .from("purchase_orders")
+              .select("*, suppliers(name)")
+              .eq("organization_id", companyId)
+              .not("deleted_at", "is", null)
+              .order("created_at", { ascending: false })
+          : supabase
+              .from("purchase_orders")
+              .select("*, suppliers(name)")
+              .eq("organization_id", companyId)
+              .is("deleted_at", null)
+              .order("created_at", { ascending: false })),
+        supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
         supabase.from("product_organizations").select("product_id").eq("organization_id", companyId),
         supabase.from("products").select("id").eq("organization_id", companyId).is("deleted_at", null),
         supabase
@@ -529,13 +541,30 @@ const PurchaseOrders = () => {
     if (!confirm(t('purchaseOrders.delete.confirm'))) return;
 
     try {
-      const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
+      const { error } = await supabase.rpc("rpc_delete_purchase_order", { p_id: id });
 
       if (error) throw error;
 
       toast({
         title: t('purchaseOrders.toast.deleteSuccess'),
       });
+
+      loadData();
+    } catch (error: any) {
+      toast({
+        title: t('purchaseOrders.toast.deleteError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_purchase_order", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t('purchaseOrders.toast.restoreSuccess') || "Encomenda restaurada" });
 
       loadData();
     } catch (error: any) {
@@ -703,6 +732,22 @@ const PurchaseOrders = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = purchaseOrderSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('purchaseOrders.toast.createError'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
+
     if (orderItems.length === 0) {
       toast({
         title: t('purchaseOrders.toast.addAtLeastOneItem'),
@@ -718,6 +763,12 @@ const PurchaseOrders = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
       const orderData = {
         supplier_id: formData.supplier_id,
         order_date: formData.order_date,
@@ -727,43 +778,31 @@ const PurchaseOrders = () => {
         notes: formData.notes || null,
       };
 
+      const itemsPayload = orderItems.map(item => ({
+        item_type: item.item_type,
+        product_id: item.product_id || null,
+        service_id: item.service_id || null,
+        description: item.description,
+        sku: item.sku || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        vat_rate: item.vat_rate,
+        vat_amount: item.vat_amount,
+        total_price: item.total_price,
+        selected_attributes: item.selected_attributes || {},
+        notes: item.notes || null,
+      }));
+
       if (editingId) {
-        // Update order
-        const { error: orderError } = await supabase
-          .from("purchase_orders")
-          .update(orderData)
-          .eq("id", editingId);
+        // Update order + full item replace (delete-all + re-insert) in a single
+        // atomic RPC call, matching rpc_update_purchase_order's contract.
+        const { error: updateError } = await supabase.rpc("rpc_update_purchase_order", {
+          p_purchase_order_id: editingId,
+          p_order: orderData,
+          p_items: itemsPayload,
+        });
 
-        if (orderError) throw orderError;
-
-        // Delete existing items
-        await supabase
-          .from("purchase_order_items")
-          .delete()
-          .eq("purchase_order_id", editingId);
-
-        // Insert new items
-        const itemsToInsert = orderItems.map(item => ({
-          purchase_order_id: editingId,
-          item_type: item.item_type,
-          product_id: item.product_id || null,
-          service_id: item.service_id || null,
-          description: item.description,
-          sku: item.sku || null,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          vat_rate: item.vat_rate,
-          vat_amount: item.vat_amount,
-          total_price: item.total_price,
-          selected_attributes: item.selected_attributes || {},
-          notes: item.notes || null,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from("purchase_order_items")
-          .insert(itemsToInsert);
-
-        if (itemsError) throw itemsError;
+        if (updateError) throw updateError;
 
         toast({
           title: t('purchaseOrders.toast.updateSuccess'),
@@ -772,53 +811,15 @@ const PurchaseOrders = () => {
         const companyId = organizationSelection.companyId || activeCompany?.id;
         if (!companyId) throw new Error("No company selected");
 
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-          return;
-        }
-        
-        // Create order - order_number will be auto-generated by trigger (empty string triggers auto-generation)
-        const { data: newOrder, error: orderError } = await supabase
-          .from("purchase_orders")
-          .insert([{
-            order_number: "", // Will be auto-generated by trigger
-            supplier_id: orderData.supplier_id,
-            order_date: orderData.order_date,
-            expected_delivery: orderData.expected_delivery,
-            status: orderData.status,
-            total_value: orderData.total_value,
-            notes: orderData.notes,
-            organization_id: companyId,
-            created_by: businessUserId,
-          }])
-          .select()
-          .single();
+        // Create order + items in a single atomic RPC call, matching
+        // rpc_create_purchase_order's contract (order_number auto-generated by trigger).
+        const { error: createError } = await supabase.rpc("rpc_create_purchase_order", {
+          p_organization_id: companyId,
+          p_order: orderData,
+          p_items: itemsPayload,
+        });
 
-        if (orderError) throw orderError;
-
-        // Insert items
-        const itemsToInsert = orderItems.map(item => ({
-          purchase_order_id: newOrder.id,
-          item_type: item.item_type,
-          product_id: item.product_id || null,
-          service_id: item.service_id || null,
-          description: item.description,
-          sku: item.sku || null,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          vat_rate: item.vat_rate,
-          vat_amount: item.vat_amount,
-          total_price: item.total_price,
-          selected_attributes: item.selected_attributes || {},
-          notes: item.notes || null,
-        }));
-
-        const { error: itemsError } = await supabase
-          .from("purchase_order_items")
-          .insert(itemsToInsert);
-
-        if (itemsError) throw itemsError;
+        if (createError) throw createError;
 
         toast({
           title: t('purchaseOrders.toast.createSuccess'),
@@ -834,6 +835,7 @@ const PurchaseOrders = () => {
         status: "pending",
         notes: "",
       });
+      setFieldErrors({});
       setOrderItems([]);
       loadData();
     } catch (error: any) {
@@ -986,18 +988,48 @@ const PurchaseOrders = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
-      const ordersToInsert = parsePurchaseOrdersCSV(text, suppliers, businessUserId, activeCompany.id);
+      // order_number is unique per organization (not globally), and a single
+      // duplicate would otherwise fail the whole all-or-nothing RPC import.
+      // Pre-fetch existing order_numbers for this org (regardless of
+      // deleted_at — the DB constraint applies to soft-deleted rows too) so
+      // colliding rows can be skipped/reported instead of aborting the batch.
+      const { data: existingOrders, error: existingOrdersError } = await supabase
+        .from("purchase_orders")
+        .select("order_number")
+        .eq("organization_id", activeCompany.id);
+
+      if (existingOrdersError) throw existingOrdersError;
+
+      const existingOrderNumbers = new Set((existingOrders || []).map((o: any) => o.order_number));
+
+      const { ordersToInsert, skippedLines } = parsePurchaseOrdersCSV(
+        text,
+        suppliers,
+        businessUserId,
+        activeCompany.id,
+        existingOrderNumbers,
+      );
 
       if (ordersToInsert.length === 0) {
-        throw new Error(t('purchaseOrders.toast.noValidOrders'));
+        throw new Error(
+          skippedLines.length > 0
+            ? `${t('purchaseOrders.toast.noValidOrders')} ${skippedLines.slice(0, 5).map(s => `Linha ${s.line}: ${s.reason}`).join(" | ")}`
+            : t('purchaseOrders.toast.noValidOrders')
+        );
       }
 
-      const { error } = await supabase.from("purchase_orders").insert(ordersToInsert);
+      const { error } = await supabase.rpc("rpc_import_purchase_orders_csv", {
+        p_orders: ordersToInsert,
+      });
 
       if (error) throw error;
 
+      const skippedSuffix = skippedLines.length > 0
+        ? ` ${skippedLines.length} linha(s) ignoradas: ${skippedLines.slice(0, 5).map(s => `L${s.line} (${s.orderNumber}): ${s.reason}`).join(" | ")}${skippedLines.length > 5 ? ` (+${skippedLines.length - 5} mais)` : ""}`
+        : "";
+
       toast({
-        title: t('purchaseOrders.toast.importSuccess', { count: ordersToInsert.length }),
+        title: t('purchaseOrders.toast.importSuccess', { count: ordersToInsert.length }) + skippedSuffix,
       });
 
       setImportDialogOpen(false);
@@ -1062,6 +1094,13 @@ const PurchaseOrders = () => {
             <PageFAQSheet pageKey="operations.purchaseOrders" />
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {showDeleted ? (t('purchaseOrders.hideDeleted') || 'Ocultar eliminados') : (t('purchaseOrders.showDeleted') || 'Ver eliminados')}
+            </Button>
             <PermissionGate permission="purchase_orders.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
@@ -1109,6 +1148,7 @@ const PurchaseOrders = () => {
                   status: "pending",
                   notes: "",
                 });
+                setFieldErrors({});
                 setOrderItems([]);
                 setOrganizationSelection({
                   tenantId: "",
@@ -1156,6 +1196,7 @@ const PurchaseOrders = () => {
                           ))}
                         </SelectContent>
                       </Select>
+                      {fieldErrors.supplier_id && <p className="text-xs text-destructive">{fieldErrors.supplier_id}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="order_date">{t('purchaseOrders.form.orderDate')} *</Label>
@@ -1165,7 +1206,9 @@ const PurchaseOrders = () => {
                         value={formData.order_date}
                         onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
                         required
+                        className={fieldErrors.order_date ? "border-destructive" : ""}
                       />
+                      {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="expected_delivery">{t('purchaseOrders.form.expectedDelivery')}</Label>
@@ -1189,6 +1232,12 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
+                      {formData.status === 'received' && (
+                        <p className="text-xs text-muted-foreground">
+                          {t('purchaseOrders.form.receivedStockNote') ||
+                            'Marcar como recebida não atualiza automaticamente o stock — atualize os armazéns manualmente em Stocks.'}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1378,23 +1427,37 @@ const PurchaseOrders = () => {
                     <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
-                          <FileDown className="w-4 h-4" />
-                        </Button>
-                        <PermissionGate permission="purchase_orders.edit">
-                          <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="purchase_orders.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(order.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="purchase_orders.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(order.id)}
+                            >
+                              {t('purchaseOrders.restore') || 'Restaurar'}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
+                              <FileDown className="w-4 h-4" />
+                            </Button>
+                            <PermissionGate permission="purchase_orders.edit">
+                              <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="purchase_orders.delete">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleDelete(order.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

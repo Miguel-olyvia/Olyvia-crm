@@ -9,7 +9,9 @@ import { AppSidebar } from "@/components/AppSidebar";
 import { TopHeader } from "@/components/TopHeader";
 
 import { InternalChatWidget } from "@/components/chat/InternalChatWidget";
+import { SupportAccessBanner } from "@/components/platform/SupportAccessBanner";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
@@ -135,7 +137,7 @@ const LayoutContent = memo(function LayoutContent({
   fullWidth?: boolean;
 }) {
   const { isSubmenuOpen } = useSidebarExpand();
-  const { activeCompany } = useCompany();
+  const { activeCompany, isLoading: companyLoading } = useCompany();
   const location = useLocation();
 
   // Total sidebar width: icon rail (64px) + submenu panel (256px) when open
@@ -143,10 +145,15 @@ const LayoutContent = memo(function LayoutContent({
 
   // Check if current route requires an organization
   const isExemptRoute = NO_ORG_EXEMPT_ROUTES.some(r => location.pathname === r || location.pathname.startsWith(r + "/"));
-  const showNoOrgState = !activeCompany && !isExemptRoute;
+  // Gate the "no organization" empty state on companyLoading so it doesn't
+  // flash briefly while activeCompany is still being resolved.
+  const showNoOrgState = !companyLoading && !activeCompany && !isExemptRoute;
 
   return (
     <div className="min-h-screen w-full flex flex-col">
+      {/* Break-glass support access banner — only visible to sysadmin with active access */}
+      <SupportAccessBanner />
+
       {/* Top Header - Fixed */}
       <TopHeader userName={userName} userRole={displayRole} />
 
@@ -175,7 +182,11 @@ const LayoutContent = memo(function LayoutContent({
         "fixed top-14 right-0 bottom-0 left-0 overflow-auto bg-background transition-[left] duration-300",
         isSubmenuOpen ? "md:left-80" : "md:left-16"
       )}>
-        {fullWidth ? (
+        {companyLoading && !isExemptRoute ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <OlyviaLoader size={40} />
+          </div>
+        ) : fullWidth ? (
           showNoOrgState ? (
             <div className="p-6 md:p-8"><NoOrganizationState /></div>
           ) : (

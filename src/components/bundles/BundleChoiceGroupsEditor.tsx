@@ -72,6 +72,13 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
   const [groups, setGroups] = useState<ChoiceGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Every product_id/service_id already present anywhere in this bundle's
+  // bundle_components — required (ungrouped) components AND every choice
+  // group's options. Used to block adding the same product/service twice,
+  // which previously duplicated its price contribution (see
+  // computeChoiceAwareTotal in Bundles.tsx: a base component and a choice
+  // group option for the same product are both summed).
+  const [existingBundleItemKeys, setExistingBundleItemKeys] = useState<Set<string>>(new Set());
   
   // New group dialog
   const [showNewGroupDialog, setShowNewGroupDialog] = useState(false);
@@ -112,6 +119,24 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
         .order("sort_order");
       
       if (groupsError) throw groupsError;
+
+      // Load EVERY component of this bundle (required components with no
+      // choice_group_id, plus every choice group's options) so we can block
+      // adding a product/service that already exists anywhere in the bundle —
+      // not just within the group currently being edited.
+      const { data: allComponentsData, error: allComponentsError } = await supabase
+        .from("bundle_components")
+        .select("product_id, service_id")
+        .eq("bundle_id", bundleId);
+
+      if (allComponentsError) throw allComponentsError;
+
+      const allKeys = new Set<string>();
+      (allComponentsData || []).forEach((c: any) => {
+        if (c.product_id) allKeys.add(`product:${c.product_id}`);
+        if (c.service_id) allKeys.add(`service:${c.service_id}`);
+      });
+      setExistingBundleItemKeys(allKeys);
 
       // Load components for each group
       const groupsWithComponents = await Promise.all((groupsData || []).map(async (group) => {
@@ -180,19 +205,17 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
     }
 
     try {
-      const { data, error } = await supabase
-        .from("bundle_choice_groups")
-        .insert({
-          bundle_id: bundleId,
+      const { data, error } = await supabase.rpc("rpc_create_bundle_choice_group", {
+        p_bundle_id: bundleId,
+        p_group: {
           name: newGroupForm.name.trim(),
           description: newGroupForm.description.trim() || null,
           min_selections: newGroupForm.min_selections,
           max_selections: newGroupForm.max_selections,
           is_required: newGroupForm.is_required,
           sort_order: groups.length,
-        })
-        .select()
-        .single();
+        },
+      }).single();
 
       if (error) throw error;
 
@@ -222,16 +245,10 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
 
   const handleDeleteGroup = async (groupId: string) => {
     try {
-      // First remove components from this group
-      await supabase
-        .from("bundle_components")
-        .delete()
-        .eq("choice_group_id", groupId);
-      
-      const { error } = await supabase
-        .from("bundle_choice_groups")
-        .delete()
-        .eq("id", groupId);
+      const { error } = await supabase.rpc("rpc_delete_bundle_choice_group", {
+        p_group_id: groupId,
+        p_bundle_id: bundleId,
+      });
 
       if (error) throw error;
 
@@ -286,12 +303,26 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
   const handleAddItems = async () => {
     if (!addItemsGroupId || selectedItems.size === 0) return;
 
+    // Defense in depth: `availableItems` already excludes items that are
+    // already anywhere in the bundle, but re-check here in case the bundle
+    // was edited concurrently (e.g. another tab) since the dialog opened.
+    const duplicateItem = Array.from(selectedItems).find(itemId =>
+      existingBundleItemKeys.has(`${catalog.itemType}:${itemId}`)
+    );
+    if (duplicateItem) {
+      toast({
+        title: t('common.error'),
+        description: t('bundles.choices.itemAlreadyInBundle'),
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const group = groups.find(g => g.id === addItemsGroupId);
       const existingCount = group?.components?.length || 0;
 
       const newComponents = Array.from(selectedItems).map((itemId, index) => ({
-        bundle_id: bundleId,
         choice_group_id: addItemsGroupId,
         product_id: catalog.itemType === 'product' ? itemId : null,
         service_id: catalog.itemType === 'service' ? itemId : null,
@@ -301,9 +332,10 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
         sort_order: existingCount + index,
       }));
 
-      const { error } = await supabase
-        .from("bundle_components")
-        .insert(newComponents);
+      const { error } = await supabase.rpc("rpc_add_bundle_components", {
+        p_bundle_id: bundleId,
+        p_items: newComponents,
+      });
 
       if (error) throw error;
 
@@ -324,10 +356,10 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
 
   const handleDeleteComponent = async (compId: string) => {
     try {
-      const { error } = await supabase
-        .from("bundle_components")
-        .delete()
-        .eq("id", compId);
+      const { error } = await supabase.rpc("rpc_delete_bundle_component", {
+        p_id: compId,
+        p_bundle_id: bundleId,
+      });
 
       if (error) throw error;
 
@@ -353,11 +385,14 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
     });
   };
 
-  // Filter out items already in the group (server-side search handled by hook)
-  const existingIds = new Set(
-    groups.find(g => g.id === addItemsGroupId)?.components?.map(c => c.product_id || c.service_id) || []
+  // Filter out items already anywhere in the bundle — as a required component,
+  // in this choice group, or in any other choice group (server-side search
+  // handled by hook). Prevents the same product/service from being added
+  // twice, which would double-count its price (see computeChoiceAwareTotal
+  // in Bundles.tsx).
+  const availableItems = catalog.items.filter(
+    item => !existingBundleItemKeys.has(`${catalog.itemType}:${item.id}`)
   );
-  const availableItems = catalog.items.filter(item => !existingIds.has(item.id));
 
   return (
     <div className="space-y-4">

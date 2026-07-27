@@ -537,8 +537,8 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
     if (!comp) return;
 
     let newExcluded = [...bundleSelection.excludedComponentIds];
-    let newChoiceSelections: Record<string, Record<string, number>> = { ...bundleSelection.choiceSelections };
-    let newChoiceAttributes = { ...(bundleSelection.choiceAttributes || {}) };
+    const newChoiceSelections: Record<string, Record<string, number>> = { ...bundleSelection.choiceSelections };
+    const newChoiceAttributes = { ...(bundleSelection.choiceAttributes || {}) };
 
     if (comp.choice_group_id) {
       const groupId = comp.choice_group_id;
@@ -623,7 +623,7 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
     }
 
     const newChoiceSelections = { ...bundleSelection.choiceSelections, [groupId]: currentMap };
-    let newChoiceAttributes = { ...(bundleSelection.choiceAttributes || {}) };
+    const newChoiceAttributes = { ...(bundleSelection.choiceAttributes || {}) };
     const nextKeys = Object.keys(currentMap);
     const sameSet = prevKeys.length === nextKeys.length && prevKeys.every(id => nextKeys.includes(id));
     if (!sameSet) {

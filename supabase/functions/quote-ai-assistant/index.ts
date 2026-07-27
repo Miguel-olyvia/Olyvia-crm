@@ -3,10 +3,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+
+initSentry();
+
+// Authenticated, org-scoped AI assistant — persistent (DB-backed) rate limit
+// per organization, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "quote-ai-assistant";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const requestSchema = z.object({
   query: z.string(),
@@ -15,19 +23,35 @@ const requestSchema = z.object({
 });
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
-    }
+    getAiGatewayKey();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read below run under the
+    // caller's real RLS/permissions (has_anew_permission, get_user_visible_org_ids),
+    // exactly as if the frontend had called them directly.
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+    // Residual service-role client — ONLY for:
+    //  - the persistent rate-limit table (RLS enabled, zero policies for
+    //    "authenticated" by design);
+    //  - ai_suggestion_ratings, which also has RLS enabled with zero policies
+    //    (read-only signal used to bias suggestions; failing closed under the
+    //    scoped client would silently and permanently empty out that context).
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
     // Auth: resolve caller identity
     const caller = await resolveCallerIdentity(req, supabase);
@@ -51,6 +75,18 @@ serve(async (req) => {
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // Rate limiting — persistent, DB-backed; scoped per organization.
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: effective_org_id || caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
 
     // Fetch historical quote data for context
     const { data: recentQuotes, error: quotesError } = await supabase
@@ -132,8 +168,11 @@ serve(async (req) => {
       console.error("Error fetching services:", servicesError);
     }
 
-    // Fetch AI ratings to learn from user feedback
-    const { data: ratings } = await supabase
+    // Fetch AI ratings to learn from user feedback.
+    // ai_suggestion_ratings has RLS enabled with zero policies for
+    // "authenticated" — read via the residual service-role client (see note
+    // above); this is a read-only, org-filtered signal, not a privilege escalation.
+    const { data: ratings } = await supabaseAdmin
       .from("ai_suggestion_ratings")
       .select("suggestion_name, suggestion_category, suggestion_type, rating")
       .eq("organization_id", effective_org_id)
@@ -264,20 +303,13 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
   "tips": ["dica 1", "dica 2"]
 }`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: query },
-        ],
-        temperature: 0.7,
-      }),
+    const response = await callAiGateway({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: query },
+      ],
+      temperature: 0.7,
     });
 
     if (!response.ok) {
@@ -337,6 +369,7 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error("Quote AI Assistant error:", error);
+    await captureError(error, { function: "quote-ai-assistant" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { 

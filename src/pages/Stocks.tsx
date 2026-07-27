@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -28,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Pencil, Trash2, Package, Download, Upload } from "lucide-react";
@@ -42,6 +44,19 @@ type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string };
   warehouses?: { name: string };
 };
+
+const stockSchema = z.object({
+  product_id: z.string().trim().min(1, "O produto é obrigatório."),
+  warehouse_id: z.string().trim().min(1, "O armazém é obrigatório."),
+  quantity: z.number().min(0, "A quantidade deve ser positiva.").max(999999999, "A quantidade é demasiado elevada."),
+  minimum_quantity: z.number().min(0, "A quantidade mínima deve ser positiva.").max(999999999, "A quantidade mínima é demasiado elevada."),
+  maximum_quantity: z.number().min(0, "A quantidade máxima deve ser positiva.").max(999999999, "A quantidade máxima é demasiado elevada."),
+  reorder_point: z.number().min(0, "O ponto de reencomenda deve ser positivo.").max(999999999, "O ponto de reencomenda é demasiado elevado."),
+  location: z.string().trim().max(255, "A localização deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+}).refine((data) => data.maximum_quantity === 0 || data.maximum_quantity >= data.minimum_quantity, {
+  message: "A quantidade máxima deve ser maior ou igual à quantidade mínima.",
+  path: ["maximum_quantity"],
+});
 
 const Stocks = () => {
   const { t } = useTranslation();
@@ -63,6 +78,8 @@ const Stocks = () => {
     reorder_point: 0,
     location: "",
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -70,13 +87,13 @@ const Stocks = () => {
       fetchProducts();
       fetchWarehouses();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const fetchStocks = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("stocks")
         .select(`
           *,
@@ -85,6 +102,11 @@ const Stocks = () => {
         `)
         .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false });
+
+      // Soft-deleted stocks are hidden from the normal list by default.
+      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setStocks(data as Stock[] || []);
@@ -128,6 +150,7 @@ const Stocks = () => {
         .from("warehouses")
         .select("id, name")
         .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null)
         .order("name");
 
       if (error) throw error;
@@ -144,6 +167,19 @@ const Stocks = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = stockSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t('stocks.toast.error'), description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -151,15 +187,17 @@ const Stocks = () => {
       if (!businessUserId) throw new Error("Business user not resolved");
 
       if (editingStock) {
-        const { error } = await supabase
-          .from("stocks")
-          .update({
-            ...formData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingStock.id);
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("stocks")
+            .update({
+              ...formData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingStock.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        });
 
         toast({
           title: t('stocks.toast.updateSuccess'),
@@ -167,16 +205,18 @@ const Stocks = () => {
         });
       } else {
         if (!activeCompany?.id) throw new Error("No active company selected");
-        
-        const { error } = await supabase.from("stocks").insert([
-          {
-            ...formData,
-            organization_id: activeCompany.id,
-            created_by: businessUserId,
-          },
-        ]);
 
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("stocks").insert([
+            {
+              ...formData,
+              organization_id: activeCompany.id,
+              created_by: businessUserId,
+            },
+          ]);
+
+          if (error) throw error;
+        });
 
         toast({
           title: t('stocks.toast.createSuccess'),
@@ -200,14 +240,30 @@ const Stocks = () => {
     if (!confirm(t('stocks.delete.confirm'))) return;
 
     try {
-      const { error } = await supabase.from("stocks").delete().eq("id", id);
-
+      const { error } = await supabase.rpc("rpc_delete_stock", { p_id: id });
       if (error) throw error;
 
       toast({
         title: t('stocks.toast.deleteSuccess'),
         description: t('stocks.toast.deleteSuccessDesc'),
       });
+
+      fetchStocks();
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_stock", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t('stocks.toast.restoreSuccess') || "Stock restaurado" });
 
       fetchStocks();
     } catch (error: any) {
@@ -230,6 +286,7 @@ const Stocks = () => {
       location: "",
     });
     setEditingStock(null);
+    setFieldErrors({});
   };
 
   const openEditDialog = (stock: Stock) => {
@@ -301,43 +358,114 @@ const Stocks = () => {
         throw new Error(t('stocks.toast.emptyFile'));
       }
 
+      // Pre-check existing (product_id, warehouse_id) pairs already tracked for this
+      // org, so a collision can be skipped/reported per-row instead of failing the
+      // whole batch atomically.
+      const { data: existingStockPairs, error: existingStockPairsError } = await supabase
+        .from("stocks")
+        .select("product_id, warehouse_id")
+        .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null);
+
+      if (existingStockPairsError) throw existingStockPairsError;
+
+      const pairKey = (productId: string, warehouseId: string) => `${productId}::${warehouseId}`;
+      const existingPairSet = new Set(
+        (existingStockPairs || []).map((s: any) => pairKey(s.product_id, s.warehouse_id))
+      );
+      const seenInFile = new Set<string>();
+
       const dataLines = lines.slice(1);
       const stocksToInsert = [];
+      const rowErrors: string[] = [];
 
-      for (const line of dataLines) {
+      // Convert a raw CSV cell to a number, WITHOUT silently coercing malformed
+      // values to 0. Empty cells default to 0 (matches "not provided"); anything
+      // else that fails to parse is surfaced as NaN so stockSchema rejects it.
+      const toNumberOrNaN = (v: string | undefined): number => {
+        const trimmed = (v ?? '').trim();
+        if (trimmed === '') return 0;
+        return Number(trimmed);
+      };
+
+      dataLines.forEach((line, index) => {
         const values = line.split(';').map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-        
-        if (values.length < 3) continue;
+
+        if (values.length < 3) return;
+
+        const lineNumber = index + 2; // +2 for header row and 0-index
 
         const product = products.find(p => p.name === values[0]);
         const warehouse = warehouses.find(w => w.name === values[1]);
 
-        if (!product || !warehouse) continue;
+        if (!product || !warehouse) {
+          rowErrors.push(`Linha ${lineNumber}: produto ou armazém não encontrado ("${values[0]}" / "${values[1]}")`);
+          return;
+        }
 
-        stocksToInsert.push({
+        const candidate = {
           product_id: product.id,
           warehouse_id: warehouse.id,
-          quantity: parseInt(values[2]) || 0,
-          minimum_quantity: parseInt(values[3]) || 0,
-          maximum_quantity: parseInt(values[4]) || 0,
-          reorder_point: parseInt(values[5]) || 0,
-          location: values[6] || null,
+          quantity: toNumberOrNaN(values[2]),
+          minimum_quantity: toNumberOrNaN(values[3]),
+          maximum_quantity: toNumberOrNaN(values[4]),
+          reorder_point: toNumberOrNaN(values[5]),
+          location: values[6] || "",
+        };
+
+        const validation = stockSchema.safeParse(candidate);
+        if (!validation.success) {
+          const firstError = validation.error.errors[0];
+          rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${firstError.message}`);
+          return;
+        }
+
+        const key = pairKey(product.id, warehouse.id);
+        if (existingPairSet.has(key) || seenInFile.has(key)) {
+          rowErrors.push(`Linha ${lineNumber}: já existe stock para "${values[0]}" no armazém "${values[1]}"`);
+          return;
+        }
+        seenInFile.add(key);
+
+        const validated = validation.data;
+        stocksToInsert.push({
+          product_id: validated.product_id,
+          warehouse_id: validated.warehouse_id,
+          quantity: validated.quantity,
+          minimum_quantity: validated.minimum_quantity,
+          maximum_quantity: validated.maximum_quantity,
+          reorder_point: validated.reorder_point,
+          location: validated.location || null,
           organization_id: activeCompany.id,
           created_by: businessUserId,
         });
-      }
+      });
 
       if (stocksToInsert.length === 0) {
-        throw new Error(t('stocks.toast.noValidStocks'));
+        throw new Error(
+          rowErrors.length > 0
+            ? `${t('stocks.toast.noValidStocks')} ${rowErrors.slice(0, 5).join(" | ")}`
+            : t('stocks.toast.noValidStocks')
+        );
       }
 
-      const { error } = await supabase.from("stocks").insert(stocksToInsert);
-      
-      if (error) throw error;
+      await withAuditContext(
+        supabase,
+        businessUserId,
+        async () => {
+          const { error } = await supabase.from("stocks").insert(stocksToInsert);
+          if (error) throw error;
+        },
+        "csv_import"
+      );
+
+      const skippedSuffix = rowErrors.length > 0
+        ? ` ${rowErrors.length} linha(s) inválida(s) foram ignoradas: ${rowErrors.slice(0, 5).join(" | ")}${rowErrors.length > 5 ? ` (+${rowErrors.length - 5} mais)` : ""}`
+        : "";
 
       toast({
         title: t('stocks.toast.importSuccess'),
-        description: t('stocks.toast.importSuccessDesc', { count: stocksToInsert.length }),
+        description: `${t('stocks.toast.importSuccessDesc', { count: stocksToInsert.length })}${skippedSuffix}`,
       });
 
       setImportDialogOpen(false);
@@ -385,6 +513,13 @@ const Stocks = () => {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {showDeleted ? (t('stocks.hideDeleted') || 'Ocultar eliminados') : (t('stocks.showDeleted') || 'Ver eliminados')}
+            </Button>
             <PermissionGate permission="stocks.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('stocks.export')}
@@ -451,6 +586,7 @@ const Stocks = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.product_id && <p className="text-sm text-destructive mt-1">{fieldErrors.product_id}</p>}
                 </div>
                 <div>
                   <Label htmlFor="warehouse_id">{t('stocks.form.warehouse')}</Label>
@@ -471,6 +607,7 @@ const Stocks = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.warehouse_id && <p className="text-sm text-destructive mt-1">{fieldErrors.warehouse_id}</p>}
                 </div>
                 <div>
                   <Label htmlFor="quantity">{t('stocks.form.quantity')}</Label>
@@ -485,7 +622,9 @@ const Stocks = () => {
                       })
                     }
                     required
+                    className={fieldErrors.quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="minimum_quantity">{t('stocks.form.minimumQuantity')}</Label>
@@ -499,7 +638,9 @@ const Stocks = () => {
                         minimum_quantity: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.minimum_quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.minimum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.minimum_quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="maximum_quantity">{t('stocks.form.maximumQuantity')}</Label>
@@ -513,7 +654,9 @@ const Stocks = () => {
                         maximum_quantity: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.maximum_quantity ? "border-destructive" : ""}
                   />
+                  {fieldErrors.maximum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.maximum_quantity}</p>}
                 </div>
                 <div>
                   <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
@@ -527,7 +670,9 @@ const Stocks = () => {
                         reorder_point: parseInt(e.target.value) || 0,
                       })
                     }
+                    className={fieldErrors.reorder_point ? "border-destructive" : ""}
                   />
+                  {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
                 </div>
                 <div>
                   <Label htmlFor="location">{t('stocks.form.location')}</Label>
@@ -538,7 +683,9 @@ const Stocks = () => {
                       setFormData({ ...formData, location: e.target.value })
                     }
                     placeholder={t('stocks.form.locationPlaceholder')}
+                    className={fieldErrors.location ? "border-destructive" : ""}
                   />
+                  {fieldErrors.location && <p className="text-sm text-destructive mt-1">{fieldErrors.location}</p>}
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button
@@ -612,24 +759,38 @@ const Stocks = () => {
                     <TableCell>{getStockStatus(stock)}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="stocks.edit">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(stock)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="stocks.delete">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(stock.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="stocks.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(stock.id)}
+                            >
+                              {t('stocks.restore') || 'Restaurar'}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <PermissionGate permission="stocks.edit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditDialog(stock)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="stocks.delete">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(stock.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

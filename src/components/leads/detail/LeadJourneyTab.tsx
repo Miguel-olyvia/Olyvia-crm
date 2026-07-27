@@ -3,10 +3,12 @@ import { pt } from "date-fns/locale";
 import { Check, Star, HelpCircle } from "lucide-react";
 
 interface LeadJourneyTabProps {
+  // `any` kept intentionally: this prop is the raw selectedLead row from
+  // AnewLeads.tsx, which already carries qualification_type/qualified_at
+  // (see LEADS_LIST_COLUMNS) — no separate shared Lead interface exists to
+  // extend here.
   lead: any;
-  hasContact: boolean;
   hasClient: boolean;
-  contactCreatedAt: string | null;
   clientCreatedAt: string | null;
   interactionCount: number;
   dealCount: number;
@@ -14,16 +16,26 @@ interface LeadJourneyTabProps {
 }
 
 export function LeadJourneyTab({
-  lead, hasContact, hasClient, contactCreatedAt, clientCreatedAt,
+  lead, hasClient, clientCreatedAt,
   interactionCount, dealCount, dealValue,
 }: LeadJourneyTabProps) {
+  const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
+
+  // qualification_type (SQL/MQL) is sticky and orthogonal to status — once
+  // set it survives later status changes, so it's shown as a suffix on the
+  // "Qualificado" node rather than tied to the live status value.
+  const qualificationSuffix =
+    lead.qualification_type === "sql" ? " · SQL"
+    : lead.qualification_type === "mql" ? " · MQL"
+    : "";
+
   const steps = [
     {
       key: "lead",
       label: "Lead",
       date: lead.created_at,
       completed: true,
-      current: !hasContact && !hasClient,
+      current: !isNegotiatingOrLater && !hasClient,
     },
     {
       key: "contacted",
@@ -35,16 +47,16 @@ export function LeadJourneyTab({
     {
       key: "qualified",
       label: "Qualificado",
-      date: lead.status === "qualified" || lead.status === "converted" ? lead.updated_at : null,
-      completed: lead.status === "qualified" || lead.status === "converted" || hasContact,
-      current: lead.status === "qualified" && !hasContact,
+      date: lead.status === "qualified" || isNegotiatingOrLater ? lead.updated_at : null,
+      completed: lead.status === "qualified" || isNegotiatingOrLater || hasClient,
+      current: lead.status === "qualified" && !isNegotiatingOrLater && !hasClient,
     },
     {
-      key: "contact",
-      label: "Contacto",
-      date: contactCreatedAt,
-      completed: hasContact,
-      current: hasContact && !hasClient,
+      key: "negotiation",
+      label: "Em Negociação",
+      date: isNegotiatingOrLater ? lead.updated_at : null,
+      completed: isNegotiatingOrLater,
+      current: lead.status === "negotiation" && !hasClient,
     },
     {
       key: "client",
@@ -55,8 +67,8 @@ export function LeadJourneyTab({
     },
   ];
 
-  const leadToContactDays = hasContact && contactCreatedAt
-    ? differenceInDays(new Date(contactCreatedAt), new Date(lead.created_at))
+  const leadToContactDays = isNegotiatingOrLater
+    ? differenceInDays(new Date(lead.updated_at), new Date(lead.created_at))
     : null;
 
   return (
@@ -88,6 +100,11 @@ export function LeadJourneyTab({
               <p className="text-[10px] text-muted-foreground">
                 {step.date ? format(new Date(step.date), "dd/MM/yyyy", { locale: pt }) : "—"}
               </p>
+              {step.key === "qualified" && step.date && (
+                <p className="text-[10px] text-muted-foreground/80">
+                  {step.label} — {format(new Date(step.date), "dd/MM/yyyy", { locale: pt })}{qualificationSuffix}
+                </p>
+              )}
             </div>
             {i < steps.length - 1 && (
               <div className={`flex-1 h-0.5 mx-2 ${
@@ -103,7 +120,7 @@ export function LeadJourneyTab({
         <div className="rounded-lg bg-gradient-to-r from-primary/5 to-purple-500/5 border p-4 text-center">
           <p className="text-sm text-muted-foreground">
             {leadToContactDays !== null && (
-              <><strong className="text-foreground">{leadToContactDays} dias</strong> de Lead a Contacto · </>
+              <><strong className="text-foreground">{leadToContactDays} dias</strong> de Lead a Negociação · </>
             )}
             <strong className="text-foreground">{interactionCount} interacções</strong> registadas
             {dealCount > 0 && (

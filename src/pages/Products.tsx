@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { z } from "zod";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
+import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
 import ProductPricesDialog from "@/components/ProductPricesDialog";
@@ -16,6 +18,18 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+
+const productSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  barcode: z.string().trim().max(100, "O código de barras deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  status: z.string().trim().min(1, "O estado é obrigatório."),
+  category_id: z.string().optional().or(z.literal("")),
+  subcategory_id: z.string().optional().or(z.literal("")),
+  brand_id: z.string().optional().or(z.literal("")),
+  product_type: z.enum(["sale", "purchase", "both"]),
+});
 
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
 const getAllOrgIds = (sel: any): string[] => {
@@ -39,9 +53,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -110,6 +136,8 @@ export default function Products() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [importReport, setImportReport] = useState<{
     inserted: number;
     updated: number;
@@ -118,6 +146,8 @@ export default function Products() {
     warnings: string[];
   } | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [editingCell, setEditingCell] = useState<{productId: string; field: string} | null>(null);
   const [editingValue, setEditingValue] = useState<string>("");
   const [pricesDialogOpen, setPricesDialogOpen] = useState(false);
@@ -153,7 +183,8 @@ export default function Products() {
     brand_id: "",
     product_type: "sale", // "sale", "purchase", or "both"
   });
-  
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
     companyId: activeCompany?.id || "",
@@ -164,6 +195,14 @@ export default function Products() {
     levelSelections: [],
   });
   const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>(defaultOrgSelection);
+
+  // Reset organizationSelection whenever the active company changes so a stale org ID
+  // cannot survive a company switch and end up written to a different org's product.
+  useEffect(() => {
+    setOrganizationSelection(defaultOrgSelection());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // defaultOrgSelection closes over activeCompany; activeCompany?.id is the only trigger needed.
+  }, [activeCompany?.id]);
 
   const [priceFormData, setPriceFormData] = useState<PriceFormData>({
     purchase: 0,
@@ -252,8 +291,9 @@ export default function Products() {
 
   const loadProducts = useCallback(async (pageNum: number, reset: boolean = false, orgIds?: string[]) => {
     const filters = filtersRef.current;
-    // Use passed orgIds, fallback to descendantIds state, then single activeCompanyId
-    const effectiveOrgIds = orgIds ?? (descendantIds.length > 0 ? descendantIds : (filters.activeCompanyId ? [filters.activeCompanyId] : []));
+    // Use passed orgIds, fallback to descendantIdsRef (stable ref avoids recreating callback on every company change),
+    // then single activeCompanyId
+    const effectiveOrgIds = orgIds ?? (descendantIdsRef.current.length > 0 ? descendantIdsRef.current : (filters.activeCompanyId ? [filters.activeCompanyId] : []));
     
     if (reset) {
       setLoading(true);
@@ -379,7 +419,8 @@ export default function Products() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [t, toast, descendantIds]);
+  // descendantIds intentionally omitted — read via descendantIdsRef to keep the callback stable
+  }, [t, toast]);
 
   const loadMetadata = useCallback(async () => {
     // Wait for descendant IDs to resolve before loading metadata
@@ -423,9 +464,7 @@ export default function Products() {
             .order("name");
         })();
       } else {
-        brandsPromise = Promise.resolve(
-          supabase.from("brands").select("id, name, organization_id").order("name")
-        );
+        brandsPromise = Promise.resolve({ data: [], error: null });
       }
 
       // Fetch organizations as tree from active company
@@ -477,7 +516,7 @@ export default function Products() {
           return { data: allOrgs, error: null };
         })();
       } else {
-        companiesPromise = Promise.resolve(supabase.from("anew_organizations").select("id, name, type"));
+        companiesPromise = Promise.resolve({ data: [], error: null });
       }
 
       // Load suppliers (filtered by org)
@@ -500,7 +539,9 @@ export default function Products() {
         categoriesQuery,
         brandsPromise,
         companiesPromise,
-        supabase.from("uom").select("id, code, description").eq("is_active", true).order("code"),
+        activeCompany?.id
+          ? supabase.from("uom").select("id, code, description").eq("is_active", true).or(`organization_id.eq.${activeCompany.id},organization_id.is.null`).order("code")
+          : Promise.resolve({ data: [], error: null }),
         suppliersPromise,
       ]);
 
@@ -515,8 +556,13 @@ export default function Products() {
       setCompanies(companiesRes.data || []);
     } catch (error: any) {
       console.error("Failed to load metadata:", error);
+      toast({
+        title: t('products.toast.metadataError') || "Erro ao carregar metadados",
+        description: error.message,
+        variant: "destructive",
+      });
     }
-  }, [activeCompany?.id, userType, descendantIds]);
+  }, [activeCompany?.id, userType, descendantIds, t, toast]);
 
   const loadData = useCallback(async () => {
     setPage(0);
@@ -529,22 +575,36 @@ export default function Products() {
     tableName: "products",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_product",
+    bulkDeleteRpc: "rpc_bulk_delete_product",
+    bulkOrgRpc: "rpc_bulk_org_product",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
-  // Trigger reload when filters change - use separate effect from loadProducts
+  // Trigger reload when filters change or when descendantIds resolve after a company switch.
+  // descendantIds (state) is the single trigger for company-switch reloads; loadProducts is
+  // intentionally omitted from the dep array because it is now stable (reads via ref).
   useEffect(() => {
-    if (activeCompany?.id && descendantIds.length === 0) return; // Wait for descendant IDs to resolve
+    // Wait for the hierarchy effect to resolve descendant IDs before loading.
+    // When activeCompany is set but descendantIds is still empty, the hierarchy
+    // fetch is still in-flight — skip until it resolves.
+    if (activeCompany?.id && descendantIds.length === 0) return;
     setPage(0);
     setHasMore(true);
     loadProducts(0, true, descendantIds);
-  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds, loadProducts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // loadProducts is stable (dep array is [t, toast]); descendantIds is the intentional trigger
+    // for company switches; the filter values are read via filtersRef inside loadProducts.
+  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
 
   // Load metadata separately (only when company changes)
   useEffect(() => {
     loadMetadata();
   }, [loadMetadata]);
 
-  // Infinite scroll observer
+  // Infinite scroll observer — descendantIds is included so the callback always uses the current
+  // org tree after a company switch, preventing stale-closure loads from a previous company.
   useEffect(() => {
     if (loading) return;
 
@@ -568,10 +628,28 @@ export default function Products() {
         observerRef.current.disconnect();
       }
     };
-  }, [loading, hasMore, loadingMore, page, loadProducts]);
+  }, [loading, hasMore, loadingMore, page, loadProducts, descendantIds]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = productSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t('common.error'), description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     // Category and organization are optional - they may not exist yet
 
@@ -587,177 +665,118 @@ export default function Products() {
       // Determine the primary organization - use selected or active company
       const primaryOrgId = getPrimaryOrgId(organizationSelection) || activeCompany?.id || null;
 
-      const productData: any = {
-        sku: formData.sku,
-        name: formData.name,
-        status: formData.status,
-        is_active: true,
-        is_sellable: formData.product_type === "sale" || formData.product_type === "both",
-        is_purchasable: formData.product_type === "purchase" || formData.product_type === "both",
-        category_id: formData.category_id || null,
-        subcategory_id: formData.subcategory_id || null,
-        organization_id: primaryOrgId,
-        uom_id: priceFormData.uom_id || null,
-      };
+      await withAuditContext(supabase, businessUserId, async () => {
 
-      if (formData.description) productData.description = formData.description;
-      if (formData.barcode) productData.barcode = formData.barcode;
-      if (formData.brand_id) productData.brand_id = formData.brand_id;
+      const isSellable = formData.product_type === "sale" || formData.product_type === "both";
+      const isPurchasable = formData.product_type === "purchase" || formData.product_type === "both";
 
-      let productId: string;
-
-      if (editingProduct) {
-        // Update existing product
-        const { error } = await supabase
-          .from("products")
-          .update(productData)
-          .eq("id", editingProduct.id);
-
-        if (error) throw error;
-        productId = editingProduct.id;
-
-        // Update organization associations - delete old ones and insert new
-        await supabase
-          .from("product_organizations")
-          .delete()
-          .eq("product_id", editingProduct.id);
-
-        toast({
-          title: t('products.toast.updateSuccess'),
-        });
-      } else {
-        // Create new product — created_by must be anew_users.id (fail-closed)
-        productData.created_by = businessUserId;
-        const { data: newProduct, error } = await supabase
-          .from("products")
-          .insert(productData)
-          .select("id")
-          .single();
-
-        if (error) throw error;
-        productId = newProduct.id;
-
-        toast({
-          title: t('products.toast.createSuccess'),
-        });
-      }
-
-      // Insert organization associations - ALWAYS include primaryOrgId
+      // Build the unique org set exactly like the FE did before: {primaryOrgId} ∪ selection.
       const uniqueOrgIds = new Set<string>();
-      
-      // Always add the primary organization if it exists
       if (primaryOrgId) {
         uniqueOrgIds.add(primaryOrgId);
       }
-      
-      // Add all org IDs from selection
       getAllOrgIds(organizationSelection).forEach(id => uniqueOrgIds.add(id));
-      
-      // Create associations for all unique organizations
-      if (uniqueOrgIds.size > 0) {
-        const orgAssociations = Array.from(uniqueOrgIds).map((orgId) => ({
-          product_id: productId,
-          organization_id: orgId,
-          created_by: businessUserId,
-        }));
+      const allOrgIds = Array.from(uniqueOrgIds);
 
-        const { error: assocError } = await supabase
-          .from("product_organizations")
-          .insert(orgAssociations);
-
-        if (assocError) throw assocError;
-      }
-
-      // Save prices
+      // Reduce prices to only the entries the FE would have written (value > 0).
       const priceTypes: Array<{ type: 'purchase' | 'retail' | 'wholesale' | 'distributor', value: number }> = [
         { type: 'purchase', value: priceFormData.purchase },
         { type: 'retail', value: priceFormData.retail },
         { type: 'wholesale', value: priceFormData.wholesale },
         { type: 'distributor', value: priceFormData.distributor },
       ];
+      const pricesPayload = priceTypes
+        .filter(({ value }) => value && value > 0)
+        .map(({ type, value }) => ({
+          price_type: type,
+          price: value,
+          currency: priceFormData.currency,
+          vat_rate: priceFormData.vat_rate,
+        }));
 
-      for (const { type, value } of priceTypes) {
-        if (value && value > 0) {
-          // Check if price exists
-          const { data: existingPrice } = await supabase
-            .from('product_prices')
-            .select('id')
-            .eq('product_id', productId)
-            .eq('price_type', type)
-            .maybeSingle();
-
-          const priceData = {
-            product_id: productId,
-            price_type: type as 'purchase' | 'retail' | 'wholesale' | 'distributor',
-            price: value,
-            currency: priceFormData.currency as 'EUR' | 'USD' | 'GBP',
-            vat_rate: priceFormData.vat_rate,
-            created_by: businessUserId
-          };
-
-          if (existingPrice) {
-            await supabase.from('product_prices').update(priceData).eq('id', existingPrice.id);
-          } else {
-            await supabase.from('product_prices').insert(priceData);
-          }
-        }
-      }
-
-      // Delete removed attributes
-      const currentAttributeIds = attributeFormData.map(av => av.attribute_id);
-      const { data: existingAttrs } = await supabase
-        .from('product_attribute_values')
-        .select('id, attribute_id')
-        .eq('product_id', productId);
-      
-      if (existingAttrs) {
-        const toDelete = existingAttrs.filter(ea => !currentAttributeIds.includes(ea.attribute_id));
-        for (const del of toDelete) {
-          await supabase.from('product_attribute_values').delete().eq('id', del.id);
-        }
-      }
-
-      // Save attributes
-      for (const av of attributeFormData) {
-        const valueData: any = {
-          product_id: productId,
-          attribute_id: av.attribute_id
+      // Reduce attribute values into the column already resolved by value_type,
+      // matching the FE's switch exactly.
+      const attributeValuesPayload = attributeFormData.map((av) => {
+        const row: { attribute_id: string; value_text?: string | null; value_number?: number | null; value_bool?: boolean } = {
+          attribute_id: av.attribute_id,
         };
-
         switch (av.attribute?.value_type) {
           case 'text':
           case 'string':
           case 'list':
-            valueData.value_text = av.value_text || null;
+            row.value_text = av.value_text || null;
             break;
           case 'number':
-            valueData.value_number = av.value_number || null;
+            row.value_number = av.value_number || null;
             break;
           case 'boolean':
-            valueData.value_bool = av.value_bool || false;
+            row.value_bool = av.value_bool || false;
             break;
         }
+        return row;
+      });
 
-        // Check if attribute value exists
-        const { data: existingAttr } = await supabase
-          .from('product_attribute_values')
-          .select('id')
-          .eq('product_id', productId)
-          .eq('attribute_id', av.attribute_id)
-          .maybeSingle();
-
-        if (existingAttr) {
-          await supabase.from('product_attribute_values').update(valueData).eq('id', existingAttr.id);
-        } else {
-          await supabase.from('product_attribute_values').insert(valueData);
+      if (editingProduct) {
+        if (!activeCompany?.id) {
+          throw new Error(t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.");
         }
+        const updateProductArgs: Database['public']['Functions']['rpc_update_product']['Args'] = {
+          p_id: editingProduct.id,
+          p_active_org_id: activeCompany.id,
+          p_sku: formData.sku,
+          p_name: formData.name,
+          p_status: formData.status,
+          p_is_sellable: isSellable,
+          p_is_purchasable: isPurchasable,
+          p_category_id: formData.category_id || null,
+          p_subcategory_id: formData.subcategory_id || null,
+          p_primary_org_id: primaryOrgId,
+          p_uom_id: priceFormData.uom_id || null,
+          p_description: formData.description || null,
+          p_barcode: formData.barcode || null,
+          p_brand_id: formData.brand_id || null,
+          p_supplier_id: selectedSupplierId || null,
+          p_all_org_ids: allOrgIds,
+          p_prices: pricesPayload,
+          p_attribute_ids: attributeFormData.map(av => av.attribute_id),
+          p_attribute_values: attributeValuesPayload,
+        };
+        const { error } = await supabase.rpc('rpc_update_product', updateProductArgs);
+
+        if (error) throw error;
+
+        toast({
+          title: t('products.toast.updateSuccess'),
+        });
+      } else {
+        const createProductArgs: Database['public']['Functions']['rpc_create_product']['Args'] = {
+          p_sku: formData.sku,
+          p_name: formData.name,
+          p_status: formData.status,
+          p_is_sellable: isSellable,
+          p_is_purchasable: isPurchasable,
+          p_category_id: formData.category_id || null,
+          p_subcategory_id: formData.subcategory_id || null,
+          p_primary_org_id: primaryOrgId,
+          p_uom_id: priceFormData.uom_id || null,
+          p_description: formData.description || null,
+          p_barcode: formData.barcode || null,
+          p_brand_id: formData.brand_id || null,
+          p_supplier_id: selectedSupplierId || null,
+          p_all_org_ids: allOrgIds,
+          p_prices: pricesPayload,
+          p_attribute_values: attributeValuesPayload,
+        };
+        const { error } = await supabase.rpc('rpc_create_product', createProductArgs);
+
+        if (error) throw error;
+
+        toast({
+          title: t('products.toast.createSuccess'),
+        });
       }
 
-      // Save supplier on the product directly
-      await supabase
-        .from("products")
-        .update({ supplier_id: selectedSupplierId || null })
-        .eq("id", productId);
+      }); // end withAuditContext
 
       handleCloseDialog(false);
       loadData();
@@ -771,23 +790,24 @@ export default function Products() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t('products.toast.deleteConfirm'))) return;
+    // Delegate to the AlertDialog — this function is called after confirmation
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
-      const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
-      const businessUserId = await resolveBusinessUserId(user.id);
 
-      // Soft delete - mark as deleted instead of removing
-      const { error } = await supabase
-        .from("products")
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-          deleted_by: businessUserId,
-        })
-        .eq("id", id);
+      // Soft delete via a single-transaction RPC (rpc_delete_product) instead of
+      // withAuditContext's two separate PostgREST calls — the same audit-source
+      // bug already found and fixed for user delete (set_audit_context does not
+      // survive across two independent transactions).
+      const { error } = await supabase.rpc("rpc_delete_product", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
+      });
 
       if (error) throw error;
 
@@ -803,6 +823,8 @@ export default function Products() {
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -908,7 +930,15 @@ export default function Products() {
         tenantId = orgData?.id || "";
       }
       
-      setOrganizationSelection(defaultOrgSelection());
+      setOrganizationSelection({
+        tenantId,
+        companyId: primaryCompanyId,
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: secondaryIds,
+        selectedCompanyIds: companyIds.length > 0 ? companyIds : (primaryCompanyId ? [primaryCompanyId] : []),
+        levelSelections: [],
+      });
 
       // Set supplier directly from product
       setSelectedSupplierId(product.supplier_id || "");
@@ -936,6 +966,7 @@ export default function Products() {
       brand_id: "",
       product_type: "sale",
     });
+    setFieldErrors({});
     setOrganizationSelection(defaultOrgSelection());
     setPriceFormData({
       purchase: 0,
@@ -1016,7 +1047,17 @@ export default function Products() {
 
       // Set organization
       const orgIds = (lastProduct as any).product_organizations?.map((po: any) => po.organization_id) || [];
-      setOrganizationSelection(defaultOrgSelection());
+      const copyPrimaryOrgId = orgIds.length > 0 ? orgIds[0] : (lastProduct.organization_id || activeCompany?.id || "");
+      const copySecondaryIds = orgIds.slice(1);
+      setOrganizationSelection({
+        tenantId: copyPrimaryOrgId,
+        companyId: copyPrimaryOrgId,
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: copySecondaryIds,
+        selectedCompanyIds: orgIds.length > 0 ? orgIds : (copyPrimaryOrgId ? [copyPrimaryOrgId] : []),
+        levelSelections: [],
+      });
 
       // Set prices
       const loadedPrices: PriceFormData = {
@@ -1087,16 +1128,27 @@ export default function Products() {
   };
 
   const saveInlineEdit = async (productId: string, field: string) => {
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      cancelEditing();
+      return;
+    }
     if (field === "category_id") {
       // For category, we don't need to check if value is empty as it's a select
       try {
-        const updateData: any = {};
+        const businessUserId = await resolveCurrentBusinessUserId();
+        if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+        const updateData: Partial<Record<string, unknown>> = {};
         updateData[field] = editingValue;
 
-        const { error } = await supabase
-          .from("products")
-          .update(updateData)
-          .eq("id", productId);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("products")
+            .update(updateData)
+            .eq("id", productId)
+            .eq("organization_id", activeCompany?.id)
+        );
 
         if (error) throw error;
 
@@ -1123,13 +1175,19 @@ export default function Products() {
     }
 
     try {
-      const updateData: any = {};
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      const updateData: Partial<Record<string, unknown>> = {};
       updateData[field] = editingValue.trim();
 
-      const { error } = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", productId);
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("products")
+          .update(updateData)
+          .eq("id", productId)
+          .eq("organization_id", activeCompany?.id)
+      );
 
       if (error) throw error;
 
@@ -1190,13 +1248,18 @@ export default function Products() {
 
   // Bulk category update handler
   const handleBulkCategoryUpdate = async () => {
-    if (!bulkCategoryId) return;
+    if (!bulkCategoryId || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
-      const { error } = await supabase
-        .from("products")
-        .update({ category_id: bulkCategoryId, subcategory_id: null })
-        .in("id", selectedIds);
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ category_id: bulkCategoryId, subcategory_id: null })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1217,13 +1280,18 @@ export default function Products() {
 
   // Bulk subcategory update handler
   const handleBulkSubcategoryUpdate = async () => {
-    if (!bulkSubcategoryId) return;
+    if (!bulkSubcategoryId || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
-      const { error } = await supabase
-        .from("products")
-        .update({ subcategory_id: bulkSubcategoryId })
-        .in("id", selectedIds);
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ subcategory_id: bulkSubcategoryId })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1245,16 +1313,21 @@ export default function Products() {
 
   // Bulk product type update handler
   const handleBulkProductTypeUpdate = async () => {
-    if (!bulkProductType) return;
+    if (!bulkProductType || !activeCompany?.id) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
       const selectedIds = Array.from(bulkActions.selectedIds);
       const isSellable = bulkProductType === "sale" || bulkProductType === "both";
       const isPurchasable = bulkProductType === "purchase" || bulkProductType === "both";
-      
-      const { error } = await supabase
-        .from("products")
-        .update({ is_sellable: isSellable, is_purchasable: isPurchasable })
-        .in("id", selectedIds);
+
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ is_sellable: isSellable, is_purchasable: isPurchasable })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1275,13 +1348,19 @@ export default function Products() {
 
   const handleBulkUomUpdate = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
-    if (selectedIds.length === 0 || !bulkUomId) return;
+    if (selectedIds.length === 0 || !bulkUomId || !activeCompany?.id) return;
 
     try {
-      const { error } = await supabase
-        .from("products")
-        .update({ uom_id: bulkUomId })
-        .in("id", selectedIds);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      const { error } = await withAuditContext(supabase, businessUserId, async () =>
+        await supabase
+          .from("products")
+          .update({ uom_id: bulkUomId })
+          .in("id", selectedIds)
+          .eq("organization_id", activeCompany.id)
+      );
       if (error) throw error;
       toast({
         title: t('products.toast.success'),
@@ -1302,7 +1381,7 @@ export default function Products() {
 
   const handleExport = async () => {
     try {
-      await exportProductsToCSV(products, activeCompany?.id);
+      await exportProductsToCSV(filteredProducts, activeCompany?.id);
       toast({
         title: t('products.toast.exportSuccess'),
         description: t('products.toast.exportSuccessDesc'),
@@ -1321,14 +1400,22 @@ export default function Products() {
     const files = inputEl.files;
     if (!files || files.length === 0) return;
 
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      inputEl.value = '';
+      return;
+    }
+
     let totalNew = 0;
     let totalUpdated = 0;
     let totalPrices = 0;
     let totalSkipped = 0;
     const allSkipped: { line: number; sku: string; reason: string; file: string }[] = [];
     const allWarnings: string[] = [];
-    let failedFiles: string[] = [];
+    const failedFiles: string[] = [];
 
+    setIsImporting(true);
+    setImportProgress(null);
     try {
     for (const file of Array.from(files)) {
       try {
@@ -1363,6 +1450,7 @@ export default function Products() {
             let q = supabase
               .from("products")
               .select("id, sku, organization_id")
+              .eq("organization_id", activeCompany?.id)
               .range(from, from + PAGE_SIZE - 1);
             q = trashed ? q.not("deleted_at", "is", null) : q.is("deleted_at", null);
             const { data, error } = await q;
@@ -1385,10 +1473,12 @@ export default function Products() {
           }
         });
 
-        // Busca todas as categorias visíveis (sem filtro de org) para o import
-        const { data: allCategoriesForImport } = await supabase
+        // Busca categorias da org activa para o import
+        const { data: allCategoriesForImport, error: categoriesForImportError } = await supabase
           .from("product_categories")
-          .select("id, name, parent_id, organization_id");
+          .select("id, name, parent_id, organization_id")
+          .eq("organization_id", activeCompany?.id);
+        if (categoriesForImportError) throw categoriesForImportError;
         const allCats = allCategoriesForImport || categories;
         const parentCategories = allCats.filter((c: any) => !c.parent_id);
         const subcategories = allCats.filter((c: any) => c.parent_id);
@@ -1429,115 +1519,111 @@ export default function Products() {
           }
           return chunks;
         };
-        const CHUNK_SIZE = 50;
+        const CHUNK_SIZE = 200;
 
-        // Upsert new products in chunks (handles SKUs hidden by RLS that already exist in DB).
-        // onConflict matches the unique constraint products_sku_organization_id_key.
-        // Returning rows lets us reconcile JS-generated UUIDs with the actual DB ids
-        // (different when an upsert hit an existing row).
-        const upsertedProducts: { id: string; sku: string; organization_id: string | null }[] = [];
-        if (productsToInsert.length > 0) {
-          for (const chunk of chunkArray(productsToInsert, CHUNK_SIZE)) {
-            // Strip JS-generated `id` from payload: when upsert hits an existing row,
-            // including `id` would attempt to change the PK and violate FKs from
-            // dependent tables (product_attribute_price_ranges, etc.) whose CASCADE
-            // only covers DELETE, not PK UPDATE.
-            const sanitizedChunk = chunk.map(({ id, ...rest }: any) => rest);
-            const { data: upserted, error: prodError } = await supabase
-              .from("products")
-              .upsert(sanitizedChunk, { onConflict: "sku,organization_id", ignoreDuplicates: false })
-              .select("id, sku, organization_id");
-            if (prodError) throw prodError;
-            if (upserted) upsertedProducts.push(...upserted);
-          }
-        }
-
-        // Map (sku::orgId) -> real DB id, so we can detect when upsert merged into an existing row.
-        const skuLookup = new Map<string, string>();
-        upsertedProducts.forEach(p => {
-          skuLookup.set(`${p.sku.toLowerCase()}::${p.organization_id ?? ''}`, p.id);
+        // Build the RPC's per-row shape from parseProductsCSV's flat, correlated
+        // arrays. Prices are correlated back to their product purely via the
+        // shared `product_id` key that parseProductsCSV already stamps onto both
+        // the product row (JS-generated uuid for inserts, real id for updates)
+        // and every price row — no extra correlation logic needed.
+        const pricesByProductId = new Map<string, any[]>();
+        [...pricesToInsert, ...pricesToUpdate].forEach((p: any) => {
+          const list = pricesByProductId.get(p.product_id) || [];
+          list.push({
+            price_type: p.price_type,
+            price: p.price,
+            currency: p.currency,
+            vat_rate: p.vat_rate,
+            valid_from: p.valid_from ?? null,
+            valid_to: p.valid_to ?? null,
+          });
+          pricesByProductId.set(p.product_id, list);
         });
 
-        // Reconcile prices/associations: redirect to real id and treat conflicts as updates.
-        const reconciledPricesToInsert: any[] = [];
-        const additionalPricesToUpdate: any[] = [];
-        const conflictedJsIds = new Set<string>();
-        const jsIdToRealId = new Map<string, string>();
-        for (const original of productsToInsert) {
-          const key = `${(original.sku || '').toLowerCase()}::${original.organization_id ?? ''}`;
-          const realId = skuLookup.get(key) || original.id;
-          jsIdToRealId.set(original.id, realId);
-          const isConflict = realId !== original.id;
-          if (isConflict) conflictedJsIds.add(original.id);
-
-          pricesToInsert
-            .filter((p: any) => p.product_id === original.id)
-            .forEach((p: any) => {
-              if (isConflict) additionalPricesToUpdate.push({ ...p, product_id: realId });
-              else reconciledPricesToInsert.push(p);
-            });
-        }
-
-        // Update existing products (matched in JS via existingProducts)
-        for (const product of productsToUpdate) {
-          const { id, ...updateData } = product;
-          const { error } = await supabase.from("products").update(updateData).eq("id", id);
-          if (error) throw error;
-        }
-
-        // Insert prices for genuinely new products
-        if (reconciledPricesToInsert.length > 0) {
-          for (const chunk of chunkArray(reconciledPricesToInsert, CHUNK_SIZE)) {
-            const { error: priceError } = await supabase.from("product_prices").insert(chunk);
-            if (priceError) throw priceError;
-          }
-        }
-
-        // Update prices for existing products: delete old then insert the CSV values.
-        // Includes both JS-detected updates AND upsert-detected conflicts.
-        const normalizedPricesToUpdate = [...pricesToUpdate, ...additionalPricesToUpdate].map((price: any) => ({
-          ...price,
-          created_by: businessUserIdForCsv,
+        const insertRows = productsToInsert.map((p: any) => ({
+          mode: 'insert',
+          id: null,
+          sku: p.sku,
+          name: p.name,
+          description: p.description ?? null,
+          barcode: p.barcode ?? null,
+          status: p.status,
+          category_id: p.category_id ?? null,
+          subcategory_id: p.subcategory_id ?? null,
+          brand_id: p.brand_id ?? null,
+          supplier_id: p.supplier_id ?? null,
+          organization_id: p.organization_id ?? null,
+          is_sellable: p.is_sellable,
+          is_purchasable: p.is_purchasable,
+          prices: pricesByProductId.get(p.id) || [],
         }));
-        const updateProductIds = [...new Set(normalizedPricesToUpdate.map((p: any) => p.product_id))];
 
-        for (const productId of updateProductIds) {
-          const { error: deletePriceError } = await supabase
-            .from("product_prices")
-            .delete()
-            .eq("product_id", productId);
-
-          if (deletePriceError) throw deletePriceError;
-        }
-
-        if (normalizedPricesToUpdate.length > 0) {
-          for (const chunk of chunkArray(normalizedPricesToUpdate, CHUNK_SIZE)) {
-            const { error: priceUpdateError } = await supabase
-              .from("product_prices")
-              .insert(chunk);
-
-            if (priceUpdateError) throw priceUpdateError;
-          }
-        }
-
-        // Remap associations to real DB ids (handles upsert merging into existing rows)
-        // and upsert idempotently so both new and existing products end up linked.
-        const remappedAssociations = companyAssociations.map(a => ({
-          ...a,
-          product_id: jsIdToRealId.get(a.product_id) || a.product_id,
+        const updateRows = productsToUpdate.map((p: any) => ({
+          mode: 'update',
+          id: p.id,
+          sku: p.sku,
+          name: p.name,
+          description: p.description ?? null,
+          barcode: p.barcode ?? null,
+          status: p.status,
+          category_id: p.category_id ?? null,
+          subcategory_id: p.subcategory_id ?? null,
+          brand_id: p.brand_id ?? null,
+          supplier_id: p.supplier_id ?? null,
+          organization_id: p.organization_id ?? null,
+          is_sellable: p.is_sellable,
+          is_purchasable: p.is_purchasable,
+          prices: pricesByProductId.get(p.id) || [],
         }));
-        if (remappedAssociations.length > 0) {
-          for (const chunk of chunkArray(remappedAssociations, CHUNK_SIZE)) {
-            const { error: assocError } = await supabase
-              .from("product_organizations")
-              .upsert(chunk, { onConflict: "product_id,organization_id", ignoreDuplicates: true });
-            if (assocError) throw assocError;
-          }
+
+        const allRows = [...insertRows, ...updateRows];
+
+        // Single SECURITY DEFINER RPC per chunk: for EACH product it does the
+        // products write + price reconciliation + org association upsert inside
+        // one transaction, emitting exactly one fn_manual_audit_log call per
+        // product (see rpc_bulk_import_products migration). This replaces the
+        // old fragmented per-table bulk upsert/insert calls that could split a
+        // single imported product's own creation across up to 3 audit rows.
+        //
+        // The RPC isolates each row in its own SAVEPOINT server-side: a bad
+        // row is rolled back individually and reported in the returned array
+        // as { status: 'error', sku, error }, while every other valid row in
+        // the same chunk still commits. We surface those per-row failures
+        // through the existing skippedLines/report UI instead of aborting.
+        const chunks = chunkArray(allRows, CHUNK_SIZE);
+        let insertedInFile = 0;
+        let updatedInFile = 0;
+        let failedInFile = 0;
+        for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+          const chunk = chunks[chunkIdx];
+          setImportProgress({ current: chunkIdx + 1, total: chunks.length });
+          const { data: rpcResults, error: rpcError } = await supabase.rpc('rpc_bulk_import_products', {
+            p_org_id: activeCompany?.id,
+            p_products: chunk,
+          });
+          if (rpcError) throw rpcError;
+
+          (rpcResults || []).forEach((result: any) => {
+            if (result.status === 'error') {
+              const failedRow = chunk[result.input_index];
+              failedInFile += 1;
+              allSkipped.push({
+                line: 0,
+                sku: result.sku || failedRow?.sku || '(desconhecido)',
+                reason: result.error || 'Erro desconhecido ao importar linha',
+                file: file.name,
+              });
+            } else if (result.action === 'insert') {
+              insertedInFile += 1;
+            } else if (result.action === 'update') {
+              updatedInFile += 1;
+            }
+          });
         }
 
-        totalNew += stats.newCount;
-        totalUpdated += stats.updateCount;
-        totalSkipped += stats.skippedCount;
+        totalNew += insertedInFile;
+        totalUpdated += updatedInFile;
+        totalSkipped += stats.skippedCount + failedInFile;
         totalPrices += pricesToInsert.length;
       } catch (error: any) {
         failedFiles.push(`${file.name}: ${error.message}`);
@@ -1579,6 +1665,8 @@ export default function Products() {
       // Otherwise re-selecting the same filename does NOT trigger onChange,
       // and edits to the same CSV would appear to be ignored.
       inputEl.value = '';
+      setIsImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -1612,19 +1700,36 @@ export default function Products() {
             <PageFAQSheet pageKey="catalog.products" />
           </div>
           <div className="flex gap-2">
+            <PermissionGate permission="products.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Eliminados
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="products.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('products.export')}
               </Button>
             </PermissionGate>
             <PermissionGate permission="products.import">
-              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+              <Dialog
+                open={importDialogOpen}
+                onOpenChange={(o) => {
+                  // Block closing the dialog while an import is in-flight —
+                  // writes may still be committing chunk by chunk.
+                  if (isImporting) return;
+                  setImportDialogOpen(o);
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button variant="outline">
                     <Upload className="mr-2 h-4 w-4" /> {t('products.import')}
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent
+                  hideClose={isImporting}
+                  onInteractOutside={(e) => { if (isImporting) e.preventDefault(); }}
+                  onEscapeKeyDown={(e) => { if (isImporting) e.preventDefault(); }}
+                >
                   <DialogHeader>
                     <DialogTitle>{t('products.importDialog.title')}</DialogTitle>
                   </DialogHeader>
@@ -1633,7 +1738,7 @@ export default function Products() {
                       {t('products.importDialog.description')}
                     </p>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                      <Button variant="outline" size="sm" onClick={handleDownloadTemplate} disabled={isImporting}>
                         <Download className="mr-2 h-4 w-4" />
                         {t('products.downloadTemplate') || "Template"}
                       </Button>
@@ -1643,7 +1748,16 @@ export default function Products() {
                       accept=".xlsx,.xls,.csv"
                       multiple
                       onChange={handleImport}
+                      disabled={isImporting}
                     />
+                    {isImporting && (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {importProgress
+                          ? `A importar produtos... lote ${importProgress.current}/${importProgress.total}`
+                          : 'A importar produtos...'}
+                      </div>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>
@@ -1781,7 +1895,9 @@ export default function Products() {
                       onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                       required
                       disabled={!!editingProduct}
+                      className={fieldErrors.sku ? "border-destructive" : ""}
                     />
+                    {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="barcode">{t('products.form.barcode')}</Label>
@@ -1789,7 +1905,9 @@ export default function Products() {
                       id="barcode"
                       value={formData.barcode}
                       onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                      className={fieldErrors.barcode ? "border-destructive" : ""}
                     />
+                    {fieldErrors.barcode && <p className="text-sm text-destructive">{fieldErrors.barcode}</p>}
                   </div>
                 </div>
 
@@ -1800,7 +1918,9 @@ export default function Products() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -1810,7 +1930,9 @@ export default function Products() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2215,12 +2337,17 @@ export default function Products() {
                                value={editingValue}
                                onValueChange={(value) => {
                                  setEditingValue(value);
-                                 // Save immediately when selecting
+                                 // Save immediately when selecting — scoped to activeCompany to match all other write paths
+                                 if (!activeCompany?.id) {
+                                   cancelEditing();
+                                   return;
+                                 }
                                  const updateData = { category_id: value };
                                  supabase
                                    .from("products")
                                    .update(updateData)
                                    .eq("id", product.id)
+                                   .eq("organization_id", activeCompany.id)
                                    .then(({ error }) => {
                                      if (error) {
                                        toast({
@@ -2348,7 +2475,7 @@ export default function Products() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => handleDelete(product.id)}
+                                onClick={() => setDeleteConfirmId(product.id)}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
@@ -2471,6 +2598,7 @@ export default function Products() {
           open={bulkAttributesDialogOpen}
           onOpenChange={setBulkAttributesDialogOpen}
           selectedProductIds={Array.from(bulkActions.selectedIds)}
+          companyId={activeCompany?.id || ""}
           onSuccess={() => {
             bulkActions.clearSelection();
             loadData();
@@ -2606,6 +2734,37 @@ export default function Products() {
           </DialogContent>
         </Dialog>
       </div>
+
+      {/* Delete confirmation AlertDialog — replaces window.confirm for accessibility */}
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('products.toast.deleteConfirm') || "Eliminar produto?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('products.toast.deleteConfirmDesc') || "Esta ação não pode ser desfeita. O produto será marcado como eliminado."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deleteConfirmId) handleDelete(deleteConfirmId); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t('common.delete') || "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="products"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product"
+        labelColumns={["sku", "name"]}
+        onRestored={loadData}
+      />
     </>
   );
 }

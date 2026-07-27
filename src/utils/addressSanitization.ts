@@ -47,7 +47,7 @@ function cleanText(raw: string | null, { min = 2, max = 255 } = {}): string | nu
 
 function cleanPostal(raw: string | null): string | null {
   if (raw == null) return null;
-  let s = String(raw).replace(/\s+/g, "").replace(/-+/g, "-").trim();
+  const s = String(raw).replace(/\s+/g, "").replace(/-+/g, "-").trim();
   if (!s) return null;
   if (REJECTED_TOKENS.has(s.toLowerCase())) return null;
   if (!POSTAL_RE.test(s)) return null;

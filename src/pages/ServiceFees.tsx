@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -46,6 +47,8 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useCompany } from "@/contexts/CompanyContext";
+import { serviceFeeSchema } from "@/lib/validations";
+import { PermissionGate } from "@/components/PermissionGate";
 
 interface ServiceFeeType {
   id: string;
@@ -61,6 +64,7 @@ interface ServiceFeeType {
   application_mode: "SUBTOTAL" | "LINE_PERCENTAGE";
   apply_vat: boolean;
   vat_rate: number;
+  is_deleted?: boolean;
   anew_organizations?: { name: string };
   services?: { name: string };
 }
@@ -80,6 +84,8 @@ export default function ServiceFees() {
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   const [formData, setFormData] = useState({
@@ -106,7 +112,7 @@ export default function ServiceFees() {
     if (isSystemAdmin) {
       fetchAllCompanies();
     }
-  }, [isSystemAdmin, userCompanies, activeCompany?.id]);
+  }, [isSystemAdmin, userCompanies, activeCompany?.id, showDeleted]);
 
   // Load services when company changes
   useEffect(() => {
@@ -166,6 +172,7 @@ export default function ServiceFees() {
           services(name)
         `)
         .in("organization_id", orgIds)
+        .eq("is_deleted", showDeleted)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -226,14 +233,28 @@ export default function ServiceFees() {
       if (!user) throw new Error(t('serviceFees.toast.notAuthenticated'));
 
       // Validation
-      if (!formData.name.trim()) {
+      const amountBeingUsed = formData.calculation_type === "PERCENTAGE" ? formData.percentage : formData.fixed_amount;
+      const feeValidation = serviceFeeSchema.safeParse({
+        name: formData.name,
+        service_id: formData.service_id,
+        amount: amountBeingUsed,
+      });
+      if (!feeValidation.success) {
+        const errors: Record<string, string> = {};
+        feeValidation.error.errors.forEach((err) => {
+          const key = err.path[0]?.toString();
+          if (key === "amount") errors[formData.calculation_type === "PERCENTAGE" ? "percentage" : "fixed_amount"] = err.message;
+          else if (key) errors[key] = err.message;
+        });
+        setFieldErrors(errors);
         toast({
           title: t('serviceFees.toast.nameRequired'),
-          description: t('serviceFees.toast.enterName'),
+          description: feeValidation.error.errors[0]?.message,
           variant: "destructive",
         });
         return;
       }
+      setFieldErrors({});
 
       // Use activeCompany if not set in form (for consistency)
       const companyIdToUse = formData.organization_id || activeCompany?.id;
@@ -297,51 +318,61 @@ export default function ServiceFees() {
         vat_rate: formData.apply_vat ? (parseFloat(formData.vat_rate) || 0) : 0,
       };
 
-      if (editingId) {
-        const { error } = await supabase
-          .from("service_fee_types")
-          .update({
-            ...payload,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingId);
-
-        if (error) throw error;
-
-        toast({
-          title: t('serviceFees.toast.updateSuccess'),
-          description: t('serviceFees.toast.updateSuccessDesc'),
-        });
-      } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
-        const { error } = await supabase
-          .from("service_fee_types")
-          .insert([{
-            ...payload,
-            created_by: businessUserId,
-          }]);
-
-        if (error) throw error;
-
-        toast({
-          title: t('serviceFees.toast.createSuccess'),
-          description: t('serviceFees.toast.createSuccessDesc'),
-        });
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
+        return;
       }
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (editingId) {
+          const { error } = await supabase
+            .from("service_fee_types")
+            .update({
+              ...payload,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingId);
+
+          if (error) throw error;
+
+          toast({
+            title: t('serviceFees.toast.updateSuccess'),
+            description: t('serviceFees.toast.updateSuccessDesc'),
+          });
+        } else {
+          const { error } = await supabase
+            .from("service_fee_types")
+            .insert([{
+              ...payload,
+              created_by: businessUserId,
+            }]);
+
+          if (error) throw error;
+
+          toast({
+            title: t('serviceFees.toast.createSuccess'),
+            description: t('serviceFees.toast.createSuccessDesc'),
+          });
+        }
+      });
 
       setShowDialog(false);
       resetForm();
       fetchFeeTypes();
     } catch (error: any) {
       const isUniqueViolation = error?.code === "23505" || /service_fee_types_one_line_percentage_per_org/i.test(error?.message || "");
+      const isPermissionDenied = /row-level security|row violates/i.test(error?.message || "");
       toast({
-        title: isUniqueViolation ? "Já existe uma taxa por linha activa" : t('serviceFees.toast.saveError'),
+        title: isUniqueViolation
+          ? "Já existe uma taxa por linha activa"
+          : isPermissionDenied
+          ? "Sem permissão"
+          : t('serviceFees.toast.saveError'),
         description: isUniqueViolation
           ? "Esta organização já tem uma taxa de serviço activa com modo 'Percentagem por linha'. Desactive ou apague a existente antes de criar outra."
+          : isPermissionDenied
+          ? "Sem permissão para criar taxas de serviço."
           : error.message,
         variant: "destructive",
       });
@@ -352,10 +383,12 @@ export default function ServiceFees() {
     if (!deleteId) return;
 
     try {
-      const { error } = await supabase
-        .from("service_fee_types")
-        .delete()
-        .eq("id", deleteId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_delete_service_fee_type", {
+        p_id: deleteId,
+      });
 
       if (error) throw error;
 
@@ -376,6 +409,31 @@ export default function ServiceFees() {
     }
   };
 
+  const handleRestore = async (id: string) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_restore_service_fee_type", {
+        p_id: id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: "Taxa de serviço restaurada com sucesso.",
+      });
+
+      fetchFeeTypes();
+    } catch (error: any) {
+      toast({
+        title: t('serviceFees.toast.deleteError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <>
       <div className="container mx-auto p-6 space-y-6">
@@ -386,15 +444,26 @@ export default function ServiceFees() {
               {t('serviceFees.subtitle')}
             </p>
           </div>
-          <Button
-            onClick={() => {
-              resetForm();
-              setShowDialog(true);
-            }}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            {t('serviceFees.newFee')}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "secondary" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+            </Button>
+            <PermissionGate permission="service_fees.create">
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setShowDialog(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                {t('serviceFees.newFee')}
+              </Button>
+            </PermissionGate>
+          </div>
         </div>
 
         <Card>
@@ -407,10 +476,12 @@ export default function ServiceFees() {
               <p className="text-muted-foreground">
                 {t('serviceFees.noFees')}
               </p>
-              <Button onClick={() => { resetForm(); setShowDialog(true); }}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('serviceFees.createFirstFee')}
-              </Button>
+              <PermissionGate permission="service_fees.create">
+                <Button onClick={() => { resetForm(); setShowDialog(true); }}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t('serviceFees.createFirstFee')}
+                </Button>
+              </PermissionGate>
             </div>
           ) : (
             <Table>
@@ -470,20 +541,33 @@ export default function ServiceFees() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleEdit(fee)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setDeleteId(fee.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        {!showDeleted && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => handleEdit(fee)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {showDeleted ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Restaurar"
+                            onClick={() => handleRestore(fee.id)}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteId(fee.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -495,7 +579,7 @@ export default function ServiceFees() {
       </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingId ? t('serviceFees.dialog.editTitle') : t('serviceFees.dialog.newTitle')}
@@ -527,7 +611,9 @@ export default function ServiceFees() {
                   setFormData({ ...formData, name: e.target.value })
                 }
                 placeholder={t('serviceFees.form.namePlaceholder')}
+                className={fieldErrors.name ? "border-destructive" : ""}
               />
+              {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
@@ -631,7 +717,9 @@ export default function ServiceFees() {
                     setFormData({ ...formData, percentage: e.target.value })
                   }
                   placeholder={t('serviceFees.form.percentagePlaceholder')}
+                  className={fieldErrors.percentage ? "border-destructive" : ""}
                 />
+                {fieldErrors.percentage && <p className="text-sm text-destructive">{fieldErrors.percentage}</p>}
               </div>
             ) : (
               <div className="space-y-2">
@@ -646,7 +734,9 @@ export default function ServiceFees() {
                     setFormData({ ...formData, fixed_amount: e.target.value })
                   }
                   placeholder={t('serviceFees.form.fixedAmountPlaceholder')}
+                  className={fieldErrors.fixed_amount ? "border-destructive" : ""}
                 />
+                {fieldErrors.fixed_amount && <p className="text-sm text-destructive">{fieldErrors.fixed_amount}</p>}
               </div>
             )}
 

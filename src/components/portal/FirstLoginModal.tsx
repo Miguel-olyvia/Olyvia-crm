@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { passwordResetSchema } from "@/lib/validations";
 
 interface FirstLoginModalProps {
   open: boolean;
@@ -22,13 +23,9 @@ export function FirstLoginModal({ open, onPasswordChanged }: FirstLoginModalProp
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (password.length < 8) {
-      toast({ title: "Password demasiado curta", description: "A password deve ter pelo menos 8 caracteres.", variant: "destructive" });
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      toast({ title: "Passwords não coincidem", description: "As passwords introduzidas não são iguais.", variant: "destructive" });
+    const validation = passwordResetSchema.safeParse({ password, confirmPassword });
+    if (!validation.success) {
+      toast({ title: "Erro", description: validation.error.issues[0]?.message || "Dados inválidos.", variant: "destructive" });
       return;
     }
 
@@ -47,7 +44,13 @@ export function FirstLoginModal({ open, onPasswordChanged }: FirstLoginModalProp
 
   return (
     <Dialog open={open}>
-      <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent
+        className="sm:max-w-md"
+        hideClose
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <div className="flex items-center gap-2 mb-1">
             <ShieldCheck className="h-5 w-5 text-primary" />

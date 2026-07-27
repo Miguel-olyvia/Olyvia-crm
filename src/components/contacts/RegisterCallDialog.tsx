@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { generateQuotePdfBlob, blobToBase64 } from "@/utils/generateQuotePdfBlob";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { contactCallSchema } from "@/lib/validations";
 
 export interface DealProposalOption {
   id: string;
@@ -191,6 +192,18 @@ export function RegisterCallDialog({
   };
 
   const handleSave = async () => {
+    const validation = contactCallSchema.safeParse({
+      result,
+      sentiment,
+      subject,
+    });
+
+    if (!validation.success) {
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
+      return;
+    }
+
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { format, startOfDay, subDays } from "date-fns";
+import { useQuery } from "@tanstack/react-query";
+import { format, formatDistanceToNow, startOfDay, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
   Area,
@@ -23,7 +24,10 @@ import {
   CalendarRange,
   Clock,
   Filter,
+  Mail,
+  MessageCircle,
   PhoneCall,
+  StickyNote,
   Target,
   TrendingUp,
   UserCheck,
@@ -32,6 +36,7 @@ import {
   Zap,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useEntityIdentity } from "@/hooks/useEntityIdentity";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -40,18 +45,64 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   buildDashboardScopedRpcParams,
+  buildNegotiationScopeFilter,
+  computeMqlToSqlConversionRate,
+  daysBetween,
   deriveCampaignDistribution,
   deriveDashboardKpis,
   deriveLeadsOverTime,
+  deriveMonthlyQualificationTrend,
+  deriveQualificationBreakdown,
   deriveSourceDistribution,
+  deriveStageFunnel,
   deriveStatusDistribution,
+  formatDaysMetric,
+  QUALIFICATION_COLORS,
   getAssigneeIds,
   getComparisonPeriod,
   getDashboardRenderState,
   resolveDashboardDateRange,
+  resolveDashboardScope,
   type DashboardStats,
   type LeadsDashboardQuery,
+  type NegotiationLeadRow,
+  type QualificationHistoryRow,
+  type QualificationLeadRow,
 } from "./leadsDashboardHelpers";
+
+const NEGOTIATION_LIST_LIMIT = 20;
+const ACTIVITY_FEED_LIMIT = 15;
+// Fetches more raw interactions than ACTIVITY_FEED_LIMIT because rows are
+// filtered down afterwards to lead-only entity_ids (entity_interactions is
+// shared across leads/clients/contacts and has no module discriminator).
+const ACTIVITY_FEED_FETCH_LIMIT = 60;
+
+const currencyFormatter = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" });
+
+// Mirrors the icon/label convention already used for entity_interactions in
+// src/components/leads/detail/LeadTimelineTab.tsx (TYPE_CONFIG), scoped down
+// to the interaction types relevant to this aggregated feed.
+const ACTIVITY_TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; label: string }> = {
+  call: { icon: PhoneCall, label: "Chamada" },
+  email: { icon: Mail, label: "Email" },
+  meeting: { icon: Users, label: "Reunião" },
+  whatsapp: { icon: MessageCircle, label: "WhatsApp" },
+  visit: { icon: CalendarIcon, label: "Visita" },
+  note: { icon: StickyNote, label: "Nota" },
+};
+
+function getActivityTypeConfig(interactionType: string | null) {
+  return ACTIVITY_TYPE_CONFIG[interactionType ?? ""] ?? ACTIVITY_TYPE_CONFIG.note;
+}
+
+interface ActivityFeedRow {
+  id: string;
+  entity_id: string | null;
+  interaction_type: string | null;
+  subject: string | null;
+  notes: string | null;
+  interaction_at: string;
+}
 
 interface WorkflowStage {
   id: string;
@@ -77,6 +128,8 @@ interface LeadsDashboardProps {
   campaigns: Campaign[];
   companyId?: string | null;
   query?: LeadsDashboardQuery | null;
+  /** Visible-team user ids for the current viewer, required to replicate TEAM-scope narrowing on the direct negotiation-leads query (the scoped RPC only returns aggregates, not rows). */
+  teamMemberIds?: string[];
 }
 
 function formatMetricValue(value: number | string | null, suffix = ""): string {
@@ -144,9 +197,11 @@ function KPICard({
 }
 
 export function LeadsDashboard(props: LeadsDashboardProps) {
-  const { query } = props;
+  const { query, workflowStages, teamMemberIds } = props;
+  const { getIdentity, resolveEntities } = useEntityIdentity();
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
+  const [dashboardView, setDashboardView] = useState<"leads" | "pipeline">("leads");
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [comparisonStats, setComparisonStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -236,8 +291,274 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     return () => clearInterval(interval);
   }, [query]);
 
+  const negotiationScope = query ? resolveDashboardScope(query) : null;
+  const teamMemberIdsKey = (teamMemberIds ?? []).join(",");
+
+  const {
+    data: negotiationData,
+    isLoading: negotiationLoading,
+    error: negotiationQueryError,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-negotiation",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+      dateRange.from.toISOString(),
+      dateRange.to.toISOString(),
+    ],
+    queryFn: async () => {
+      if (!query) return { rows: [] as NegotiationLeadRow[], totalCount: 0, deals: new Map<string, number>() };
+
+      // Filtered by the same created_at date range the stage funnel above uses
+      // (get_lead_dashboard_stats_scoped's p_date_from/p_date_to), so this list's
+      // count always matches the "Negotiation" bar in the funnel instead of
+      // silently showing a different, unscoped total for the same metric.
+      let negotiationQuery = supabase
+        .from("anew_leads")
+        .select("id, entity_id, assigned_to, updated_at, created_at", { count: "exact" })
+        .eq("organization_id", query.orgId)
+        .eq("status", "negotiation")
+        .is("deleted_at", null)
+        .gte("created_at", dateRange.from.toISOString())
+        .lte("created_at", dateRange.to.toISOString())
+        .order("updated_at", { ascending: true })
+        .range(0, NEGOTIATION_LIST_LIMIT - 1);
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        negotiationQuery = negotiationQuery.or(scopeFilter);
+      }
+
+      const { data, error: negotiationError, count } = await negotiationQuery;
+      if (negotiationError) throw new Error(negotiationError.message || "Erro ao carregar leads em negociação.");
+
+      const rows = (data ?? []) as NegotiationLeadRow[];
+      const leadIds = rows.map((row) => row.id);
+      const dealsByLead = new Map<string, number>();
+
+      if (leadIds.length > 0) {
+        const { data: dealsData, error: dealsError } = await supabase
+          .from("deals")
+          .select("lead_id, value, created_at")
+          .in("lead_id", leadIds)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false });
+
+        if (dealsError) {
+          console.error("Error loading negotiation deal values:", dealsError);
+        } else {
+          (dealsData ?? []).forEach((deal: { lead_id: string | null; value: number | null }) => {
+            if (deal.lead_id && !dealsByLead.has(deal.lead_id)) {
+              dealsByLead.set(deal.lead_id, deal.value ?? 0);
+            }
+          });
+        }
+      }
+
+      return { rows, totalCount: count ?? rows.length, deals: dealsByLead };
+    },
+    enabled: !!query && dashboardView === "pipeline",
+    staleTime: 60_000,
+  });
+
+  // Memoized (not `negotiationData?.rows ?? []`): the `?? []` fallback creates
+  // a brand-new array reference on every render whenever negotiationData is
+  // undefined (the permanent state in the default "Leads" sub-view, since
+  // this query is gated to dashboardView === "pipeline"). That fresh
+  // reference fed straight into a useEffect dependency array below, which
+  // unconditionally called setUsers([]) every time -- an infinite render
+  // loop, since a new [] is never Object.is-equal to the previous state.
+  const negotiationRows = useMemo(() => negotiationData?.rows ?? [], [negotiationData]);
+  const negotiationTotalCount = negotiationData?.totalCount ?? 0;
+
+  const {
+    data: activityRows,
+    isLoading: activityLoading,
+    error: activityQueryError,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-activity",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+    ],
+    queryFn: async (): Promise<ActivityFeedRow[]> => {
+      if (!query) return [];
+
+      const { data: interactionsData, error: interactionsError } = await supabase
+        .from("entity_interactions")
+        .select("id, entity_id, interaction_type, subject, notes, interaction_at")
+        .eq("organization_id", query.orgId)
+        .order("interaction_at", { ascending: false })
+        .limit(ACTIVITY_FEED_FETCH_LIMIT);
+
+      if (interactionsError) {
+        throw new Error(interactionsError.message || "Erro ao carregar atividade recente.");
+      }
+
+      const candidateInteractions = (interactionsData ?? []) as ActivityFeedRow[];
+      const candidateEntityIds = Array.from(
+        new Set(candidateInteractions.map((row) => row.entity_id).filter((id): id is string => Boolean(id))),
+      );
+
+      if (candidateEntityIds.length === 0) return [];
+
+      // entity_interactions is shared across leads/clients/contacts and has no
+      // module discriminator column, so lead-only rows are determined by
+      // inner-joining the candidate entity_ids against anew_leads, applying
+      // the same organization + ORG/TEAM/OWNED scoping used elsewhere in this
+      // dashboard (buildNegotiationScopeFilter).
+      let leadsQuery = supabase
+        .from("anew_leads")
+        .select("entity_id")
+        .eq("organization_id", query.orgId)
+        .is("deleted_at", null)
+        .in("entity_id", candidateEntityIds);
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        leadsQuery = leadsQuery.or(scopeFilter);
+      }
+
+      const { data: leadsData, error: leadsError } = await leadsQuery;
+      if (leadsError) {
+        throw new Error(leadsError.message || "Erro ao carregar atividade recente.");
+      }
+
+      const leadEntityIds = new Set(
+        (leadsData ?? []).map((row) => (row as { entity_id: string | null }).entity_id).filter(Boolean),
+      );
+
+      return candidateInteractions
+        .filter((row) => row.entity_id && leadEntityIds.has(row.entity_id))
+        .slice(0, ACTIVITY_FEED_LIMIT);
+    },
+    enabled: !!query && dashboardView === "pipeline",
+    staleTime: 60_000,
+  });
+
+  // Memoized for the same reason as negotiationRows above -- see that comment.
+  const activityFeedRows = useMemo(() => activityRows ?? [], [activityRows]);
+
+  // MQL -> SQL conversion KPI: sourced from anew_entity_history's dedicated
+  // qualification_changed feed (see migration 20261110480000), not from the
+  // scoped RPC. RLS on anew_entity_history (is_entity_in_user_scope) already
+  // narrows visibility for the caller, so no extra org/scope filter is added
+  // here beyond the change_type + period filters.
+  const {
+    data: qualificationHistoryRows,
+    isLoading: qualificationHistoryLoading,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-qualification-history",
+      query?.orgId,
+      dateRange.from.toISOString(),
+      dateRange.to.toISOString(),
+    ],
+    queryFn: async (): Promise<QualificationHistoryRow[]> => {
+      if (!query) return [];
+
+      const { data, error: historyError } = await supabase
+        .from("anew_entity_history")
+        .select("entity_id, new_value, created_at")
+        .eq("change_type", "qualification_changed")
+        .gte("created_at", dateRange.from.toISOString())
+        .lte("created_at", dateRange.to.toISOString())
+        .order("created_at", { ascending: true });
+
+      if (historyError) {
+        throw new Error(historyError.message || "Erro ao carregar histórico de qualificação.");
+      }
+
+      return (data ?? []) as QualificationHistoryRow[];
+    },
+    enabled: !!query && dashboardView === "leads",
+    staleTime: 60_000,
+  });
+
+  const mqlToSqlConversion = useMemo(
+    () => computeMqlToSqlConversionRate(qualificationHistoryRows ?? []),
+    [qualificationHistoryRows],
+  );
+
+  // Monthly SQL vs MQL cohort trend: derived client-side from anew_leads
+  // (qualification_type/qualified_at), scoped the same way as the
+  // negotiation-leads query above (buildNegotiationScopeFilter), since the
+  // scoped RPC does not return a monthly breakdown of qualification.
+  const {
+    data: qualificationTrendRows,
+    isLoading: qualificationTrendLoading,
+  } = useQuery({
+    queryKey: [
+      "leads-dashboard-qualification-trend",
+      query?.orgId,
+      negotiationScope,
+      query?.anewUserId,
+      query?.authUserId,
+      teamMemberIdsKey,
+    ],
+    queryFn: async (): Promise<QualificationLeadRow[]> => {
+      if (!query) return [];
+
+      let trendQuery = supabase
+        .from("anew_leads")
+        .select("qualification_type, qualified_at")
+        .eq("organization_id", query.orgId)
+        .is("deleted_at", null)
+        .not("qualified_at", "is", null)
+        .order("qualified_at", { ascending: true });
+
+      const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
+      if (scopeFilter) {
+        trendQuery = trendQuery.or(scopeFilter);
+      }
+
+      const { data, error: trendError } = await trendQuery;
+      if (trendError) {
+        throw new Error(trendError.message || "Erro ao carregar tendência de qualificação.");
+      }
+
+      return (data ?? []) as QualificationLeadRow[];
+    },
+    enabled: !!query && dashboardView === "leads",
+    staleTime: 60_000,
+  });
+
+  const qualificationTrend = useMemo(
+    () => deriveMonthlyQualificationTrend(qualificationTrendRows ?? []),
+    [qualificationTrendRows],
+  );
+
   useEffect(() => {
-    const assigneeIds = getAssigneeIds(stats);
+    const entityIds = negotiationRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
+    if (entityIds.length > 0) {
+      resolveEntities(entityIds);
+    }
+    // resolveEntities is stable-ish (memoized on identityMap) but must not be
+    // re-run on every identityMap change, only when the negotiation rows change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [negotiationRows]);
+
+  useEffect(() => {
+    const entityIds = activityFeedRows.map((row) => row.entity_id).filter((id): id is string => Boolean(id));
+    if (entityIds.length > 0) {
+      resolveEntities(entityIds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activityFeedRows]);
+
+  useEffect(() => {
+    const statsAssigneeIds = getAssigneeIds(stats);
+    const negotiationAssigneeIds = negotiationRows
+      .map((row) => row.assigned_to)
+      .filter((id): id is string => Boolean(id));
+    const assigneeIds = Array.from(new Set([...statsAssigneeIds, ...negotiationAssigneeIds]));
+
     if (!query || assigneeIds.length === 0) {
       setUsers([]);
       return;
@@ -264,7 +585,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     return () => {
       cancelled = true;
     };
-  }, [query, stats]);
+  }, [query, stats, negotiationRows]);
 
   const renderState = getDashboardRenderState({
     query,
@@ -295,10 +616,20 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   );
 
   const statusDistribution = useMemo(() => deriveStatusDistribution(stats), [stats]);
+  const qualificationBreakdown = useMemo(() => deriveQualificationBreakdown(stats), [stats]);
+  const qualificationBreakdownTotal = useMemo(
+    () => qualificationBreakdown.reduce((sum, entry) => sum + entry.value, 0),
+    [qualificationBreakdown],
+  );
   const leadsByCampaign = useMemo(() => deriveCampaignDistribution(stats), [stats]);
   const sourceDistribution = useMemo(() => deriveSourceDistribution(stats), [stats]);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
   const comparisonPeriod = useMemo(() => getComparisonPeriod(dateRange), [dateRange]);
+  const stageFunnel = useMemo(() => deriveStageFunnel(stats, workflowStages), [stats, workflowStages]);
+  const maxFunnelCount = useMemo(
+    () => Math.max(1, ...stageFunnel.map((stage) => stage.count)),
+    [stageFunnel],
+  );
 
   return (
     <div className="space-y-6">
@@ -394,6 +725,25 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </CardContent>
       </Card>
 
+      <div className="flex items-center gap-1">
+        <Button
+          variant={dashboardView === "leads" ? "default" : "outline"}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setDashboardView("leads")}
+        >
+          Leads
+        </Button>
+        <Button
+          variant={dashboardView === "pipeline" ? "default" : "outline"}
+          size="sm"
+          className="h-8 text-xs"
+          onClick={() => setDashboardView("pipeline")}
+        >
+          Pipeline
+        </Button>
+      </div>
+
       {renderState === "missing_query" &&
         renderPlaceholderCard(
           "Configuração do dashboard em falta",
@@ -425,13 +775,13 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </Card>
       )}
 
-      {renderState === "ready" && (
+      {renderState === "ready" && dashboardView === "leads" && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
             <KPICard
               title="Total Pipeline Ativo"
               value={formatMetricValue(kpis.totalLeads)}
-              subtitle={`leads em pipeline · ${formatMetricValue(kpis.leadsToday)} hoje`}
+              subtitle={`leads em pipeline no período · ${formatMetricValue(kpis.leadsToday)} hoje`}
               icon={Users}
               trend={compareMode && kpis.totalGrowth !== null && kpis.totalGrowth !== 0 ? (kpis.totalGrowth > 0 ? "up" : "down") : undefined}
               trendValue={compareMode ? kpis.totalGrowth : null}
@@ -466,7 +816,48 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               subtitle={`${formatMetricValue(kpis.cohortConversions)} dos ${formatMetricValue(kpis.leadsInPeriod)} novos converteram`}
               icon={Target}
             />
+            <KPICard
+              title="Conversão MQL → SQL"
+              value={
+                qualificationHistoryLoading
+                  ? "--"
+                  : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")
+              }
+              subtitle={
+                mqlToSqlConversion.totalMql > 0
+                  ? `${mqlToSqlConversion.convertedToSql} de ${mqlToSqlConversion.totalMql} MQL viraram SQL`
+                  : "Sem leads MQL no período"
+              }
+              icon={Zap}
+            />
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Tempo médio até qualificar</CardTitle>
+              <CardDescription>Dias entre a criação do lead e a primeira classificação SQL/MQL</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">SQL</p>
+                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.sql }}>
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.sql)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">MQL</p>
+                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.mql }}>
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.mql)}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Global</p>
+                  <p className="text-xl font-bold">{formatDaysMetric(stats?.avg_days_to_qualify?.overall)}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {Object.keys(kpis.leadsByAssignee).length > 0 && (
             <Card>
@@ -604,6 +995,34 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                     </div>
                   ))}
                 </div>
+
+                {qualificationBreakdown.length > 0 && (
+                  <div className="mt-4 border-t pt-3">
+                    <p className="text-xs font-medium text-muted-foreground mb-2">
+                      Classificação SQL / MQL (independente do estado)
+                    </p>
+                    <div className="space-y-1.5">
+                      {qualificationBreakdown.map((item) => {
+                        const widthPercent =
+                          qualificationBreakdownTotal > 0
+                            ? Math.max(2, Math.round((item.value / qualificationBreakdownTotal) * 100))
+                            : 0;
+                        return (
+                          <div key={item.key} className="flex items-center gap-2 text-xs">
+                            <span className="w-24 shrink-0 text-muted-foreground">{item.label}</span>
+                            <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${widthPercent}%`, backgroundColor: item.color }}
+                              />
+                            </div>
+                            <span className="w-8 shrink-0 text-right font-medium">{item.value}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -680,6 +1099,43 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
             </Card>
           </div>
 
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Tendência mensal SQL vs MQL</CardTitle>
+              <CardDescription>Novas qualificações por mês (coorte por data de qualificação)</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="h-[250px]">
+                {qualificationTrendLoading && qualificationTrend.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    A carregar tendência…
+                  </div>
+                ) : qualificationTrend.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    Sem dados de qualificação para o período.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={qualificationTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="monthLabel" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--background))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                        }}
+                      />
+                      <Bar dataKey="sql" stackId="qualification" fill={QUALIFICATION_COLORS.sql} name="SQL" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="mql" stackId="qualification" fill={QUALIFICATION_COLORS.mql} name="MQL" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-200/50 dark:border-blue-800/50">
               <CardContent className="p-4 flex items-center gap-3">
@@ -729,6 +1185,143 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               </CardContent>
             </Card>
           </div>
+        </>
+      )}
+
+      {renderState === "ready" && dashboardView === "pipeline" && (
+        <>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Pipeline</CardTitle>
+              <CardDescription>Leads por fase do funil, na ordem configurada da organização</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {stageFunnel.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Sem fases de funil configuradas.</div>
+              ) : (
+                <div className="space-y-3">
+                  {stageFunnel.map((stage) => {
+                    const widthPercent = Math.max(4, Math.round((stage.count / maxFunnelCount) * 100));
+                    return (
+                      <div key={stage.id} className="space-y-1">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="font-medium">{stage.label}</span>
+                          <span className="text-muted-foreground">{stage.count}</span>
+                        </div>
+                        <div className="h-3 rounded-full bg-muted overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${widthPercent}%`, backgroundColor: stage.color }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Leads em Negociação</CardTitle>
+              <CardDescription>
+                {negotiationTotalCount > 0
+                  ? `${negotiationTotalCount} lead${negotiationTotalCount === 1 ? "" : "s"} atualmente na fase de negociação`
+                  : "Fase de negociação"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {negotiationLoading && negotiationRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">A carregar leads em negociação…</div>
+              ) : negotiationQueryError ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Não foi possível carregar os leads em negociação.
+                </div>
+              ) : negotiationRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Sem leads em negociação de momento.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {negotiationRows.map((row) => {
+                    const identity = getIdentity(row.entity_id);
+                    const assignee = row.assigned_to ? userMap.get(row.assigned_to) : null;
+                    const dealValue = negotiationData?.deals.get(row.id);
+                    const days = daysBetween(row.updated_at);
+                    return (
+                      <div
+                        key={row.id}
+                        className="flex items-center justify-between gap-4 rounded-lg border px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{identity?.display_name || "Lead sem nome"}</p>
+                          <p className="text-xs text-muted-foreground truncate">
+                            {assignee?.name || "Sem responsável"} · há {days} {days === 1 ? "dia" : "dias"} nesta fase
+                          </p>
+                        </div>
+                        {dealValue !== undefined && dealValue !== null && (
+                          <Badge variant="secondary" className="shrink-0 font-normal">
+                            {currencyFormatter.format(dealValue)}
+                          </Badge>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {negotiationTotalCount > negotiationRows.length && (
+                    <p className="text-xs text-muted-foreground text-center pt-2">
+                      +{negotiationTotalCount - negotiationRows.length} mais
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Atividade Recente</CardTitle>
+              <CardDescription>Chamadas, emails e notas mais recentes nos leads</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {activityLoading && activityFeedRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">A carregar atividade recente…</div>
+              ) : activityQueryError ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Não foi possível carregar a atividade recente.
+                </div>
+              ) : activityFeedRows.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-6 text-center">
+                  Sem atividade recente registada.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {activityFeedRows.map((row) => {
+                    const identity = getIdentity(row.entity_id);
+                    const typeConfig = getActivityTypeConfig(row.interaction_type);
+                    const Icon = typeConfig.icon;
+                    const description = row.subject?.trim() || row.notes?.trim() || typeConfig.label;
+                    return (
+                      <div key={row.id} className="flex items-start gap-3 rounded-lg border px-3 py-2">
+                        <div className="mt-0.5 h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
+                          <Icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">
+                            {identity?.display_name || "Lead sem nome"}
+                          </p>
+                          <p className="text-xs text-muted-foreground truncate">{description}</p>
+                        </div>
+                        <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDistanceToNow(new Date(row.interaction_at), { addSuffix: true, locale: pt })}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </div>

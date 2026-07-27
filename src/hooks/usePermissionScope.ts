@@ -3,16 +3,17 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCachedAuthUser } from "@/lib/cachedAuth";
 import { permissionSetHas } from "@/lib/permissionAliases";
 import { useCompany } from "@/contexts/CompanyContext";
+import { type AnewUserId, type AuthUserId, asAnewUserId, asAuthUserId } from "@/types/identity";
 
 export type ScopeLevel = "NONE" | "OWNED" | "TEAM" | "ORG";
 
 const SCOPE_HIERARCHY: Record<ScopeLevel, number> = { NONE: 0, OWNED: 1, TEAM: 2, ORG: 3 };
 
 /** Resolve all team member IDs where user is leader (via organization_teams) */
-async function resolveSubordinates(anewUserId: string, activeOrgId?: string): Promise<string[]> {
+async function resolveSubordinates(anewUserId: AnewUserId, activeOrgId?: string): Promise<AnewUserId[]> {
   if (!activeOrgId) return [];
 
-  const { data: ledTeams } = await (supabase as any)
+  const { data: ledTeams } = await supabase
     .from("organization_teams")
     .select("id")
     .eq("organization_id", activeOrgId)
@@ -20,8 +21,8 @@ async function resolveSubordinates(anewUserId: string, activeOrgId?: string): Pr
 
   if (!ledTeams || ledTeams.length === 0) return [];
 
-  const teamIds = ledTeams.map((t: any) => t.id);
-  const { data: teamMembers } = await (supabase as any)
+  const teamIds = ledTeams.map(t => t.id);
+  const { data: teamMembers } = await supabase
     .from("organization_team_members")
     .select("user_id")
     .in("team_id", teamIds);
@@ -29,21 +30,21 @@ async function resolveSubordinates(anewUserId: string, activeOrgId?: string): Pr
   if (!teamMembers) return [];
 
   return teamMembers
-    .map((m: any) => m.user_id as string)
-    .filter((id: string) => id !== anewUserId);
+    .map(m => asAnewUserId(m.user_id))
+    .filter(id => id !== anewUserId);
 }
 
 export function usePermissionScope() {
   const { activeCompany } = useCompany();
   const [loading, setLoading] = useState(true);
-  const [anewUserId, setAnewUserId] = useState<string | null>(null);
-  const [authUserId, setAuthUserId] = useState<string | null>(null);
+  const [anewUserId, setAnewUserId] = useState<AnewUserId | null>(null);
+  const [authUserId, setAuthUserId] = useState<AuthUserId | null>(null);
   const [isFullAccess, setIsFullAccess] = useState(false);
   const [anewRoleCode, setAnewRoleCode] = useState<string | null>(null);
   const [scopeOverrides, setScopeOverrides] = useState<Map<string, ScopeLevel>>(new Map());
   const [rolePermissions, setRolePermissions] = useState<Set<string>>(new Set());
   const [binaryPermissions, setBinaryPermissions] = useState<Set<string>>(new Set());
-  const [teamMemberIds, setTeamMemberIds] = useState<string[]>([]);
+  const [teamMemberIds, setTeamMemberIds] = useState<AnewUserId[]>([]);
 
   const loadPermissions = useCallback(async () => {
     if (!activeCompany) { setLoading(false); return; }
@@ -51,18 +52,19 @@ export function usePermissionScope() {
       setLoading(true);
       const { data: { user } } = await getCachedAuthUser();
       if (!user) { setLoading(false); return; }
-      setAuthUserId(user.id);
+      setAuthUserId(asAuthUserId(user.id));
 
-      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      const { data: anewUser } = await supabase.from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
       if (!anewUser) { setLoading(false); return; }
-      setAnewUserId(anewUser.id);
+      const typedAnewUserId = asAnewUserId(anewUser.id);
+      setAnewUserId(typedAnewUserId);
 
       // System admins are global roles: they must keep full access even
       // when the active organization is not one of their direct memberships.
       // Super admins only have access to their own organizations.
       const { data: globalMemberships } = await supabase.from("anew_memberships")
         .select("role_id")
-        .eq("user_id", anewUser.id)
+        .eq("user_id", typedAnewUserId)
         .eq("status", "active");
 
       const globalRoleIds = [...new Set((globalMemberships || []).map(m => m.role_id).filter(Boolean))];
@@ -85,7 +87,7 @@ export function usePermissionScope() {
       const orgChain: string[] = [activeCompany.id];
       let currentOrgId = activeCompany.id;
       for (let i = 0; i < 10; i++) {
-        const { data: parentLink } = await (supabase as any)
+        const { data: parentLink } = await supabase
           .from("anew_hierarchy")
           .select("parent_org_id")
           .eq("child_org_id", currentOrgId)
@@ -98,7 +100,7 @@ export function usePermissionScope() {
       // Find ALL active memberships across ancestor chain
       const { data: memberships } = await supabase.from("anew_memberships")
         .select("id, role_id, organization_id")
-        .eq("user_id", anewUser.id)
+        .eq("user_id", typedAnewUserId)
         .in("organization_id", orgChain)
         .eq("status", "active");
 
@@ -157,10 +159,10 @@ export function usePermissionScope() {
         permCodes.length > 0
           ? supabase.from("anew_permissions").select("code, supports_scope").in("code", permCodes).eq("supports_scope", false)
           : Promise.resolve({ data: [] as { code: string; supports_scope: boolean }[] }),
-        hasTeamScope ? resolveSubordinates(anewUser.id, activeCompany?.id) : Promise.resolve([] as string[]),
+        hasTeamScope ? resolveSubordinates(typedAnewUserId, activeCompany?.id) : Promise.resolve([] as AnewUserId[]),
       ]);
 
-      setBinaryPermissions(new Set((binaryDefsRes.data || []).map((p: any) => p.code)));
+      setBinaryPermissions(new Set((binaryDefsRes.data || []).map(p => p.code)));
       setTeamMemberIds(subs);
     } catch (error) { console.error("Error loading permission scopes:", error); } finally { setLoading(false); }
   }, [activeCompany]);

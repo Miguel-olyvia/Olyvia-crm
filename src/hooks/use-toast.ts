@@ -1,4 +1,5 @@
 import * as React from "react";
+import * as Sentry from "@sentry/react";
 
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 
@@ -136,6 +137,16 @@ type Toast = Omit<ToasterToast, "id">;
 
 function toast({ ...props }: Toast) {
   const id = genId();
+
+  // "destructive" toasts are the de facto error-surfacing convention across the
+  // app's ~100 scattered try/catch call sites — piping them to Sentry gives
+  // near-total error coverage without touching each call site individually.
+  if (props.variant === "destructive") {
+    Sentry.captureMessage(
+      typeof props.title === "string" ? props.title : "Destructive toast",
+      { level: "error", extra: { description: typeof props.description === "string" ? props.description : undefined } }
+    );
+  }
 
   const update = (props: ToasterToast) =>
     dispatch({

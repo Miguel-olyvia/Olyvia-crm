@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { ChevronDown, Search, HelpCircle, Sparkles, BookOpen, MessageSquareText } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ChevronDown, Search, HelpCircle, BookOpen, MessageSquareText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -17,18 +15,10 @@ interface FAQ {
   id: string;
   question: string;
   answer: string;
-  tags: string[];
-  is_featured: boolean;
-  category_id: string;
+  category: string;
+  icon: string;
   language_code: string;
   sort_order: number;
-}
-
-interface FAQCategory {
-  id: string;
-  name: string;
-  slug: string;
-  icon: string;
 }
 
 const iconMap: Record<string, string> = {
@@ -53,25 +43,12 @@ export function PageFAQSheet({ pageKey }: PageFAQSheetProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedFaqs, setExpandedFaqs] = useState<Set<string>>(new Set());
 
-  const { data: categories = [] } = useQuery({
-    queryKey: ["faq-categories"],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("faq_categories")
-        .select("*")
-        .eq("is_active", true)
-        .order("sort_order");
-      if (error) throw error;
-      return data as FAQCategory[];
-    },
-  });
-
   const { data: faqs = [], isLoading } = useQuery({
     queryKey: ["faqs-page", pageKey, language],
     queryFn: async () => {
-      const { data: localizedFaqs, error } = await (supabase as any)
-        .from("faqs")
-        .select("*")
+      const { data: localizedFaqs, error } = await supabase
+        .from("help_faqs")
+        .select("id, question, answer, category, icon, language_code, sort_order")
         .eq("is_active", true)
         .eq("page_key", pageKey)
         .eq("language_code", language)
@@ -86,9 +63,9 @@ export function PageFAQSheet({ pageKey }: PageFAQSheetProps) {
       // Fallback: try Portuguese first, then English
       const fallbackLangs = language === "pt" ? ["en"] : ["pt", "en"];
       for (const fallbackLang of fallbackLangs) {
-        const { data: fallbackFaqs, error: fbError } = await (supabase as any)
-          .from("faqs")
-          .select("*")
+        const { data: fallbackFaqs, error: fbError } = await supabase
+          .from("help_faqs")
+          .select("id, question, answer, category, icon, language_code, sort_order")
           .eq("is_active", true)
           .eq("page_key", pageKey)
           .eq("language_code", fallbackLang)
@@ -117,18 +94,11 @@ export function PageFAQSheet({ pageKey }: PageFAQSheetProps) {
     const query = searchQuery.toLowerCase();
     return (
       faq.question.toLowerCase().includes(query) ||
-      faq.answer.toLowerCase().includes(query) ||
-      faq.tags?.some((tag) => tag.toLowerCase().includes(query))
+      faq.answer.toLowerCase().includes(query)
     );
   });
 
-  const getCategoryIcon = (categoryId: string) => {
-    const category = categories.find((c) => c.id === categoryId);
-    return iconMap[category?.icon || "help-circle"] || "❓";
-  };
-
-  const featuredFaqs = filteredFaqs.filter((faq) => faq.is_featured);
-  const otherFaqs = filteredFaqs.filter((faq) => !faq.is_featured);
+  const getCategoryIcon = (faq: FAQ) => iconMap[faq.icon] || iconMap[faq.category] || "❓";
 
   return (
     <>
@@ -174,49 +144,18 @@ export function PageFAQSheet({ pageKey }: PageFAQSheetProps) {
               <p>{t("faq.noResults")}</p>
             </div>
           ) : (
-            <div className="space-y-6">
-              {featuredFaqs.length > 0 && !searchQuery && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                    <Sparkles className="h-4 w-4 text-amber-500" />
-                    {t("faq.featured")}
-                  </div>
-                  <div className="grid gap-2">
-                    {featuredFaqs.map((faq) => (
-                      <FAQItem
-                        key={faq.id}
-                        faq={faq}
-                        isExpanded={expandedFaqs.has(faq.id)}
-                        onToggle={() => toggleFaq(faq.id)}
-                        categoryIcon={getCategoryIcon(faq.category_id)}
-                        featured
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {(searchQuery ? filteredFaqs : otherFaqs).length > 0 && (
-                <div className="space-y-3">
-                  {!searchQuery && featuredFaqs.length > 0 && (
-                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                      <HelpCircle className="h-4 w-4" />
-                      {t("faq.allQuestions")}
-                    </div>
-                  )}
-                  <div className="grid gap-2">
-                    {(searchQuery ? filteredFaqs : otherFaqs).map((faq) => (
-                      <FAQItem
-                        key={faq.id}
-                        faq={faq}
-                        isExpanded={expandedFaqs.has(faq.id)}
-                        onToggle={() => toggleFaq(faq.id)}
-                        categoryIcon={getCategoryIcon(faq.category_id)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+            <div className="space-y-3">
+              <div className="grid gap-2">
+                {filteredFaqs.map((faq) => (
+                  <FAQItem
+                    key={faq.id}
+                    faq={faq}
+                    isExpanded={expandedFaqs.has(faq.id)}
+                    onToggle={() => toggleFaq(faq.id)}
+                    categoryIcon={getCategoryIcon(faq)}
+                  />
+                ))}
+              </div>
             </div>
           )}
         </SheetContent>
@@ -230,13 +169,11 @@ function FAQItem({
   isExpanded,
   onToggle,
   categoryIcon,
-  featured = false,
 }: {
   faq: FAQ;
   isExpanded: boolean;
   onToggle: () => void;
   categoryIcon: string;
-  featured?: boolean;
 }) {
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
@@ -244,9 +181,7 @@ function FAQItem({
         <div
           className={cn(
             "flex items-start gap-3 p-3 rounded-lg text-left transition-colors hover:bg-muted/50",
-            isExpanded && "bg-muted/50",
-            featured &&
-              "border border-amber-200/50 bg-amber-50/30 hover:bg-amber-50/50 dark:bg-amber-950/20 dark:hover:bg-amber-950/30 dark:border-amber-800/30"
+            isExpanded && "bg-muted/50"
           )}
         >
           <span className="text-lg shrink-0 mt-0.5">{categoryIcon}</span>
@@ -271,15 +206,6 @@ function FAQItem({
           <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
             {faq.answer}
           </p>
-          {faq.tags && faq.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-3">
-              {faq.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-xs">
-                  {tag}
-                </Badge>
-              ))}
-            </div>
-          )}
         </div>
       </CollapsibleContent>
     </Collapsible>

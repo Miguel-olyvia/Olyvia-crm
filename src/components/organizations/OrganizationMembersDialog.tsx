@@ -32,6 +32,9 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { UserCombobox } from "@/components/users/UserCombobox";
 import { MemberEditDialog } from "./MemberEditDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { resolveOrgTenantIds } from "@/lib/orgSubtree";
+import { withAuditContext } from "@/utils/auditContext";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Member {
   id: string;
@@ -44,7 +47,7 @@ interface Member {
     id: string;
     name: string;
     email: string;
-  };
+  } | null;
 }
 
 interface AnewUser {
@@ -70,7 +73,7 @@ export function OrganizationMembersDialog({
 }: OrganizationMembersDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.manage");
+  const canManage = hasPermission("organizations.edit");
   const [members, setMembers] = useState<Member[]>([]);
   const [allUsers, setAllUsers] = useState<AnewUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,34 +141,60 @@ export function OrganizationMembersDialog({
 
   const fetchMembers = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
+    // anew_memberships and anew_users have no FK between them, so an embedded
+    // PostgREST join (profile:anew_users!anew_memberships_user_id_anew_fkey(...))
+    // always fails with PGRST200 ("Could not find a relationship..."). Fetch
+    // memberships and users separately and join in JS — same pattern used in
+    // src/pages/UsersNew.tsx for this exact table pair.
+    const { data: membershipsData, error: membershipsError } = await (supabase as any)
       .from("anew_memberships")
-      .select(`
-        id,
-        user_id,
-        relationship_type,
-        role_id,
-        profile:anew_users!anew_memberships_user_id_anew_fkey(id, name, email)
-      `)
+      .select("id, user_id, relationship_type, role_id")
       .eq("organization_id", organizationId)
       .eq("status", "active");
 
-    if (!error && data) {
-      const roleIds = [...new Set((data || []).map((m: any) => m.role_id).filter(Boolean))];
-      let rolesMap: Record<string, { name: string; code: string }> = {};
-      if (roleIds.length > 0) {
-        const { data: roles } = await (supabase as any)
-          .from("anew_roles")
-          .select("id, name, code")
-          .in("id", roleIds);
-        rolesMap = Object.fromEntries((roles || []).map((r: any) => [r.id, { name: r.name, code: r.code }]));
-      }
-      setMembers((data || []).map((m: any) => ({
-        ...m,
-        role_name: rolesMap[m.role_id]?.name || null,
-        role_code: rolesMap[m.role_id]?.code || null,
-      })) as Member[]);
+    if (membershipsError) {
+      toast.error(membershipsError.message);
+      setLoading(false);
+      return;
     }
+
+    const userIds = [...new Set((membershipsData || []).map((m: any) => m.user_id).filter(Boolean))];
+    let profilesMap: Record<string, { id: string; name: string; email: string }> = {};
+    if (userIds.length > 0) {
+      const { data: usersData, error: usersError } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name, email")
+        .in("id", userIds);
+
+      if (usersError) {
+        toast.error(usersError.message);
+        setLoading(false);
+        return;
+      }
+      profilesMap = Object.fromEntries((usersData || []).map((u: any) => [u.id, u]));
+    }
+
+    const roleIds = [...new Set((membershipsData || []).map((m: any) => m.role_id).filter(Boolean))];
+    let rolesMap: Record<string, { name: string; code: string }> = {};
+    if (roleIds.length > 0) {
+      const { data: roles, error: rolesError } = await (supabase as any)
+        .from("anew_roles")
+        .select("id, name, code")
+        .in("id", roleIds);
+      if (rolesError) {
+        toast.error(rolesError.message);
+        setLoading(false);
+        return;
+      }
+      rolesMap = Object.fromEntries((roles || []).map((r: any) => [r.id, { name: r.name, code: r.code }]));
+    }
+
+    setMembers((membershipsData || []).map((m: any) => ({
+      ...m,
+      profile: profilesMap[m.user_id] || null,
+      role_name: rolesMap[m.role_id]?.name || null,
+      role_code: rolesMap[m.role_id]?.code || null,
+    })) as Member[]);
     setLoading(false);
   };
 
@@ -182,10 +211,27 @@ export function OrganizationMembersDialog({
   };
 
   const fetchAllUsers = async () => {
+    // Scope candidates to this organization's tenant tree — never show
+    // users from unrelated organizations/tenants in the picker.
+    const tenantOrgIds = await resolveOrgTenantIds(organizationId);
+
+    const { data: membershipRows } = await (supabase as any)
+      .from("anew_memberships")
+      .select("user_id")
+      .in("organization_id", tenantOrgIds)
+      .eq("status", "active");
+
+    const tenantUserIds = [...new Set((membershipRows || []).map((m: any) => m.user_id))];
+    if (tenantUserIds.length === 0) {
+      setAllUsers([]);
+      return;
+    }
+
     const { data } = await (supabase as any)
       .from("anew_users")
       .select("id, name, email")
       .eq("status", "active")
+      .in("id", tenantUserIds)
       .order("name");
 
     if (data) setAllUsers(data);
@@ -210,13 +256,13 @@ export function OrganizationMembersDialog({
     const { data: userData } = await supabase.auth.getUser();
     const createdBy = await resolveBusinessUserId(userData.user?.id);
     if (!createdBy) {
-      toast.error("Não foi possível resolver o utilizador de negócio do operador.");
+      toast.error(t("organizations.businessUserNotResolved"));
       return;
     }
 
     const selectedRoleId = memberForm.role_id || availableRoles.find((r) => r.code === "org_viewer")?.id || availableRoles[0]?.id;
     if (!selectedRoleId) {
-      toast.error("É obrigatório selecionar uma role.");
+      toast.error(t("organizations.roleRequired"));
       return;
     }
 
@@ -224,25 +270,27 @@ export function OrganizationMembersDialog({
     const { validateMembershipHierarchy } = await import("@/utils/validateMembershipHierarchy");
     const validation = await validateMembershipHierarchy(memberForm.user_id, organizationId, selectedRoleId);
     if (!validation.allowed) {
-      toast.error(validation.reason || "Não é permitido atribuir um cargo inferior ao que o utilizador já possui numa organização superior.");
+      toast.error(validation.reason || t("organizations.roleDowngradeNotAllowed"));
       return;
     }
 
-    const { error } = await (supabase as any).from("anew_memberships").insert({
-      user_id: memberForm.user_id,
-      organization_id: organizationId,
-      relationship_type: memberForm.relationship_type,
-      role_id: selectedRoleId,
-      status: "active",
-      created_by: createdBy,
-    });
+    const { error } = await withAuditContext(supabase, createdBy, () =>
+      (supabase as any).from("anew_memberships").insert({
+        user_id: memberForm.user_id,
+        organization_id: organizationId,
+        relationship_type: memberForm.relationship_type,
+        role_id: selectedRoleId,
+        status: "active",
+        created_by: createdBy,
+      })
+    );
 
     if (error) {
       if (error.code === '23505') {
         toast.error(t("organizations.memberAlreadyExists"));
         return;
       }
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
       return;
     }
 
@@ -260,12 +308,12 @@ export function OrganizationMembersDialog({
 
     const selectedRoleId = memberForm.role_id || availableRoles.find((r) => r.code === "org_viewer")?.id || availableRoles[0]?.id;
     if (!selectedRoleId) {
-      toast.error("É obrigatório selecionar uma role.");
+      toast.error(t("organizations.roleRequired"));
       return;
     }
 
     if (newUserForm.password.length < 6) {
-      toast.error(t("users.passwordTooShort"));
+      toast.error(t("profile.passwordTooShort"));
       return;
     }
 
@@ -297,13 +345,13 @@ export function OrganizationMembersDialog({
       });
 
       if (error) {
-        toast.error(error.message || t("common.error"));
+        toast.error(await getFriendlyErrorMessage(error, t("common.error")));
         setIsCreatingUser(false);
         return;
       }
 
       if (data?.error) {
-        toast.error(data.error);
+        toast.error(await getFriendlyErrorMessage(data.error, t("common.error")));
         setIsCreatingUser(false);
         return;
       }
@@ -315,7 +363,7 @@ export function OrganizationMembersDialog({
       fetchAllUsers();
       onMembersChanged?.();
     } catch (err: any) {
-      toast.error(err.message || t("common.error"));
+      toast.error(await getFriendlyErrorMessage(err, t("common.error")));
       setIsCreatingUser(false);
     }
   };
@@ -381,13 +429,17 @@ export function OrganizationMembersDialog({
   const handleConfirmDelete = async () => {
     if (!memberToDelete) return;
 
-    const { error } = await (supabase as any)
-      .from("anew_memberships")
-      .delete()
-      .eq("id", memberToDelete.id);
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any)
+        .from("anew_memberships")
+        .delete()
+        .eq("id", memberToDelete.id)
+    );
 
     if (error) {
-      toast.error(error.message);
+      toast.error(await getFriendlyErrorMessage(error));
       return;
     }
 
@@ -828,8 +880,9 @@ export function OrganizationMembersDialog({
         onOpenChange={setEditDialogOpen}
         memberId={memberToEdit?.id || ""}
         userId={memberToEdit?.user_id || ""}
+        organizationId={organizationId}
         membershipType={memberToEdit?.relationship_type || "BELONGS_TO"}
-        membershipRole={memberToEdit?.role_name || memberToEdit?.role_code || ""}
+        membershipRoleId={memberToEdit?.role_id || null}
         organizationName={organizationName}
         onSaved={() => {
           fetchMembers();

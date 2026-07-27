@@ -11,6 +11,7 @@ import { Plus, Trash2, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { AdministrativeDivision } from '@/hooks/useAdministrativeDivisions';
+import { multiAddressEntrySchema } from '@/lib/validations';
 
 export interface AddressFormData {
   id?: string;
@@ -63,6 +64,28 @@ export function MultiAddressForm({
   t,
 }: MultiAddressFormProps) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [errors, setErrors] = useState<Record<number, Record<string, string>>>({});
+
+  // Validate a single address entry (called when the user collapses the
+  // card, i.e. finishes editing that entry) and store field-level errors.
+  const validateAddress = (index: number, addr: AddressFormData) => {
+    const result = multiAddressEntrySchema.safeParse(addr);
+    if (!result.success) {
+      const fieldErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? '');
+        if (key && !fieldErrors[key]) fieldErrors[key] = issue.message;
+      }
+      setErrors(prev => ({ ...prev, [index]: fieldErrors }));
+      return false;
+    }
+    setErrors(prev => {
+      const next = { ...prev };
+      delete next[index];
+      return next;
+    });
+    return true;
+  };
 
   // Sync expandedIndex when addresses change
   useEffect(() => {
@@ -87,6 +110,16 @@ export function MultiAddressForm({
     } else if (expandedIndex !== null && expandedIndex > index) {
       setExpandedIndex(expandedIndex - 1);
     }
+    // Re-key remaining errors since indices shift after removal
+    setErrors(prev => {
+      const next: Record<number, Record<string, string>> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const i = Number(key);
+        if (i < index) next[i] = value;
+        else if (i > index) next[i - 1] = value;
+      });
+      return next;
+    });
   };
 
   const updateAddress = (index: number, field: keyof AddressFormData, value: string | boolean) => {
@@ -179,7 +212,12 @@ export function MultiAddressForm({
             <Collapsible
               key={index}
               open={expandedIndex === index}
-              onOpenChange={(open) => setExpandedIndex(open ? index : null)}
+              onOpenChange={(open) => {
+                if (!open && expandedIndex === index) {
+                  validateAddress(index, addr);
+                }
+                setExpandedIndex(open ? index : null);
+              }}
             >
               <Card className={cn(
                 "overflow-hidden transition-colors",
@@ -228,7 +266,9 @@ export function MultiAddressForm({
                           onChange={(e) => updateAddress(index, 'street', e.target.value)}
                           placeholder={t('addresses.streetPlaceholder')}
                           className="h-9"
+                          aria-invalid={!!errors[index]?.street}
                         />
+                        {errors[index]?.street && <p className="text-xs text-destructive mt-1">{errors[index].street}</p>}
                       </div>
                       <div>
                         <Label className="text-xs">{t('addresses.number')}</Label>
@@ -305,8 +345,10 @@ export function MultiAddressForm({
                             onChange={(e) => updateAddress(index, 'district', e.target.value)}
                             placeholder={t('addresses.districtPlaceholder')}
                             className="h-9"
+                            aria-invalid={!!errors[index]?.district}
                           />
                         )}
+                        {errors[index]?.district && <p className="text-xs text-destructive mt-1">{errors[index].district}</p>}
                       </div>
                     </div>
 
@@ -335,8 +377,10 @@ export function MultiAddressForm({
                             onChange={(e) => updateAddress(index, 'city', e.target.value)}
                             placeholder="Lisboa"
                             className="h-9"
+                            aria-invalid={!!errors[index]?.city}
                           />
                         )}
+                        {errors[index]?.city && <p className="text-xs text-destructive mt-1">{errors[index].city}</p>}
                       </div>
                       <div>
                         <Label className="text-xs">{t('addresses.postalCode')}</Label>
@@ -345,7 +389,9 @@ export function MultiAddressForm({
                           onChange={(e) => updateAddress(index, 'postal_code', e.target.value)}
                           placeholder="1000-001"
                           className="h-9"
+                          aria-invalid={!!errors[index]?.postal_code}
                         />
+                        {errors[index]?.postal_code && <p className="text-xs text-destructive mt-1">{errors[index].postal_code}</p>}
                       </div>
                     </div>
 

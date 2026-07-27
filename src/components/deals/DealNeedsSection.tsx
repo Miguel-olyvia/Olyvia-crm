@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -222,6 +224,20 @@ const getTemplateIcon = (iconValue: string) => {
   return found?.icon || FileText;
 };
 
+// ─── Validation ──────────────────────────────────────────────
+
+const dealNeedSchema = z.object({
+  title: z.string().trim().min(1, "O título é obrigatório.").max(200, "O título deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  priority: z.enum(["alta", "media", "baixa"]),
+  status: z.enum(["pendente", "em_analise", "orcamentado", "cancelado"]),
+  estimate_min: z.number().min(0, "O valor mínimo deve ser positivo.").max(999999999, "O valor mínimo é demasiado elevado."),
+  estimate_max: z.number().min(0, "O valor máximo deve ser positivo.").max(999999999, "O valor máximo é demasiado elevado."),
+}).refine((data) => data.estimate_max === 0 || data.estimate_min === 0 || data.estimate_max >= data.estimate_min, {
+  message: "O valor máximo deve ser maior ou igual ao valor mínimo.",
+  path: ["estimate_max"],
+});
+
 // ─── Component ───────────────────────────────────────────────
 
 export function DealNeedsSection({ dealId, organizationId, readOnly = false }: DealNeedsSectionProps) {
@@ -229,9 +245,11 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const [needItems, setNeedItems] = useState<Record<string, DealNeedItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [savingNeed, setSavingNeed] = useState(false);
   const [editingNeed, setEditingNeed] = useState<DealNeed | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [expandedNeeds, setExpandedNeeds] = useState<Set<string>>(new Set());
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   // Company config
@@ -432,6 +450,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     setFormEstimateMin(""); setFormEstimateMax(""); setFormInternalNotes("");
     setFormTemplateId(null); setFormFieldValues({}); setFormMeasurements({});
     setLinkedItems([]); setFormChecklist([]);
+    setFieldErrors({});
     updateTabVisibility(null);
   };
 
@@ -525,7 +544,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');
 
-      let pQuery = supabase
+      const pQuery = supabase
         .from("products")
         .select("id, name, sku, product_prices(price, price_type)")
         .or(orgFilter)
@@ -535,7 +554,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         .order("name")
         .limit(200);
 
-      let sQuery = supabase
+      const sQuery = supabase
         .from("services")
         .select("id, name, sku, service_prices(price, price_type)")
         .or(orgFilter)
@@ -574,10 +593,28 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
   // ─── Submit ─────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!formTitle.trim()) {
-      toast({ title: "Erro", description: "O título é obrigatório.", variant: "destructive" });
+    const validation = dealNeedSchema.safeParse({
+      title: formTitle,
+      description: formDescription,
+      priority: formPriority,
+      status: formStatus,
+      estimate_min: parseFloat(formEstimateMin) || 0,
+      estimate_max: parseFloat(formEstimateMax) || 0,
+    });
+
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
       return;
     }
+    setFieldErrors({});
+
+    setSavingNeed(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
@@ -610,32 +647,29 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         measurements: editingNeed?.measurements || {},
       };
 
-      let needId: string;
-      if (editingNeed) {
-        const { error } = await supabase.from("deal_needs").update(needData).eq("id", editingNeed.id);
-        if (error) throw error;
-        needId = editingNeed.id;
-        await supabase.from("deal_need_items").delete().eq("deal_need_id", needId);
-      } else {
-        const { data: newNeed, error } = await supabase.from("deal_needs")
-          .insert({ ...needData, sort_order: needs.length }).select("id").single();
-        if (error) throw error;
-        needId = newNeed.id;
-      }
+      const itemsPayload = linkedItems.map((li, idx) => ({
+        item_type: li.item_type, product_id: li.product_id, service_id: li.service_id,
+        quantity: li.quantity, unit_price: li.unit_price || 0, notes: li.notes, sort_order: idx,
+      }));
 
-      if (linkedItems.length > 0) {
-        const itemsToInsert = linkedItems.map((li, idx) => ({
-          deal_need_id: needId, product_id: li.product_id, service_id: li.service_id,
-          item_type: li.item_type, quantity: li.quantity, notes: li.notes, sort_order: idx,
-        }));
-        await supabase.from("deal_need_items").insert(itemsToInsert);
-      }
+      // p_update_need_columns=true: this dialog edits the deal_needs fields themselves
+      // (title, priority, custom fields, etc.), unlike the items-only path in Deals.tsx.
+      const { error } = await supabase.rpc("rpc_update_deal_needs", {
+        p_deal_id: dealId,
+        p_need_id: editingNeed?.id || null,
+        p_need_data: { ...needData, sort_order: editingNeed ? undefined : needs.length },
+        p_items: itemsPayload,
+        p_update_need_columns: true,
+      });
+      if (error) throw error;
 
       toast({ title: editingNeed ? "Necessidade atualizada" : "Necessidade adicionada" });
       setDialogOpen(false);
       loadData();
     } catch (err: any) {
       toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } finally {
+      setSavingNeed(false);
     }
   };
 
@@ -644,9 +678,18 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     if (!idToDelete) return;
     setPendingDeleteId(null);
     try {
-      await supabase.from("deal_need_items").delete().eq("deal_need_id", idToDelete);
-      const { error } = await supabase.from("deal_needs").delete().eq("id", idToDelete);
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+
+      // deal_needs / deal_need_items have no organization_id column of their own
+      // (scoped via deal_id -> deals.organization_id); scope the delete to the
+      // currently-open deal so a stale/foreign need id can't be deleted from here.
+      await withAuditContext(supabase, businessUserId, async () => {
+        await supabase.from("deal_need_items").delete().eq("deal_need_id", idToDelete);
+        const { error } = await supabase.from("deal_needs").delete().eq("id", idToDelete).eq("deal_id", dealId);
+        if (error) throw error;
+        return null;
+      });
       toast({ title: "Necessidade removida" });
       loadData();
     } catch (err: any) {
@@ -702,8 +745,16 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   };
 
   const cfgDeleteField = async (id: string) => {
-    try { await supabase.from("needs_assessment_field_configs").delete().eq("id", id); toast({ title: "Campo eliminado" }); loadData(); }
-    catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
+    if (!organizationId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("needs_assessment_field_configs").delete().eq("id", id).eq("organization_id", organizationId)
+      );
+      toast({ title: "Campo eliminado" });
+      loadData();
+    } catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
   };
 
   const cfgOpenMeasurementDialog = (index?: number) => {
@@ -768,8 +819,16 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   };
 
   const cfgDeleteTemplate = async (id: string) => {
-    try { await supabase.from("needs_assessment_templates").delete().eq("id", id); toast({ title: "Template eliminado" }); loadData(); }
-    catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
+    if (!organizationId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await withAuditContext(supabase, businessUserId, () =>
+        supabase.from("needs_assessment_templates").delete().eq("id", id).eq("organization_id", organizationId)
+      );
+      toast({ title: "Template eliminado" });
+      loadData();
+    } catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
   };
   // ─── Render helpers ─────────────────────────────────────
   const renderCustomFieldInput = (field: FieldConfig) => {
@@ -1148,7 +1207,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                 <div className="space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Identificação</Label>
-                    <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder='Ex: "Casa de banho", "Website corporativo", "Consultoria fiscal"' className="h-10 text-sm font-medium" />
+                    <Input value={formTitle} onChange={e => setFormTitle(e.target.value)} placeholder='Ex: "Casa de banho", "Website corporativo", "Consultoria fiscal"' className={cn("h-10 text-sm font-medium", fieldErrors.title && "border-destructive")} />
+                    {fieldErrors.title && <p className="text-xs text-destructive">{fieldErrors.title}</p>}
                   </div>
                 </div>
 
@@ -1201,15 +1261,17 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                       <Label className="text-xs text-muted-foreground">Mínimo (€)</Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
-                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMin} onChange={e => setFormEstimateMin(e.target.value)} className="pl-7 h-9" />
+                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMin} onChange={e => setFormEstimateMin(e.target.value)} className={cn("pl-7 h-9", fieldErrors.estimate_min && "border-destructive")} />
                       </div>
+                      {fieldErrors.estimate_min && <p className="text-xs text-destructive">{fieldErrors.estimate_min}</p>}
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-xs text-muted-foreground">Máximo (€)</Label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">€</span>
-                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMax} onChange={e => setFormEstimateMax(e.target.value)} className="pl-7 h-9" />
+                        <Input type="number" step="0.01" placeholder="0,00" value={formEstimateMax} onChange={e => setFormEstimateMax(e.target.value)} className={cn("pl-7 h-9", fieldErrors.estimate_max && "border-destructive")} />
                       </div>
+                      {fieldErrors.estimate_max && <p className="text-xs text-destructive">{fieldErrors.estimate_max}</p>}
                     </div>
                   </div>
                 </div>
@@ -1432,8 +1494,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" onClick={() => setDialogOpen(false)} size="sm">Cancelar</Button>
-                <Button onClick={handleSubmit} disabled={!formTitle.trim()} size="sm" className="min-w-[100px]">
-                  {editingNeed ? "Guardar" : "Adicionar"}
+                <Button onClick={handleSubmit} disabled={!formTitle.trim() || savingNeed} size="sm" className="min-w-[100px]">
+                  {savingNeed ? "A guardar..." : (editingNeed ? "Guardar" : "Adicionar")}
                 </Button>
               </div>
             </div>

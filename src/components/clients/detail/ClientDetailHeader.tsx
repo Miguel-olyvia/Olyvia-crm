@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Briefcase, Mail, Phone, MessageCircle, Pencil, X, MoreHorizontal, Undo2 } from "lucide-react";
+import { Briefcase, Mail, Phone, MessageCircle, Pencil, X, MoreHorizontal, Undo2, Star } from "lucide-react";
 import { PhoneCallDropdown } from "@/components/shared/PhoneCallDropdown";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { type HealthScore } from "@/hooks/useContactHealthScore";
@@ -47,6 +47,11 @@ export function ClientDetailHeader({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <h2 className="text-xl font-bold truncate">{fullName}</h2>
+          {Boolean(client.custom_fields?.vip) && (
+            <Badge variant="outline" className="text-xs gap-0.5 px-1.5 py-0 h-5 bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400">
+              <Star className="h-2.5 w-2.5 fill-current" /> VIP
+            </Badge>
+          )}
           {client.company_name && (
             <span className="text-sm text-muted-foreground">{client.company_name}</span>
           )}
@@ -121,9 +126,11 @@ export function ClientDetailHeader({
         <Button size="sm" variant="outline" onClick={onWhatsApp} className="gap-1">
           <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
         </Button>
-        <Button size="sm" variant="outline" onClick={onEdit}>
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+        <PermissionGate permission="clients.edit">
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </PermissionGate>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="outline"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
@@ -133,7 +140,7 @@ export function ClientDetailHeader({
               <PermissionGate permission="clients.edit">
                 <DropdownMenuItem onClick={onRevertToContact}>
                   <Undo2 className="w-3.5 h-3.5 mr-2" />
-                  Reverter para Contacto
+                  Reverter para Lead
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </PermissionGate>

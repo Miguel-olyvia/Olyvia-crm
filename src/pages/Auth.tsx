@@ -10,13 +10,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, Eye, EyeOff } from "lucide-react";
 import olyviaIcon from "@/assets/olyvia-icon.png";
+import { authLoginSchema, authSignupSchema } from "@/lib/validations";
 
 type AuthMode = "login" | "register" | "forgot-password";
 
 const MIN_PASSWORD_LENGTH = 8;
 const AUTH_TIMEOUT_MS = 12000;
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MS = 60000;
 
 const Auth = () => {
   const [mode, setMode] = useState<AuthMode>("login");
@@ -28,7 +27,11 @@ const Auth = () => {
   });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [failedAttempts, setFailedAttempts] = useState(() => parseInt(sessionStorage.getItem("failedAttempts") || "0", 10));
+  // Lockout state is a UX convenience only (persisted so a page refresh keeps
+  // showing the countdown). The real enforcement happens server-side in the
+  // portal-login Edge Function (see auth_login_attempts table + migration
+  // 20261103010000): even if this is cleared or bypassed, the next submit
+  // still gets rejected with 429 by the server, which repopulates it below.
   const [lockoutUntil, setLockoutUntil] = useState<number | null>(() => {
     const val = sessionStorage.getItem("lockoutUntil");
     return val ? parseInt(val, 10) : null;
@@ -46,8 +49,6 @@ const Auth = () => {
         setLockoutUntil(null);
         sessionStorage.removeItem("lockoutUntil");
         setLockoutCountdown(0);
-        setFailedAttempts(0);
-        sessionStorage.removeItem("failedAttempts");
       } else {
         setLockoutCountdown(remaining);
       }
@@ -91,17 +92,14 @@ const Auth = () => {
   const trimmedEmail = email.trim().toLowerCase();
 
   const validateForm = (): string | null => {
-    if (!trimmedEmail) return "Introduza o seu email.";
-
     if (mode === "register") {
-      if (!fullName.trim()) return "Introduza o seu nome completo.";
-      if (password.length < MIN_PASSWORD_LENGTH) {
-        return `A password deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`;
-      }
+      const result = authSignupSchema.safeParse({ fullName, email: trimmedEmail, password });
+      return result.success ? null : result.error.issues[0]?.message ?? "Dados inválidos.";
     }
 
-    if ((mode === "login" || mode === "register") && !password) {
-      return "Introduza a sua password.";
+    if (mode === "login") {
+      const result = authLoginSchema.safeParse({ email: trimmedEmail, password });
+      return result.success ? null : result.error.issues[0]?.message ?? "Dados inválidos.";
     }
 
     return null;
@@ -191,19 +189,61 @@ const Auth = () => {
 
     try {
       if (mode === "login") {
-        const { error } = await withAuthTimeout(
-          supabase.auth.signInWithPassword({
-            email: trimmedEmail,
-            password,
+        // Login is brokered through the portal-login Edge Function, which
+        // enforces server-side rate limiting (auth_login_attempts table)
+        // before performing the actual password grant. This replaces the
+        // old sessionStorage-only lockout, which was trivially bypassed by
+        // clearing storage or using a private browsing tab.
+        const { data: loginData, error: loginError } = await withAuthTimeout(
+          supabase.functions.invoke("portal-login", {
+            body: { email: trimmedEmail, password },
           }),
           "O login"
         );
 
-        if (error) throw error;
+        if (loginError) {
+          let backendMessage: string | undefined;
+          let retryAfterSeconds: number | undefined;
+          try {
+            const ctx: any = (loginError as any).context;
+            let parsedBody: any;
+            if (ctx && typeof ctx.json === "function") {
+              parsedBody = await ctx.json();
+            } else if (ctx && typeof ctx.text === "function") {
+              const text = await ctx.text();
+              try {
+                parsedBody = JSON.parse(text);
+              } catch {
+                parsedBody = { message: text };
+              }
+            }
+            backendMessage = parsedBody?.message || parsedBody?.error;
+            retryAfterSeconds = parsedBody?.retry_after_seconds;
+          } catch {
+            // ignore parse errors, fall back to generic message below
+          }
 
-        // Reset failed attempts on success
-        setFailedAttempts(0);
-        sessionStorage.removeItem("failedAttempts");
+          if (typeof retryAfterSeconds === "number" && retryAfterSeconds > 0) {
+            const until = Date.now() + retryAfterSeconds * 1000;
+            setLockoutUntil(until);
+            sessionStorage.setItem("lockoutUntil", until.toString());
+            setLockoutCountdown(retryAfterSeconds);
+          }
+
+          throw new Error(backendMessage || loginError.message || "Não foi possível iniciar sessão.");
+        }
+
+        if (!loginData?.access_token || !loginData?.refresh_token) {
+          throw new Error("Resposta inesperada do servidor de autenticação.");
+        }
+
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: loginData.access_token,
+          refresh_token: loginData.refresh_token,
+        });
+        if (sessionError) throw sessionError;
+
+        // Reset lockout UX state on success
         setLockoutUntil(null);
         sessionStorage.removeItem("lockoutUntil");
 
@@ -242,11 +282,15 @@ const Auth = () => {
 
         if (signUpError) {
           sessionStorage.removeItem("showWelcomeOrg");
+          // Deliberately generic for the "already registered" case: confirming
+          // that an email already has an account lets an attacker enumerate
+          // real accounts one guess at a time. Other errors (weak password,
+          // invalid format) don't reveal account existence, so they pass through.
           if (
             signUpError.message?.toLowerCase().includes("already registered") ||
             signUpError.message?.toLowerCase().includes("already been registered")
           ) {
-            throw new Error("Já existe uma conta com este email.");
+            throw new Error("Não foi possível concluir o registo com os dados fornecidos.");
           }
           throw signUpError;
         }
@@ -261,23 +305,15 @@ const Auth = () => {
         sessionStorage.removeItem("showWelcomeOrg");
       }
 
-      // Track failed login attempts
-      if (mode === "login") {
-        const newAttempts = failedAttempts + 1;
-        setFailedAttempts(newAttempts);
-        sessionStorage.setItem("failedAttempts", newAttempts.toString());
-        if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-          const until = Date.now() + LOCKOUT_DURATION_MS;
-          setLockoutUntil(until);
-          sessionStorage.setItem("lockoutUntil", until.toString());
-          setLockoutCountdown(Math.ceil(LOCKOUT_DURATION_MS / 1000));
-          toast({
-            title: "Conta temporariamente bloqueada",
-            description: `Demasiadas tentativas falhadas. Tente novamente em 60 segundos.`,
-            variant: "destructive",
-          });
-          return;
-        }
+      // Login lockout (429 from portal-login) already set lockoutUntil above
+      // and surfaces its own message via the thrown Error below.
+      if (mode === "login" && lockoutUntil && Date.now() < lockoutUntil) {
+        toast({
+          title: "Conta temporariamente bloqueada",
+          description: getErrorMessage(error, "Login"),
+          variant: "destructive",
+        });
+        return;
       }
 
       toast({

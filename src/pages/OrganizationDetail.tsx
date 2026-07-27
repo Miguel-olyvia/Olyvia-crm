@@ -29,8 +29,6 @@ import { OrganizationDetailFAQ } from "@/components/organizations/OrganizationDe
 import { AnewEntityHistoryDialog } from "@/components/AnewEntityHistoryDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { OrganizationAddressManager } from "@/components/organizations/OrganizationAddressManager";
-import { assignCreatorAsOrgAdmin } from "@/utils/organizationCreation";
-import { upsertOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChildOrganizationsTree } from "@/components/organizations/ChildOrganizationsTree";
@@ -45,7 +43,10 @@ import { useAdministrativeDivisions } from "@/hooks/useAdministrativeDivisions";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn } from "@/lib/utils";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { resolveOrganizationEntityId } from "@/utils/orgEntity";
+import { withAuditContext } from "@/utils/auditContext";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { resolveOrgTenantIds } from "@/lib/orgSubtree";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface Organization {
   id: string;
@@ -100,8 +101,12 @@ export default function OrganizationDetail() {
   const navigate = useNavigate();
   
   const { hasPermission } = usePermissions();
-  const canViewOrgHistory = hasPermission("organizations.view_history");
-  const canManageOrg = hasPermission("organizations.manage");
+  // "organizations.view_history" is not a real permission code in anew_permissions
+  // (phantom permission — see 20261110330000_fix_anew_hierarchy_rls_phantom_permission.sql
+  // for the same class of bug). "organizations.edit" is the real permission already used
+  // for this org-management capability elsewhere (OrganizationMembersDialog, MemberEditDialog).
+  const canViewOrgHistory = hasPermission("organizations.edit");
+  const canManageOrg = hasPermission("organizations.edit");
 
   const { countries } = useCountries();
   const [selectedDistrictId, setSelectedDistrictId] = useState<string | null>(null);
@@ -122,7 +127,10 @@ export default function OrganizationDetail() {
   const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
   const [allHierarchy, setAllHierarchy] = useState<{ parent_org_id: string; child_org_id: string }[]>([]);
   const [allUsers, setAllUsers] = useState<Profile[]>([]);
-  const [orgsWithChildren, setOrgsWithChildren] = useState<string[]>([]);
+  // Orgs that already have a parent — excluded from the hierarchy picker since
+  // the app enforces a single-parent hierarchy (mirrors OrgChartAddDialog's
+  // excludeChildIds logic).
+  const [orgsWithParent, setOrgsWithParent] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -131,6 +139,7 @@ export default function OrganizationDetail() {
   const [isAddHierarchyOpen, setIsAddHierarchyOpen] = useState(false);
   const [isAddRelationOpen, setIsAddRelationOpen] = useState(false);
   const [isCreateOrgSheetOpen, setIsCreateOrgSheetOpen] = useState(false);
+  const [isCreatingOrgFromSheet, setIsCreatingOrgFromSheet] = useState(false);
   const [showFAQ, setShowFAQ] = useState(false);
   const [showChangeHistory, setShowChangeHistory] = useState(false);
 
@@ -317,29 +326,44 @@ export default function OrganizationDetail() {
   };
 
   const fetchHierarchy = async () => {
-    const { data: parentData } = await (supabase as any)
+    const { data: parentData, error: parentError } = await (supabase as any)
       .from("anew_hierarchy")
       .select("id, parent_org_id, child_org_id, parent:anew_organizations!anew_hierarchy_parent_org_id_fkey(id, name, type, description, status)")
       .eq("child_org_id", id);
-    if (parentData) setParents(parentData as any);
+    if (parentError) {
+      console.error("Error fetching parent hierarchy:", parentError);
+      toast.error(t("common.error"));
+    } else if (parentData) {
+      setParents(parentData as any);
+    }
 
-    const { data: childData } = await (supabase as any)
+    const { data: childData, error: childError } = await (supabase as any)
       .from("anew_hierarchy")
       .select("id, parent_org_id, child_org_id, child:anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type, description, status)")
       .eq("parent_org_id", id);
-    if (childData) setChildren(childData as any);
+    if (childError) {
+      console.error("Error fetching child hierarchy:", childError);
+      toast.error(t("common.error"));
+    } else if (childData) {
+      setChildren(childData as any);
+    }
   };
 
   const fetchRelations = async () => {
-    const { data: sourceData } = await (supabase as any)
+    const { data: sourceData, error: sourceError } = await (supabase as any)
       .from("anew_relations")
       .select("id, source_org_id, target_org_id, relation_type, relation_label, metadata, target:anew_organizations!anew_relations_target_org_id_fkey(id, name, type, description, status)")
       .eq("source_org_id", id);
 
-    const { data: targetData } = await (supabase as any)
+    const { data: targetData, error: targetError } = await (supabase as any)
       .from("anew_relations")
       .select("id, source_org_id, target_org_id, relation_type, relation_label, metadata, source:anew_organizations!anew_relations_source_org_id_fkey(id, name, type, description, status)")
       .eq("target_org_id", id);
+
+    if (sourceError || targetError) {
+      console.error("Error fetching relations:", sourceError || targetError);
+      toast.error(t("common.error"));
+    }
 
     const allRelations = [
       ...(sourceData || []).map((r: any) => ({ ...r, direction: "outgoing" })),
@@ -349,46 +373,47 @@ export default function OrganizationDetail() {
   };
 
   const fetchAllOrganizations = async () => {
-    const { data: userData } = await supabase.auth.getUser();
-    const authUserId = userData.user?.id;
+    if (!id) return;
 
-    const { data } = await (supabase as any)
+    // Scope candidates to this organization's tenant tree — never show orgs
+    // from unrelated organizations/tenants in the picker (mirrors the pattern
+    // used in OrganizationMembersDialog's tenant-scoped user picker).
+    const tenantOrgIds = await resolveOrgTenantIds(id);
+
+    const { data, error } = await (supabase as any)
       .from("anew_organizations").select("id, name, type, description, status, created_by")
-      .neq("id", id).eq("status", "active").order("name");
+      .neq("id", id).eq("status", "active").in("id", tenantOrgIds).order("name");
 
-    let userMembershipOrgIds: string[] = [];
-    let businessUserId: string | null = null;
-    if (authUserId) {
-      const { data: anewUser } = await (supabase as any)
-        .from("anew_users").select("id").eq("auth_user_id", authUserId).maybeSingle();
-      if (anewUser) {
-        businessUserId = anewUser.id;
-        const { data: memberships } = await (supabase as any)
-          .from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
-        if (memberships) userMembershipOrgIds = memberships.map((m: any) => m.organization_id);
-      }
+    if (error) {
+      console.error("Error fetching organizations:", error);
+      toast.error(t("common.error"));
+    } else if (data) {
+      setAllOrganizations(data);
     }
 
-    if (data) {
-      const filtered = data.filter((org: any) =>
-        org.created_by === businessUserId || userMembershipOrgIds.includes(org.id)
-      );
-      setAllOrganizations(filtered);
-    }
-
-    const { data: hierarchyData } = await (supabase as any)
+    const { data: hierarchyData, error: hierarchyError } = await (supabase as any)
       .from("anew_hierarchy").select("parent_org_id, child_org_id");
-    if (hierarchyData) {
+    if (hierarchyError) {
+      console.error("Error fetching hierarchy:", hierarchyError);
+      toast.error(t("common.error"));
+    } else if (hierarchyData) {
       setAllHierarchy(hierarchyData);
-      const parentIds = [...new Set(hierarchyData.map((h: any) => h.parent_org_id))] as string[];
-      setOrgsWithChildren(parentIds);
+      // Orgs that already have a parent must be excluded from the "select
+      // organization" picker, since the app enforces single-parent hierarchy.
+      const parentedIds = [...new Set(hierarchyData.map((h: any) => h.child_org_id))] as string[];
+      setOrgsWithParent(parentedIds);
     }
   };
 
   const fetchAllUsers = async () => {
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("anew_users").select("id, name").order("name");
-    if (data) setAllUsers(data.map((u: any) => ({ id: u.id, name: u.name })));
+    if (error) {
+      console.error("Error fetching users:", error);
+      toast.error(t("common.error"));
+    } else if (data) {
+      setAllUsers(data.map((u: any) => ({ id: u.id, name: u.name })));
+    }
   };
 
   // Member actions
@@ -399,8 +424,12 @@ export default function OrganizationDetail() {
 
   const handleRemoveMember = (memberId: string) => { setDeleteType('member'); setDeleteItemId(memberId); setDeleteDialogOpen(true); };
   const confirmRemoveMember = async (memberId: string) => {
-    const { error } = await (supabase as any).from("anew_memberships").delete().eq("id", memberId);
-    if (error) { toast.error(error.message); return; }
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_memberships").delete().eq("id", memberId)
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.deleted")); fetchMembers();
   };
 
@@ -412,8 +441,10 @@ export default function OrganizationDetail() {
     const insertData = hierarchyForm.type === "parent"
       ? { parent_org_id: hierarchyForm.organization_id, child_org_id: id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId }
       : { parent_org_id: id, child_org_id: hierarchyForm.organization_id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId };
-    const { error } = await (supabase as any).from("anew_hierarchy").insert(insertData);
-    if (error) { toast.error(error.message); return; }
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").insert(insertData)
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.created"));
     setIsAddHierarchyOpen(false);
     setHierarchyForm({ type: "parent", organization_id: "" });
@@ -421,77 +452,72 @@ export default function OrganizationDetail() {
   };
 
   const handleCreateOrgFromSheet = async () => {
+    if (isCreatingOrgFromSheet) return;
     if (!newOrgFormData.name) { toast.error(t("common.required")); return; }
-    const { data: userData } = await supabase.auth.getUser();
-    const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    const finalType = newOrgFormData.type === "other" ? newOrgFormData.customType : newOrgFormData.type;
-    const newOrgId = crypto.randomUUID();
-    const newOrgName = newOrgFormData.name.trim();
-    const hasFiscalData = newOrgFormData.isFiscal && !!newOrgFormData.nif?.trim();
-    const entityId = await resolveOrganizationEntityId({
-      orgName: newOrgName,
-      createdBy: businessUserId,
-      nif: hasFiscalData ? newOrgFormData.nif : null,
-    });
+    setIsCreatingOrgFromSheet(true);
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
+      if (!businessUserId) { toast.error(t("organizations.businessUserNotResolved")); return; }
+      const finalType = newOrgFormData.type === "other" ? newOrgFormData.customType : newOrgFormData.type;
+      const newOrgName = newOrgFormData.name.trim();
+      const hasFiscalData = newOrgFormData.isFiscal && !!newOrgFormData.nif?.trim();
 
-    const { error: createError } = await (supabase as any)
-      .from("anew_organizations")
-      .insert({
-        id: newOrgId,
-        name: newOrgName,
-        type: finalType || "departamento",
-        description: newOrgFormData.description || null,
-        status: newOrgFormData.status || "active",
-        sector: newOrgFormData.sector || null,
-        is_fiscal: newOrgFormData.isFiscal,
-        entity_id: entityId,
-        created_by: businessUserId,
-      });
+      const addressesPayload = newOrgFormData.addresses
+        .filter((addr) => addr.street && addr.number && addr.city && addr.postal_code)
+        .map((addr) => ({
+          street: addr.street, number: addr.number, floor: addr.floor || null, unit: addr.unit || null,
+          postal_code: addr.postal_code, city: addr.city, district: addr.district || null,
+          country: addr.country || "PT", extra: addr.extra || null, is_fiscal: addr.isFiscal || false,
+        }));
 
-    if (createError) { toast.error(createError.message); return; }
+      const nif = hasFiscalData ? newOrgFormData.nif : null;
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy("rpc_create_organization_with_hierarchy", {
+          p_current_org_id: id,
+          p_hierarchy_type: hierarchyForm.type,
+          p_name: newOrgName,
+          p_type: finalType || "departamento",
+          p_description: newOrgFormData.description || null,
+          p_status: newOrgFormData.status || "active",
+          p_sector: newOrgFormData.sector || null,
+          p_is_fiscal: newOrgFormData.isFiscal,
+          p_nif: nif,
+          p_commercial_name: hasFiscalData ? (newOrgFormData.commercialName || null) : null,
+          p_country_code: "PT",
+          p_addresses: addressesPayload,
+        }, nif)
+      );
 
-    if (hasFiscalData) {
-      await upsertOrgFiscalEntity(newOrgId, newOrgFormData.nif, newOrgFormData.commercialName || null, "PT", businessUserId);
+      if (error) throw error;
+
+      toast.success(t("common.created"));
+      setIsCreateOrgSheetOpen(false); setIsAddHierarchyOpen(false);
+      setNewOrgFormData(emptyFormData); setHierarchyForm({ type: "parent", organization_id: "" });
+      fetchHierarchy(); fetchAllOrganizations();
+    } catch (error: unknown) {
+      console.error("Error creating organization from sheet:", error);
+      toast.error(await getFriendlyErrorMessage(error, t("common.error")));
+    } finally {
+      setIsCreatingOrgFromSheet(false);
     }
-
-    const insertData = hierarchyForm.type === "parent"
-      ? { parent_org_id: newOrgId, child_org_id: id, relationship_type: "parent_of", is_primary: true, created_by: businessUserId }
-      : { parent_org_id: id, child_org_id: newOrgId, relationship_type: "parent_of", is_primary: true, created_by: businessUserId };
-    const { error: hierarchyError } = await (supabase as any).from("anew_hierarchy").insert(insertData);
-    if (hierarchyError) { toast.error(hierarchyError.message); return; }
-
-    if (userData.user?.id) {
-      const { error: bootstrapError } = await (supabase as any).rpc("bootstrap_org_creator", {
-        p_organization_id: newOrgId,
-        p_organization_name: newOrgName,
-      });
-      if (bootstrapError) {
-        console.error("Bootstrap error, falling back:", bootstrapError);
-        await assignCreatorAsOrgAdmin(newOrgId, newOrgName, userData.user.id);
-      }
-    }
-
-    for (const addr of newOrgFormData.addresses) {
-      if (addr.street && addr.number && addr.city && addr.postal_code) {
-        await (supabase as any).rpc('assign_address_to_org', {
-          p_org_id: newOrgId, p_street: addr.street, p_number: addr.number,
-          p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
-          p_city: addr.city, p_district: addr.district || null, p_country: addr.country || 'PT',
-          p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
-        });
-      }
-    }
-
-    toast.success(t("common.created"));
-    setIsCreateOrgSheetOpen(false); setIsAddHierarchyOpen(false);
-    setNewOrgFormData(emptyFormData); setHierarchyForm({ type: "parent", organization_id: "" });
-    fetchHierarchy(); fetchAllOrganizations();
   };
 
   const handleRemoveHierarchy = (hierarchyId: string) => { setDeleteType('hierarchy'); setDeleteItemId(hierarchyId); setDeleteDialogOpen(true); };
   const confirmRemoveHierarchy = async (hierarchyId: string) => {
-    const { error } = await (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId);
-    if (error) { toast.error(error.message); return; }
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_hierarchy").delete().eq("id", hierarchyId).select("id")
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
+    if (!data || data.length === 0) {
+      // RLS can silently filter out a DELETE with no rows affected (no error
+      // is raised) — .select() after delete lets us tell that apart from a
+      // genuine success and surface it instead of a false-positive toast.
+      toast.error(t("common.error"));
+      return;
+    }
     toast.success(t("common.deleted")); fetchHierarchy();
   };
 
@@ -503,10 +529,14 @@ export default function OrganizationDetail() {
   };
   const handleSaveChildEdit = async () => {
     if (!editingChild || !editChildForm.name) { toast.error(t("common.required")); return; }
-    const { error } = await (supabase as any).from("anew_organizations")
-      .update({ name: editChildForm.name, type: editChildForm.type, description: editChildForm.description || null })
-      .eq("id", editingChild.id);
-    if (error) { toast.error(error.message); return; }
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_organizations")
+        .update({ name: editChildForm.name, type: editChildForm.type, description: editChildForm.description || null })
+        .eq("id", editingChild.id)
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.saved"));
     setIsEditChildOpen(false); setEditingChild(null); setEditChildForm({ name: "", type: "", description: "" });
     fetchHierarchy();
@@ -517,13 +547,15 @@ export default function OrganizationDetail() {
     if (!relationForm.target_id || !relationForm.relation_type) { toast.error(t("common.required")); return; }
     const { data: userData } = await supabase.auth.getUser();
     const businessUserId = await resolveBusinessUserId(userData.user?.id);
-    if (!businessUserId) { toast.error("Business user not resolved"); return; }
-    const { error } = await (supabase as any).from("anew_relations").insert({
-      source_org_id: id, target_org_id: relationForm.target_id,
-      relation_type: relationForm.relation_type, relation_label: relationForm.relation_label || null,
-      description: relationForm.description || null, created_by: businessUserId,
-    });
-    if (error) { toast.error(error.message); return; }
+    if (!businessUserId) { toast.error(t("organizations.businessUserNotResolved")); return; }
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_relations").insert({
+        source_org_id: id, target_org_id: relationForm.target_id,
+        relation_type: relationForm.relation_type, relation_label: relationForm.relation_label || null,
+        description: relationForm.description || null, created_by: businessUserId,
+      })
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.created"));
     setIsAddRelationOpen(false);
     setRelationForm({ target_id: "", relation_type: "RELATED_TO", relation_label: "", description: "" });
@@ -531,8 +563,12 @@ export default function OrganizationDetail() {
   };
   const handleRemoveRelation = (relationId: string) => { setDeleteType('relation'); setDeleteItemId(relationId); setDeleteDialogOpen(true); };
   const confirmRemoveRelation = async (relationId: string) => {
-    const { error } = await (supabase as any).from("anew_relations").delete().eq("id", relationId);
-    if (error) { toast.error(error.message); return; }
+    const { data: userData } = await supabase.auth.getUser();
+    const businessUserId = await resolveBusinessUserId(userData.user?.id);
+    const { error } = await withAuditContext(supabase, businessUserId, () =>
+      (supabase as any).from("anew_relations").delete().eq("id", relationId)
+    );
+    if (error) { toast.error(await getFriendlyErrorMessage(error)); return; }
     toast.success(t("common.deleted")); fetchRelations();
   };
 
@@ -569,7 +605,7 @@ export default function OrganizationDetail() {
     return (
       <>
         <div className="flex flex-col items-center justify-center h-64 gap-4 text-center">
-          <p className="text-lg font-medium">Organização não encontrada ou sem acesso.</p>
+          <p className="text-lg font-medium">{t("organizations.notFoundOrNoAccess")}</p>
           <Button variant="outline" onClick={() => navigate("/organizations")}>{t("common.back")}</Button>
         </div>
       </>
@@ -632,16 +668,72 @@ export default function OrganizationDetail() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{t("organizations.parents")}</CardTitle>
-              <GitBranch className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <GitBranch className="h-4 w-4 text-muted-foreground" />
+                {canManageOrg && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={() => { setHierarchyForm({ type: "parent", organization_id: "" }); setIsAddHierarchyOpen(true); }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardContent><div className="text-2xl font-bold">{parents.length}</div></CardContent>
+            <CardContent>
+              <div className="text-2xl font-bold">{parents.length}</div>
+              {parents.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {parents.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{p.parent?.name}</span>
+                      {canManageOrg && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleRemoveHierarchy(p.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">{t("organizations.children")}</CardTitle>
-              <Network className="h-4 w-4 text-muted-foreground" />
+              <div className="flex items-center gap-1">
+                <Network className="h-4 w-4 text-muted-foreground" />
+                {canManageOrg && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5"
+                    onClick={() => { setHierarchyForm({ type: "child", organization_id: "" }); setIsAddHierarchyOpen(true); }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
             </CardHeader>
-            <CardContent><div className="text-2xl font-bold">{children.length}</div></CardContent>
+            <CardContent>
+              <div className="text-2xl font-bold">{children.length}</div>
+              {children.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {children.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between text-sm">
+                      <span className="truncate">{c.child?.name}</span>
+                      {canManageOrg && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => handleRemoveHierarchy(c.id)}>
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -827,7 +919,7 @@ export default function OrganizationDetail() {
                 <Label>{t("organizations.selectOrganization")} *</Label>
                 <OrganizationCombobox
                   organizations={allOrganizations
-                    .filter((org) => org.id !== id && !orgsWithChildren.includes(org.id))
+                    .filter((org) => org.id !== id && !orgsWithParent.includes(org.id))
                     .map((org) => ({
                       id: org.id, name: org.name, type: org.type,
                       parent_id: allHierarchy.find(h => h.child_org_id === org.id)?.parent_org_id || null
@@ -885,6 +977,7 @@ export default function OrganizationDetail() {
                   onSave={handleCreateOrgFromSheet}
                   onCancel={() => { setIsCreateOrgSheetOpen(false); setNewOrgFormData(emptyFormData); }}
                   title={t("organizations.createNew")}
+                  isSaving={isCreatingOrgFromSheet}
                 />
               </div>
             </div>

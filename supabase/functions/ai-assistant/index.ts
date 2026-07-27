@@ -8,12 +8,20 @@ import { TOOLS, HANDLERS } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 
-const MODEL = "google/gemini-2.5-flash";
+initSentry();
+
+const MODEL = "gemini-2.5-flash";
+
+// Authenticated AI assistant — persistent (DB-backed) rate limit per user, to
+// bound AI-gateway cost/abuse even though the caller is already authenticated.
+const RATE_LIMIT_BUCKET = "ai-assistant";
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 type ToolCallView = {
   id: string;
@@ -87,16 +95,16 @@ async function executeTool(ctx: ExecCtx, toolName: string, args: any): Promise<T
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    getAiGatewayKey();
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) throw new Error("Supabase configuration missing");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -128,6 +136,19 @@ Deno.serve(async (req) => {
       });
     }
     const ctx = built.ctx;
+
+    // Rate limiting — persistent, DB-backed; scoped per authenticated user.
+    const rateLimitIdentifier = ctx.businessUserId || ctx.organizationId;
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: rateLimitIdentifier,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, rateLimitIdentifier);
 
     // Capabilities block — fonte canónica = TOOLS no registry, gerado em runtime
     // para que o prompt da BD nunca tenha de listar nomes de tools.
@@ -261,22 +282,15 @@ Deno.serve(async (req) => {
       };
       const toolMsg = { role: "tool", tool_call_id: toolCallId, content: JSON.stringify(result) };
 
-      const followUpResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [
-            { role: "system", content: fullSystemPrompt },
-            ...trimmedMessages,
-            synthAssistantMsg,
-            toolMsg,
-          ],
-          stream: true,
-        }),
+      const followUpResponse = await callAiGateway({
+        model: MODEL,
+        messages: [
+          { role: "system", content: fullSystemPrompt },
+          ...trimmedMessages,
+          synthAssistantMsg,
+          toolMsg,
+        ],
+        stream: true,
       });
 
       if (!followUpResponse.ok || !followUpResponse.body) throw new Error("Follow-up AI request failed (pendingTool)");
@@ -345,18 +359,11 @@ Deno.serve(async (req) => {
     }
 
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
-      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${LOVABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
-          tools: TOOLS,
-          tool_choice: "auto",
-        }),
+      const response = await callAiGateway({
+        model: MODEL,
+        messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
+        tools: TOOLS,
+        tool_choice: "auto",
       });
 
       if (!response.ok) {
@@ -719,17 +726,10 @@ Deno.serve(async (req) => {
     }
 
     // ---- Final streaming call (sem tools) — entrega texto ao cliente ----
-    const streamResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
-        stream: true,
-      }),
+    const streamResponse = await callAiGateway({
+      model: MODEL,
+      messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
+      stream: true,
     });
 
     if (!streamResponse.ok || !streamResponse.body) throw new Error("Final stream AI request failed");
@@ -745,6 +745,7 @@ Deno.serve(async (req) => {
     });
   } catch (e) {
     console.error("AI assistant error:", e);
+    await captureError(e, { function: "ai-assistant" });
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

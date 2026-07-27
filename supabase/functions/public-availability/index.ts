@@ -1,10 +1,18 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+
+initSentry();
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const RATE_LIMIT_BUCKET = 'public-availability';
+const RATE_LIMIT_MAX_ATTEMPTS = 30;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 /**
  * Public Availability API
@@ -21,6 +29,7 @@ const requestSchema = z.object({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
   postal_code: z.string().optional(),
+  district_id: z.string().uuid().optional(),
   board_id: z.string().optional(),
   duration_minutes: z.number().optional(),
   include_settings: z.boolean().optional(),
@@ -39,6 +48,23 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Rate limiting check — persistent, DB-backed; must come before any other DB work
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
+
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
     if (!parsed.success) {
@@ -49,13 +75,9 @@ Deno.serve(async (req: Request) => {
     }
     const {
       form_id, step_number, date, start_date, end_date,
-      postal_code, board_id: directBoardId, duration_minutes: directDuration,
+      postal_code, district_id, board_id: directBoardId, duration_minutes: directDuration,
       include_settings,
     } = parsed.data;
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     let boardId = directBoardId || null;
     let durationMinutes = directDuration || 60;
@@ -167,6 +189,7 @@ Deno.serve(async (req: Request) => {
         p_end_date: end_date,
         p_duration_minutes: durationMinutes,
         p_postal_code: postal_code || null,
+        p_district_id: district_id || null,
       });
 
       if (monthError) {
@@ -213,15 +236,17 @@ Deno.serve(async (req: Request) => {
       scheduleConfig = await fetchScheduleConfig();
     }
 
-    // With postal_code: use proximity-based search via find_nearest_resources RPC
-    if (postal_code) {
+    // With postal_code and/or district_id: use find_nearest_resources RPC,
+    // which already implements the district-coverage-with-fallback rule.
+    if (postal_code || district_id) {
       const { data: resources, error: rpcError } = await supabase
         .rpc('find_nearest_resources', {
-          p_target_postal_code: postal_code,
+          p_target_postal_code: postal_code || null,
           p_board_id: boardId,
           p_target_date: date,
           p_duration_minutes: durationMinutes,
           p_limit: 10,
+          p_district_id: district_id || null,
         });
 
       if (rpcError) {
@@ -258,7 +283,7 @@ Deno.serve(async (req: Request) => {
         new Date(a.start).getTime() - new Date(b.start).getTime()
       );
 
-      console.log(`public-availability: date=${date}, postal=${postal_code}, board=${boardId}, resources=${(resources || []).length}, slots=${aggregatedSlots.length}`);
+      console.log(`public-availability: date=${date}, postal=${postal_code || 'none'}, district=${district_id || 'none'}, board=${boardId}, resources=${(resources || []).length}, slots=${aggregatedSlots.length}`);
 
       return new Response(
         JSON.stringify({
@@ -331,6 +356,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     console.error('Error in public-availability:', error);
+    await captureError(error, { function: "public-availability" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

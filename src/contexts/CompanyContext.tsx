@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/hooks/use-toast";
+import { identifyUser, resetAnalytics } from "@/lib/analytics/posthog";
 
 // Cache user type per company to reduce queries
 const userTypeCache = new Map<string, { tipo: string; roleName: string; timestamp: number }>();
@@ -24,37 +26,27 @@ interface CompanyContextType {
   userRoleName: string;
 }
 
-interface AnewUserRow { id: string }
 interface HierarchyLinkRow { child_org_id: string; parent_org_id: string | null }
 interface OrganizationRow { id: string; name: string; logo_url?: string | null; type?: string | null }
-interface RoleRow { code: string | null; name: string | null }
-interface MembershipRow { role_id: string | null; organization_id?: string | null }
+interface WorkOrgRpcRow {
+  id: string;
+  name: string;
+  membership_type: string;
+  via_org_id: string | null;
+  via_org_name: string | null;
+  roles: string[];
+}
+
+// Shape returned by get_user_context RPC
+interface UserContextRpc {
+  business_user_id: string | null;
+  is_system_admin: boolean;
+  org_ids: string[];
+  memberships: Array<{ organization_id: string; role_id: string; role_code: string }>;
+  permissions: string[];
+}
 
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
-
-// Helper: get anew_user id from auth user id
-async function getAnewUserId(authUserId: string): Promise<string | null> {
-  const { data } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", authUserId).maybeSingle();
-  return (data as AnewUserRow | null)?.id || null;
-}
-
-// Helper: build ancestor chain for an org (up to 10 levels)
-async function buildAncestorChain(orgId: string): Promise<string[]> {
-  const chain: string[] = [orgId];
-  let currentId = orgId;
-  for (let i = 0; i < 10; i++) {
-    const { data } = await (supabase as any)
-      .from("anew_hierarchy")
-      .select("parent_org_id")
-      .eq("child_org_id", currentId)
-      .maybeSingle();
-    const link = data as Pick<HierarchyLinkRow, "parent_org_id"> | null;
-    if (!link?.parent_org_id) break;
-    chain.push(link.parent_org_id);
-    currentId = link.parent_org_id;
-  }
-  return chain;
-}
 
 // Role priority map — higher index = higher privilege
 const ROLE_PRIORITY: Record<string, number> = {
@@ -69,38 +61,20 @@ const ROLE_PRIORITY: Record<string, number> = {
 // No normalization — userType always reflects the real role code.
 // UI visibility is driven by PermissionsContext/PermissionGate, not userType checks.
 
-// Helper: find the user's HIGHEST role across the ancestor chain, returns { code, name }
-async function resolveRole(anewUserId: string, orgId: string): Promise<{ code: string; name: string } | null> {
-  const chain = await buildAncestorChain(orgId);
-  let best: { code: string; name: string } | null = null;
+// Picks the highest-priority role from an already-resolved role list (e.g.
+// get_user_work_orgs()'s per-company `roles` array, which correctly reflects
+// inherited/via_department access) — does not re-derive from raw memberships.
+function pickHighestRole(roles: string[]): { tipo: string; roleName: string } {
+  let best: { tipo: string; roleName: string } | null = null;
   let bestPriority = -Infinity;
-
-  for (const oid of chain) {
-    // Read as array — a user may have multiple active memberships in the same org
-    // (different roles). Pick the highest-priority one.
-    const { data: memberships } = await supabase.from("anew_memberships")
-      .select("role_id")
-      .eq("user_id", anewUserId)
-      .eq("organization_id", oid)
-      .eq("status", "active");
-    if (memberships && memberships.length > 0) {
-      const roleIds = (memberships as MembershipRow[]).map((m) => m.role_id).filter(Boolean);
-      if (roleIds.length === 0) continue;
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      for (const role of (roles || []) as RoleRow[]) {
-        const code = role?.code || null;
-        const name = role?.name || code || "";
-        const priority = code ? (ROLE_PRIORITY[code] ?? 0) : -1;
-        if (priority > bestPriority) {
-          bestPriority = priority;
-          best = { code: code || "org_viewer", name };
-        }
-      }
-      // Short-circuit if we already found the highest possible role
-      if (bestPriority >= ROLE_PRIORITY.system_admin) break;
+  for (const code of roles) {
+    const priority = ROLE_PRIORITY[code] ?? 0;
+    if (priority > bestPriority) {
+      bestPriority = priority;
+      best = { tipo: code, roleName: code };
     }
   }
-  return best;
+  return best ?? { tipo: "", roleName: "" };
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
@@ -114,12 +88,16 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   // (Supabase re-emits SIGNED_IN on tab refocus / session revalidation)
   const loadedUserIdRef = useRef<string | null>(null);
   const initialLoadDoneRef = useRef(false);
+  // Per-work-org roles from the last get_user_work_orgs() response, keyed by
+  // company id — the only source that correctly reflects inherited access.
+  const rolesByOrgIdRef = useRef<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     loadUserCompanies();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "SIGNED_OUT" || (event === "TOKEN_REFRESHED" && !session)) {
+        if (event === "SIGNED_OUT") resetAnalytics();
         requestVersionRef.current += 1;
         loadedUserIdRef.current = null;
         initialLoadDoneRef.current = false;
@@ -131,6 +109,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         setIsLoading(false);
       } else if (event === "SIGNED_IN") {
         if (!session) return;
+        identifyUser(session.user.id);
         // Skip if same user already fully loaded (tab refocus revalidation)
         if (
           session.user.id === loadedUserIdRef.current &&
@@ -147,93 +126,73 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Determine user type using anew tables only — returns { tipo, roleName }
-  const determineUserType = useCallback(async (authUserId: string, companyId: string | null): Promise<{ tipo: string; roleName: string }> => {
-    const cacheKey = `${authUserId}-${companyId || 'none'}`;
+  // Determine the user's GLOBAL role status (system_admin or not) exclusively
+  // via get_user_context RPC. Org-specific role resolution for a selected
+  // company is NOT done here — it uses get_user_work_orgs()'s own per-company
+  // `roles` array (see rolesByOrgIdRef below), because that's the only source
+  // that correctly reflects inherited (via_department) access; a fresh
+  // per-org filter over get_user_context()'s direct-membership list cannot
+  // see that relationship and silently falls back to the user's unrelated
+  // globally-highest role for any company reached only via hierarchy.
+  const determineUserType = useCallback(async (_authUserId: string): Promise<{ tipo: string; roleName: string }> => {
+    const cacheKey = _authUserId;
     const cached = userTypeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return { tipo: cached.tipo, roleName: cached.roleName };
     }
 
-    const anewId = await getAnewUserId(authUserId);
-    if (!anewId) {
+    const { data: rawCtx, error } = await (supabase as any).rpc("get_user_context");
+    if (error || !rawCtx) {
       const result = { tipo: "", roleName: "" };
       userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
       return result;
     }
 
-    // 1. Check for system_admin membership (org-less or any org)
-    const { data: sysMemb } = await supabase.from("anew_memberships")
-      .select("role_id")
-      .eq("user_id", anewId)
-      .eq("status", "active");
+    const ctx = rawCtx as UserContextRpc;
 
-    if (sysMemb && sysMemb.length > 0) {
-      const roleIds = sysMemb.map(m => m.role_id);
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      const sysRole = roles?.find(r => r.code === "system_admin");
-      if (sysRole) {
-        const result = { tipo: "system_admin", roleName: sysRole.name || "System Admin" };
-        userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-        return result;
-      }
-    }
-
-    // 2. If company context, resolve role via ancestor traversal
-    if (companyId) {
-      const resolved = await resolveRole(anewId, companyId);
-      if (resolved) {
-        const result = { tipo: resolved.code, roleName: resolved.name };
-        userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-        return result;
-      }
-    }
-
-    // 3. Find highest role across all memberships
-    if (sysMemb && sysMemb.length > 0) {
-      const roleIds = sysMemb.map(m => m.role_id);
-      const { data: roles } = await supabase.from("anew_roles").select("code, name").in("id", roleIds);
-      const rolePriority = ["super_admin", "org_admin", "org_editor", "org_viewer"];
-      for (const rp of rolePriority) {
-        const found = roles?.find(r => r.code === rp);
-        if (found) {
-          const result = { tipo: rp, roleName: found.name || rp };
-          userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
-          return result;
-        }
-      }
-      // Return first role code found
-      const first = roles?.[0];
-      const result = { tipo: first?.code || "", roleName: first?.name || "" };
+    if (!ctx.business_user_id) {
+      const result = { tipo: "", roleName: "" };
       userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
       return result;
     }
 
-    // No memberships at all — user has no role
-    const result = { tipo: "", roleName: "" };
+    if (ctx.is_system_admin) {
+      const result = { tipo: "system_admin", roleName: "System Admin" };
+      userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
+      return result;
+    }
+
+    const memberships = Array.isArray(ctx.memberships) ? ctx.memberships : [];
+    const result = pickHighestRole(memberships.map((m) => m.role_code || ""));
     userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
     return result;
   }, []);
 
-  // Fetch organizations with parent org names (replaces fetchCompaniesWithTenantNames)
-  const fetchOrgsWithParentNames = async (orgIds: string[]): Promise<Company[]> => {
-    if (orgIds.length === 0) return [];
+  // Enriches the work_orgs already resolved by get_user_work_orgs() with
+  // display-only fields the RPC contract doesn't return (logo_url, type) and
+  // with each work_org's OWN hierarchy parent (one hop), used by
+  // CompanySwitcher to render the nested company tree. This is a DIFFERENT
+  // concept from via_org_id/via_org_name (the internal structure the CURRENT
+  // USER's membership came through) — do not conflate the two.
+  const enrichWorkOrgs = async (workOrgs: WorkOrgRpcRow[]): Promise<Company[]> => {
+    if (workOrgs.length === 0) return [];
+    const orgIds = workOrgs.map((w) => w.id);
 
-    const { data: orgs } = await (supabase as any)
-      .from("anew_organizations")
-      .select("id, name, logo_url, type")
-      .in("id", orgIds)
-      .in("type", ["holding", "empresa"])
-      .order("name");
+    const [{ data: orgs, error: orgsError }, { data: hierarchyLinks, error: hierarchyError }] = await Promise.all([
+      (supabase as any)
+        .from("anew_organizations")
+        .select("id, logo_url, type")
+        .in("id", orgIds),
+      (supabase as any)
+        .from("anew_hierarchy")
+        .select("child_org_id, parent_org_id")
+        .in("child_org_id", orgIds),
+    ]);
+    if (orgsError) console.error("Error enriching companies (anew_organizations):", orgsError);
+    if (hierarchyError) console.error("Error enriching companies (anew_hierarchy):", hierarchyError);
 
-    const organizations = (orgs || []) as OrganizationRow[];
-    if (organizations.length === 0) return [];
-
-    // Fetch parent org for each org via anew_hierarchy
-    const { data: hierarchyLinks } = await (supabase as any)
-      .from("anew_hierarchy")
-      .select("child_org_id, parent_org_id")
-      .in("child_org_id", orgIds);
+    const orgById = new Map<string, Pick<OrganizationRow, "id" | "logo_url" | "type">>();
+    ((orgs || []) as OrganizationRow[]).forEach((o) => orgById.set(o.id, o));
 
     const parentIds = new Set<string>();
     const childToParent = new Map<string, string>();
@@ -243,25 +202,34 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       parentIds.add(h.parent_org_id);
     });
 
-    // Fetch parent org names
     const parentNames = new Map<string, string>();
     if (parentIds.size > 0) {
-      const { data: parents } = await (supabase as any)
+      const { data: parents, error: parentsError } = await (supabase as any)
         .from("anew_organizations")
         .select("id, name")
         .in("id", Array.from(parentIds));
+      if (parentsError) console.error("Error enriching companies (parent names):", parentsError);
       ((parents || []) as Pick<OrganizationRow, "id" | "name">[]).forEach((p) => parentNames.set(p.id, p.name));
     }
 
-    return organizations.map((org) => ({
-      id: org.id,
-      name: org.name,
-      logo_url: org.logo_url,
-      type: org.type || null,
-      parent_id: childToParent.get(org.id) || null,
-      parent_name: parentNames.get(childToParent.get(org.id) || "") || null,
-    }));
+    return workOrgs.map((w) => {
+      const org = orgById.get(w.id);
+      const parentId = childToParent.get(w.id) || null;
+      return {
+        id: w.id,
+        name: w.name,
+        logo_url: org?.logo_url ?? null,
+        type: org?.type ?? null,
+        parent_id: parentId,
+        parent_name: parentId ? parentNames.get(parentId) || null : null,
+      };
+    });
   };
+
+  // Ref-wrapper so refreshCompanies (exposed via context) can have a stable
+  // identity via useCallback without needing loadUserCompanies itself
+  // (which closes over many local state/refs) to be memoized.
+  const loadUserCompaniesRef = useRef<() => Promise<void>>(async () => {});
 
   const loadUserCompanies = async () => {
     const requestVersion = ++requestVersionRef.current;
@@ -278,58 +246,36 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const initialResult = await determineUserType(session.user.id, null);
+      const initialResult = await determineUserType(session.user.id);
       if (requestVersion !== requestVersionRef.current) return;
 
-      const anewId = await getAnewUserId(session.user.id);
+      // get_user_work_orgs() is the single source of truth for which orgs are
+      // selectable: is_work_org = true AND status = 'active' (system_admin
+      // sees all of them; everyone else only direct/inherited memberships,
+      // resolved server-side with correct anti-cycle hierarchy traversal that
+      // tolerates the legacy relationship_type casing still present in
+      // anew_hierarchy). This replaces the previous client-side type IN
+      // ('holding','empresa') filter (no status check) and unfiltered
+      // anew_hierarchy descendant walk.
+      const { data: workOrgsRaw, error: workOrgsError } = await (supabase as any).rpc("get_user_work_orgs");
       if (requestVersion !== requestVersionRef.current) return;
-      
-      let userCompanies: Company[] = [];
 
-      if (initialResult.tipo === "system_admin") {
-        // Only system_admin sees all organizations globally
-        const { data: allOrgs } = await (supabase as any)
-          .from("anew_organizations")
-          .select("id")
-          .order("name");
-        if (requestVersion !== requestVersionRef.current) return;
-
-        const allOrgIds = ((allOrgs || []) as Pick<OrganizationRow, "id">[]).map((o) => o.id);
-        userCompanies = await fetchOrgsWithParentNames(allOrgIds);
-        if (requestVersion !== requestVersionRef.current) return;
-      } else if (anewId) {
-        // Get all orgs from active memberships
-        const { data: memberships } = await supabase.from("anew_memberships")
-          .select("organization_id")
-          .eq("user_id", anewId)
-          .eq("status", "active");
-        if (requestVersion !== requestVersionRef.current) return;
-
-        const orgIdSet = new Set<string>();
-        (memberships || []).forEach(m => orgIdSet.add(m.organization_id));
-
-        // Resolve full descendant tree for all membership orgs
-        const directOrgIds = Array.from(orgIdSet);
-        let currentParentIds = directOrgIds;
-        for (let depth = 0; depth < 10 && currentParentIds.length > 0; depth++) {
-          const { data: children } = await (supabase as any)
-            .from("anew_hierarchy")
-            .select("child_org_id")
-            .in("parent_org_id", currentParentIds);
-          if (requestVersion !== requestVersionRef.current) return;
-
-          if (!children || children.length === 0) break;
-          const childIds = (children as Pick<HierarchyLinkRow, "child_org_id">[])
-            .map((c) => c.child_org_id)
-            .filter((id) => !orgIdSet.has(id));
-          if (childIds.length === 0) break;
-          childIds.forEach((id: string) => orgIdSet.add(id));
-          currentParentIds = childIds;
-        }
-
-        userCompanies = await fetchOrgsWithParentNames(Array.from(orgIdSet));
-        if (requestVersion !== requestVersionRef.current) return;
+      if (workOrgsError) {
+        // Do NOT fall through silently — a failed RPC call must not look like
+        // "this account genuinely has zero companies" (which drives the
+        // create-company empty state in CompanySwitcher).
+        console.error("Error loading work orgs:", workOrgsError);
+        toast({
+          variant: "destructive",
+          title: "Erro ao carregar organizações",
+          description: "Não foi possível obter a lista de organizações. Tenta recarregar a página.",
+        });
       }
+
+      const workOrgs = (workOrgsRaw || []) as WorkOrgRpcRow[];
+      rolesByOrgIdRef.current = new Map(workOrgs.map((w) => [w.id, w.roles || []]));
+      const userCompanies = await enrichWorkOrgs(workOrgs);
+      if (requestVersion !== requestVersionRef.current) return;
 
       setCompanies(userCompanies);
 
@@ -347,17 +293,18 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("activeCompanyId", userCompanies[0].id);
       }
 
-      // Determine contextual user type based on selected company
-      if (selectedCompany && initialResult.tipo !== "system_admin") {
-        const contextualResult = await determineUserType(session.user.id, selectedCompany.id);
-        if (requestVersion !== requestVersionRef.current) return;
-
-        setUserType(contextualResult.tipo);
-        setUserRoleName(contextualResult.roleName);
-      } else if (initialResult.tipo === "system_admin") {
+      // Determine contextual user type based on the selected company. system_admin
+      // is global and never org-scoped. Otherwise use the roles already resolved
+      // by get_user_work_orgs() for this exact company (correct for inherited/
+      // via_department access) instead of a second, per-org lookup.
+      if (initialResult.tipo === "system_admin") {
         setUserType(initialResult.tipo);
         setUserRoleName(initialResult.roleName);
-      } else if (initialResult.tipo !== "system_admin") {
+      } else if (selectedCompany) {
+        const contextualResult = pickHighestRole(rolesByOrgIdRef.current.get(selectedCompany.id) || []);
+        setUserType(contextualResult.tipo);
+        setUserRoleName(contextualResult.roleName);
+      } else {
         setUserType(initialResult.tipo);
         setUserRoleName(initialResult.roleName);
       }
@@ -377,38 +324,46 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const setActiveCompany = async (company: Company) => {
-    const requestVersion = ++requestVersionRef.current;
+  loadUserCompaniesRef.current = loadUserCompanies;
+
+  const setActiveCompany = useCallback((company: Company) => {
     setActiveCompanyState(company);
     localStorage.setItem("activeCompanyId", company.id);
-    
-    // Recalculate userType for the new company context
-    const { data: { session } } = await supabase.auth.getSession();
-    if (requestVersion !== requestVersionRef.current) return;
 
-    if (session && userType !== "system_admin") {
-      const contextualResult = await determineUserType(session.user.id, company.id);
-      if (requestVersion !== requestVersionRef.current) return;
-
+    // Recalculate userType for the new company context. system_admin is
+    // global; everyone else uses the roles already resolved for this company
+    // by the last get_user_work_orgs() response (see rolesByOrgIdRef).
+    if (userType !== "system_admin") {
+      const contextualResult = pickHighestRole(rolesByOrgIdRef.current.get(company.id) || []);
       setUserType(contextualResult.tipo);
       setUserRoleName(contextualResult.roleName);
     }
-  };
+  }, [userType]);
 
-  const refreshCompanies = async () => {
-    await loadUserCompanies();
-  };
+  const refreshCompanies = useCallback(async () => {
+    await loadUserCompaniesRef.current();
+  }, []);
 
-  return (
-    <CompanyContext.Provider value={{ 
-      companies, 
-      activeCompany, 
+  // Memoized so consumers of useCompany() only see a new context value when
+  // one of these actually changes, instead of on every CompanyProvider
+  // render — an unmemoized value object here previously caused every
+  // consumer's effects/callbacks depending on "the whole context" to refire
+  // on every render, which could cascade into render loops downstream.
+  const value = useMemo(
+    () => ({
+      companies,
+      activeCompany,
       setActiveCompany,
       refreshCompanies,
       isLoading,
       userType,
-      userRoleName
-    }}>
+      userRoleName,
+    }),
+    [companies, activeCompany, setActiveCompany, refreshCompanies, isLoading, userType, userRoleName],
+  );
+
+  return (
+    <CompanyContext.Provider value={value}>
       {children}
     </CompanyContext.Provider>
   );

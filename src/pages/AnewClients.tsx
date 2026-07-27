@@ -2,8 +2,10 @@ import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity } from "@/hooks/useEntityIdentity";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { searchEntityIds } from "@/lib/clientSearch";
+import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -18,7 +20,7 @@ import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDistanceToNow, differenceInDays, format } from "date-fns";
+import { formatDistanceToNow, differenceInDays, format, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ClientDetailsDialog } from "@/components/clients/ClientDetailsDialog";
@@ -42,6 +44,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { buildContactScopeOrFilter, getContactScopeUserIds } from "@/lib/contacts/scope";
 import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -63,6 +66,10 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
+import { withAuditContext } from "@/utils/auditContext";
+import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
+import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClientMeetingDialog";
+import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 
 interface ClientRecord {
   id: string;
@@ -78,6 +85,7 @@ interface ClientRecord {
   created_by: string | null;
   updated_at?: string | null;
   last_interaction_at?: string | null;
+  custom_fields?: Record<string, unknown> | null;
 }
 
 interface AnewUserNameRow { id: string; name: string | null }
@@ -96,6 +104,47 @@ interface ClientAddress {
   postal_code: string; district: string; municipality: string; is_primary: boolean;
 }
 
+interface MatchesStatusFilterContext {
+  getIdentity: (entityId: string) => { vat?: string | null } | undefined | null;
+  contractMap?: Map<string, { expiringContracts: unknown[] }>;
+  noContactEntityIds?: Set<string>;
+}
+
+// Single source of truth for "does this client satisfy statusFilter" — used by
+// loadClients' post-filters, displayClients (main table) and dashboardScopedClients
+// (KPI cards), so the table and the KPIs can never drift apart again.
+const matchesStatusFilter = (client: ClientRecord, filter: string, ctx: MatchesStatusFilterContext): boolean => {
+  switch (filter) {
+    case "all":
+      return true;
+    case "active":
+      return !INACTIVE_CLIENT_STATUSES.includes(client.status || "");
+    case "inactive":
+      return INACTIVE_CLIENT_STATUSES.includes(client.status || "");
+    case "no_contact_30d": {
+      if (INACTIVE_CLIENT_STATUSES.includes(client.status || "")) return false;
+      if (ctx.noContactEntityIds) return ctx.noContactEntityIds.has(client.entity_id);
+      return true;
+    }
+    case "no_contact_60d": {
+      const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000);
+      const lastInteraction = client.last_interaction_at ? new Date(client.last_interaction_at) : null;
+      return !lastInteraction || lastInteraction < sixtyDaysAgo;
+    }
+    case "expiring_contracts": {
+      if (INACTIVE_CLIENT_STATUSES.includes(client.status || "")) return false;
+      const contract = ctx.contractMap?.get(client.entity_id);
+      return !!contract && contract.expiringContracts.length > 0;
+    }
+    case "missing_nif": {
+      const identity = ctx.getIdentity(client.entity_id);
+      return !identity?.vat;
+    }
+    default:
+      return client.status === filter;
+  }
+};
+
 const AnewClients = () => {
   const { t } = useTranslation();
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -110,18 +159,42 @@ const AnewClients = () => {
   const { lookupPostalCode, loading: postalLoading } = usePostalCodeLookup();
   const navigate = useNavigate();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
-  const { getPermissionScope, anewUserId: scopeAnewUserId, loading: scopeLoading } = usePermissionScope();
+  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  // Must match the "clients.view" scope used at every buildContactScopeOrFilter
+  // call site below — team member ids are only ever folded into scopedUserIds
+  // when this scope is TEAM (see getContactScopeUserIds for why).
+  const clientsViewScope = useMemo(
+    () => getPermissionScope("clients.view"),
+    [getPermissionScope],
+  );
+  const scopedUserIds = useMemo(
+    () => getContactScopeUserIds(clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds),
+    [clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
+  );
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { resolveEntities, getIdentity } = useEntityIdentity();
   const { alerts: clientAlerts, dismissAlert: dismissClientAlert } = useModuleAlerts('client', activeCompany?.id);
 
   const [assignedUserMap, setAssignedUserMap] = useState<Map<string, string>>(new Map());
   const [showEmailDialog, setShowEmailDialog] = useState(false);
-  const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string; pdfAttachment?: any }>({ id: "", name: "", email: "" });
+  const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string; pdfAttachment?: { name: string; content: string; mimeType: string } | Blob | File | null }>({ id: "", name: "", email: "" });
   const [showCallDialog, setShowCallDialog] = useState(false);
   const [callTarget, setCallTarget] = useState<{ entityId: string; name: string; phone: string; clientId: string }>({ entityId: "", name: "", phone: "", clientId: "" });
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
+
+  // Bug 7/9/10 dialogs: proposal creation, VIP toggle, meeting scheduling.
+  const [showProposalDialog, setShowProposalDialog] = useState(false);
+  const [proposalPresetEntityId, setProposalPresetEntityId] = useState<string | undefined>(undefined);
+  const [vipTogglingClientId, setVipTogglingClientId] = useState<string | null>(null);
+  const [showScheduleMeetingDialog, setShowScheduleMeetingDialog] = useState(false);
+  const [meetingTarget, setMeetingTarget] = useState<{ clientId: string; entityId: string; organizationId: string; rootOrganizationId: string; name: string } | null>(null);
+
+  // "Gerir tags": reuses ContactTagsDialog against the generic contact_tags table (entity_id-keyed).
+  const [tagsDialogOpen, setTagsDialogOpen] = useState(false);
+  const [tagsEntityId, setTagsEntityId] = useState("");
+  const [tagsEntityName, setTagsEntityName] = useState("");
+  const [tagsOrganizationId, setTagsOrganizationId] = useState("");
 
   const [orgOptions, setOrgOptions] = useState<{ id: string; name: string; depth: number }[]>([]);
   const [orgNameMap, setOrgNameMap] = useState<Map<string, string>>(new Map());
@@ -132,6 +205,11 @@ const AnewClients = () => {
   const PAGE_SIZE = 10;
   const initialLoadDoneRef = useRef(false);
   const truncatedWarnedRef = useRef<string | null>(null);
+  const clientsAbortControllerRef = useRef<AbortController | null>(null);
+  const clientsRequestIdRef = useRef(0);
+  // Separate abort controller for "load more" (pagination) calls so they never share/abort
+  // the controller used by page-1 (filter-change) calls — see loadClients below.
+  const clientsLoadMoreAbortControllerRef = useRef<AbortController | null>(null);
   // Background: all clients for analytics views (Value, Retention, Dashboard)
   const [allClients, setAllClients] = useState<ClientRecord[]>([]);
   const [allClientsLoaded, setAllClientsLoaded] = useState(false);
@@ -159,6 +237,9 @@ const AnewClients = () => {
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("active");
+  const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
+  const [bulkAssignUserId, setBulkAssignUserId] = useState("");
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [clientToRevert, setClientToRevert] = useState<ClientRecord | null>(null);
   const [reverting, setReverting] = useState(false);
@@ -167,7 +248,7 @@ const AnewClients = () => {
   // Duplicate detection state for clients
   const [clientDuplicateDialogOpen, setClientDuplicateDialogOpen] = useState(false);
   const [clientDuplicateMatches, setClientDuplicateMatches] = useState<DuplicateMatch[]>([]);
-  const [pendingClientData, setPendingClientData] = useState<{ entityId: string; displayName: string; email: string; phone: string; status: string; organizationId: string; internalUserId: string; clientType: string; addressData: ClientAddress } | null>(null);
+  const [pendingClientData, setPendingClientData] = useState<{ entityId: string | null; displayName: string; email: string; phone: string; phoneCountryCode: string; vat: string; firstName: string | null; lastName: string | null; entityType: 'person' | 'organization'; status: string; organizationId: string; internalUserId: string; clientType: string; addressData: ClientAddress } | null>(null);
   const [revertableClientIds, setRevertableClientIds] = useState<Set<string>>(new Set());
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeView, setActiveView] = useState<"dashboard" | "list" | "value" | "retention">("list");
@@ -179,6 +260,13 @@ const AnewClients = () => {
   const [lastContactFilter, setLastContactFilter] = useState("all");
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Stable org scope array for Value/Retention views — avoids a new array
+  // literal on every render, which would otherwise retrigger their fetch effects.
+  const activeCompanyScopeOrgIds = useMemo(
+    () => (activeCompany?.id ? [activeCompany.id] : []),
+    [activeCompany?.id]
+  );
 
   // Enriched data for paginated list
   const entityIds = useMemo(() => clients.map(c => c.entity_id).filter(Boolean), [clients]);
@@ -294,6 +382,45 @@ const AnewClients = () => {
     return { noContactClients, expiringContracts, upsellClients, avgValue, vipAtRisk };
   }, [analyticsClients, analyticsHealthScores, analyticsContractMap, analyticsInteractionMap, analyticsTagMap, getIdentity]);
 
+  // Clients feeding the dashboard KPI cards — always a filtered subset of analyticsClients
+  // (org+permission+search+date scoped), narrowed by the same predicates the main list uses,
+  // so KPI cards and the paginated table can never disagree.
+  const dashboardScopedClients = useMemo(() => {
+    const noContactEntityIds = new Set(alertData.noContactClients.map(c => c.entityId).filter(Boolean));
+    let filtered = analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
+      getIdentity, contractMap: analyticsContractMap, noContactEntityIds,
+    }));
+
+    if (healthFilter !== "all") {
+      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
+    }
+
+    if (lastContactFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(c => {
+        const int = analyticsInteractionMap.get(c.entity_id);
+        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
+        switch (lastContactFilter) {
+          case "7d": return days <= 7;
+          case "30d": return days <= 30;
+          case "30d+": return days > 30;
+          case "60d+": return days > 60;
+          default: return true;
+        }
+      });
+    }
+
+    if (onlyMine && scopeAnewUserId) {
+      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
+    }
+
+    if (salesRepFilter !== "all") {
+      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
+    }
+
+    return filtered;
+  }, [analyticsClients, statusFilter, healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap, analyticsContractMap, alertData, getIdentity]);
+
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
     let filtered = [...clients];
@@ -309,14 +436,8 @@ const AnewClients = () => {
     }
 
     // Special status filters (from KPI cards)
-    if (statusFilter === "no_contact_30d") {
-      filtered = filtered.filter(c => !["inactive", "churned", "lost"].includes(c.status || ""));
-    } else if (statusFilter === "expiring_contracts") {
-      filtered = filtered.filter(c => {
-        if (["inactive", "churned", "lost"].includes(c.status || "")) return false;
-        const contract = contractMap.get(c.entity_id);
-        return !!contract && contract.expiringContracts.length > 0;
-      });
+    if (statusFilter === "no_contact_30d" || statusFilter === "expiring_contracts") {
+      filtered = filtered.filter(c => matchesStatusFilter(c, statusFilter, { getIdentity, contractMap }));
     }
 
     // Last contact filter
@@ -358,7 +479,7 @@ const AnewClients = () => {
     }
 
     return filtered;
-  }, [clients, healthFilter, salesRepFilter, statusFilter, lastContactFilter, onlyMine, activeView, sortColumn, sortDir, healthScores, contractMap, interactionMap, scopeAnewUserId]);
+  }, [clients, healthFilter, salesRepFilter, statusFilter, lastContactFilter, onlyMine, activeView, sortColumn, sortDir, healthScores, contractMap, interactionMap, scopeAnewUserId, getIdentity]);
 
   // Max contract value for progress bars
   const maxContractValue = useMemo(() => {
@@ -443,62 +564,33 @@ const AnewClients = () => {
       newParams.delete("_t");
       setSearchParams(newParams, { replace: true });
     }
-  }, []);
+  }, [searchParams, setSearchParams]);
 
-  useEffect(() => {
-    if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
-  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading]);
-
-  useEffect(() => {
-    const openId = searchParams.get("open");
-    if (!openId || selectedClient) return;
-
-    const openFromQuery = async () => {
-      const found = clients.find((c) => c.id === openId || c.entity_id === openId);
-      if (found) {
-        await openClientDetails(found);
-        setSearchParams({});
-        return;
-      }
-
-      let fetchedClient: ClientRecord | null = null;
-      const { data: byId } = await (supabase as any)
-        .from("anew_clients")
-        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
-        .eq("id", openId)
-        .maybeSingle();
-      fetchedClient = byId as ClientRecord | null;
-
-      if (!fetchedClient && activeCompany?.id) {
-        const { data: byEntityInActiveOrg } = await (supabase as any)
-          .from("anew_clients")
-          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
-          .eq("entity_id", openId)
-          .eq("organization_id", activeCompany.id)
-          .maybeSingle();
-        fetchedClient = byEntityInActiveOrg as ClientRecord | null;
-      }
-
-      if (fetchedClient) {
-        await openClientDetails(fetchedClient as ClientRecord);
-        setSearchParams({});
-      }
-    };
-
-    void openFromQuery();
-  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities]);
-
-  const loadClients = async (offset: number, isInitial: boolean = false, silent: boolean = false) => {
+  const loadClients = useCallback(async (offset: number, isInitial: boolean = false, silent: boolean = false) => {
     const shouldShowInitialLoader = isInitial && !silent;
     if (shouldShowInitialLoader) setLoading(true);
     else if (!isInitial) setLoadingMore(true);
+    // Any fresh (page-1) load — i.e. any global filter change — cancels the previous
+    // in-flight request so a slow stale response can never clobber newer filter results.
+    let requestId = clientsRequestIdRef.current;
+    let abortController: AbortController | null;
+    if (isInitial) {
+      clientsAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      clientsAbortControllerRef.current = abortController;
+      requestId = ++clientsRequestIdRef.current;
+    } else {
+      // "Load more" gets its own controller so an initial (filter-change) call aborting
+      // clientsAbortControllerRef never cancels an in-flight pagination request.
+      clientsLoadMoreAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      clientsLoadMoreAbortControllerRef.current = abortController;
+    }
     try {
       const viewScope = getPermissionScope("clients.view");
-      let internalUserId: string | null = scopeAnewUserId || null;
 
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at", { count: 'exact' }).is("deleted_at", null);
+      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-      else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
       else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
       // When searching, ignore status filter so inactive/churned/lost clients still appear
       if (!effectiveSearch) {
@@ -514,22 +606,27 @@ const AnewClients = () => {
           const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
           if (atRiskIds.length > 0) {
             query = query.in("entity_id", atRiskIds);
+          } else {
+            // No at-risk clients — force an empty result instead of falling back to
+            // "all non-inactive clients" (matches the pattern used in Deals.tsx).
+            query = query.eq("entity_id", "00000000-0000-0000-0000-000000000000");
           }
         }
       }
 
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-      if (viewScope === "OWNED" && internalUserId) {
-        const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-        query = query.or(orFilters.join(','));
-      } else if (viewScope === "NONE") {
+      if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
+      } else {
+        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+        if (scopeFilter) query = query.or(scopeFilter);
       }
 
       // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
       if (effectiveSearch) {
         const { ids: matchedIds, truncated } = await searchEntityIds(effectiveSearch);
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
         if (truncated && truncatedWarnedRef.current !== effectiveSearch) {
           truncatedWarnedRef.current = effectiveSearch;
           toast({
@@ -546,8 +643,10 @@ const AnewClients = () => {
       }
 
       query = query.order("updated_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
+      if (isInitial && requestId !== clientsRequestIdRef.current) return;
 
       let newClients = (data || []) as ClientRecord[];
       const eIds = newClients.map(c => c.entity_id).filter(Boolean);
@@ -556,21 +655,9 @@ const AnewClients = () => {
       // Text search is applied server-side above via searchEntityIds (entity_id .in).
 
 
-      // Post-filter: missing NIF
-      if (statusFilter === "missing_nif") {
-        newClients = newClients.filter(c => {
-          const id = getIdentity(c.entity_id);
-          return !id?.vat;
-        });
-      }
-
-      // Post-filter: no contact (60d)
-      if (statusFilter === "no_contact_60d") {
-        const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000);
-        newClients = newClients.filter(c => {
-          const lastInteraction = c.last_interaction_at ? new Date(c.last_interaction_at) : null;
-          return !lastInteraction || lastInteraction < sixtyDaysAgo;
-        });
+      // Post-filter: missing NIF / no contact (60d)
+      if (statusFilter === "missing_nif" || statusFilter === "no_contact_60d") {
+        newClients = newClients.filter(c => matchesStatusFilter(c, statusFilter, { getIdentity }));
       }
 
       const assignedIds = newClients.map(c => c.assigned_to).filter(Boolean) as string[];
@@ -591,14 +678,63 @@ const AnewClients = () => {
       });
       setHasMore(newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
     } catch (error: unknown) {
+      if (abortController?.signal.aborted || (isInitial && requestId !== clientsRequestIdRef.current)) return;
       const message = error instanceof Error ? error.message : "Erro inesperado.";
       toast({ title: t('clients.loading'), description: message, variant: "destructive" });
     } finally {
-      if (isInitial) initialLoadDoneRef.current = true;
-      setLoading(false);
-      setLoadingMore(false);
+      if (!isInitial || requestId === clientsRequestIdRef.current) {
+        if (isInitial) initialLoadDoneRef.current = true;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  };
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+
+  useEffect(() => {
+    if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
+  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
+
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (!openId || selectedClient) return;
+
+    const openFromQuery = async () => {
+      const found = clients.find((c) => c.id === openId || c.entity_id === openId);
+      if (found) {
+        await openClientDetails(found);
+        setSearchParams({});
+        return;
+      }
+
+      if (!activeCompany?.id) return;
+
+      let fetchedClient: ClientRecord | null = null;
+      const { data: byId } = await (supabase as any)
+        .from("anew_clients")
+        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+        .eq("id", openId)
+        .eq("organization_id", activeCompany.id)
+        .maybeSingle();
+      fetchedClient = byId as ClientRecord | null;
+
+      if (!fetchedClient) {
+        const { data: byEntityInActiveOrg } = await (supabase as any)
+          .from("anew_clients")
+          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+          .eq("entity_id", openId)
+          .eq("organization_id", activeCompany.id)
+          .maybeSingle();
+        fetchedClient = byEntityInActiveOrg as ClientRecord | null;
+      }
+
+      if (fetchedClient) {
+        await openClientDetails(fetchedClient as ClientRecord);
+        setSearchParams({});
+      }
+    };
+
+    void openFromQuery();
+  }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
 
   const loadMoreClients = () => { if (!loadingMore && hasMore) loadClients(clients.length); };
 
@@ -607,7 +743,6 @@ const AnewClients = () => {
     try {
       const viewScope = getPermissionScope("clients.view");
       if (viewScope === "NONE") { setAllClients([]); setAllClientsLoaded(true); return; }
-      let internalUserId: string | null = scopeAnewUserId || null;
 
       // Server-side search: pre-resolve matching entity_ids (covers full universe, not just first batch)
       let searchEntityIdsList: string[] | null = null;
@@ -628,13 +763,12 @@ const AnewClients = () => {
       while (hasMore) {
         let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at").is("deleted_at", null);
         if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-        else if (scopeOrgIds.length > 0) query = query.in("organization_id", scopeOrgIds);
         else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-        if (viewScope === "OWNED" && internalUserId) {
-          const orFilters = [`assigned_to.eq.${internalUserId}`, `created_by.eq.${internalUserId}`];
-          query = query.or(orFilters.join(','));
-        }
+        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+        if (scopeFilter) query = query.or(scopeFilter);
         if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
+        if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
+        if (dateTo) query = query.lte("created_at", dateTo.toISOString());
         query = query.order("updated_at", { ascending: false }).range(offset, offset + BATCH - 1);
         const { data, error } = await query;
         if (error) throw error;
@@ -665,7 +799,7 @@ const AnewClients = () => {
     } catch (err) {
       console.error("Error loading all clients for analytics:", err);
     }
-  }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, resolveEntities, effectiveSearch]);
+  }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, scopedUserIds, resolveEntities, effectiveSearch, dateFrom, dateTo]);
 
   // Trigger background load for accurate KPIs — defer via idle to avoid competing with first paint
   useEffect(() => {
@@ -688,7 +822,7 @@ const AnewClients = () => {
   // Realtime: refresh both paginated list and full analytics on any anew_clients change in scope
   useEffect(() => {
     if (scopeLoading || isParentOrg === null) return;
-    const orgIds = scopeOrgIds.length > 0 ? scopeOrgIds : (activeCompany?.id ? [activeCompany.id] : []);
+    const orgIds = activeCompany?.id ? [activeCompany.id] : [];
     if (orgIds.length === 0) return;
     let timer: number | null = null;
     const orgSet = new Set(orgIds);
@@ -712,7 +846,7 @@ const AnewClients = () => {
       if (timer) window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [scopeLoading, isParentOrg, scopeOrgIds, activeCompany?.id, loadAllClients]);
+  }, [scopeLoading, isParentOrg, scopeOrgIds, activeCompany?.id, loadClients, loadAllClients]);
 
   // Realtime: contracts / interactions — bump dashboardKey to force enriched data re-fetch
   useEffect(() => {
@@ -760,6 +894,34 @@ const AnewClients = () => {
 
   const handleDeleteClick = (client: ClientRecord, e: React.MouseEvent) => { e.stopPropagation(); setClientToDelete(client); setDeleteDialogOpen(true); };
 
+  // Bug 9 — "Marcar como VIP": toggles anew_clients.custom_fields->>'vip' via
+  // rpc_toggle_client_vip (atomic, single audit row).
+  const handleToggleVip = async (client: ClientRecord) => {
+    if (vipTogglingClientId) return;
+    setVipTogglingClientId(client.id);
+    try {
+      const { data: current, error: fetchError } = await (supabase as any)
+        .from("anew_clients")
+        .select("custom_fields")
+        .eq("id", client.id)
+        .maybeSingle();
+      if (fetchError) throw fetchError;
+      const currentVip = Boolean(current?.custom_fields?.vip);
+      const { error } = await supabase.rpc("rpc_toggle_client_vip", {
+        p_client_id: client.id,
+        p_organization_id: client.organization_id,
+        p_is_vip: !currentVip,
+      });
+      if (error) throw error;
+      toast({ title: !currentVip ? "Cliente marcado como VIP" : "Cliente deixou de ser VIP" });
+      setClients([]); setHasMore(true); loadClients(0, true);
+    } catch (err: any) {
+      toast({ title: t('clients.toast.vipUpdateError'), description: err.message, variant: "destructive" });
+    } finally {
+      setVipTogglingClientId(null);
+    }
+  };
+
   const deactivateEntityRole = async (entityId: string, orgId: string, rootOrgId?: string) => {
     // Deactivate entity role in both possible org IDs to handle hierarchy mismatches
     const orgIds = [orgId];
@@ -782,22 +944,42 @@ const AnewClients = () => {
   const handleDeleteConfirm = async () => {
     if (!clientToDelete) return;
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: clientToDelete.id });
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: clientToDelete.id })
+      );
       if (error) throw error;
       await resolveClientNotifications([clientToDelete.id]);
-      toast({ title: "Cliente movido para lixo" });
+      toast({ title: t('clients.toast.movedToTrash') });
       setDeleteDialogOpen(false); setClientToDelete(null); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.deleteError'), description: error.message, variant: "destructive" }); }
   };
 
   const toggleSelectAll = () => { selectedIds.size === displayClients.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(displayClients.map(c => c.id))); };
-  const toggleSelectOne = (id: string) => { const s = new Set(selectedIds); s.has(id) ? s.delete(id) : s.add(id); setSelectedIds(s); };
+  const toggleSelectOne = (id: string) => {
+    if (selectedIds.has(id)) {
+      const next = new Set(selectedIds);
+      next.delete(id);
+      setSelectedIds(next);
+    } else {
+      setSelectedIds(new Set([...selectedIds, id]));
+    }
+  };
 
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
       const ids = Array.from(selectedIds);
-      const { error } = await (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids);
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).from("anew_clients").update({ status: bulkNewStatus }).in("id", ids).eq("organization_id", activeCompany?.id)
+      );
       if (error) throw error;
       // Sync entity roles for status changes to/from inactive
       const targetClients = clients.filter(c => selectedIds.has(c.id));
@@ -816,23 +998,141 @@ const AnewClients = () => {
       if (inactiveStatuses.includes(bulkNewStatus)) {
         await resolveClientNotifications(ids);
       }
-      toast({ title: "Status atualizado", description: `${selectedIds.size} clientes atualizados` });
+      toast({ title: t('clients.toast.statusUpdated'), description: t('clients.toast.statusUpdatedDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkStatusDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('common.error'), description: error.message, variant: "destructive" }); }
   };
 
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
       const ids = Array.from(selectedIds);
       for (const id of ids) {
-        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: id });
+        const { error } = await withAuditContext(supabase, anewUser.id, () =>
+          (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "client", p_id: id })
+        );
         if (error) throw error;
       }
       await resolveClientNotifications(ids);
-      toast({ title: "Clientes movidos para lixo", description: `${selectedIds.size} clientes` });
+      toast({ title: t('clients.toast.bulkMovedToTrash'), description: t('clients.toast.bulkMovedToTrashDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: "Erro", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.bulkDeleteError'), description: error.message, variant: "destructive" }); }
+  };
+
+  // Bulk "Atribuir a...": reuses the same audit-context + org-scoped update
+  // pattern as handleBulkStatusChange, applied to assigned_to instead of status.
+  const handleBulkAssign = async () => {
+    if (selectedIds.size === 0 || !bulkAssignUserId) return;
+    setBulkActionLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+      const ids = Array.from(selectedIds);
+      const { error } = await withAuditContext(supabase, anewUser.id, () =>
+        (supabase as any).from("anew_clients").update({ assigned_to: bulkAssignUserId }).in("id", ids).eq("organization_id", activeCompany?.id)
+      );
+      if (error) throw error;
+      toast({ title: t('clients.toast.bulkAssignSuccess'), description: t('clients.toast.bulkAssignSuccessDesc', { count: selectedIds.size, name: assignedUserMap.get(bulkAssignUserId) || "comercial selecionado" }) });
+      setSelectedIds(new Set()); setBulkAssignDialogOpen(false); setBulkAssignUserId(""); setClients([]); setHasMore(true); loadClients(0, true);
+    } catch (error: any) {
+      toast({ title: t('clients.toast.bulkAssignError'), description: error.message, variant: "destructive" });
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk "Marcar VIP": reuses the same rpc_toggle_client_vip RPC as the
+  // single-record VIP toggle (handleToggleVip), looped per selected client,
+  // but always sets VIP = true (a bulk "mark", not a per-row toggle).
+  const handleBulkMarkVip = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkActionLoading(true);
+    try {
+      const targetClients = clients.filter(c => selectedIds.has(c.id));
+      let successCount = 0;
+      for (const client of targetClients) {
+        const { error } = await supabase.rpc("rpc_toggle_client_vip", {
+          p_client_id: client.id,
+          p_organization_id: client.organization_id,
+          p_is_vip: true,
+        });
+        if (error) {
+          console.error("Error marking client as VIP:", client.id, error);
+          continue;
+        }
+        successCount++;
+      }
+      if (successCount === 0) {
+        toast({ title: t('clients.toast.bulkVipError'), description: t('clients.toast.bulkVipErrorDesc'), variant: "destructive" });
+      } else {
+        toast({ title: t('clients.toast.bulkVipSuccess'), description: t('clients.toast.bulkVipSuccessDesc', { success: successCount, total: targetClients.length }) });
+      }
+      setSelectedIds(new Set()); setClients([]); setHasMore(true); loadClients(0, true);
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk "Novo Pedido": reuses the same direct `deals` insert shape as
+  // ClientDetailsDialog's single-client "novo pedido" flow, looped per
+  // selected client with sensible defaults (first pipeline stage, 50%
+  // probability) since the interactive deal form only supports one entity
+  // at a time.
+  const handleBulkCreateDeals = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkActionLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
+      if (!anewUser?.id) throw new Error("Business user not found");
+
+      const { data: firstStage, error: stageError } = await supabase
+        .from("deal_stages")
+        .select("id")
+        .order("order_index")
+        .limit(1)
+        .maybeSingle();
+      if (stageError || !firstStage?.id) throw new Error("Nenhuma etapa de pipeline configurada.");
+
+      const targetClients = clients.filter(c => selectedIds.has(c.id) && c.entity_id);
+      let successCount = 0;
+      for (const client of targetClients) {
+        const identity = getIdentity(client.entity_id);
+        const { error } = await supabase.from("deals").insert({
+          entity_id: client.entity_id,
+          title: `Pedido - ${identity?.display_name || ""}`,
+          value: 0,
+          probability: 50,
+          stage_id: firstStage.id,
+          created_by: anewUser.id,
+          assigned_to: client.assigned_to || anewUser.id,
+          organization_id: client.organization_id,
+          root_organization_id: client.root_organization_id || client.organization_id,
+        } as any);
+        if (error) {
+          console.error("Error creating bulk deal for client:", client.id, error);
+          continue;
+        }
+        successCount++;
+      }
+      if (successCount === 0) {
+        toast({ title: t('clients.toast.bulkDealsError'), description: t('clients.toast.bulkDealsErrorDesc'), variant: "destructive" });
+      } else {
+        toast({ title: t('clients.toast.bulkDealsSuccess'), description: t('clients.toast.bulkDealsSuccessDesc', { success: successCount, total: targetClients.length }) });
+      }
+      setSelectedIds(new Set());
+    } catch (error: any) {
+      toast({ title: t('clients.toast.bulkDealsError'), description: error.message, variant: "destructive" });
+    } finally {
+      setBulkActionLoading(false);
+    }
   };
 
   const [savingClient, setSavingClient] = useState(false);
@@ -849,32 +1149,30 @@ const AnewClients = () => {
       phone_country_code: companyFormData.phone_country_code, vat: companyFormData.vat, position: "", status: companyFormData.status,
     };
     const schema = clientType === "company" ? contactCompanySchema : contactSchema;
-    console.log('[DEBUG] clientType:', clientType, 'dataToValidate:', JSON.stringify(dataToValidate));
     const validation = schema.safeParse(dataToValidate);
-    console.log('[DEBUG] validation result:', validation.success, validation.success ? 'OK' : JSON.stringify(validation.error.errors));
     if (!validation.success) {
       const errors: Record<string, string> = {};
       validation.error.errors.forEach(err => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
       setFieldErrors(errors);
-      toast({ title: "Erro de validação", description: validation.error.errors[0]?.message, variant: "destructive" });
+      toast({ title: t('clients.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
     setFieldErrors({});
     if (addressData.postal_code) {
       const av = addressSchema.safeParse(addressData);
-      if (!av.success) { toast({ title: "Erro na morada", description: av.error.errors[0]?.message, variant: "destructive" }); return; }
+      if (!av.success) { toast({ title: t('clients.toast.addressValidationError'), description: av.error.errors[0]?.message, variant: "destructive" }); return; }
     }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
       const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
       if (!anewUser?.id) {
-        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        toast({ title: t('common.error'), description: t('clients.toast.profileNotFound'), variant: "destructive" });
         return;
       }
       const internalUserId = anewUser.id;
       const organizationId = activeCompany?.id || null;
-      if (!organizationId) { toast({ title: "Erro", description: "Nenhuma organização ativa", variant: "destructive" }); return; }
+      if (!organizationId) { toast({ title: t('common.error'), description: t('clients.toast.noActiveOrg'), variant: "destructive" }); return; }
 
       const personNames = clientType === "person" ? normalizeFirstLast(formData.first_name, formData.last_name) : { first: null, last: null };
       const displayName = clientType === "person" ? composeDisplayName(personNames.first, personNames.last) : companyFormData.name;
@@ -886,28 +1184,45 @@ const AnewClients = () => {
       const firstName = clientType === "person" ? personNames.first : null;
       const lastName = clientType === "person" ? personNames.last : null;
 
-      let entityId = await resolveEntityByIdentity({ email: email || null, phone: phone || null, vat: vat || null });
-      if (!entityId) {
-        entityId = await createEntityWithIdentity({
-          displayName, type: entityType as 'person' | 'organization',
-          email: email || null, phone: phone || null, phoneCountryCode: phoneCode,
-          vat: vat || null, createdBy: internalUserId, firstName, lastName,
-        });
-      } else {
-        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
+      let entityId = await resolveEntityByIdentity({ email: email || null, phone: phone || null, vat: vat || null, organizationId });
+      if (entityId) {
+        // Phone alone is a weak signal (shared/reused far more than email or
+        // VAT) — never auto-reuse an unrelated entity on phone match alone.
+        const coherence = await validateEntityCoherence(entityId, { name: displayName || null, email: email || null, phone: phone || null, vat: vat || null });
+        if (coherence.level === 'none' || coherence.phoneOnlyMatch) {
+          console.warn('[client-create] Entity match rejected (insufficient coherence)', { rejectedEntityId: entityId, coherence });
+          entityId = null;
+        }
       }
-      try {
-        await ensureEntityOrgLink({ entityId: entityId!, organizationId, isPrimary: false });
-      } catch (e) { console.warn('[org-link] non-fatal', e); }
+      // NOTE: entity creation (name/email/phone/vat) is deferred entirely to
+      // rpc_create_client_manual below when entityId is null — the RPC creates
+      // the entity + client atomically with a single, complete audit diff. A
+      // prior version called createEntityWithIdentity() here first, which
+      // wrote the entity outside any transaction the RPC could audit, so the
+      // resulting log only ever showed the anew_clients row (no
+      // name/email/phone). Never reintroduce a separate pre-creation call.
+      const entityResolved = !!entityId;
+      if (entityResolved) {
+        try {
+          await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
+        } catch (e) { console.warn('[org-link] non-fatal', e); }
+        // NOTE: display_name update on the reused entity is deferred until
+        // after the duplicate check (see below) so duplicates surface with
+        // the entity's real existing name, not the freshly typed one.
+      }
 
       const status = clientType === "person" ? formData.status : companyFormData.status;
 
-      // --- DUPLICATE CHECK: look for existing leads, contacts, clients with same entity in same org ---
-      const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = await Promise.all([
-        (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-        supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-        supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-      ]);
+      // --- DUPLICATE CHECK: only meaningful when reusing an existing entity —
+      // a brand-new entity (entityId still null here) cannot already have
+      // leads/contacts/clients tied to it, so skip the query entirely.
+      const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = entityResolved
+        ? await Promise.all([
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+          ])
+        : [{ data: [] }, { data: [] }, { data: [] }];
 
       // Resolve real identity data for matched entities
       const allClientRawMatches = [
@@ -963,62 +1278,86 @@ const AnewClients = () => {
 
       if (allClientMatches.length > 0) {
         setClientDuplicateMatches(allClientMatches);
-        setPendingClientData({ entityId, displayName, email: email || '', phone: phone || '', status, organizationId, internalUserId, clientType, addressData: { ...addressData } });
+        setPendingClientData({
+          entityId, displayName, email: email || '', phone: phone || '', phoneCountryCode: phoneCode || '+351',
+          vat: vat || '', firstName, lastName, entityType: entityType as 'person' | 'organization',
+          status, organizationId, internalUserId, clientType, addressData: { ...addressData },
+        });
         setClientDuplicateDialogOpen(true);
         setSavingClient(false);
         submitLockRef.current = false;
         return;
       }
 
+      // Sem duplicado — agora sim podemos sincronizar o display_name na entidade reutilizada.
+      if (entityResolved) {
+        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
+      }
       // No duplicates — proceed with creation
-      await createClientRecord(entityId, status, organizationId, internalUserId, entityType, addressData);
+      await createClientRecord(entityId, status, organizationId, internalUserId, entityType, addressData, {
+        displayName, firstName, lastName, email: email || null, phone: phone || null,
+        phoneCountryCode: phoneCode || null, vat: vat || null,
+      });
 
-      toast({ title: "Cliente criado com sucesso" });
+      toast({ title: t('clients.toast.clientCreated') });
       setOpen(false); setClientType("person");
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
-    } catch (error: any) { toast({ title: "Erro ao criar cliente", description: error.message, variant: "destructive" }); }
+    } catch (error: any) { toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
-  // Extracted client creation logic for reuse
-  const createClientRecord = async (entityId: string, status: string, organizationId: string, internalUserId: string, entityType: string, addr: ClientAddress) => {
-    const { data: existingClient } = await (supabase as any).from("anew_clients").select("id")
-      .eq("entity_id", entityId).eq("organization_id", organizationId).is("deleted_at", null).maybeSingle();
-    if (existingClient) {
-      // Always reactivate when reusing: never leave an inactive client behind.
-      await (supabase as any).from("anew_clients").update({ status: status || "active", deleted_at: null, organization_id: organizationId, source_type: "manual", updated_at: new Date().toISOString() }).eq("id", existingClient.id);
-    } else {
-      await (supabase as any).from("anew_clients").insert({
-        entity_id: entityId, root_organization_id: resolvedRootOrgId || organizationId,
-        organization_id: organizationId, status, client_type: entityType,
-        source_type: "manual", created_by: internalUserId,
-      });
-    }
-    const { data: existingRole } = await supabase.from("anew_entity_roles").select("id")
-      .eq("entity_id", entityId).eq("role", "client").eq("organization_id", organizationId).maybeSingle();
-    if (!existingRole) {
-      await supabase.from("anew_entity_roles").insert({
-        entity_id: entityId, role: "client", status: "active",
-        organization_id: organizationId, source_type: "manual", created_by: internalUserId,
-      });
-    }
-    if (addr.postal_code && addr.street) {
-      const addressKey = `${addr.street}-${addr.number}-${addr.postal_code}`.toLowerCase().replace(/\s+/g, '-');
-      const { data: newAddress } = await supabase.from("anew_addresses").insert({
-        address_key: addressKey, street: addr.street, number: addr.number,
-        floor: addr.floor_number || null, city: addr.city, postal_code: addr.postal_code,
-        district: addr.district || null, country: "PT", created_by: internalUserId,
-      }).select("id").single();
-      if (newAddress) {
-        await supabase.from("anew_entity_addresses").insert({
-          entity_id: entityId, address_id: newAddress.id, address_type: "work", is_primary: true, created_by: internalUserId,
-        });
-      }
-    }
+  // Extracted client creation logic for reuse.
+  // Delegates the actual writes (anew_entities + anew_clients + anew_entity_roles
+  // + address) to rpc_create_client_manual, which performs them atomically with a
+  // single consolidated entity_audit_log row (audit_bypass + fn_manual_audit_log
+  // pattern). When entityId is null, the RPC also creates the entity itself using
+  // entityFields — never create the entity separately beforehand (see
+  // create_contact_with_role's equivalent branch for the same reasoning).
+  interface ClientEntityFields {
+    displayName: string;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    phoneCountryCode: string | null;
+    vat: string | null;
+  }
+
+  const createClientRecord = async (
+    entityId: string | null,
+    status: string,
+    organizationId: string,
+    internalUserId: string,
+    entityType: string,
+    addr: ClientAddress,
+    entityFields?: ClientEntityFields,
+  ) => {
+    const nif = entityFields?.vat ?? null;
+    const { error } = await callNifWriteProxy("rpc_create_client_manual", {
+      p_entity_id: entityId,
+      p_organization_id: organizationId,
+      p_root_organization_id: resolvedRootOrgId || organizationId,
+      p_status: status || "active",
+      p_client_type: entityType,
+      p_address_street: addr.street || null,
+      p_address_number: addr.number || null,
+      p_address_floor: addr.floor_number || null,
+      p_address_city: addr.city || null,
+      p_address_postal_code: addr.postal_code || null,
+      p_address_district: addr.district || null,
+      p_display_name: entityFields?.displayName ?? null,
+      p_first_name: entityFields?.firstName ?? null,
+      p_last_name: entityFields?.lastName ?? null,
+      p_email: entityFields?.email ?? null,
+      p_phone: entityFields?.phone ?? null,
+      p_phone_country_code: entityFields?.phoneCountryCode ?? null,
+      p_vat: entityFields?.vat ?? null,
+    }, nif);
+    if (error) throw error;
   };
 
   // Duplicate client handlers
@@ -1030,7 +1369,7 @@ const AnewClients = () => {
     if (match.type === "lead") {
       navigate(`/leads?open=${match.id}`);
     } else if (match.type === "contact") {
-      navigate(`/contacts?open=${match.id}`);
+      navigate(`/leads?open=${match.id}`);
     } else {
       // Client — try to open detail on current page
       const existingClient = clients.find(c => c.id === match.id);
@@ -1039,7 +1378,7 @@ const AnewClients = () => {
         setDetailsOpen(true);
       } else {
         (async () => {
-          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).single();
+          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
           if (data) {
             setSelectedClient(data);
             setDetailsOpen(true);
@@ -1050,7 +1389,7 @@ const AnewClients = () => {
   };
 
   const convertContactMatchToClient = async (match: DuplicateMatch) => {
-    if (!pendingClientData || match.type !== "contact") return;
+    if (!pendingClientData || match.type !== "contact" || !pendingClientData.entityId) return;
     await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
     // createClientRecord already reactivates an existing client (any status, non-deleted) or inserts a new one.
     const { data: clientRow } = await (supabase as any)
@@ -1064,7 +1403,7 @@ const AnewClients = () => {
       .limit(1)
       .maybeSingle();
     if (clientRow?.id) {
-      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id);
+      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
     }
     await supabase.from("anew_entity_roles").update({ status: "inactive" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "contact").eq("organization_id", pendingClientData.organizationId);
     await supabase.from("anew_entity_roles").update({ status: "active" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
@@ -1077,24 +1416,24 @@ const AnewClients = () => {
         setSavingClient(true);
         try {
           await convertContactMatchToClient(match);
-          toast({ title: "Contacto convertido", description: `O contacto "${match.displayName}" foi convertido em cliente.` });
+          toast({ title: t('clients.toast.contactConverted'), description: t('clients.toast.contactConvertedDesc', { name: match.displayName }) });
           setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
           setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
         } catch (err: any) {
-          toast({ title: "Erro ao converter", description: err.message, variant: "destructive" });
+          toast({ title: t('clients.toast.convertError'), description: err.message, variant: "destructive" });
         } finally { setSavingClient(false); }
       }
       return;
     }
     setSavingClient(true);
     try {
-      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id);
+      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
       await supabase.from("anew_entity_roles").update({ status: pendingClientData.status } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
-      toast({ title: "Cliente atualizado", description: `Os dados do cliente "${match.displayName}" foram atualizados.` });
+      toast({ title: t('clients.toast.clientUpdated'), description: t('clients.toast.duplicateUpdateDesc', { name: match.displayName }) });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.updateError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1105,11 +1444,11 @@ const AnewClients = () => {
       await linkEntityToOrg(match.entityId, pendingClientData.organizationId);
       // Reuse the (now shared) entity for the new client record
       await createClientRecord(match.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
-      toast({ title: "Cliente criado a partir de entidade do grupo" });
+      toast({ title: t('clients.toast.createFromGroupSuccess') });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.shareEntityError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1141,22 +1480,26 @@ const AnewClients = () => {
     setClientDuplicateDialogOpen(false);
     setSavingClient(true);
     try {
-      await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData);
-      toast({ title: "Cliente criado com sucesso" });
+      await createClientRecord(pendingClientData.entityId, pendingClientData.status, pendingClientData.organizationId, pendingClientData.internalUserId, pendingClientData.clientType, pendingClientData.addressData, {
+        displayName: pendingClientData.displayName, firstName: pendingClientData.firstName, lastName: pendingClientData.lastName,
+        email: pendingClientData.email || null, phone: pendingClientData.phone || null,
+        phoneCountryCode: pendingClientData.phoneCountryCode || null, vat: pendingClientData.vat || null,
+      });
+      toast({ title: t('clients.toast.clientCreated') });
       setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao criar cliente", description: err.message, variant: "destructive" });
+      toast({ title: t('clients.toast.createError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
   const performExport = async (includeSensitive: boolean) => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
-      toast({ title: "Selecione uma organização", variant: "destructive" });
+      toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
       return;
     }
     setExporting(true);
@@ -1176,7 +1519,7 @@ const AnewClients = () => {
         description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
     } catch (error: any) {
-      toast({ title: "Erro na exportação", description: error.message, variant: "destructive" });
+      toast({ title: t('clients.toast.exportError'), description: error.message, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -1185,7 +1528,7 @@ const AnewClients = () => {
   const handleExport = () => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
-      toast({ title: "Selecione uma organização", variant: "destructive" });
+      toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
       return;
     }
     if (hasPermission("clients.export_sensitive")) {
@@ -1265,6 +1608,14 @@ const AnewClients = () => {
     else { setSortColumn(col); setSortDir("desc"); }
   };
 
+  // Stable ref callback for the scroll container: auto-loads more when content fits on large screens.
+  // Using useCallback avoids React StrictMode calling the inline function twice (null + element).
+  const scrollContainerRef = useCallback((el: HTMLDivElement | null) => {
+    if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
+      loadMoreClients();
+    }
+  }, [hasMore, loadingMore, loadMoreClients]);
+
   if (loading) {
     return (
       <>
@@ -1307,6 +1658,7 @@ const AnewClients = () => {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
                 .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
 
@@ -1324,10 +1676,10 @@ const AnewClients = () => {
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
               if (contactRow) {
-                navigate(`/contacts?open=${contactRow.id}`);
+                navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
-              toast({ title: "Cliente não encontrado", variant: "destructive" });
+              toast({ title: t('clients.toast.clientNotFound'), variant: "destructive" });
               return;
             }
 
@@ -1335,8 +1687,8 @@ const AnewClients = () => {
             if (alert.action_type === "call_now") {
               const identity = getIdentity(found.entity_id);
               if (identity?.phone) {
-                const phoneNumber = `${identity.phone_country_code || '+351'}${identity.phone}`.replace(/\s/g, '');
-                const a = document.createElement("a"); a.href = `tel:${phoneNumber}`; a.click();
+                const phoneNumber = `${(identity.phone_country_code || '+351').replace(/\s/g, '')}${identity.phone.replace(/\s/g, '')}`;
+                window.location.href = `tel:${phoneNumber}`;
               }
             }
 
@@ -1354,6 +1706,7 @@ const AnewClients = () => {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
                 .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
 
@@ -1371,10 +1724,10 @@ const AnewClients = () => {
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
               if (contactRow) {
-                navigate(`/contacts?open=${contactRow.id}`);
+                navigate(`/leads?open=${contactRow.id}`);
                 return;
               }
-              toast({ title: "Cliente não encontrado", variant: "destructive" });
+              toast({ title: t('clients.toast.clientNotFound'), variant: "destructive" });
               return;
             }
 
@@ -1424,12 +1777,10 @@ const AnewClients = () => {
         {/* Dashboard KPIs */}
         <AnewClientsDashboard
           key={dashboardKey}
-          companyId={companyFilter !== "all" ? companyFilter : undefined}
+          scopedClients={dashboardScopedClients}
           activeFilter={statusFilter}
           onFilterChange={setStatusFilter}
-          scopeOrgIds={scopeOrgIds}
           activeView={activeView}
-          salesRepFilter={salesRepFilter}
           healthScoresMap={analyticsHealthScores}
         />
 
@@ -1452,10 +1803,10 @@ const AnewClients = () => {
         {/* Dashboard View */}
         {activeView === "dashboard" && (
           <ClientsDashboardView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
             loading={enrichLoading && !allClientsLoaded}
           />
@@ -1464,32 +1815,36 @@ const AnewClients = () => {
         {/* Value View */}
         {activeView === "value" && (
           <ClientsValueView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
-            scopeOrgIds={scopeOrgIds}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
+            scopeOrgIds={activeCompanyScopeOrgIds}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
             }}
-            onCreateDeal={() => navigate("/deals")}
+            onCreateDeal={(entityId) => {
+              const identity = (allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment)[entityId];
+              const entityName = identity?.display_name || "";
+              navigate(`/deals?newDeal=true&entityId=${entityId}&entityName=${encodeURIComponent(entityName)}`);
+            }}
           />
         )}
 
         {/* Retention View */}
         {activeView === "retention" && (
           <ClientsRetentionView
-            clients={analyticsClients as any}
+            clients={analyticsClients}
             healthScores={analyticsHealthScores}
             contracts={analyticsContractMap}
             interactions={analyticsInteractionMap}
             tags={analyticsTagMap}
-            identityMap={(allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment) as any}
+            identityMap={allClientsLoaded ? allIdentityMapForEnrichment : identityMapForEnrichment}
             assignedUserMap={assignedUserMap}
-            scopeOrgIds={scopeOrgIds}
+            scopeOrgIds={activeCompanyScopeOrgIds}
             onOpenClient={(entityId) => {
               const client = [...clients, ...allClients].find(c => c.entity_id === entityId);
               if (client) openClientDetails(client);
@@ -1601,13 +1956,15 @@ const AnewClients = () => {
             <CardContent className="p-3 flex items-center gap-2 flex-wrap">
               <span className="text-sm font-medium text-purple-700 dark:text-purple-400">{selectedIds.size} clientes selecionados</span>
               <Separator orientation="vertical" className="h-6" />
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><UserPlus className="w-3.5 h-3.5" />Atribuir a...</Button>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={() => setBulkAssignDialogOpen(true)}><UserPlus className="w-3.5 h-3.5" />Atribuir a...</Button>
               <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={() => {
                 setShowEmailDialog(true);
                 setEmailTarget({ id: "", name: `${selectedIds.size} clientes`, email: "" });
               }}><Mail className="w-3.5 h-3.5" />Enviar email</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
-              <Button size="sm" variant="outline" className="h-8 gap-1.5"><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
+              <PermissionGate permission="clients.edit">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkMarkVip}><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
+              </PermissionGate>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkCreateDeals}><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
               <PermissionGate permission="clients.export">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleExport}><Download className="w-3.5 h-3.5" />Exportar</Button>
               </PermissionGate>
@@ -1636,12 +1993,7 @@ const AnewClients = () => {
           <>
             <Card className="flex flex-col" style={{ maxHeight: 'calc(100vh - 380px)', minHeight: '400px' }}>
               <div
-                ref={(el) => {
-                  // Auto-load more if content fits without scroll (large screens)
-                  if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
-                    loadMoreClients();
-                  }
-                }}
+                ref={scrollContainerRef}
                 className="flex-1 min-h-0 overflow-auto leads-table-scroll"
                 onScroll={(e) => {
                   const el = e.currentTarget;
@@ -1696,20 +2048,30 @@ const AnewClients = () => {
                             {health && <ClientHealthBadge health={health} size="sm" />}
                           </TableCell>
                           <TableCell>
-                            <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                            <div
+                              role="img"
+                              aria-label={identity?.display_name || 'Cliente'}
+                              className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold ${
                               health && health.level === 'excellent' ? 'bg-green-100 text-green-700 dark:bg-green-900/30' :
                               health && health.level === 'good' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30' :
                               health && health.level === 'at_risk' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30' :
                               health && health.level === 'critical' ? 'bg-red-100 text-red-700 dark:bg-red-900/30' :
                               'bg-primary/10 text-primary'
                             }`}>
-                              {(identity?.display_name || '??').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                              <span aria-hidden="true">
+                                {(identity?.display_name || '??').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                              </span>
                             </div>
                           </TableCell>
                           <TableCell>
                             <div>
                               <div className="font-medium flex items-center gap-1">
                                 {identity?.display_name || "—"}
+                                {Boolean(client.custom_fields?.vip) && (
+                                  <Badge variant="outline" className="text-xs gap-0.5 px-1.5 py-0 h-5 bg-yellow-100 text-yellow-800 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400">
+                                    <Star className="w-2.5 h-2.5 fill-current" /> VIP
+                                  </Badge>
+                                )}
                                 {lastContact.warning && <AlertTriangle className="w-3 h-3 text-red-500" />}
                               </div>
                               <div className="text-xs text-muted-foreground">
@@ -1789,8 +2151,13 @@ const AnewClients = () => {
                           </TableCell>
                           <TableCell>
                             {sentimentEmoji ? (
-                              <TooltipProvider><Tooltip><TooltipTrigger>
-                                <span className="text-lg">{sentimentEmoji}</span>
+                              <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                                <span
+                                  role="img"
+                                  aria-label={interactionMap.get(client.entity_id)?.lastSentiment === 'positive' ? 'Sentimento positivo' : interactionMap.get(client.entity_id)?.lastSentiment === 'negative' ? 'Sentimento negativo' : 'Sentimento neutro'}
+                                  className="text-lg cursor-default"
+                                  tabIndex={0}
+                                >{sentimentEmoji}</span>
                               </TooltipTrigger><TooltipContent>
                                 {interactionMap.get(client.entity_id)?.lastSentiment === 'positive' ? 'Positivo' :
                                  interactionMap.get(client.entity_id)?.lastSentiment === 'negative' ? 'Negativo' : 'Neutro'}
@@ -1798,7 +2165,7 @@ const AnewClients = () => {
                             ) : <span className="text-muted-foreground">—</span>}
                           </TableCell>
                           <TableCell>
-                            <span className="text-xs text-muted-foreground">{format(new Date(client.created_at), 'dd/MM/yyyy')}</span>
+                            <span className="text-xs text-muted-foreground">{(() => { const d = new Date(client.created_at); return isValid(d) ? format(d, 'dd/MM/yyyy') : '—'; })()}</span>
                           </TableCell>
                           <TableCell>
                             <Badge className={statusDisplay.className}>{statusDisplay.label}</Badge>
@@ -1807,7 +2174,7 @@ const AnewClients = () => {
                             <div className="flex gap-0.5 justify-end" onClick={(e) => e.stopPropagation()}>
                               {/* Quick actions */}
                               <TooltipProvider><Tooltip><TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate('/deals')}>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/deals?newDeal=true&entityId=${client.entity_id}&entityName=${encodeURIComponent(identity?.display_name || "")}`)}>
                                   <FileText className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger><TooltipContent>Novo Pedido</TooltipContent></Tooltip></TooltipProvider>
@@ -1835,7 +2202,7 @@ const AnewClients = () => {
                                         const ph = identity?.phone;
                                         const cc = identity?.phone_country_code || "+351";
                                         if (ph) {
-                                           const a = document.createElement("a"); a.href = `tel:${cc}${ph}`.replace(/\s/g, ""); a.click();
+                                           window.location.href = `tel:${cc.replace(/\s/g, "")}${ph.replace(/\s/g, "")}`;
                                            setTimeout(() => { setCallTarget({ entityId: client.entity_id, name: identity?.display_name || "", phone: ph, clientId: client.id }); setShowCallDialog(true); }, 600);
                                         }
                                       }}
@@ -1873,7 +2240,7 @@ const AnewClients = () => {
                                       const ph = identity?.phone;
                                       const cc = identity?.phone_country_code || "+351";
                                       if (ph) {
-                                         const a = document.createElement("a"); a.href = `tel:${cc}${ph}`.replace(/\s/g, ""); a.click();
+                                         window.location.href = `tel:${cc.replace(/\s/g, "")}${ph.replace(/\s/g, "")}`;
                                          setTimeout(() => { setCallTarget({ entityId: client.entity_id, name: identity?.display_name || "", phone: ph, clientId: client.id }); setShowCallDialog(true); }, 600);
                                       }
                                     }}
@@ -1899,27 +2266,55 @@ const AnewClients = () => {
 
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Comercial</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate('/deals')}>
+                                  <DropdownMenuItem onClick={() => navigate(`/deals?newDeal=true&entityId=${client.entity_id}&entityName=${encodeURIComponent(identity?.display_name || "")}`)}>
                                     <FileText className="w-3.5 h-3.5 mr-2" />Novo Pedido de Proposta
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
-                                  <DropdownMenuItem><FileText className="w-3.5 h-3.5 mr-2" />Criar contrato</DropdownMenuItem>
+                                  <PermissionGate permission="proposals.create">
+                                    <DropdownMenuItem onClick={() => {
+                                      setProposalPresetEntityId(client.entity_id);
+                                      setShowProposalDialog(true);
+                                    }}><FileText className="w-3.5 h-3.5 mr-2" />Criar proposta</DropdownMenuItem>
+                                  </PermissionGate>
+                                  <DropdownMenuItem onClick={() => {
+                                    navigate(`/client-contracts?newContract=true&clientId=${client.id}`);
+                                  }}><FileText className="w-3.5 h-3.5 mr-2" />Criar contrato</DropdownMenuItem>
 
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-xs text-muted-foreground">Gestão</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => openClientDetails(client)}>
                                     <Eye className="w-3.5 h-3.5 mr-2" />Ver ficha completa
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
-                                  <DropdownMenuItem><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
-                                  <DropdownMenuItem><Calendar className="w-3.5 h-3.5 mr-2" />Agendar reunião</DropdownMenuItem>
+                                  <PermissionGate permission="contacts.edit">
+                                    <DropdownMenuItem onClick={() => {
+                                      setTagsEntityId(client.entity_id);
+                                      setTagsEntityName(identity?.display_name || "");
+                                      setTagsOrganizationId(client.organization_id || activeCompany?.id || "");
+                                      setTagsDialogOpen(true);
+                                    }}><Tag className="w-3.5 h-3.5 mr-2" />Gerir tags</DropdownMenuItem>
+                                  </PermissionGate>
+                                  <PermissionGate permission="clients.edit">
+                                    <DropdownMenuItem
+                                      disabled={vipTogglingClientId === client.id}
+                                      onClick={() => handleToggleVip(client)}
+                                    ><Star className="w-3.5 h-3.5 mr-2" />Marcar como VIP</DropdownMenuItem>
+                                  </PermissionGate>
+                                  <DropdownMenuItem onClick={() => {
+                                    setMeetingTarget({
+                                      clientId: client.id,
+                                      entityId: client.entity_id,
+                                      organizationId: client.organization_id || activeCompany?.id || "",
+                                      rootOrganizationId: client.root_organization_id || resolvedRootOrgId || client.organization_id || activeCompany?.id || "",
+                                      name: identity?.display_name || "",
+                                    });
+                                    setShowScheduleMeetingDialog(true);
+                                  }}><Calendar className="w-3.5 h-3.5 mr-2" />Agendar reunião</DropdownMenuItem>
 
                                   {client.source_type === 'contact' && (
                                     <>
                                       <DropdownMenuSeparator />
                                       <PermissionGate permission="clients.edit">
                                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setClientToRevert(client); setRevertDialogOpen(true); }}>
-                                          <Undo2 className="w-3.5 h-3.5 mr-2" />Reverter para Contacto
+                                          <Undo2 className="w-3.5 h-3.5 mr-2" />Reverter para Lead
                                         </DropdownMenuItem>
                                       </PermissionGate>
                                     </>
@@ -1989,10 +2384,26 @@ const AnewClients = () => {
                         <Input value={formData.first_name} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} className={fieldErrors.first_name ? "border-destructive" : ""} />
                         {fieldErrors.first_name && <p className="text-xs text-destructive">{fieldErrors.first_name}</p>}
                       </div>
-                      <div className="space-y-2"><Label>{t('clients.form.lastName')}</Label><Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.phone')}</Label><PhoneInput phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({ ...formData, phone: v })} onCountryCodeChange={(v) => setFormData({ ...formData, phone_country_code: v })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.vatNumber')}</Label><Input value={formData.vat} onChange={(e) => setFormData({ ...formData, vat: e.target.value })} /></div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.lastName')}</Label>
+                        <Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} className={fieldErrors.last_name ? "border-destructive" : ""} />
+                        {fieldErrors.last_name && <p className="text-xs text-destructive">{fieldErrors.last_name}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.email')}</Label>
+                        <Input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} />
+                        {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.phone')}</Label>
+                        <PhoneInput phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({ ...formData, phone: v })} onCountryCodeChange={(v) => setFormData({ ...formData, phone_country_code: v })} />
+                        {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.vatNumber')}</Label>
+                        <Input value={formData.vat} onChange={(e) => setFormData({ ...formData, vat: e.target.value })} className={fieldErrors.vat ? "border-destructive" : ""} />
+                        {fieldErrors.vat && <p className="text-xs text-destructive">{fieldErrors.vat}</p>}
+                      </div>
                       <div className="space-y-2">
                         <Label>{t('clients.form.status')}</Label>
                         <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v })}>
@@ -2004,9 +2415,21 @@ const AnewClients = () => {
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2 sm:col-span-2"><Label>{t('clients.form.companyName')}</Label><Input value={companyFormData.name} onChange={(e) => setCompanyFormData({ ...companyFormData, name: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({ ...companyFormData, email: e.target.value })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.phone')}</Label><PhoneInput phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({ ...companyFormData, phone: v })} onCountryCodeChange={(v) => setCompanyFormData({ ...companyFormData, phone_country_code: v })} /></div>
-                      <div className="space-y-2"><Label>{t('clients.form.vatNumber')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({ ...companyFormData, vat: e.target.value })} /></div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.email')}</Label>
+                        <Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({ ...companyFormData, email: e.target.value })} className={fieldErrors.email ? "border-destructive" : ""} />
+                        {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.phone')}</Label>
+                        <PhoneInput phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({ ...companyFormData, phone: v })} onCountryCodeChange={(v) => setCompanyFormData({ ...companyFormData, phone_country_code: v })} />
+                        {fieldErrors.phone && <p className="text-xs text-destructive">{fieldErrors.phone}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t('clients.form.vatNumber')}</Label>
+                        <Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({ ...companyFormData, vat: e.target.value })} className={fieldErrors.vat ? "border-destructive" : ""} />
+                        {fieldErrors.vat && <p className="text-xs text-destructive">{fieldErrors.vat}</p>}
+                      </div>
                       <div className="space-y-2">
                         <Label>{t('clients.form.status')}</Label>
                         <Select value={companyFormData.status} onValueChange={(v) => setCompanyFormData({ ...companyFormData, status: v })}>
@@ -2072,6 +2495,25 @@ const AnewClients = () => {
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>Cancelar</Button>
                 <Button onClick={handleBulkStatusChange}>Aplicar a {selectedIds.size} clientes</Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bulk Assign Dialog */}
+        <Dialog open={bulkAssignDialogOpen} onOpenChange={setBulkAssignDialogOpen}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Atribuir a comercial</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <Select value={bulkAssignUserId} onValueChange={setBulkAssignUserId}>
+                <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
+                <SelectContent>
+                  {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setBulkAssignDialogOpen(false)}>Cancelar</Button>
+                <Button onClick={handleBulkAssign} disabled={!bulkAssignUserId || bulkActionLoading}>Aplicar a {selectedIds.size} clientes</Button>
               </div>
             </div>
           </DialogContent>
@@ -2160,10 +2602,10 @@ const AnewClients = () => {
                 <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Undo2 className="h-4 w-4 text-primary" />
                 </div>
-                Reverter para Contacto
+                Reverter para Lead
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Esta acção vai reverter este cliente para contacto. O registo de cliente será desactivado e o contacto original será restaurado.
+                Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -2205,6 +2647,39 @@ const AnewClients = () => {
           onShareWithOrg={handleClientDuplicateShareWithOrg}
           loading={savingClient}
           strictBlocking={true}
+        />
+
+        {/* Bug 7 — "Criar proposta": reuses the existing proposal creation flow,
+            pre-filled with the clicked client's entity, already wired to
+            rpc_create_proposal (single audit row). */}
+        <ProposalCreateDialog
+          open={showProposalDialog}
+          onOpenChange={(open) => { setShowProposalDialog(open); if (!open) setProposalPresetEntityId(undefined); }}
+          presetEntityId={proposalPresetEntityId}
+        />
+
+        {/* Bug 10 — "Agendar reunião": creates an entity_interactions row via
+            rpc_schedule_client_meeting (single audit row). */}
+        {meetingTarget && (
+          <ScheduleClientMeetingDialog
+            open={showScheduleMeetingDialog}
+            onOpenChange={(open) => { setShowScheduleMeetingDialog(open); if (!open) setMeetingTarget(null); }}
+            entityId={meetingTarget.entityId}
+            organizationId={meetingTarget.organizationId}
+            rootOrganizationId={meetingTarget.rootOrganizationId}
+            entityName={meetingTarget.name}
+            onScheduled={() => { setClients([]); setHasMore(true); loadClients(0, true); }}
+          />
+        )}
+
+        {/* "Gerir tags": reuses ContactTagsDialog (contact_tags table is entity-generic,
+            keyed by entity_id/organization_id — no client-specific table exists). */}
+        <ContactTagsDialog
+          open={tagsDialogOpen}
+          onOpenChange={setTagsDialogOpen}
+          entityId={tagsEntityId}
+          organizationId={tagsOrganizationId}
+          entityName={tagsEntityName}
         />
       </div>
       )}

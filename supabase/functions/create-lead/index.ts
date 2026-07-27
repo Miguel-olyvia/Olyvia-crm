@@ -4,13 +4,13 @@ import { sanitizeTracking } from '../_shared/leadTracking.ts';
 
 const requestSchema = z.object({
   campaign_id: z.string().uuid(),
-  form_id: z.string().optional(),
-  business_unit_id: z.string().optional(),
+  form_id: z.string().uuid().optional(),
+  business_unit_id: z.string().uuid().optional(),
   step_number: z.number().optional(),
   field_values: z.record(z.unknown()).optional(),
   source: z.string().optional(),
-  source_id: z.string().optional(),
-  sourceId: z.string().optional(),
+  source_id: z.string().uuid().optional(),
+  sourceId: z.string().uuid().optional(),
   notes: z.string().optional(),
   tags: z.array(z.string()).optional(),
   from_chat_widget: z.boolean().optional(),
@@ -26,6 +26,7 @@ import {
   mergeFieldValuesNonDestructive,
   ensureEntityOrgLinkSR,
 } from '../_shared/entityScopedLookup.ts';
+import { deriveKeyFromEnv, hashNif } from '../_shared/nifCrypto.ts';
 import {
   sanitizeEmail,
   sanitizePhone,
@@ -35,7 +36,12 @@ import {
   cleanupCreatedEntityArtifacts,
   resolveCanonicalFormId,
   resolveRootOrganizationId,
+  validateLocationDistrict,
 } from '../_shared/leadsValidation.ts';
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+
+initSentry();
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -43,40 +49,9 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,OPTIONS',
 };
 
-// --- Rate Limiting (in-memory, per-isolate) ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;       // max requests per window
-const RATE_WINDOW = 60_000;  // 60 seconds
-
-function checkRateLimit(req: Request): Response | null {
-  const ip =
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('cf-connecting-ip') ||
-    'unknown';
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (entry && now < entry.resetAt) {
-    entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return new Response(
-        JSON.stringify({ error: 'Too many requests. Please try again later.' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-  } else {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
-  }
-
-  // Cleanup stale entries when map grows large
-  if (rateLimitMap.size > 10_000) {
-    for (const [k, v] of rateLimitMap) {
-      if (now > v.resetAt) rateLimitMap.delete(k);
-    }
-  }
-
-  return null; // not rate-limited
-}
+const RATE_LIMIT_BUCKET = 'create-lead';
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input Validation ---
 const MAX_FIELD_VALUE_LENGTH = 10_000;
@@ -111,7 +86,12 @@ function validateFieldValues(field_values: Record<string, unknown>): string | nu
  * - tags: string[]
  * 
  * Response includes:
- * - lead_id: for subsequent update-lead calls
+ * - lead_id: for subsequent update-lead calls (kept for backwards compatibility)
+ * - target_type ("lead" | "contact" | "client") + target_id: polymorphic
+ *   continuation key. When the resolved entity already classifies as an
+ *   active contact/client in this org, no anew_leads row is created; the
+ *   step progress accumulates in form_submissions instead, and target_id
+ *   points at that form_submissions row (not the contact/client id).
  * - current_step, total_steps, is_complete: for multi-step tracking
  * - next_step: null if complete, or the next step number
  */
@@ -127,14 +107,23 @@ Deno.serve(async (req) => {
     );
   }
 
-  // Rate limiting check
-  const rateLimitResponse = checkRateLimit(req);
-  if (rateLimitResponse) return rateLimitResponse;
-
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Rate limiting check — persistent, DB-backed (survives cold starts / shared across instances)
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const body = await req.json();
     const parsedBody = requestSchema.safeParse(body);
@@ -166,7 +155,7 @@ Deno.serve(async (req) => {
     // Get campaign and its company
     const { data: campaign, error: campaignError } = await supabase
       .from('campaigns')
-      .select('id, name, organization_id, status, form_id')
+      .select('id, name, organization_id, status, form_id, location_required')
       .eq('id', campaign_id)
       .single();
 
@@ -215,8 +204,19 @@ Deno.serve(async (req) => {
     // Priority: form_id (form_steps/form_fields) > campaign_id (campaign_form_steps/lead_field_definitions)
     let totalSteps = 1;
     let definitions: any[] = [];
+    let formLocationRequired = false;
 
     if (canonicalFormId) {
+      // Fetch location_required alongside the form-level tables — needed for
+      // the server-side district validation below (CRITICAL: this endpoint is
+      // public and must not trust the client-side location check alone).
+      const { data: formLocationData } = await supabase
+        .from('forms')
+        .select('location_required')
+        .eq('id', canonicalFormId)
+        .maybeSingle();
+      formLocationRequired = !!formLocationData?.location_required;
+
       // Use form-level tables
       const { data: formStepsData } = await supabase
         .from('form_steps')
@@ -352,6 +352,26 @@ Deno.serve(async (req) => {
       }
     }
 
+    // CRITICAL: server-side enforcement of location_required/allowed_districts.
+    // The public form only checks this client-side (PublicLeadForm.tsx); a
+    // direct API call with a district outside campaign_districts/form_districts
+    // must be rejected here, mirroring the calculation in get-form-data.
+    const locationValidation = await validateLocationDistrict({
+      supabase,
+      campaignId: campaign_id,
+      campaignLocationRequired: campaign.location_required,
+      formId: canonicalFormId,
+      formLocationRequired,
+      definitions,
+      fieldValues: field_values,
+    });
+    if (!locationValidation.ok) {
+      return new Response(
+        JSON.stringify({ error: locationValidation.error }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Validate business_unit belongs to company
     if (business_unit_id) {
       const { data: bu, error: buError } = await supabase
@@ -485,6 +505,21 @@ Deno.serve(async (req) => {
       return null;
     })();
 
+    // Compute the NIF hash server-side so the plaintext rawVat never reaches
+    // the entity-matching query — same HMAC-SHA256 pattern used by
+    // search-entities / fiscal-entity-resolve (see _shared/nifCrypto.ts).
+    // Best-effort: a hashing failure (e.g. missing key) must not block the
+    // public form; it just means NIF-based dedup is skipped for this submission.
+    let rawVatHash: string | null = null;
+    if (rawVat) {
+      try {
+        const hmacKey = deriveKeyFromEnv('NIF_HMAC_KEY', 'HMAC');
+        rawVatHash = await hashNif(rawVat, hmacKey);
+      } catch (hashError) {
+        console.error('[create-lead] failed to hash rawVat for entity lookup:', hashError instanceof Error ? hashError.message : hashError);
+      }
+    }
+
     // --- Local-scoped entity lookup (form receiving org ONLY) ---
     // Cross-org identity is intentionally ignored: another org's entity is
     // never silently shared into this org by the public form. Manual UI is
@@ -494,8 +529,14 @@ Deno.serve(async (req) => {
       organizationId: organization_id,
       email: leadEmail,
       phone: leadPhone,
-      nif: rawVat,
+      nifHash: rawVatHash,
     });
+
+    // When classifyEntityInOrg resolves the entity to an already-active
+    // contact/client in this org, we short-circuit the whole anew_leads path
+    // below and instead upsert into form_submissions. Populated only when
+    // scopedHit + classification produce targetType "contact"/"client".
+    let contactOrClientTarget: { targetType: 'contact' | 'client'; targetId: string } | null = null;
 
     if (scopedHit?.entityId) {
       entityId = scopedHit.entityId;
@@ -505,11 +546,35 @@ Deno.serve(async (req) => {
       // client / has an active lead, emit an internal alert for the responsible
       // commercial and merge new field values into the existing record — but
       // NEVER block the visitor: the multi-step form must flow exactly like a
-      // new entity (create-lead -> update-lead -> success). A new
-      // anew_leads row will still be created below, anchored to this entityId.
+      // new entity (create-lead -> update-lead -> success).
+      // For targetType "contact"/"client" we do NOT fall through to the
+      // anew_leads insert below — a real client/contact resubmitting the
+      // public form must not spawn a bogus new Lead in the pipeline; instead
+      // their step progress accumulates in form_submissions.
+      // Classification determines whether this entity is a lead/contact/client
+      // in this org. This result MUST survive even if the merge/alert side
+      // effects below fail — otherwise a transient error would silently fall
+      // through to the anew_leads insert path for an entity that is already
+      // a real contact/client, reproducing the exact bug this branch exists
+      // to prevent. Keep classification outside the side-effects try/catch.
+      let classifySummary: Awaited<ReturnType<typeof classifyEntityInOrg>> | null = null;
       try {
-        const summary = await classifyEntityInOrg({ supabase, entityId, organizationId: organization_id });
-        if (summary.targetType && summary.targetId) {
+        classifySummary = await classifyEntityInOrg({ supabase, entityId, organizationId: organization_id });
+      } catch (classifyErr) {
+        console.error('[create-lead] classifyEntityInOrg failed:', classifyErr);
+      }
+
+      if (classifySummary?.targetType && classifySummary.targetId) {
+        const summary = classifySummary;
+        if (summary.targetType === 'contact' || summary.targetType === 'client') {
+          contactOrClientTarget = { targetType: summary.targetType, targetId: summary.targetId };
+        }
+
+        // Best-effort side effects: merge new field values into the existing
+        // record and notify the responsible commercial. A failure here must
+        // NOT unset contactOrClientTarget (already captured above) and must
+        // NOT block the visitor's form flow.
+        try {
           const targetTable =
             summary.targetType === 'lead' ? 'anew_leads' :
             summary.targetType === 'contact' ? 'anew_contacts' : 'anew_clients';
@@ -526,9 +591,9 @@ Deno.serve(async (req) => {
             fieldValuesDiff: diff,
             displayName: composeDisplayName(leadFirstName, leadLastName) || null,
           });
+        } catch (alertErr) {
+          console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
         }
-      } catch (alertErr) {
-        console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
       }
 
       // Reused entity, but no active contact/client/lead — proceed normally.
@@ -541,6 +606,57 @@ Deno.serve(async (req) => {
           await supabase.from('anew_entities').update(nameUpdate).eq('id', entityId);
         }
       }
+    }
+
+    // --- Contact/client target: skip anew_leads entirely, upsert form_submissions ---
+    if (contactOrClientTarget) {
+      const { data: submission, error: submissionError } = await supabase
+        .from('form_submissions')
+        .upsert(
+          {
+            organization_id,
+            root_organization_id: rootOrgId,
+            entity_id: entityId,
+            form_id: canonicalFormId ?? null,
+            campaign_id: campaign_id ?? null,
+            target_type: contactOrClientTarget.targetType,
+            target_id: contactOrClientTarget.targetId,
+            field_values: fieldValuesWithMeta,
+            status: isComplete ? 'complete' : 'in_progress',
+            is_complete: isComplete,
+            current_step: currentStep,
+            total_steps: totalSteps,
+            created_by: null,
+          },
+          { onConflict: 'organization_id,entity_id,form_id,campaign_id' },
+        )
+        .select('id')
+        .single();
+
+      if (submissionError || !submission) {
+        console.error('Error upserting form_submissions:', submissionError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to record form submission', details: submissionError?.message }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          target_type: contactOrClientTarget.targetType,
+          target_id: submission.id,
+          current_step: currentStep,
+          total_steps: totalSteps,
+          is_complete: isComplete,
+          next_step: isComplete ? null : currentStep + 1,
+          sanitized: sanitizeReport,
+          message: isComplete
+            ? 'Form submission recorded successfully'
+            : `Step ${currentStep} completed. Continue with update-lead API.`,
+        }),
+        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      );
     }
 
 
@@ -641,6 +757,7 @@ Deno.serve(async (req) => {
         .from('anew_entity_roles')
         .select('role, status')
         .eq('entity_id', entityId)
+        .eq('organization_id', organization_id)
         .in('role', ['contact', 'client'])
         .eq('status', 'active');
       existingRoles = (roles || []).map(r => r.role);
@@ -802,8 +919,10 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({ 
-        success: true, 
+        success: true,
         lead_id: lead.id,
+        target_type: 'lead',
+        target_id: lead.id,
         current_step: currentStep,
         total_steps: totalSteps,
         is_complete: isComplete,
@@ -826,6 +945,7 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in create-lead:', error);
+    await captureError(error, { function: "create-lead" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

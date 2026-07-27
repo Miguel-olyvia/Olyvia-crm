@@ -70,7 +70,7 @@ export function ClientNotesTab({ entityId, organizationId }: ClientNotesTabProps
       const { data: anewUser } = await supabase.from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
       const createdBy = anewUser?.id || user.id;
 
-      await supabase.from("entity_interactions").insert({
+      const { error } = await supabase.from("entity_interactions").insert({
         entity_id: entityId,
         interaction_type: "note",
         notes: newNote.trim(),
@@ -78,6 +78,7 @@ export function ClientNotesTab({ entityId, organizationId }: ClientNotesTabProps
         created_by: createdBy,
         organization_id: organizationId,
       });
+      if (error) throw error;
 
       setNewNote("");
       toast({ title: "Nota adicionada" });

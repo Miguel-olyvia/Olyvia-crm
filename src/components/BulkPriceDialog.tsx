@@ -20,6 +20,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface BulkPriceDialogProps {
   open: boolean;
@@ -60,7 +61,7 @@ export function BulkPriceDialog({
       // Get existing prices for the selected price type
       const { data: existingPrices, error: fetchError } = await supabase
         .from("product_prices")
-        .select("id, product_id, price")
+        .select("id, product_id, price, vat_rate")
         .eq("price_type", priceType)
         .in("product_id", selectedProductIds);
 
@@ -72,12 +73,16 @@ export function BulkPriceDialog({
         product_id: string;
         price_type: PriceType;
         price: number;
-        vat_rate: number;
+        vat_rate: number | null;
         created_by: string;
       }> = [];
 
+      type ExistingPrice = { id: string; product_id: string; price: number; vat_rate: number | null };
+
       for (const productId of selectedProductIds) {
-        const existingPrice = existingPrices?.find((p: any) => p.product_id === productId);
+        const existingPrice = existingPrices?.find(
+          (p: ExistingPrice) => p.product_id === productId
+        ) as ExistingPrice | undefined;
         const currentPrice = existingPrice?.price ?? 0;
 
         let newPrice = numValue;
@@ -108,26 +113,28 @@ export function BulkPriceDialog({
             product_id: productId,
             price_type: priceType,
             price: rounded,
-            vat_rate: 23,
+            vat_rate: existingPrice?.vat_rate ?? null,
             created_by: businessUserId,
           });
         }
       }
 
-      if (updates.length > 0) {
-        const updateResults = await Promise.all(
-          updates.map((u) =>
-            supabase.from("product_prices").update({ price: u.price }).eq("id", u.id)
-          )
-        );
-        const firstError = updateResults.find((r) => r.error)?.error;
-        if (firstError) throw firstError;
-      }
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (updates.length > 0) {
+          const updateResults = await Promise.all(
+            updates.map((u) =>
+              supabase.from("product_prices").update({ price: u.price }).eq("id", u.id)
+            )
+          );
+          const firstError = updateResults.find((r) => r.error)?.error;
+          if (firstError) throw firstError;
+        }
 
-      if (inserts.length > 0) {
-        const { error } = await supabase.from("product_prices").insert(inserts);
-        if (error) throw error;
-      }
+        if (inserts.length > 0) {
+          const { error } = await supabase.from("product_prices").insert(inserts);
+          if (error) throw error;
+        }
+      });
 
       toast({
         title: t('bulkPrice.success'),
@@ -136,10 +143,10 @@ export function BulkPriceDialog({
 
       onOpenChange(false);
       onSuccess();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('common.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {

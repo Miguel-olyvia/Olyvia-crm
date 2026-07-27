@@ -32,6 +32,8 @@ import {
   BarChart3,
   Mail,
   Trash2,
+  FileDown,
+  ShieldAlert,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -119,11 +121,10 @@ export const menuSections: MenuSection[] = [
     id: "crm",
     icon: UsersRound,
     labelKey: "sidebar.crm",
-    paths: ["/leads", "/contacts", "/clients"],
-    permissions: ["leads.view", "contacts.view", "clients.view"],
+    paths: ["/leads", "/clients"],
+    permissions: ["leads.view", "clients.view"],
     items: [
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
-      { to: "/contacts", icon: Users, labelKey: "sidebar.contacts", permission: "contacts.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },
     ],
   },
@@ -190,11 +191,12 @@ export const menuSections: MenuSection[] = [
     id: "users",
     icon: UserCog,
     labelKey: "sidebar.users",
-    paths: ["/users", "/roles"],
+    paths: ["/users", "/roles", "/export-audit"],
     permissions: ["users.view"],
     items: [
       { to: "/users", icon: Users, labelKey: "sidebar.users", permission: "users.view" },
       { to: "/roles", icon: Shield, labelKey: "sidebar.roles", permission: "roles.view" },
+      { to: "/export-audit", icon: FileDown, labelKey: "sidebar.exportAudit", permission: "exports.audit.view" },
     ],
   },
   {
@@ -208,6 +210,17 @@ export const menuSections: MenuSection[] = [
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
       { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
+    ],
+  },
+  {
+    id: "platform",
+    icon: ShieldAlert,
+    labelKey: "sidebar.platform",
+    paths: ["/platform/support-access", "/platform/auth-audit-log"],
+    permissions: ["platform.support_access.view", "platform.auth_audit_log.view"],
+    items: [
+      { to: "/platform/support-access", icon: ShieldAlert, labelKey: "sidebar.supportAccess", permission: "platform.support_access.view" },
+      { to: "/platform/auth-audit-log", icon: ShieldAlert, labelKey: "sidebar.authAuditLog", permission: "platform.auth_audit_log.view" },
     ],
   },
 ];

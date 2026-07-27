@@ -7,10 +7,10 @@ const requestSchema = z.object({
   signer_name: z.string().optional(),
 });
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface SignatureRequest {
   token: string;
@@ -18,6 +18,7 @@ interface SignatureRequest {
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeaders(req);
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -276,6 +277,7 @@ const handler = async (req: Request): Promise<Response> => {
 
       if (allSigned) {
         // Update contract status to signed
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'signature' });
         await supabase
           .from('client_contracts')
           .update({ status: 'signed' })
@@ -336,6 +338,7 @@ const handler = async (req: Request): Promise<Response> => {
     );
   } catch (error: any) {
     console.error('Error in validate-contract-signature:', error);
+    await captureError(error, { function: "validate-contract-signature" });
     return new Response(
       JSON.stringify({ error: error.message || 'Internal server error' }),
       { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders } }

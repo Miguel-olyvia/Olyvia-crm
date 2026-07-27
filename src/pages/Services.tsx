@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload } from "lucide-react";
+import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload, RotateCcw } from "lucide-react";
 import { exportServicesToCSV, parseServicesCSV, downloadServicesTemplate, type ImportReport } from "@/utils/servicesExportImport";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/table";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -66,6 +68,7 @@ interface Service {
   short_desc: string | null;
   long_desc: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
   service_type: string;
   organization_id?: string | null;
   root_organization_id?: string | null;
@@ -79,6 +82,16 @@ interface Service {
     organization_id: string;
   }>;
 }
+
+const serviceSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  category_id: z.string().optional().or(z.literal("")),
+  subcategory_id: z.string().optional().or(z.literal("")),
+  service_type: z.string().trim().min(1, "O tipo de serviço é obrigatório."),
+  status: z.string().trim().min(1, "O estado é obrigatório."),
+});
 
 // Helper functions for organization selection compatibility
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
@@ -99,6 +112,7 @@ export default function Services() {
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
@@ -130,6 +144,7 @@ export default function Services() {
     service_type: "both",
     status: "active",
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [priceData, setPriceData] = useState<ServicePriceFormData>({
     purchase: 0,
@@ -164,7 +179,7 @@ export default function Services() {
     setSupplierFilter("all");
     setSearchTerm("");
     loadData();
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const loadData = async () => {
     setLoading(true);
@@ -223,12 +238,14 @@ export default function Services() {
           subcategory:service_categories!service_subcategory_id(name),
           anew_organizations!organization_id(name)
         `)
-        .in("organization_id", allOrgIds);
+        .in("organization_id", allOrgIds)
+        .eq("is_deleted", showDeleted);
 
       const categoriesQuery = supabase
         .from("service_categories")
         .select("id, name, parent_id, organization_id")
         .or(orgScopeFilter)
+        .eq("is_deleted", false)
         .order("name");
 
       const companiesQuery = supabase
@@ -288,6 +305,19 @@ export default function Services() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = serviceSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t("common.error") || "Erro", description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
+
     // Determine the primary company - use selected or active company
     const primaryCompanyId = (organizationSelection?.companyId || organizationSelection?.levelSelections?.[0]?.selectedIds?.[0]) || activeCompany?.id || null;
 
@@ -304,146 +334,71 @@ export default function Services() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
 
-      // Resolve root org
-      let rootOrgId = primaryCompanyId;
-      try {
-        let currentId = primaryCompanyId;
-        for (let i = 0; i < 10; i++) {
-          const { data: parentLink } = await supabase
-            .from("anew_hierarchy")
-            .select("parent_org_id")
-            .eq("child_org_id", currentId)
-            .maybeSingle();
-          if (!parentLink) break;
-          currentId = parentLink.parent_org_id;
-        }
-        rootOrgId = currentId;
-      } catch (e) { /* use primaryCompanyId */ }
-
-      const serviceData: any = {
-        sku: formData.sku,
-        name: formData.name,
-        slug: formData.name.toLowerCase().replace(/\s+/g, "-"),
-        is_active: formData.status === "active",
-        organization_id: primaryCompanyId,
-        service_type: formData.service_type,
-      };
-
-      if (formData.description) serviceData.long_desc = formData.description;
-      if (formData.category_id) serviceData.service_category_id = formData.category_id;
-      if (formData.subcategory_id) serviceData.service_subcategory_id = formData.subcategory_id;
-      
-
-      let serviceId: string;
-
-      if (editingService) {
-        const { error } = await supabase
-          .from("services")
-          .update(serviceData)
-          .eq("id", editingService.id);
-
-        if (error) throw error;
-        serviceId = editingService.id;
-
-        // Update company associations - delete old ones and insert new
-        await supabase
-          .from("service_organizations")
-          .delete()
-          .eq("service_id", editingService.id);
-
-        toast({
-          title: t("services.toast.updateSuccess"),
-        });
-      } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-          return;
-        }
-        serviceData.created_by = businessUserId;
-        const { data: newService, error } = await supabase
-          .from("services")
-          .insert(serviceData)
-          .select("id")
-          .single();
-
-        if (error) throw error;
-        serviceId = newService.id;
-
-        toast({
-          title: t("services.toast.createSuccess"),
-        });
-      }
-
+      const slug = formData.name.toLowerCase().replace(/\s+/g, "-");
+      const longDesc = formData.description ? formData.description : null;
+      const categoryId = formData.category_id ? formData.category_id : null;
+      const subcategoryId = formData.subcategory_id ? formData.subcategory_id : null;
+      const isActive = formData.status === "active";
       const allOrgIds = getAllOrgIds(organizationSelection);
-        
-      if (allOrgIds.length > 0) {
-      const assocBusinessUserId = await resolveCurrentBusinessUserId();
-        if (!assocBusinessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
-        const orgAssociations = allOrgIds.map((orgId) => ({
-          service_id: serviceId,
-          organization_id: orgId,
-          created_by: assocBusinessUserId,
-        }));
 
-        const { error: assocError } = await supabase
-          .from("service_organizations")
-          .insert(orgAssociations);
-
-        if (assocError) {
-          console.error("Error inserting service org associations:", assocError);
-        }
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
       }
 
-      // Save prices (always save both purchase and retail)
-      const priceTypes = [
-        { type: "purchase", value: priceData.purchase },
-        { type: "retail", value: priceData.retail },
-      ];
+      await withAuditContext(supabase, businessUserId, async () => {
+        if (editingService) {
+          const { error } = await supabase.rpc("rpc_update_service", {
+            p_id: editingService.id,
+            p_sku: formData.sku,
+            p_name: formData.name,
+            p_slug: slug,
+            p_long_desc: longDesc,
+            p_service_type: formData.service_type,
+            p_is_active: isActive,
+            p_organization_id: primaryCompanyId,
+            p_category_id: categoryId,
+            p_subcategory_id: subcategoryId,
+            p_org_ids: allOrgIds.length > 0 ? allOrgIds : null,
+            p_touch_orgs: true,
+            p_touch_prices: true,
+            p_purchase: priceData.purchase || 0,
+            p_retail: priceData.retail || 0,
+            p_currency: priceData.currency,
+            p_vat_rate: priceData.vat_rate,
+          });
 
-      for (const { type, value } of priceTypes) {
-        // Check if price exists
-        const { data: existingPrice, error: existingPriceError } = await supabase
-          .from("service_prices")
-          .select("id")
-          .eq("service_id", serviceId)
-          .eq("price_type", type)
-          .maybeSingle();
+          if (error) throw error;
 
-        if (existingPriceError) throw existingPriceError;
-
-        const priceBusinessUserId = await resolveCurrentBusinessUserId();
-        if (!priceBusinessUserId) {
-          toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-          return;
-        }
-        const priceRecord = {
-          service_id: serviceId,
-          price_type: type,
-          price: value || 0,
-          currency: priceData.currency,
-          vat_rate: priceData.vat_rate,
-          created_by: priceBusinessUserId,
-        };
-
-        if (existingPrice) {
-          const { error: updatePriceError } = await supabase
-            .from("service_prices")
-            .update(priceRecord)
-            .eq("id", existingPrice.id);
-
-          if (updatePriceError) throw updatePriceError;
+          toast({
+            title: t("services.toast.updateSuccess"),
+          });
         } else {
-          const { error: insertPriceError } = await supabase
-            .from("service_prices")
-            .insert(priceRecord);
+          const { error } = await supabase.rpc("rpc_create_service", {
+            p_sku: formData.sku,
+            p_name: formData.name,
+            p_slug: slug,
+            p_long_desc: longDesc,
+            p_service_type: formData.service_type,
+            p_is_active: isActive,
+            p_organization_id: primaryCompanyId,
+            p_category_id: categoryId,
+            p_subcategory_id: subcategoryId,
+            p_org_ids: allOrgIds.length > 0 ? allOrgIds : null,
+            p_purchase: priceData.purchase || 0,
+            p_retail: priceData.retail || 0,
+            p_currency: priceData.currency,
+            p_vat_rate: priceData.vat_rate,
+          });
 
-          if (insertPriceError) throw insertPriceError;
+          if (error) throw error;
+
+          toast({
+            title: t("services.toast.createSuccess"),
+          });
         }
-      }
+      });
 
       handleCloseDialog(false);
       loadData();
@@ -465,9 +420,13 @@ export default function Services() {
     if (!serviceToDelete) return;
 
     try {
-      const { error } = await supabase.from("services").delete().eq("id", serviceToDelete.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
 
-      if (error) throw error;
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase.rpc("rpc_delete_service", { p_id: serviceToDelete.id });
+        if (error) throw error;
+      });
 
       toast({
         title: t("services.toast.success"),
@@ -487,13 +446,33 @@ export default function Services() {
     }
   };
 
+  const handleRestore = async (service: Service) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_service", { p_id: service.id });
+      if (error) throw error;
+
+      toast({
+        title: t("services.toast.success") || "Sucesso",
+        description: t("services.toast.restoreSuccess") || "Serviço restaurado com sucesso.",
+      });
+
+      loadData();
+    } catch (error: any) {
+      toast({
+        title: t("services.toast.error") || "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleExport = async () => {
     try {
       await exportServicesToCSV(filteredServices, activeCompany?.id);
-      toast({ title: "Exportação concluída" });
+      toast({ title: t("services.toast.exportSuccess") });
     } catch (error: any) {
       toast({
-        title: "Erro ao exportar",
+        title: t("services.toast.exportError"),
         description: error.message,
         variant: "destructive",
       });
@@ -505,7 +484,7 @@ export default function Services() {
       downloadServicesTemplate();
     } catch (error: any) {
       toast({
-        title: "Erro ao gerar template",
+        title: t("services.toast.templateError"),
         description: error.message,
         variant: "destructive",
       });
@@ -519,8 +498,8 @@ export default function Services() {
 
     if (!activeCompany?.id) {
       toast({
-        title: "Empresa não definida",
-        description: "Selecione uma empresa ativa antes de importar.",
+        title: t("services.toast.companyNotSet"),
+        description: t("services.toast.selectActiveCompanyImport"),
         variant: "destructive",
       });
       if (inputEl) inputEl.value = "";
@@ -554,7 +533,7 @@ export default function Services() {
       loadData();
     } catch (error: any) {
       toast({
-        title: "Erro ao importar",
+        title: t("services.toast.importError"),
         description: error.message,
         variant: "destructive",
       });
@@ -577,10 +556,18 @@ export default function Services() {
     });
 
     // Load prices for service
-    const { data: prices } = await supabase
+    const { data: prices, error: pricesError } = await supabase
       .from("service_prices")
       .select("price_type, price, currency, vat_rate")
       .eq("service_id", service.id);
+
+    if (pricesError) {
+      toast({
+        title: t("services.toast.pricesLoadError"),
+        description: pricesError.message,
+        variant: "destructive",
+      });
+    }
 
     if (prices && prices.length > 0) {
       const priceMap: ServicePriceFormData = {
@@ -601,17 +588,33 @@ export default function Services() {
     }
 
     // Load associated companies from service_companies table
-    const { data: serviceOrgs } = await supabase
+    const { data: serviceOrgs, error: serviceOrgsError } = await supabase
       .from("service_organizations")
       .select("organization_id")
       .eq("service_id", service.id);
+
+    if (serviceOrgsError) {
+      toast({
+        title: t("services.toast.organizationsLoadError"),
+        description: serviceOrgsError.message,
+        variant: "destructive",
+      });
+    }
 
     const associatedOrgIds = serviceOrgs?.map((sc: any) => sc.organization_id) || [];
     const primaryOrgId = service.organization_id || (associatedOrgIds.length > 0 ? associatedOrgIds[0] : "");
     const secondaryIds = associatedOrgIds.filter(id => id !== primaryOrgId);
 
-    // Set organization selection for editing
-    setOrganizationSelection(defaultOrgSelection());
+    // Set organization selection for editing from the real associations
+    setOrganizationSelection({
+      tenantId: primaryOrgId,
+      companyId: primaryOrgId,
+      businessUnitId: "",
+      departmentId: "",
+      secondaryCompanyIds: secondaryIds,
+      selectedCompanyIds: associatedOrgIds.length > 0 ? associatedOrgIds : (primaryOrgId ? [primaryOrgId] : []),
+      levelSelections: [],
+    });
 
     setOpen(true);
   };
@@ -627,6 +630,7 @@ export default function Services() {
       service_type: "both",
       status: "active",
     });
+    setFieldErrors({});
     setPriceData({
       purchase: 0,
       retail: 0,
@@ -661,15 +665,40 @@ export default function Services() {
     }
 
     try {
-      const updateData: any = {};
-      updateData[field] = editingValue.trim();
+      const currentService = services.find((s) => s.id === serviceId);
+      if (!currentService) throw new Error("Serviço não encontrado.");
 
-      const { error } = await supabase
-        .from("services")
-        .update(updateData)
-        .eq("id", serviceId);
+      const updatedValue = editingValue.trim();
+      const nextSku = field === "sku" ? updatedValue : currentService.sku;
+      const nextName = field === "name" ? updatedValue : currentService.name;
+      const nextSlug = nextName.toLowerCase().replace(/\s+/g, "-");
 
-      if (error) throw error;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado.");
+
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase.rpc("rpc_update_service", {
+          p_id: serviceId,
+          p_sku: nextSku,
+          p_name: nextName,
+          p_slug: nextSlug,
+          p_long_desc: currentService.long_desc || null,
+          p_service_type: currentService.service_type,
+          p_is_active: currentService.is_active,
+          p_organization_id: currentService.organization_id || null,
+          p_category_id: currentService.service_category_id || null,
+          p_subcategory_id: currentService.service_subcategory_id || null,
+          p_org_ids: null,
+          p_touch_orgs: false,
+          p_touch_prices: false,
+          p_purchase: null,
+          p_retail: null,
+          p_currency: null,
+          p_vat_rate: null,
+        });
+
+        if (error) throw error;
+      });
 
       toast({
         title: t("services.toast.inlineUpdateSuccess"),
@@ -705,6 +734,7 @@ export default function Services() {
           *,
           service_organizations(organization_id)
         `)
+        .eq("is_deleted", false)
         .order("created_at", { ascending: false })
         .limit(1);
 
@@ -796,6 +826,11 @@ export default function Services() {
     tableName: "services",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_service",
+    bulkDeleteRpc: "rpc_bulk_delete_service",
+    bulkOrgRpc: "rpc_bulk_org_service",
+    bulkOrgRpcNewOrgParam: "p_new_org_id",
   });
 
   const toggleSelectAll = () => {
@@ -820,6 +855,15 @@ export default function Services() {
             <PageFAQSheet pageKey="catalog.services" />
           </div>
           <div className="flex gap-2">
+            <PermissionGate permission="services.delete">
+              <Button
+                variant={showDeleted ? "secondary" : "outline"}
+                onClick={() => setShowDeleted((prev) => !prev)}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                {showDeleted ? "Ver ativos" : "Ver eliminados"}
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="services.view">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> Exportar
@@ -940,7 +984,9 @@ export default function Services() {
                     onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                     required
                     disabled={!!editingService}
+                    className={fieldErrors.sku ? "border-destructive" : ""}
                   />
+                  {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                 </div>
 
                 {/* Name */}
@@ -951,7 +997,9 @@ export default function Services() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 {/* Description */}
@@ -962,7 +1010,9 @@ export default function Services() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 {/* Category + Subcategory */}
@@ -1265,23 +1315,36 @@ export default function Services() {
                             <History className="w-4 h-4" />
                           </Button>
                         </PermissionGate>
-                        <PermissionGate permission="services.edit">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditDialog(service)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {!showDeleted && (
+                          <PermissionGate permission="services.edit">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEditDialog(service)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
                         <PermissionGate permission="services.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeleteDialog(service)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {showDeleted ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleRestore(service)}
+                              title="Restaurar"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openDeleteDialog(service)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </PermissionGate>
                       </div>
                     </TableCell>

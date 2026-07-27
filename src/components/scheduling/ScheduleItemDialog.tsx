@@ -20,6 +20,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useCompany } from '@/contexts/CompanyContext';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { scheduleItemSchema } from '@/lib/validations';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleItemStatus, BoardModule } from '@/types/scheduling';
 
 interface ScheduleItemDialogProps {
@@ -59,6 +60,7 @@ export function ScheduleItemDialog({
   const { hasPermission, isSystemAdmin } = usePermissions();
   const { userType } = useCompany();
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [inviteesOpen, setInviteesOpen] = useState(false);
   const [addressOptions, setAddressOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [showAddressPicker, setShowAddressPicker] = useState(false);
@@ -182,6 +184,7 @@ export function ScheduleItemDialog({
       });
       setSelectedResourceIds(item?.assignees?.map(a => a.resource_id) || []);
       setSelectedInvitees([]);
+      setFieldErrors({});
     }
   }, [open, item, boards, defaultDate]);
 
@@ -272,6 +275,24 @@ export function ScheduleItemDialog({
       toast.error(t('common.required'));
       return;
     }
+
+    const validation = scheduleItemSchema.safeParse({
+      board_id: formData.board_id,
+      title,
+      start_datetime: formData.start_datetime,
+      end_datetime: formData.end_datetime,
+      location: formData.location,
+      notes: formData.notes,
+      priority: formData.priority,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+      toast.error(validation.error.errors[0].message);
+      return;
+    }
+    setFieldErrors({});
 
     setLoading(true);
     try {
@@ -530,7 +551,9 @@ export function ScheduleItemDialog({
                   placeholder={t('scheduling.item.titlePlaceholder')}
                   required
                   disabled={isViewOnly}
+                  className={fieldErrors.title ? 'border-destructive' : ''}
                 />
+                {fieldErrors.title && <p className="text-sm text-destructive mt-1">{fieldErrors.title}</p>}
               </div>
             )}
 
@@ -619,11 +642,13 @@ export function ScheduleItemDialog({
                     ...f, 
                     end_datetime: formData.all_day 
                       ? `${e.target.value}T23:59` 
-                      : e.target.value 
+                      : e.target.value
                   }))}
                   required
                   disabled={isViewOnly}
+                  className={fieldErrors.end_datetime ? 'border-destructive' : ''}
                 />
+                {fieldErrors.end_datetime && <p className="text-sm text-destructive mt-1">{fieldErrors.end_datetime}</p>}
             </div>
 
             {/* Client - hide for time-off */}

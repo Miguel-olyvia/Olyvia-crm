@@ -19,6 +19,7 @@ import { DocumentsTab } from "@/components/shared/DocumentsTab";
 import {
   FileText, Calendar, User, Euro, Send, Pencil, Loader2, Clock, Building2, Hash, CreditCard, StickyNote, CheckCircle, AlertTriangle, Paperclip, Edit3,
 } from "lucide-react";
+import { contractDetailFormSchema, contractPromptValuesSchema } from "@/lib/validations";
 
 interface PromptVar { key: string; label: string; description: string | null; promptType: "text" | "textarea" | "number" | "date"; }
 
@@ -78,7 +79,7 @@ export function ContractDetailDialog({
   }, [open, contract]);
 
   // Carrega variáveis customizadas em modo "Preencher no contrato" (sem default e sem linked field)
-  const { data: promptCustomVars = [] } = useQuery({
+  const { data: promptCustomVarsRaw } = useQuery({
     queryKey: ["custom-contract-prompt-vars", activeCompany?.id],
     queryFn: async () => {
       if (!activeCompany?.id) return [] as Array<{ variable_key: string; label: string; description: string | null; prompt_type: string | null }>;
@@ -94,10 +95,31 @@ export function ContractDetailDialog({
     },
     enabled: !!activeCompany?.id && open,
   });
+  // Stable reference: a `= []` destructure default creates a new array literal on every
+  // render while `data` stays undefined, which cascaded into an infinite re-render loop
+  // via promptVars/setPromptValues below.
+  const promptCustomVars = useMemo(() => promptCustomVarsRaw ?? [], [promptCustomVarsRaw]);
 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const formValidation = contractDetailFormSchema.safeParse(formData);
+    if (!formValidation.success) {
+      toast.error(formValidation.error.issues[0]?.message || "Dados do contrato inválidos");
+      return;
+    }
+    if (isNew && !formData.proposal_id) {
+      toast.error("Seleccione uma proposta");
+      return;
+    }
+
+    const promptValidation = contractPromptValuesSchema.safeParse(promptValues);
+    if (!promptValidation.success) {
+      toast.error(promptValidation.error.issues[0]?.message || "Valores de contrato inválidos");
+      return;
+    }
+
     const payload: any = contract ? { ...formData, id: contract.id } : { ...formData };
     onSave(payload);
   };

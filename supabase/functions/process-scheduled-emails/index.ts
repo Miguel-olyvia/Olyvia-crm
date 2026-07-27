@@ -9,12 +9,13 @@ const _noInputSchema = z.object({});
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -157,6 +158,7 @@ serve(async (req) => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error in process-scheduled-emails:", safeError);
+    await captureError(error, { function: "process-scheduled-emails" });
     return new Response(
       JSON.stringify({ error: safeError }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

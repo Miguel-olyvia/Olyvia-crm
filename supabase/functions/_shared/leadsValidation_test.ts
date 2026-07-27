@@ -4,7 +4,23 @@ import {
   getWorkflowPermissionForSourceEntity,
   resolveCanonicalFormId,
   resolveRootOrganizationId,
+  validateLocationDistrict,
 } from "./leadsValidation.ts";
+
+function makeDistrictsMock(rows: { table: string; districtIds: string[] }[]) {
+  const supabase = {
+    from: (table: string) => {
+      const match = rows.find((r) => r.table === table);
+      const builder: any = {
+        select: () => builder,
+        eq: (_col: string, _val: unknown) =>
+          Promise.resolve({ data: (match?.districtIds ?? []).map((id) => ({ district_id: id })), error: null }),
+      };
+      return builder;
+    },
+  };
+  return supabase;
+}
 
 function makeRootResolverMock(opts: {
   rpcData?: string | null;
@@ -144,4 +160,94 @@ Deno.test("getWorkflowPermissionForSourceEntity maps every supported module", ()
   assertEquals(getWorkflowPermissionForSourceEntity("quote"), "quotes.edit");
   assertEquals(getWorkflowPermissionForSourceEntity("proposal"), "proposals.edit");
   assertEquals(getWorkflowPermissionForSourceEntity("contract"), "client_contracts.edit");
+});
+
+// ---- validateLocationDistrict (CRITICAL: public-endpoint district gate) ---
+
+Deno.test("validateLocationDistrict is a no-op when location is not required", async () => {
+  const supabase = makeDistrictsMock([]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: false,
+    formId: null,
+    formLocationRequired: false,
+    definitions: [{ field_key: "district", field_type: "ref_district" }],
+    fieldValues: { district: "district-outside" },
+  });
+  assertEquals(result.ok, true);
+});
+
+Deno.test("validateLocationDistrict is permissive when the district field wasn't submitted yet", async () => {
+  const supabase = makeDistrictsMock([{ table: "campaign_districts", districtIds: ["d-1", "d-2"] }]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: true,
+    formId: null,
+    formLocationRequired: false,
+    definitions: [{ field_key: "district", field_type: "ref_district" }],
+    fieldValues: { name: "John" },
+  });
+  assertEquals(result.ok, true);
+});
+
+Deno.test("validateLocationDistrict accepts a district within campaign_districts", async () => {
+  const supabase = makeDistrictsMock([{ table: "campaign_districts", districtIds: ["d-1", "d-2"] }]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: true,
+    formId: null,
+    formLocationRequired: false,
+    definitions: [{ field_key: "district", field_type: "ref_district" }],
+    fieldValues: { district: "d-2" },
+  });
+  assertEquals(result.ok, true);
+});
+
+Deno.test("validateLocationDistrict rejects a district outside campaign_districts (public API bypass)", async () => {
+  const supabase = makeDistrictsMock([{ table: "campaign_districts", districtIds: ["d-1", "d-2"] }]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: true,
+    formId: null,
+    formLocationRequired: false,
+    definitions: [{ field_key: "district", field_type: "ref_district" }],
+    fieldValues: { district: "d-999-not-allowed" },
+  });
+  assertEquals(result.ok, false);
+  assertEquals(
+    result.error,
+    "Selected district is not within the allowed service area for this campaign/form",
+  );
+});
+
+Deno.test("validateLocationDistrict falls back to form_districts when campaign doesn't require location", async () => {
+  const supabase = makeDistrictsMock([{ table: "form_districts", districtIds: ["d-5"] }]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: false,
+    formId: "form-1",
+    formLocationRequired: true,
+    definitions: [{ field_key: "distrito_cliente", field_type: "text", field_label: "Distrito" }],
+    fieldValues: { distrito_cliente: "d-999" },
+  });
+  assertEquals(result.ok, false);
+});
+
+Deno.test("validateLocationDistrict is permissive when no districts are configured (matches get-form-data fallback)", async () => {
+  const supabase = makeDistrictsMock([{ table: "campaign_districts", districtIds: [] }]);
+  const result = await validateLocationDistrict({
+    supabase,
+    campaignId: "camp-1",
+    campaignLocationRequired: true,
+    formId: null,
+    formLocationRequired: false,
+    definitions: [{ field_key: "district", field_type: "ref_district" }],
+    fieldValues: { district: "anything" },
+  });
+  assertEquals(result.ok, true);
 });

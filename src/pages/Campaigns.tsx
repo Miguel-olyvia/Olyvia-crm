@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import Layout from "@/components/Layout";
@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useCompany } from "@/contexts/CompanyContext";
 import { PermissionGate } from "@/components/PermissionGate";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -46,6 +46,7 @@ import { CampaignFormPreview } from "@/components/campaigns/CampaignFormPreview"
 import { CampaignRoutingRules } from "@/components/campaigns/CampaignRoutingRules";
 import { CampaignBrandingConfig } from "@/components/campaigns/CampaignBrandingConfig";
 import { CampaignFormBuilder } from "@/components/campaigns/CampaignFormBuilder";
+import { campaignSchema } from "@/lib/validations";
 
 interface LeadSource {
   id: string;
@@ -110,7 +111,7 @@ interface FormField {
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [organizations, setOrganizations] = useState<{ id: string; name: string }[]>([]);
   const [childOrgs, setChildOrgs] = useState<ChildOrganization[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
@@ -133,6 +134,7 @@ const Campaigns = () => {
   const [brandingCampaign, setBrandingCampaign] = useState<Campaign | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
 
   // Filter states
@@ -214,46 +216,37 @@ const Campaigns = () => {
     return labels[type] || type.charAt(0).toUpperCase() + type.slice(1);
   };
 
-  useEffect(() => {
-    loadData();
-  }, [activeCompany]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      let campaignsQuery = supabase
-        .from("campaigns")
-        .select("*, organization:anew_organizations!campaigns_organization_id_anew_fkey(name), lead_sources(id, name, icon, color), forms(id, name)");
-
-      if (activeCompany) {
-        campaignsQuery = campaignsQuery.eq("organization_id", activeCompany.id);
+      if (!activeCompany?.id) {
+        setCampaigns([]);
+        setLoading(false);
+        return;
       }
 
-      const sourcesQuery = supabase
+      let campaignsQuery = supabase
+        .from("campaigns")
+        .select("*, organization:anew_organizations!campaigns_organization_id_anew_fkey(name), lead_sources(id, name, icon, color), forms(id, name)")
+        .eq("organization_id", activeCompany.id);
+
+      let sourcesQuery = supabase
         .from("lead_sources")
         .select("id, name, icon, color")
         .eq("is_active", true)
         .order("name");
 
-      if (activeCompany) {
-        sourcesQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
-      }
+      sourcesQuery = sourcesQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
 
       const [campaignsRes, organizationsRes, childOrgsRes, countriesRes, sourcesRes, formsRes] = await Promise.all([
         campaignsQuery.order("created_at", { ascending: false }),
-        activeCompany 
-          ? Promise.resolve({ data: [{ id: activeCompany.id, name: activeCompany.name }], error: null })
-          : supabase.from("anew_organizations").select("id, name").in("type", ["empresa"]),
-        activeCompany
-          ? supabase.from("anew_hierarchy").select("child_org_id, anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type)").eq("parent_org_id", activeCompany.id).then(res => ({
-              data: (res.data || []).map((h: any) => ({ id: (h as any).anew_organizations?.id, name: (h as any).anew_organizations?.name, type: (h as any).anew_organizations?.type || '' })).filter((d: any) => d.id),
-              error: res.error
-            }))
-          : Promise.resolve({ data: [] as ChildOrganization[], error: null }),
+        Promise.resolve({ data: [{ id: activeCompany.id, name: activeCompany.name }], error: null }),
+        supabase.from("anew_hierarchy").select("child_org_id, anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type)").eq("parent_org_id", activeCompany.id).then(res => ({
+            data: (res.data || []).map((h: any) => ({ id: (h as any).anew_organizations?.id, name: (h as any).anew_organizations?.name, type: (h as any).anew_organizations?.type || '' })).filter((d: any) => d.id),
+            error: res.error
+          })),
         supabase.from("administrative_divisions").select("country_code").eq("admin_level", 1),
         sourcesQuery,
-        activeCompany
-          ? supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).eq("organization_id", activeCompany.id).order("is_primary", { ascending: false })
-          : supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).order("is_primary", { ascending: false }),
+        supabase.from("forms").select("id, name, is_primary, form_type").eq("is_active", true).eq("organization_id", activeCompany.id).order("is_primary", { ascending: false }),
       ]);
 
       if (campaignsRes.error) throw campaignsRes.error;
@@ -337,7 +330,11 @@ const Campaigns = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany, toast, t]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const loadFormFields = async (formId: string) => {
     if (!formId) {
@@ -355,7 +352,11 @@ const Campaigns = () => {
       if (error) throw error;
       setFormFields(data || []);
     } catch (error: any) {
-      console.error("Error loading form fields:", error);
+      toast({
+        title: t('campaigns.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
       setFormFields([]);
     }
   };
@@ -372,11 +373,23 @@ const Campaigns = () => {
     if (e) e.preventDefault();
     if (submitLockRef.current) return;
 
-    if (!formData.name) {
-      setFieldErrors({ name: t('campaigns.toast.nameRequired') });
+    const validation = campaignSchema.safeParse({
+      name: formData.name,
+      organization_id: formData.organization_id,
+      country_code: formData.country_code,
+      source_id: formData.default_source_id || formData.source_id,
+      form_id: formData.form_id,
+      selected_district_ids: formData.selected_district_ids,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('campaigns.toast.validationError'),
-        description: t('campaigns.toast.nameRequired'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
@@ -410,11 +423,12 @@ const Campaigns = () => {
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
-        toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador. Faça login novamente.", variant: "destructive" });
+        toast({ title: t('campaigns.toast.identityError'), description: t('campaigns.toast.identityErrorDesc'), variant: "destructive" });
         return;
       }
 
       let campaignId: string;
+      let relationSyncFailed = false;
 
       if (editingCampaign) {
         const { error } = await supabase
@@ -426,11 +440,12 @@ const Campaigns = () => {
         campaignId = editingCampaign.id;
 
         // Delete existing relations
-        await Promise.all([
+        const deleteResults = await Promise.all([
           supabase.from("campaign_organizations").delete().eq("campaign_id", campaignId),
           supabase.from("campaign_districts").delete().eq("campaign_id", campaignId),
           supabase.from("campaign_sources").delete().eq("campaign_id", campaignId),
         ]);
+        if (deleteResults.some((r) => r.error)) relationSyncFailed = true;
       } else {
         const { data, error } = await supabase.from("campaigns").insert({
           ...campaignData,
@@ -443,26 +458,28 @@ const Campaigns = () => {
 
       // Insert campaign organizations (unified)
       if (formData.selected_org_ids.length > 0) {
-        await supabase.from("campaign_organizations").insert(
+        const { error } = await supabase.from("campaign_organizations").insert(
           formData.selected_org_ids.map((orgId) => ({
             campaign_id: campaignId,
             organization_id: orgId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
       if (formData.selected_district_ids.length > 0) {
-        await supabase.from("campaign_districts").insert(
+        const { error } = await supabase.from("campaign_districts").insert(
           formData.selected_district_ids.map((districtId) => ({
             campaign_id: campaignId,
             district_id: districtId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
       // Insert campaign sources
       if (formData.selected_source_ids.length > 0) {
-        await supabase.from("campaign_sources").insert(
+        const { error } = await supabase.from("campaign_sources").insert(
           formData.selected_source_ids.map((sourceId) => ({
             campaign_id: campaignId,
             source_id: sourceId,
@@ -470,14 +487,23 @@ const Campaigns = () => {
             created_by: businessUserId,
           }))
         );
+        if (error) relationSyncFailed = true;
       }
 
-      toast({
-        title: editingCampaign ? t('campaigns.toast.updateSuccess') : t('campaigns.toast.createSuccess'),
-      });
+      if (relationSyncFailed) {
+        toast({
+          title: t('campaigns.toast.relationSyncError'),
+          description: t('campaigns.toast.relationSyncErrorDesc'),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: editingCampaign ? t('campaigns.toast.updateSuccess') : t('campaigns.toast.createSuccess'),
+        });
+      }
 
       handleCloseDialog();
-      loadData();
+      void loadData();
     } catch (error: any) {
       toast({
         title: editingCampaign ? t('campaigns.toast.updateError') : t('campaigns.toast.createError'),
@@ -507,7 +533,7 @@ const Campaigns = () => {
 
       setDeleteDialogOpen(false);
       setCampaignToDelete(null);
-      loadData();
+      void loadData();
     } catch (error: any) {
       toast({
         title: t('campaigns.toast.deleteError'),
@@ -545,6 +571,23 @@ const Campaigns = () => {
     if (formId) loadFormFields(formId);
     setOpen(true);
   };
+
+  // Deep-link: CampaignDetail's header "Edit" button navigates here with
+  // { editCampaignId } in location.state instead of just landing on the bare
+  // list. Once campaigns are loaded, find the matching row and open the same
+  // edit dialog openEditDialog() would open from a row click, then clear the
+  // state so a browser back/forward doesn't reopen it.
+  useEffect(() => {
+    const editCampaignId = (location.state as { editCampaignId?: string } | null)?.editCampaignId;
+    if (!editCampaignId || campaigns.length === 0) return;
+
+    const target = campaigns.find((c) => c.id === editCampaignId);
+    if (target) {
+      openEditDialog(target);
+    }
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaigns, location.state]);
 
   const handleCloseDialog = () => {
     setOpen(false);
@@ -617,16 +660,16 @@ const Campaigns = () => {
     setVisibleCount(PAGE_SIZE);
   }, [searchQuery, statusFilter, typeFilter, organizationFilter, orgTypeFilters]);
 
-  const filteredCampaigns = campaigns
+  const filteredCampaigns = useMemo(() => campaigns
     .filter((campaign) => {
-      const matchesSearch = !searchQuery || 
+      const matchesSearch = !searchQuery ||
         campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         campaign.description?.toLowerCase().includes(searchQuery.toLowerCase());
-      
+
       const matchesStatus = statusFilter === "all" || campaign.status === statusFilter;
       const matchesType = typeFilter === "all" || campaign.type === typeFilter;
       const matchesOrganization = organizationFilter === "all" || campaign.organization_id === organizationFilter;
-      
+
       // Dynamic org type filters
       const matchesOrgTypes = Object.entries(orgTypeFilters).every(([type, filterId]) => {
         if (filterId === "all" || !filterId) return true;
@@ -635,7 +678,8 @@ const Campaigns = () => {
 
       return matchesSearch && matchesStatus && matchesType && matchesOrganization && matchesOrgTypes;
     })
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+  [campaigns, searchQuery, statusFilter, typeFilter, organizationFilter, orgTypeFilters]);
 
   const paginatedCampaigns = filteredCampaigns.slice(0, visibleCount);
   const hasMore = visibleCount < filteredCampaigns.length;
@@ -671,20 +715,20 @@ const Campaigns = () => {
     });
   };
 
-  if (loading) {
+  if (companyLoading) {
     return (
       <>
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center h-64">
           <OlyviaLoader size={40} />
         </div>
       </>
     );
   }
 
-  if (companyLoading) {
+  if (loading) {
     return (
       <>
-        <div className="flex items-center justify-center h-64">
+        <div className="flex items-center justify-center py-12">
           <OlyviaLoader size={40} />
         </div>
       </>

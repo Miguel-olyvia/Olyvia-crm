@@ -48,6 +48,7 @@ import {
   MessageSquare, PhoneCall, PhoneForwarded, Ban
 } from "lucide-react";
 import { HelpButton } from "@/components/HelpButton";
+import { leadContactResultConfigSchema } from "@/lib/validations";
 
 interface ContactResult {
   id: string;
@@ -82,6 +83,7 @@ export default function LeadContactResults() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingResult, setEditingResult] = useState<ContactResult | null>(null);
   const [resultToDelete, setResultToDelete] = useState<ContactResult | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const AVAILABLE_ICONS = [
     { value: "phone", label: t('contactResults.icons.phone'), icon: Phone },
@@ -170,14 +172,26 @@ export default function LeadContactResults() {
         is_active: true,
       });
     }
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) {
-      toast({ title: t('contactResults.toast.nameRequired'), variant: "destructive" });
+    const validation = leadContactResultConfigSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('contactResults.toast.nameRequired'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
       return;
     }
+    setFieldErrors({});
 
     const businessUserId = await resolveCurrentBusinessUserId();
     if (!businessUserId) throw new Error("Business user not resolved");
@@ -392,7 +406,9 @@ export default function LeadContactResults() {
                 value={formData.name}
                 onChange={e => setFormData({ ...formData, name: e.target.value })}
                 placeholder={t('contactResults.form.namePlaceholder')}
+                className={fieldErrors.name ? "border-destructive" : ""}
               />
+              {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
@@ -401,7 +417,9 @@ export default function LeadContactResults() {
                 value={formData.description}
                 onChange={e => setFormData({ ...formData, description: e.target.value })}
                 placeholder={t('contactResults.form.descriptionPlaceholder')}
+                className={fieldErrors.description ? "border-destructive" : ""}
               />
+              {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">

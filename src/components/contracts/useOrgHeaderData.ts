@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { useCompany } from "@/contexts/CompanyContext";
 
 export interface OrgHeaderData {
@@ -110,12 +111,8 @@ export function useOrgHeaderData() {
 
         const feId = fiscalRes?.data?.[0]?.fiscal_entity_id;
         if (feId) {
-          const { data: fe } = await (supabase as any)
-            .from("fiscal_entities")
-            .select("nif")
-            .eq("id", feId)
-            .maybeSingle();
-          if (fe?.nif) out.empresa_nif = String(fe.nif).trim();
+          const nif = await callNifRevealSingle(feId);
+          if (nif) out.empresa_nif = String(nif).trim();
         }
         if (!out.empresa_telefone) {
           out.empresa_telefone = phoneRes?.data?.[0]?.phone_number || "";

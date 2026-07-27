@@ -64,8 +64,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
@@ -193,9 +195,15 @@ const defaultConfig = {
   quote_header_text: "#ffffff",
   quote_row_alt_bg: "#f9fafb",
   quote_border_color: "#e5e7eb",
+  // NOTE: applied in the live preview (see the content-block <div>s further down)
+  // but has no color-picker control in the Colors tab yet. Known gap, low priority.
   content_block_bg: "#ffffff",
-  
+
   // Status colors
+  // NOTE: these have color pickers in the Colors tab (see "Pendente"/"Aceite"/
+  // "Enviada" controls) but are not yet read anywhere in the live preview.
+  // Known gap, low priority — wire into whatever preview element shows
+  // proposal/quote status badges when this is tackled.
   status_pending_color: "#f59e0b",
   status_accepted_color: "#10b981",
   status_rejected_color: "#ef4444",
@@ -660,6 +668,19 @@ function ColorPicker({ label, value, onChange }: { label: string; value: string;
   );
 }
 
+const ALLOWED_LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function validateFile(file: File): string | null {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type)) {
+    return "Formato inválido. Selecione um ficheiro PNG, JPG ou WEBP.";
+  }
+  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+    return "Imagem demasiado grande (máx. 5MB)";
+  }
+  return null;
+}
+
 interface ProposalTemplateEditorProps {
   templateId?: string | null;
   onClose: () => void;
@@ -700,8 +721,12 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   );
   const [isLoaded, setIsLoaded] = useState(false);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  // Bloqueia a gravação quando o template não pôde ser carregado (RLS, apagado,
+  // falha de rede) — evita sobrescrever silenciosamente o template real com
+  // a config default em branco (bug: loadTemplate engolia erros).
+  const [loadFailed, setLoadFailed] = useState(false);
 
-  const isDirty = isLoaded && initialConfigRef.current !== null && initialConfigRef.current !== JSON.stringify(config);
+  const isDirty = isLoaded && initialConfigRef.current !== null && initialConfigRef.current !== JSON.stringify({ config, itemsTableSettings });
 
   const requestClose = useCallback(() => {
     if (isDirty) setCloseConfirmOpen(true);
@@ -711,26 +736,34 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Erro", description: "Selecione um ficheiro de imagem (PNG, JPG)", variant: "destructive" });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "Erro", description: "Imagem demasiado grande (máx. 5MB)", variant: "destructive" });
+    const validationError = validateFile(file);
+    if (validationError) {
+      toast({ title: "Erro", description: validationError, variant: "destructive" });
+      if (logoInputRef.current) logoInputRef.current.value = "";
       return;
     }
     setUploadingLogo(true);
     try {
       const orgId = activeCompany?.id || "general";
-      const ext = file.name.split(".").pop() || "png";
-      const filePath = `${orgId}/proposal-logo-${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos").upload(filePath, file, { upsert: true });
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/proposal-logo-${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({ title: t("proposalTemplateEditor.toast.logoError"), description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
+        return;
+      }
+
       const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
       setConfig(prev => ({ ...prev, logo_url: urlData.publicUrl }));
       toast({ title: "Logotipo carregado com sucesso" });
-    } catch (err: any) {
-      toast({ title: "Erro ao carregar logotipo", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: t("proposalTemplateEditor.toast.logoError"), description: getUploadErrorMessage(err), variant: "destructive" });
     } finally {
       setUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = "";
@@ -747,6 +780,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   useEffect(() => {
     loadCompanies();
     setIsLoaded(false);
+    setLoadFailed(false);
     initialConfigRef.current = null;
     if (templateId) {
       loadTemplate().then(() => setNeedsBaseline(true));
@@ -758,14 +792,18 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
 
   useEffect(() => {
     if (needsBaseline) {
-      initialConfigRef.current = JSON.stringify(config);
+      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings });
       setIsLoaded(true);
       setNeedsBaseline(false);
     }
-  }, [needsBaseline, config]);
+  }, [needsBaseline, config, itemsTableSettings]);
 
   const loadCompanies = async () => {
-    const { data } = await supabase.from("anew_organizations").select("id, name").order("name");
+    const { data, error } = await supabase.from("anew_organizations").select("id, name").order("name");
+    if (error) {
+      toast({ title: "Erro ao carregar empresas", description: error.message, variant: "destructive" });
+      return;
+    }
     setCompanies(data || []);
   };
 
@@ -826,6 +864,16 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         show_quote_details: data.show_quote_details ?? true,
         sections: loadedSections || prev.sections,
       }));
+    } else {
+      // Erro no fetch (RLS, template apagado, falha de rede): NÃO substituir
+      // silenciosamente pela config default em branco. Avisa e bloqueia a
+      // gravação para não sobrescrever o template real com defaults.
+      setLoadFailed(true);
+      toast({
+        title: "Erro ao carregar template",
+        description: error?.message || "Não foi possível carregar este template. A edição foi bloqueada para evitar perda de dados.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -902,6 +950,10 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   };
 
   const handleSave = async () => {
+    if (loadFailed) {
+      toast({ title: "Não é possível gravar", description: "O template não foi carregado corretamente.", variant: "destructive" });
+      return;
+    }
     if (!config.name) {
       toast({ title: "Nome obrigatório", variant: "destructive" });
       return;
@@ -916,15 +968,6 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       // (anew_users.id), not auth.uid(). Resolve before insert.
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Não foi possível identificar o utilizador");
-
-      // If setting as default, unset others
-      if (config.is_default) {
-        const tbl = supabase.from("proposal_templates") as any;
-        await tbl
-          .update({ is_default: false })
-          .eq("organization_id", config.organization_id || activeCompany?.id)
-          .eq("template_type", config.template_type);
-      }
 
       const templateData = {
         name: config.name,
@@ -964,6 +1007,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         },
       };
 
+      let savedId: string | null = null;
       if (templateId) {
         const tbl = supabase.from("proposal_templates") as any;
         const { data: updated, error } = await tbl
@@ -972,6 +1016,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
           .select("id");
         if (error) throw error;
         if (!updated || updated.length === 0) throw new Error("Sem permissão para guardar este template");
+        savedId = updated[0].id;
       } else {
         const tbl = supabase.from("proposal_templates") as any;
         const { data: inserted, error } = await tbl
@@ -979,9 +1024,29 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
           .select("id");
         if (error) throw error;
         if (!inserted || inserted.length === 0) throw new Error("Sem permissão para criar template");
+        savedId = inserted[0].id;
       }
 
-      initialConfigRef.current = JSON.stringify(config);
+      // Só desmarca os outros templates default DEPOIS de confirmar que a
+      // gravação do alvo teve sucesso — evita que a org fique sem nenhum
+      // template default se este passo seguinte falhar (permissão, rede).
+      if (config.is_default && savedId) {
+        const tbl = supabase.from("proposal_templates") as any;
+        const { error: unsetError } = await tbl
+          .update({ is_default: false })
+          .eq("organization_id", config.organization_id || activeCompany?.id)
+          .eq("template_type", config.template_type)
+          .neq("id", savedId);
+        if (unsetError) {
+          toast({
+            title: "Template guardado, mas com aviso",
+            description: "Não foi possível desmarcar outros templates default. Pode haver mais do que um template marcado como default.",
+            variant: "destructive",
+          });
+        }
+      }
+
+      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings });
       toast({ title: templateId ? "Template atualizado" : "Template criado" });
       onClose();
     } catch (error: any) {
@@ -1055,7 +1120,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
             <Button variant="outline" size="sm" onClick={applyQuotePdfTemplate}>
               Usar layout Orçamento
             </Button>
-            <Button onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving || loadFailed} title={loadFailed ? "Carregamento do template falhou — gravação bloqueada" : undefined}>
               <Save className="h-4 w-4 mr-2" />
               {saving ? "A guardar..." : "Guardar"}
             </Button>

@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, FolderTree, Pencil, Trash2 } from "lucide-react";
+import { Plus, Search, FolderTree, Pencil, Trash2, RotateCcw } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useCompany } from "@/contexts/CompanyContext";
+import { serviceCategorySchema } from "@/lib/validations";
 
 interface ServiceCategory {
   id: string;
@@ -54,6 +55,7 @@ interface ServiceCategory {
   
   organization_id: string | null;
   is_active: boolean;
+  is_deleted?: boolean;
   sort_order: number;
   parent_category?: { name: string };
   anew_organizations?: { name: string };
@@ -62,7 +64,7 @@ interface ServiceCategory {
 export default function ServiceCategories() {
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { companies: userCompanies, userType } = useCompany();
+  const { companies: userCompanies, userType, activeCompany } = useCompany();
   const [searchParams] = useSearchParams();
   const businessAreaId = searchParams.get("area");
   const [businessAreaName, setBusinessAreaName] = useState<string>("");
@@ -70,8 +72,10 @@ export default function ServiceCategories() {
   const [allCompanies, setAllCompanies] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ServiceCategory | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<ServiceCategory | null>(null);
   const [formData, setFormData] = useState({
@@ -88,48 +92,40 @@ export default function ServiceCategories() {
   // Get available companies based on user access
   const availableCompanies = isSystemAdmin ? allCompanies : userCompanies;
 
-  useEffect(() => {
-    loadCategories();
-    if (businessAreaId) {
-      loadBusinessAreaName();
-    }
-    if (isSystemAdmin) {
-      loadAllCompanies();
-    }
-  }, [businessAreaId, isSystemAdmin]);
-
-  const loadAllCompanies = async () => {
+  const loadAllCompanies = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("anew_organizations")
         .select("id, name")
         .order("name");
-      
+
       if (error) throw error;
       setAllCompanies(data || []);
-    } catch (error: any) {
-      console.error("Error loading companies:", error);
+    } catch (error: unknown) {
+      // Non-critical: system admin company list. Failure is silent; the list
+      // remains empty and the UI falls back to showing no filter options.
+      void error;
     }
-  };
+  }, []);
 
-  const loadBusinessAreaName = async () => {
+  const loadBusinessAreaName = useCallback(async () => {
     if (!businessAreaId) return;
-    
+
     try {
       const { data, error } = await supabase
         .from("anew_organizations")
         .select("name")
         .eq("id", businessAreaId)
         .single();
-      
+
       if (error) throw error;
       setBusinessAreaName(data?.name || "");
-    } catch (error: any) {
-      console.error("Error loading business area:", error);
+    } catch (error: unknown) {
+      void error;
     }
-  };
+  }, [businessAreaId]);
 
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
       let query = supabase
         .from("service_categories")
@@ -139,30 +135,43 @@ export default function ServiceCategories() {
           anew_organizations!organization_id(name)
         `)
         .is("parent_id", null)
+        .eq("is_deleted", showDeleted)
         .order("name");
 
-
-      // Filter by user's companies if not system admin
-      if (!isSystemAdmin && userCompanies.length > 0) {
-        const companyIds = userCompanies.map(c => c.id);
-        query = query.in("organization_id", companyIds);
+      // ALWAYS filter by activeCompany - this applies to ALL users including admins
+      if (!activeCompany?.id) {
+        setCategories([]);
+        setLoading(false);
+        return;
       }
+      query = query.eq("organization_id", activeCompany.id);
 
       const { data, error } = await query;
 
       if (error) throw error;
 
       setCategories((data || []) as unknown as ServiceCategory[]);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Erro desconhecido";
       toast({
         title: t('serviceCategories.toast.loadError'),
-        description: error.message,
+        description: message,
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany?.id, showDeleted, t, toast]);
+
+  useEffect(() => {
+    loadCategories();
+    if (businessAreaId) {
+      loadBusinessAreaName();
+    }
+    if (isSystemAdmin) {
+      loadAllCompanies();
+    }
+  }, [loadCategories, loadBusinessAreaName, loadAllCompanies, businessAreaId, isSystemAdmin]);
 
   const generateSlug = (name: string) => {
     return name
@@ -174,14 +183,21 @@ export default function ServiceCategories() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.organization_id) {
+    const validation = serviceCategorySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('serviceCategories.toast.companyRequired'),
-        description: t('serviceCategories.toast.selectCompany'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -189,22 +205,19 @@ export default function ServiceCategories() {
 
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) {
-        toast({ title: "Erro de identidade", description: "Sessão inválida.", variant: "destructive" });
-        return;
+        throw new Error("Perfil de utilizador não encontrado");
       }
 
       const slug = formData.slug || generateSlug(formData.name);
 
       if (editingCategory) {
-        const { error } = await supabase
-          .from("service_categories")
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            organization_id: formData.organization_id,
-            sort_order: formData.sort_order,
-          } as any)
-          .eq("id", editingCategory.id);
+        const { error } = await supabase.rpc("rpc_update_service_category", {
+          p_id: editingCategory.id,
+          p_name: formData.name,
+          p_description: formData.description || null,
+          p_organization_id: formData.organization_id,
+          p_sort_order: formData.sort_order,
+        });
 
         if (error) throw error;
 
@@ -212,18 +225,13 @@ export default function ServiceCategories() {
           title: t('serviceCategories.toast.updateSuccess'),
         });
       } else {
-        const { error } = await supabase
-          .from("service_categories")
-          .insert({
-            name: formData.name,
-            slug,
-            description: formData.description || null,
-            parent_id: formData.parent_id || null,
-            organization_id: formData.organization_id,
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-          } as any);
+        const { error } = await supabase.rpc("rpc_create_service_category", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description || null,
+          p_organization_id: formData.organization_id,
+          p_sort_order: formData.sort_order,
+        });
 
         if (error) throw error;
 
@@ -233,11 +241,11 @@ export default function ServiceCategories() {
       }
 
       handleCloseDialog(false);
-      loadCategories();
-    } catch (error: any) {
+      await loadCategories();
+    } catch (error: unknown) {
       toast({
         title: editingCategory ? t('serviceCategories.toast.updateError') : t('serviceCategories.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -252,10 +260,12 @@ export default function ServiceCategories() {
     if (!categoryToDelete) return;
 
     try {
-      const { error } = await supabase
-        .from("service_categories")
-        .delete()
-        .eq("id", categoryToDelete.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_delete_service_category", {
+        p_id: categoryToDelete.id,
+      });
 
       if (error) throw error;
 
@@ -264,16 +274,42 @@ export default function ServiceCategories() {
         description: t('serviceCategories.toast.deleteSuccess'),
       });
 
-      loadCategories();
-    } catch (error: any) {
+      await loadCategories();
+    } catch (error: unknown) {
       toast({
         title: t('serviceCategories.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     } finally {
       setDeleteDialogOpen(false);
       setCategoryToDelete(null);
+    }
+  };
+
+  const handleRestore = async (category: ServiceCategory) => {
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Sessão inválida.");
+
+      const { error } = await supabase.rpc("rpc_restore_service_category", {
+        p_id: category.id,
+      });
+
+      if (error) throw error;
+
+      toast({
+        title: t('serviceCategories.toast.success') || "Sucesso",
+        description: t('serviceCategories.toast.restoreSuccess') || "Categoria restaurada com sucesso.",
+      });
+
+      await loadCategories();
+    } catch (error: unknown) {
+      toast({
+        title: t('serviceCategories.toast.error'),
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
+        variant: "destructive",
+      });
     }
   };
 
@@ -300,6 +336,7 @@ export default function ServiceCategories() {
       organization_id: userCompanies.length === 1 ? userCompanies[0].id : "",
       sort_order: 0,
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -328,12 +365,23 @@ export default function ServiceCategories() {
               )}
             </div>
           </div>
-          <PermissionGate permission="service_categories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('serviceCategories.addCategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="service_categories.delete">
+              <Button
+                variant={showDeleted ? "secondary" : "outline"}
+                onClick={() => setShowDeleted((prev) => !prev)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                {showDeleted ? "Ver ativas" : "Ver eliminadas"}
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="service_categories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('serviceCategories.addCategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
             <DialogContent>
               <DialogHeader>
@@ -359,6 +407,7 @@ export default function ServiceCategories() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {fieldErrors.organization_id && <p className="text-xs text-destructive">{fieldErrors.organization_id}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -368,7 +417,9 @@ export default function ServiceCategories() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -465,23 +516,38 @@ export default function ServiceCategories() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="service_categories.edit">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEditDialog(category)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {!showDeleted && (
+                          <PermissionGate permission="service_categories.edit">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t('common.edit')}
+                              onClick={() => openEditDialog(category)}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
                         <PermissionGate permission="service_categories.delete">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openDeleteDialog(category)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {showDeleted ? (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label="Restaurar"
+                              onClick={() => handleRestore(category)}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={t('common.delete')}
+                              onClick={() => openDeleteDialog(category)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                         </PermissionGate>
                       </div>
                     </TableCell>

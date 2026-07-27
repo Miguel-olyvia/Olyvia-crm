@@ -5,10 +5,10 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 // ... keep existing code (interfaces SmtpConfig, InviteRequest, getSmtpConfig, sendEmailViaSMTP, getUsersFromEntity, generateInviteEmailHtml)
 
@@ -159,14 +159,35 @@ function generateInviteEmailHtml(
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const authHeader = req.headers.get("Authorization") ?? "";
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read/write below
+    // (schedule_invitations insert, notifications insert, schedule_items
+    // read) run under the caller's real RLS. schedule_invitations' INSERT
+    // policy identity-space bug was fixed in
+    // 20261107020000_fix_schedule_invitations_invited_by_identity_space.sql.
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
+    );
+    // Residual service-role client — ONLY passed to getUsersFromEntity, which
+    // calls supabase.auth.admin.getUserById() (a GoTrue admin API with no
+    // scoped equivalent) to resolve invitee emails.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+      { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
     const caller = await resolveCallerIdentity(req, supabaseClient);
@@ -234,7 +255,21 @@ const handler = async (req: Request): Promise<Response> => {
 
         if (inviteError) throw inviteError;
 
-        const users = await getUsersFromEntity(supabaseClient, invitee.type, invitee.id);
+        // For org-scoped invitee types, invitee.id is an organization id
+        // (company/business_unit/business_area) chosen client-side from a
+        // dropdown — it is never re-validated to be within the caller's own
+        // scope. Without this check, a caller could target any organization
+        // id and have this function (via the residual service_role admin
+        // client) resolve and notify all of that organization's members.
+        if (invitee.type === "company" || invitee.type === "business_unit" || invitee.type === "business_area") {
+          const inviteeOrgInScope = await validateOrgScope(supabaseClient, caller, invitee.id);
+          if (!inviteeOrgInScope) {
+            results.push({ invitee_id: invitee.id, status: "error", error: "Organization out of scope" });
+            continue;
+          }
+        }
+
+        const users = await getUsersFromEntity(supabaseAdmin, invitee.type, invitee.id);
 
         for (const user of users) {
           // Create in-app notification only if enabled
@@ -293,6 +328,7 @@ const handler = async (req: Request): Promise<Response> => {
     if (authResp) return authResp;
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending invites:", safeError);
+    await captureError(error, { function: "send-schedule-invite" });
     return new Response(
       JSON.stringify({ error: safeError }),
       {

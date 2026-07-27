@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
@@ -36,6 +37,19 @@ interface ProductFormPricesProps {
   onChange: (prices: PriceFormData) => void;
 }
 
+// Validates the per-UOM pricing fields (financially sensitive business data).
+// Ran on every change so the profit-margin calculation and the persisted
+// prices are always derived from sane, non-negative values.
+const productPricesSchema = z.object({
+  purchase: z.number().min(0, "O preço de compra deve ser positivo").max(9999999, "O preço de compra é demasiado elevado"),
+  retail: z.number().min(0, "O preço de venda deve ser positivo").max(9999999, "O preço de venda é demasiado elevado"),
+  wholesale: z.number().min(0, "O preço grossista deve ser positivo").max(9999999, "O preço grossista é demasiado elevado"),
+  distributor: z.number().min(0, "O preço de distribuidor deve ser positivo").max(9999999, "O preço de distribuidor é demasiado elevado"),
+  currency: z.enum(["EUR", "USD", "GBP"], { errorMap: () => ({ message: "Moeda inválida" }) }),
+  vat_rate: z.number().min(0, "A taxa de IVA deve ser pelo menos 0").max(100, "A taxa de IVA deve ser no máximo 100"),
+  uom_id: z.string().trim().max(100).optional().or(z.literal("")),
+});
+
 function calculateMargin(purchase: number, retail: number): number {
   if (!purchase || !retail || purchase <= 0) return 0;
   return ((retail - purchase) / retail) * 100;
@@ -50,8 +64,24 @@ function formatMarginBadge(margin: number): { label: string; variant: string } {
 export default function ProductFormPrices({ prices, onChange }: ProductFormPricesProps) {
   const { t } = useTranslation();
   const [uomList, setUomList] = useState<UOM[]>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const margin = calculateMargin(prices.purchase, prices.retail);
   const marginInfo = formatMarginBadge(margin);
+
+  // Validates the next price state on every change and surfaces per-field
+  // errors, while still propagating the value upward so typing behavior
+  // (e.g. clearing a field to type a new value) is not interrupted.
+  const handlePricesChange = (next: PriceFormData) => {
+    const validation = productPricesSchema.safeParse(next);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => { if (err.path[0]) errors[err.path[0].toString()] = err.message; });
+      setFieldErrors(errors);
+    } else {
+      setFieldErrors({});
+    }
+    onChange(next);
+  };
 
   useEffect(() => {
     const fetchUomList = async () => {
@@ -98,12 +128,13 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
           <select
             className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
             value={prices.currency}
-            onChange={(e) => onChange({ ...prices, currency: e.target.value })}
+            onChange={(e) => handlePricesChange({ ...prices, currency: e.target.value })}
           >
             <option value="EUR">EUR (€)</option>
             <option value="USD">USD ($)</option>
             <option value="GBP">GBP (£)</option>
           </select>
+          {fieldErrors.currency && <p className="text-xs text-destructive">{fieldErrors.currency}</p>}
         </div>
         <div className="space-y-2">
           <Label>{t('productPrices.vatRate')}</Label>
@@ -113,9 +144,11 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             min="0"
             max="100"
             value={prices.vat_rate || ''}
-            onChange={(e) => onChange({ ...prices, vat_rate: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => handlePricesChange({ ...prices, vat_rate: parseFloat(e.target.value) || 0 })}
             placeholder="23"
+            className={fieldErrors.vat_rate ? "border-destructive" : ""}
           />
+          {fieldErrors.vat_rate && <p className="text-xs text-destructive">{fieldErrors.vat_rate}</p>}
         </div>
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
@@ -124,7 +157,7 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
           </Label>
           <Select
             value={prices.uom_id || ""}
-            onValueChange={(value) => onChange({ ...prices, uom_id: value })}
+            onValueChange={(value) => handlePricesChange({ ...prices, uom_id: value })}
           >
             <SelectTrigger>
               <SelectValue placeholder={t('common.select')} />
@@ -152,9 +185,11 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             type="number"
             step="0.01"
             value={prices.purchase || ''}
-            onChange={(e) => onChange({ ...prices, purchase: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => handlePricesChange({ ...prices, purchase: parseFloat(e.target.value) || 0 })}
             placeholder="0.00"
+            className={fieldErrors.purchase ? "border-destructive" : ""}
           />
+          {fieldErrors.purchase && <p className="text-xs text-destructive">{fieldErrors.purchase}</p>}
         </div>
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
@@ -165,9 +200,11 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             type="number"
             step="0.01"
             value={prices.retail || ''}
-            onChange={(e) => onChange({ ...prices, retail: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => handlePricesChange({ ...prices, retail: parseFloat(e.target.value) || 0 })}
             placeholder="0.00"
+            className={fieldErrors.retail ? "border-destructive" : ""}
           />
+          {fieldErrors.retail && <p className="text-xs text-destructive">{fieldErrors.retail}</p>}
         </div>
       </div>
 
@@ -178,9 +215,11 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             type="number"
             step="0.01"
             value={prices.wholesale || ''}
-            onChange={(e) => onChange({ ...prices, wholesale: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => handlePricesChange({ ...prices, wholesale: parseFloat(e.target.value) || 0 })}
             placeholder="0.00"
+            className={fieldErrors.wholesale ? "border-destructive" : ""}
           />
+          {fieldErrors.wholesale && <p className="text-xs text-destructive">{fieldErrors.wholesale}</p>}
         </div>
         <div className="space-y-2">
           <Label>{t('productPrices.distributorPrice')}</Label>
@@ -188,9 +227,11 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             type="number"
             step="0.01"
             value={prices.distributor || ''}
-            onChange={(e) => onChange({ ...prices, distributor: parseFloat(e.target.value) || 0 })}
+            onChange={(e) => handlePricesChange({ ...prices, distributor: parseFloat(e.target.value) || 0 })}
             placeholder="0.00"
+            className={fieldErrors.distributor ? "border-destructive" : ""}
           />
+          {fieldErrors.distributor && <p className="text-xs text-destructive">{fieldErrors.distributor}</p>}
         </div>
       </div>
     </div>

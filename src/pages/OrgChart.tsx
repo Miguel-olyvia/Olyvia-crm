@@ -12,7 +12,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Shield, Users, Palette, Move, ZoomIn, ZoomOut, Maximize2, LayoutTemplate, Building2, Building, Link2 } from "lucide-react";
-import { OrgChartCard, getOrgTypeColors, getOrgTypeLabel, OrgType } from "@/components/orgchart/OrgChartCard";
+import { OrgChartCard, getOrgTypeColors, getOrgTypeLabel, OrgType, OrgChartColors } from "@/components/orgchart/OrgChartCard";
 import { OrgChartColorPicker, OrgChartColorSettings, DEFAULT_COLORS } from "@/components/orgchart/OrgChartColorPicker";
 import { OrgChartAddDialog } from "@/components/orgchart/OrgChartAddDialog";
 import { PeopleOrgChartDialog } from "@/components/orgchart/PeopleOrgChartDialog";
@@ -43,6 +43,31 @@ interface HierarchyRow {
 type AddDialogState = { open: boolean; parentId: string } | null;
 type RemoveDialogState = { open: boolean; childId: string; parentId: string } | null;
 
+const ORG_CHART_COLORS_STORAGE_KEY = "orgChartCustomColors";
+
+// Maps each concrete org type to the 4 broad categories exposed by
+// OrgChartColorPicker (organization / company / businessUnit / department).
+const ORG_TYPE_COLOR_CATEGORY: Record<string, keyof OrgChartColorSettings> = {
+  holding: "organization",
+  empresa: "company",
+  filial: "company",
+  departamento: "businessUnit",
+  divisao: "businessUnit",
+  equipa: "department",
+  projeto: "department",
+};
+
+function loadStoredOrgChartColors(): OrgChartColorSettings {
+  try {
+    const raw = localStorage.getItem(ORG_CHART_COLORS_STORAGE_KEY);
+    if (!raw) return DEFAULT_COLORS;
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_COLORS, ...parsed };
+  } catch {
+    return DEFAULT_COLORS;
+  }
+}
+
 export default function OrgChart() {
   const { t, language } = useTranslation();
   const { toast } = useToast();
@@ -55,6 +80,7 @@ export default function OrgChart() {
   const [rootOrgs, setRootOrgs] = useState<OrgNode[]>([]);
   const [selectedRootId, setSelectedRootId] = useState<string | null>(null);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [orgChartColors, setOrgChartColors] = useState<OrgChartColorSettings>(() => loadStoredOrgChartColors());
   const [addDialog, setAddDialog] = useState<AddDialogState>(null);
   const [removeDialog, setRemoveDialog] = useState<RemoveDialogState>(null);
   const [dragEnabled, setDragEnabled] = useState(false);
@@ -370,7 +396,12 @@ export default function OrgChart() {
       return;
     }
 
-    const typeLevel: Record<string, number> = { holding: 0, empresa: 1, filial: 2, departamento: 3, divisao: 4, equipa: 5, projeto: 6 };
+    // 'unit' is the generic quick-created org type from OrgChartAddDialog.handleCreateNew
+    // (always created as a leaf child of whichever node the "+" button was used on).
+    // It must be mapped here too, one level deeper than the deepest existing type, or
+    // else it falls back to level 99 and the dragLevel <= targetLevel guard below always
+    // rejects dragging any node onto a 'unit'-type node.
+    const typeLevel: Record<string, number> = { holding: 0, empresa: 1, filial: 2, departamento: 3, divisao: 4, equipa: 5, projeto: 6, unit: 7 };
     const dragLevel = typeLevel[draggedNode.type?.toLowerCase()] ?? 99;
     const targetLevel = typeLevel[targetNode.type?.toLowerCase()] ?? 99;
 
@@ -442,7 +473,8 @@ export default function OrgChart() {
     const isBeingDragged = activeDragId === node.id;
     const isCollapsed = collapsedNodes.has(node.id);
     const visibleChildren = isCollapsed ? [] : node.children;
-    const colors = getOrgTypeColors(orgType);
+    const colorCategory = ORG_TYPE_COLOR_CATEGORY[orgType];
+    const colors: OrgChartColors = colorCategory ? orgChartColors[colorCategory] : getOrgTypeColors(orgType);
 
     return (
       <div key={node.id} className="flex flex-col items-center">
@@ -455,6 +487,7 @@ export default function OrgChart() {
           childrenCount={node.children.length}
           memberCount={node.memberCount}
           isCollapsed={isCollapsed}
+          colors={colorCategory ? colors : undefined}
           onToggleCollapse={node.children.length > 0 ? () => toggleCollapse(node.id) : undefined}
           onAdd={canEdit ? () => setAddDialog({ open: true, parentId: node.id }) : undefined}
           onManageAssociations={canEdit ? () => setAssocDialog({ open: true, orgId: node.id, orgName: node.name, orgType: node.type }) : undefined}
@@ -547,6 +580,15 @@ export default function OrgChart() {
           <div className="flex items-center gap-2">
             {selectedRootId && (
               <>
+                <Button
+                  variant="outline"
+                  onClick={() => setColorPickerOpen(true)}
+                  size="sm"
+                  className="gap-2"
+                >
+                  <Palette className="w-4 h-4" />
+                  {t('orgChart.customizeColors')}
+                </Button>
                 <Button
                   variant="outline"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -686,7 +728,8 @@ export default function OrgChart() {
             <CardContent className="pt-0 pb-3">
               <div className="flex flex-wrap gap-4">
                 {legendTypes.map(orgType => {
-                  const c = getOrgTypeColors(orgType);
+                  const legendCategory = ORG_TYPE_COLOR_CATEGORY[orgType];
+                  const c = legendCategory ? orgChartColors[legendCategory] : getOrgTypeColors(orgType);
                   return (
                     <div key={orgType} className="flex items-center gap-2">
                       <div
@@ -707,6 +750,21 @@ export default function OrgChart() {
       {addDialog && (
         <OrgChartAddDialog open={addDialog.open} onOpenChange={(open) => !open && setAddDialog(null)} parentId={addDialog.parentId} onSuccess={loadData} />
       )}
+
+      <OrgChartColorPicker
+        open={colorPickerOpen}
+        onOpenChange={setColorPickerOpen}
+        colors={orgChartColors}
+        onSave={(newColors) => {
+          setOrgChartColors(newColors);
+          try {
+            localStorage.setItem(ORG_CHART_COLORS_STORAGE_KEY, JSON.stringify(newColors));
+          } catch {
+            // Ignore storage errors (e.g. private browsing quota) — colors
+            // still apply for the current session via state.
+          }
+        }}
+      />
 
       <AlertDialog open={removeDialog?.open} onOpenChange={(open) => !open && setRemoveDialog(null)}>
         <AlertDialogContent>

@@ -174,7 +174,6 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
 
     try {
       const newComponents = Array.from(selectedItems).map((itemId, index) => ({
-        bundle_id: bundleId,
         product_id: catalog.itemType === 'product' ? itemId : null,
         service_id: catalog.itemType === 'service' ? itemId : null,
         quantity: 1,
@@ -183,9 +182,10 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
         sort_order: components.length + index,
       }));
 
-      const { error } = await supabase
-        .from("bundle_components")
-        .insert(newComponents);
+      const { error } = await supabase.rpc("rpc_add_bundle_components", {
+        p_bundle_id: bundleId,
+        p_items: newComponents,
+      });
 
       if (error) throw error;
 
@@ -208,16 +208,11 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
 
   const handleUpdateComponent = async (id: string, updates: Partial<BundleComponent>) => {
     try {
-      // Cast pricing_mode if it exists
-      const dbUpdates: Record<string, unknown> = { ...updates };
-      if (updates.pricing_mode) {
-        dbUpdates.pricing_mode = updates.pricing_mode as "original" | "custom_price" | "custom_discount_percent" | "custom_discount_fixed";
-      }
-      
-      const { error } = await supabase
-        .from("bundle_components")
-        .update(dbUpdates as any)
-        .eq("id", id);
+      const { error } = await supabase.rpc("rpc_update_bundle_component", {
+        p_id: id,
+        p_bundle_id: bundleId,
+        p_updates: updates,
+      });
 
       if (error) throw error;
 
@@ -233,10 +228,10 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
 
   const handleDeleteComponent = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from("bundle_components")
-        .delete()
-        .eq("id", id);
+      const { error } = await supabase.rpc("rpc_delete_bundle_component", {
+        p_id: id,
+        p_bundle_id: bundleId,
+      });
 
       if (error) throw error;
 

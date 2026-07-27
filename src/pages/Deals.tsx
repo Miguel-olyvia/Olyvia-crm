@@ -1,8 +1,11 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { searchEntityIds } from "@/lib/clientSearch";
 import Layout from "@/components/Layout";
@@ -86,6 +89,7 @@ interface Deal {
   id: string;
   title: string;
   value: number;
+  value_max?: number | null;
   probability: number;
   description: string | null;
   lost_reason: string | null;
@@ -149,7 +153,6 @@ const Deals = () => {
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
-  const [isParentOrg, setIsParentOrg] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [resolvedRootOrgId, setResolvedRootOrgId] = useState<string | null>(null);
 
@@ -169,6 +172,11 @@ const Deals = () => {
   
   // Handle create from lead URL param
   const createFromLeadId = searchParams.get("create_from_lead");
+  // Handle "new deal for an already-resolved entity" URL params (e.g. Contacts'
+  // "Novo Pedido de Proposta" kebab action): ?newDeal=true&entityId=...&entityName=...
+  const newDealParam = searchParams.get("newDeal");
+  const newDealEntityId = searchParams.get("entityId");
+  const newDealEntityName = searchParams.get("entityName");
 
   // Pagination
   const PAGE_SIZE = 200;
@@ -178,15 +186,14 @@ const Deals = () => {
   const [savingDeal, setSavingDeal] = useState(false);
   const currentPageRef = useRef(0);
   const submitLockRef = useRef(false);
-  const cachedChildrenMapRef = useRef<Map<string, string[]> | null>(null);
+  // Tracks whether the last attempt to load this deal's existing line items
+  // (deal_need_items) for the edit form failed — used to block a save that
+  // would otherwise silently overwrite deal_need_items with incomplete data.
+  const itemsLoadFailedRef = useRef(false);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 400);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+  const debouncedSearch = useDebounce(searchTerm, 400);
   const truncatedWarnedRef = useRef<string | null>(null);
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
@@ -220,6 +227,8 @@ const Deals = () => {
       loadData();
     },
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkDeleteRpc: "rpc_bulk_delete_deal",
   });
 
   // Custom bulk stage change for deals (uses stage_id instead of status)
@@ -229,25 +238,44 @@ const Deals = () => {
 
     try {
       const dealIds = Array.from(selectedIds);
-      
-      const { error } = await supabase.rpc("bulk_update_deal_stage", {
-        p_deal_ids: dealIds,
-        p_stage_id: bulkNewStatus,
-      });
+
+      const bulkBusinessUserId = await resolveCurrentBusinessUserId();
+      if (!bulkBusinessUserId) {
+        toast({ title: t('common.error'), description: "Não foi possível identificar o utilizador.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, bulkBusinessUserId, () =>
+        supabase.rpc("bulk_update_deal_stage", {
+          p_deal_ids: dealIds,
+          p_stage_id: bulkNewStatus,
+        }) as Promise<{ error: any }>
+      );
 
       if (error) throw error;
 
-      // Trigger workflow for each deal (e.g. auto-create quotes)
+      // Trigger workflow for each deal (e.g. auto-create quotes).
+      // Fetch organization_id/created_by for all selected deals in a single
+      // batched query instead of one SELECT per deal id.
+      const { data: dealsInfo } = await (supabase
+        .from("deals" as any)
+        .select("id, organization_id, created_by")
+        .in("id", dealIds) as any);
+
+      const dealInfoById = new Map(
+        (dealsInfo || []).map((d: any) => [d.id, d])
+      );
+
+      let anyWorkflowFailed = false;
       const workflowPromises = dealIds.map(async (dealId) => {
         try {
-          // Get the deal's organization_id and created_by
-          const { data: deal } = await (supabase
-            .from("deals" as any)
-            .select("organization_id, created_by")
-            .eq("id", dealId)
-            .single() as any);
+          const deal = dealInfoById.get(dealId);
 
           if (deal) {
+            // execute-workflow still runs once per deal: it operates on a
+            // single entity_id/new_stage_id pair and returns per-deal
+            // automation results (e.g. one created quote per deal), not
+            // trivially batchable without changing the function's contract.
             await supabase.functions.invoke('execute-workflow', {
               body: {
                 source_entity: 'deal',
@@ -259,15 +287,20 @@ const Deals = () => {
             });
           }
         } catch (wfError) {
-          console.error(`Workflow failed for deal ${dealId}:`, wfError);
+          anyWorkflowFailed = true;
+          const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+          console.error(`Workflow failed for deal ${dealId}:`, friendlyWfMessage);
         }
       });
 
       await Promise.all(workflowPromises);
 
-      toast({ 
-        title: t('common.statusUpdated'),
-        description: `${selectedIds.size} ${t('deals.records') || 'registos'} ${t('common.updated') || 'atualizados'}.`
+      toast({
+        title: anyWorkflowFailed ? t('deals.toast.workflowFailedTitle') : t('common.statusUpdated'),
+        description: anyWorkflowFailed
+          ? t('deals.toast.workflowFailedDesc')
+          : `${selectedIds.size} ${t('deals.records') || 'registos'} ${t('common.updated') || 'atualizados'}.`,
+        variant: anyWorkflowFailed ? "destructive" : undefined,
       });
       clearSelection();
       setBulkStatusDialogOpen(false);
@@ -295,7 +328,10 @@ const Deals = () => {
     }
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
-  // Resolve root organization id (walk UP hierarchy)
+  // Resolve root organization id (walk UP hierarchy) — used for the
+  // root_organization_id column value on deal create/update (dedup scoping),
+  // not for CRM visibility. No longer computes a descendant scope: deal
+  // listings/dashboards are strictly scoped to the active org.
   useEffect(() => {
     const resolveRootOrg = async () => {
       if (!activeCompany?.id) return;
@@ -306,37 +342,15 @@ const Deals = () => {
           .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
 
         const parentMap = new Map<string, string>();
-        const childrenMap = new Map<string, string[]>();
         (allHierarchy || []).forEach((h: any) => {
           parentMap.set(h.child_org_id, h.parent_org_id);
-          const existing = childrenMap.get(h.parent_org_id) || [];
-          existing.push(h.child_org_id);
-          childrenMap.set(h.parent_org_id, existing);
         });
 
-        // Walk up to find root
         let current = activeCompany.id;
         while (parentMap.has(current)) {
           current = parentMap.get(current)!;
         }
         setResolvedRootOrgId(current);
-
-        // Check if activeCompany has children
-        const scopeIds = new Set<string>([activeCompany.id]);
-        const queue = [activeCompany.id];
-        while (queue.length > 0) {
-          const cur = queue.shift()!;
-          for (const child of (childrenMap.get(cur) || [])) {
-            if (!scopeIds.has(child)) {
-              scopeIds.add(child);
-              queue.push(child);
-            }
-          }
-        }
-        setIsParentOrg(scopeIds.size > 1);
-
-        // Cache childrenMap for reuse in loadData (C9)
-        cachedChildrenMapRef.current = childrenMap;
       } catch (err) {
         console.error("Error resolving root org:", err);
         setResolvedRootOrgId(activeCompany.id);
@@ -345,29 +359,86 @@ const Deals = () => {
     resolveRootOrg();
   }, [activeCompany?.id]);
 
-  // Fetch dashboard stats via RPC (KPIs) + separate query for kanban deals
+  // Shared search-id resolution (title/entity match), reused by loadData and
+  // fetchDealsDashboardStats so both apply identical search semantics.
+  const resolveSearchDealIds = useCallback(async (search: string, scopeOrgIds: string[]): Promise<string[]> => {
+    const term = search.trim();
+    const { ids: matchedEntityIds, truncated } = await searchEntityIds(term);
+    if (truncated && truncatedWarnedRef.current !== term) {
+      truncatedWarnedRef.current = term;
+      toast({
+        title: "Demasiados resultados",
+        description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
+      });
+    }
+    if (scopeOrgIds.length === 0) return [];
+    const escTerm = term.replace(/[,()*]/g, " ").replace(/\s+/g, " ").trim();
+    let searchIdsQuery = (supabase.from("deals") as any)
+      .select("id")
+      .is("deleted_at", null)
+      .in("organization_id", scopeOrgIds);
+    if (matchedEntityIds.length > 0) {
+      searchIdsQuery = searchIdsQuery.or(`title.ilike.%${escTerm}%,entity_id.in.(${matchedEntityIds.join(",")})`);
+    } else {
+      searchIdsQuery = searchIdsQuery.ilike("title", `%${escTerm}%`);
+    }
+    const { data: idsRows } = await searchIdsQuery.limit(2000);
+    return (idsRows || []).map((r: any) => r.id);
+  }, [toast]);
+
+  // Guards against stale results when a newer stats fetch supersedes an older
+  // in-flight one (e.g. rapid filter changes) — acts as a logical abort.
+  const statsRequestIdRef = useRef(0);
+
+  // Fetch dashboard stats via RPC (KPIs) + separate query for kanban deals.
+  // Applies the same TEAM/OWNED ownership scope and stage/date/search filters
+  // as loadData, so the KPI cards and Dashboard tab never exceed what the
+  // user can see in List/Kanban.
   const fetchDealsDashboardStats = useCallback(async () => {
     if (!activeCompany?.id) return;
     setStatsLoading(true);
+    const requestId = ++statsRequestIdRef.current;
     try {
-      // Build org scope array (same BFS logic as loadData)
-      const childrenLookup = cachedChildrenMapRef.current;
-      const scopeOrgIds = new Set<string>([activeCompany.id]);
-      if (childrenLookup && childrenLookup.size > 0) {
-        const bfsQueue = [activeCompany.id];
-        while (bfsQueue.length > 0) {
-          const cur = bfsQueue.shift()!;
-          for (const child of (childrenLookup.get(cur) || [])) {
-            if (!scopeOrgIds.has(child)) { scopeOrgIds.add(child); bfsQueue.push(child); }
-          }
+      const scopeOrgIdsArr = [activeCompany.id];
+      const viewScope = getPermissionScope("deals.view");
+      const scopedInternalUserIds = new Set<string>();
+      if (scopeAnewUserId) scopedInternalUserIds.add(scopeAnewUserId);
+      if (viewScope === "TEAM" && teamMemberIds.length > 0) {
+        teamMemberIds.forEach((id) => scopedInternalUserIds.add(id));
+      }
+      const isFullScope = viewScope === "ORG" || isSystemAdmin;
+
+      let searchDealIds: string[] | null = null;
+      if (debouncedSearch && debouncedSearch.trim().length >= 3) {
+        searchDealIds = await resolveSearchDealIds(debouncedSearch, scopeOrgIdsArr);
+        if (requestId !== statsRequestIdRef.current) return;
+        if (searchDealIds.length === 0) {
+          setDealsDashboardStats({
+            total: 0, totalValue: 0, stageStats: {}, stageValues: {},
+            wonCount: 0, wonValue: 0, lostCount: 0, conversionRate: 0, avgCloseTimeDays: 0,
+            stalledCount: 0, stalledValue: 0, openCount: 0, openValue: 0,
+          });
+          setDashboardDeals([]);
+          setStatsError(false);
+          return;
         }
       }
-      const scopeOrgIdsArr = Array.from(scopeOrgIds);
+
+      const p_filters = {
+        stage_id: stageFilter !== "all" ? stageFilter : null,
+        date_from: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+        date_to: dateTo ? endOfDay(dateTo).toISOString() : null,
+        deal_ids: searchDealIds,
+      };
 
       // KPIs via RPC — sempre correctos independentemente do numero de registos
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_deals_kpi_stats", {
         p_org_ids: scopeOrgIdsArr,
+        p_scope: isFullScope ? "ORG" : "TEAM_OR_OWNED",
+        p_scope_user_ids: isFullScope ? undefined : Array.from(scopedInternalUserIds),
+        p_filters,
       });
+      if (requestId !== statsRequestIdRef.current) return;
       if (kpiError) throw kpiError;
       const kpi = kpiData as any;
       setDealsDashboardStats({
@@ -386,14 +457,31 @@ const Deals = () => {
         stageValues:      kpi.stageValues       ?? {},
       });
 
-      // Kanban deals — query paginada com limite razoavel para visualizacao
-      const { data: kanbanData, error: kanbanError } = await supabase
+      // Kanban deals — query paginada com limite razoavel para visualizacao,
+      // com o mesmo âmbito de propriedade (TEAM/OWNED) e filtros do loadData.
+      let kanbanQuery = supabase
         .from("deals")
-        .select("id, title, value, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
+        .select("id, title, value, value_max, probability, created_at, closed_at, lost_reason, stage_id, assigned_to, lead_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .is("deleted_at", null)
         .in("organization_id", scopeOrgIdsArr)
         .order("created_at", { ascending: false })
         .limit(500);
+      if (stageFilter !== "all") kanbanQuery = kanbanQuery.eq("stage_id", stageFilter);
+      if (dateFrom) kanbanQuery = kanbanQuery.gte("created_at", startOfDay(dateFrom).toISOString());
+      if (dateTo) kanbanQuery = kanbanQuery.lte("created_at", endOfDay(dateTo).toISOString());
+      if (searchDealIds !== null) kanbanQuery = kanbanQuery.in("id", searchDealIds);
+      if (!isFullScope) {
+        const allowedBusinessIds = Array.from(scopedInternalUserIds);
+        if (allowedBusinessIds.length > 0) {
+          kanbanQuery = kanbanQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+        } else {
+          // No allowed owners resolved for a scoped user — force zero rows instead of leaking org-wide data.
+          kanbanQuery = kanbanQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
+      }
+
+      const { data: kanbanData, error: kanbanError } = await kanbanQuery;
+      if (requestId !== statsRequestIdRef.current) return;
       if (kanbanError) throw kanbanError;
       const all = (kanbanData || []) as any[];
       const assignedToIds = [...new Set(all.map(d => d.assigned_to).filter(Boolean))] as string[];
@@ -406,6 +494,7 @@ const Deals = () => {
           ? (supabase.from("anew_leads") as any).select("id, source, campaign_id").in("id", leadIds)
           : { data: [] },
       ]);
+      if (requestId !== statsRequestIdRef.current) return;
       const assignedMap = new Map((assignedUsersRes.data || []).map((u: any) => [u.id, u.name]));
       const leadSourceMap = new Map((leadSourcesRes.data || []).map((l: any) => [l.id, l.source || (l.campaign_id ? "campanha" : "manual")]));
       setDashboardDeals(all.map((deal) => ({
@@ -422,22 +511,23 @@ const Deals = () => {
         assigned_to_name:   deal.assigned_to ? (assignedMap.get(deal.assigned_to) || "Utilizador") : null,
         lead_source:        deal.lead_id ? (leadSourceMap.get(deal.lead_id) || null) : null,
       })) as Deal[]);
+      setStatsError(false);
     } catch (err) {
+      if (requestId !== statsRequestIdRef.current) return;
       console.error("Error fetching deals dashboard stats:", err);
       setDashboardDeals([]);
       setStatsError(true);
     } finally {
-      setStatsLoading(false);
+      if (requestId === statsRequestIdRef.current) {
+        setStatsLoading(false);
+      }
     }
-  }, [activeCompany?.id, stages]);
+  }, [activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, stageFilter, dateFrom, dateTo, debouncedSearch, resolveSearchDealIds]);
 
-  // Stable ref so loadData doesn't depend on fetchDealsDashboardStats identity
+  // Stable ref so loadData doesn't depend on fetchDealsDashboardStats identity.
+  // Stats are triggered via fetchStatsRef.current() from their own dedicated effect below.
   const fetchStatsRef = useRef(fetchDealsDashboardStats);
   fetchStatsRef.current = fetchDealsDashboardStats;
-
-  useEffect(() => {
-    if (activeCompany?.id && stages.length > 0) fetchDealsDashboardStats();
-  }, [activeCompany?.id, stages, fetchDealsDashboardStats]);
 
   const [formData, setFormData] = useState({
     title: "",
@@ -452,12 +542,12 @@ const Deals = () => {
     lost_reason: "",
   });
 
-   // Search states for lead/client/contact mention
-  const [entityType, setEntityType] = useState<'lead' | 'client' | 'contact'>('lead');
+   // Search states for lead/client mention
+  const [entityType, setEntityType] = useState<'lead' | 'client'>('lead');
   const [entitySearch, setEntitySearch] = useState("");
-  const [searchResults, setSearchResults] = useState<{ type: 'lead' | 'client' | 'contact'; id: string; name: string; email?: string; phone?: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ type: 'lead' | 'client'; id: string; name: string; email?: string; phone?: string }[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
-  const [selectedEntity, setSelectedEntity] = useState<{ type: 'lead' | 'client' | 'contact'; id: string; name: string; email?: string; phone?: string; entityId?: string } | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<{ type: 'lead' | 'client'; id: string; name: string; email?: string; phone?: string; entityId?: string } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Helper: check if user can act on a specific deal based on scope
@@ -474,20 +564,28 @@ const Deals = () => {
     return ownIds.has(deal.created_by || "") || ownIds.has(deal.assigned_to || "");
   }, [getPermissionScope, scopeAnewUserId, teamBusinessUserIds, isSystemAdmin]);
 
-  const isDisqualifiedStage = () => {
+  // Compare by stage_key (config-stable) rather than display name so locale/rename changes don't break the check.
+  // Falls back to name comparison when stage_key is not set (legacy data).
+  const isDisqualifiedStage = useMemo(() => {
     const selectedStage = stages.find(s => s.id === formData.stage_id);
-    return selectedStage?.name === 'Desqualificado';
-  };
+    if (!selectedStage) return false;
+    if (selectedStage.stage_key) return selectedStage.stage_key === 'disqualified';
+    return selectedStage.name === 'Desqualificado';
+  }, [stages, formData.stage_id]);
 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
+  // Guards against stale results when a newer loadData call supersedes an
+  // older in-flight one (e.g. rapid filter/search changes) — acts as a logical abort.
+  const loadDataRequestIdRef = useRef(0);
+
   const loadData = useCallback(async (append = false) => {
+    const requestId = ++loadDataRequestIdRef.current;
     if (append) {
       setLoadingMore(true);
     } else {
       setLoading(true);
       currentPageRef.current = 0;
-      fetchStatsRef.current();
     }
 
     const from = currentPageRef.current * PAGE_SIZE;
@@ -496,6 +594,7 @@ const Deals = () => {
     try {
       // Get current user for filtering
       const { data: { user } } = await supabase.auth.getUser();
+      if (requestId !== loadDataRequestIdRef.current) return;
       const viewScope = getPermissionScope("deals.view");
 
       // If scope is still loading, skip — will re-run when ready
@@ -529,51 +628,22 @@ const Deals = () => {
       // Store resolved business user IDs for scope-based action checks
       setTeamBusinessUserIds(new Set(scopedInternalUserIds));
 
-      // Build organization subtree scope (used both for search pre-resolution and main query)
-      let scopeOrgIdsArr: string[] = [];
-      if (activeCompany?.id) {
-        const childrenLookup = cachedChildrenMapRef.current;
-        const scopeOrgIds = new Set<string>([activeCompany.id]);
-        if (childrenLookup && childrenLookup.size > 0) {
-          const bfsQueue = [activeCompany.id];
-          while (bfsQueue.length > 0) {
-            const cur = bfsQueue.shift()!;
-            for (const child of (childrenLookup.get(cur) || [])) {
-              if (!scopeOrgIds.has(child)) {
-                scopeOrgIds.add(child);
-                bfsQueue.push(child);
-              }
-            }
-          }
-        }
-        scopeOrgIdsArr = Array.from(scopeOrgIds);
-      }
+      // Organization scope is strictly the active org (used both for search
+      // pre-resolution and main query) — no automatic widening to descendant
+      // orgs' deals.
+      const scopeOrgIdsArr: string[] = activeCompany?.id ? [activeCompany.id] : [];
 
       // Server-side search: pre-resolve deal IDs matching title or entity (name/email/phone/NIF)
       let searchDealIds: string[] | null = null;
       if (debouncedSearch && debouncedSearch.trim().length >= 3) {
-        const term = debouncedSearch.trim();
-        const { ids: matchedEntityIds, truncated } = await searchEntityIds(term);
-        if (truncated && truncatedWarnedRef.current !== term) {
-          truncatedWarnedRef.current = term;
-          toast({
-            title: "Demasiados resultados",
-            description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-          });
+        if (scopeOrgIdsArr.length === 0) {
+          // No active org — abort to prevent unscoped cross-org search
+          setLoading(false);
+          setLoadingMore(false);
+          return;
         }
-        // Escape special chars for PostgREST or filter
-        const escTerm = term.replace(/[,()*]/g, " ").replace(/\s+/g, " ").trim();
-        let searchIdsQuery = (supabase.from("deals") as any)
-          .select("id")
-          .is("deleted_at", null);
-        if (scopeOrgIdsArr.length > 0) searchIdsQuery = searchIdsQuery.in("organization_id", scopeOrgIdsArr);
-        if (matchedEntityIds.length > 0) {
-          searchIdsQuery = searchIdsQuery.or(`title.ilike.%${escTerm}%,entity_id.in.(${matchedEntityIds.join(",")})`);
-        } else {
-          searchIdsQuery = searchIdsQuery.ilike("title", `%${escTerm}%`);
-        }
-        const { data: idsRows } = await searchIdsQuery.limit(2000);
-        searchDealIds = (idsRows || []).map((r: any) => r.id);
+        searchDealIds = await resolveSearchDealIds(debouncedSearch, scopeOrgIdsArr);
+        if (requestId !== loadDataRequestIdRef.current) return;
         if (searchDealIds.length === 0) {
           if (!append) {
             setDeals([]);
@@ -589,13 +659,18 @@ const Deals = () => {
       // Load deals with pagination filtered by organization
       let dealsQuery = supabase
         .from("deals")
-        .select(`id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
+        .select(`id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
         .range(from, to);
 
       if (scopeOrgIdsArr.length > 0) {
         dealsQuery = dealsQuery.in("organization_id", scopeOrgIdsArr);
+      } else {
+        // No active org — abort to prevent unscoped cross-org fetch
+        setLoading(false);
+        setLoadingMore(false);
+        return;
       }
       if (searchDealIds) {
         dealsQuery = dealsQuery.in("id", searchDealIds);
@@ -604,9 +679,14 @@ const Deals = () => {
       // Apply scope-based ownership filtering
       const isFullScope = viewScope === "ORG" || isSystemAdmin;
 
-      if (!isFullScope && scopedInternalUserIds.size > 0) {
-        const allowedBusinessIds = Array.from(scopedInternalUserIds);
-        dealsQuery = dealsQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+      if (!isFullScope) {
+        if (scopedInternalUserIds.size > 0) {
+          const allowedBusinessIds = Array.from(scopedInternalUserIds);
+          dealsQuery = dealsQuery.or(`assigned_to.in.(${allowedBusinessIds.join(',')}),created_by.in.(${allowedBusinessIds.join(',')})`);
+        } else {
+          // No allowed owners resolved for a scoped user — force zero rows instead of leaking org-wide data.
+          dealsQuery = dealsQuery.eq("id", "00000000-0000-0000-0000-000000000000");
+        }
       }
       
       const { data: dealsData, error: dealsError } = await dealsQuery;
@@ -636,7 +716,7 @@ const Deals = () => {
           
           let leadDealsQuery = supabase
             .from("deals")
-            .select(`id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
+            .select(`id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
             .eq("organization_id", activeCompany.id)
             .in("lead_id", leadIds)
             .is("deleted_at", null)
@@ -721,6 +801,8 @@ const Deals = () => {
         if (p.deal_id) proposalsByDeal.set(p.deal_id, p.stage_id);
       });
 
+      if (requestId !== loadDataRequestIdRef.current) return;
+
       // Map deals with resolved names
       const mappedDeals: Deal[] = allDealsData.map(deal => ({
         ...deal,
@@ -741,14 +823,14 @@ const Deals = () => {
       // Update total count
       if (!append) {
         if (isFullScope) {
+          // scopeOrgIdsArr is strictly [activeCompany.id] — kept as a variable (not
+          // activeCompany.id inline) purely for consistency with the main query above.
           let countQuery = supabase
             .from("deals")
-            .select("id", { count: 'exact', head: true });
-          
-          if (activeCompany?.id) {
-            countQuery = countQuery.eq("organization_id", activeCompany.id);
-          }
-          
+            .select("id", { count: 'exact', head: true })
+            .is("deleted_at", null)
+            .in("organization_id", scopeOrgIdsArr);
+
           const { count } = await countQuery;
           setTotalCount(count || 0);
         } else {
@@ -768,27 +850,52 @@ const Deals = () => {
       setHasMore(mappedDeals.length === PAGE_SIZE);
       currentPageRef.current += 1;
     } catch (error: any) {
+      if (requestId !== loadDataRequestIdRef.current) return;
       toast({
         title: t('deals.toast.loadError'),
         description: error.message,
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (requestId === loadDataRequestIdRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [toast, t, formData.stage_id, activeCompany?.id, companyUserType, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch]);
+  // Intentionally omitted from deps:
+  //   - formData.stage_id: only used once on initial load to set a default; including it would
+  //     recreate loadData on every stage selection in the form, triggering a full reload mid-form.
+  //   - companyUserType: not read inside the callback; its effects are expressed via scopeLoading/getPermissionScope.
+  // Sorting (sortColumn/sortDirection) is applied client-side on the already-loaded page; PAGE_SIZE=200
+  // makes a full client-sort acceptable. If server-side sort is ever required, add them here and to the reset effect.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast, t, activeCompany?.id, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, debouncedSearch, resolveSearchDealIds]);
 
   useEffect(() => {
-    // Reset and reload when company, userType, scope readiness, or search changes
+    // Reset and reload when company, scope readiness, or search changes.
     if (scopeLoading) return; // Wait for permissions to resolve
     setDeals([]);
     setDashboardDeals([]);
     setTotalCount(0);
     currentPageRef.current = 0;
     loadData();
+    // Intentionally omitted from deps:
+    //   - loadData: stable enough via its own deps; including it would create an infinite loop
+    //     because loadData sets state that re-renders the component.
+    //   - sortColumn / sortDirection: sorting is applied fully client-side (see loadData comment).
+    //   - stageFilter / dateFrom / dateTo: client-side filters, do not need a server re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, companyUserType, scopeLoading, debouncedSearch]);
+
+  // Dedicated stats-fetch trigger: unlike the list-reload effect above (which
+  // intentionally excludes stageFilter/dateFrom/dateTo), the KPI/Dashboard
+  // stats must react to every filter so they stay consistent with what
+  // List/Kanban would show under the same filters.
+  useEffect(() => {
+    if (scopeLoading) return;
+    fetchStatsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, scopeLoading, stageFilter, dateFrom, dateTo, debouncedSearch, isSystemAdmin, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const resolveDealForDetails = useCallback(async (dealId: string): Promise<Deal | null> => {
     const localDeal = deals.find((deal) => deal.id === dealId);
@@ -797,7 +904,7 @@ const Deals = () => {
     try {
       const { data, error } = await (supabase as any)
         .from("deals")
-        .select("id, title, value, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
+        .select("id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)")
         .eq("id", dealId)
         .single();
 
@@ -903,7 +1010,7 @@ const Deals = () => {
         try {
           const { data: lead, error } = await (supabase
             .from("anew_leads") as any)
-            .select("id, organization_id, client_id, entity_id")
+            .select("id, organization_id, entity_id")
             .eq("id", createFromLeadId)
             .single();
           
@@ -977,12 +1084,57 @@ const Deals = () => {
           setSearchParams(searchParams);
         } catch (err) {
           console.error("Error fetching lead:", err);
+          toast({
+            title: t('common.error'),
+            description: t('deals.toast.leadNotFound') || 'Lead não encontrada',
+            variant: "destructive"
+          });
+          searchParams.delete("create_from_lead");
+          setSearchParams(searchParams);
         }
       };
-      
+
       fetchLeadAndOpenModal();
     }
   }, [createFromLeadId, stages, searchParams, setSearchParams, toast, t]);
+
+  // Handle "new deal for contact/other entity" param (Contacts' "Novo Pedido de
+  // Proposta" kebab action). Mirrors the create_from_lead flow above but the entity
+  // is already resolved by the caller — only entityId/entityName are needed.
+  useEffect(() => {
+    if (newDealParam === "true" && newDealEntityId && stages.length > 0) {
+      setFormData({
+        title: `Pedido - ${newDealEntityName || ""}`,
+        value: "",
+        value_max: "",
+        stage_id: stages[0]?.id || "",
+        lead_id: "",
+        client_id: "",
+        probability: "50",
+        description: "",
+        expected_close_date: "",
+        lost_reason: "",
+      });
+
+      // Contact merged into Lead: this legacy entity is resolved as a lead
+      // reference (only entityId is known upfront; handleSubmit falls back to
+      // anew_contacts by entity_id to keep contact_id populated for history).
+      setEntityType('lead');
+      setSelectedEntity({
+        type: 'lead',
+        id: "",
+        name: newDealEntityName || "",
+        entityId: newDealEntityId,
+      });
+
+      setOpen(true);
+
+      searchParams.delete("newDeal");
+      searchParams.delete("entityId");
+      searchParams.delete("entityName");
+      setSearchParams(searchParams);
+    }
+  }, [newDealParam, newDealEntityId, newDealEntityName, stages, searchParams, setSearchParams]);
 
   const loadMoreDeals = useCallback(() => {
     if (!loadingMore && hasMore) {
@@ -1054,7 +1206,7 @@ const Deals = () => {
 
   // Filtered and sorted deals (search is applied server-side; here only stage/date)
   const filteredDeals = useMemo(() => {
-    let result = deals.filter((deal) => {
+    const result = deals.filter((deal) => {
       // Stage filter
       if (stageFilter !== "all" && deal.deal_stages?.id !== stageFilter) {
         return false;
@@ -1119,14 +1271,26 @@ const Deals = () => {
 
   // Kanban drag handler
   const handleKanbanStageDrop = useCallback(async (dealId: string, newStageId: string, oldStageId: string) => {
+    // Guard: activeCompany?.id can be undefined; passing undefined to .eq() causes Supabase JS v2
+    // to coerce it to the string "undefined", producing a silent no-op update.
+    if (!activeCompany?.id) return;
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      
-      await (supabase.from("deals") as any)
-        .update({ stage_id: newStageId })
-        .eq("id", dealId);
+      const businessUserIdKanban = await resolveCurrentBusinessUserId();
+      if (!businessUserIdKanban) {
+        toast({ title: 'Erro ao mover pedido', description: 'Identidade do utilizador nao resolvida.', variant: 'destructive' });
+        return;
+      }
+      const { error: stageError } = await supabase.rpc("rpc_update_deal_stage", {
+        p_deal_id: dealId,
+        p_new_stage_id: newStageId,
+        p_organization_id: activeCompany.id,
+      });
+      if (stageError) throw stageError;
 
       // Execute workflow for stage change
+      let kanbanWorkflowFailed = false;
       try {
         await supabase.functions.invoke('execute-workflow', {
           body: {
@@ -1139,15 +1303,25 @@ const Deals = () => {
           },
         });
       } catch (wfError) {
-        console.error("Workflow execution error:", wfError);
+        kanbanWorkflowFailed = true;
+        const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+        console.error("Workflow execution error:", friendlyWfMessage);
       }
 
-      toast({ title: "Pedido movido com sucesso" });
+      if (kanbanWorkflowFailed) {
+        toast({
+          title: t('deals.toast.workflowFailedTitle'),
+          description: t('deals.toast.workflowFailedDesc'),
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Pedido movido com sucesso" });
+      }
       loadData();
     } catch (error: any) {
       toast({ title: "Erro ao mover pedido", description: error.message, variant: "destructive" });
     }
-  }, [activeCompany?.id, toast, loadData]);
+  }, [activeCompany?.id, toast, loadData, t]);
 
   const handleSort = (column: SortColumn) => {
     if (sortColumn === column) {
@@ -1170,10 +1344,11 @@ const Deals = () => {
   const handleEdit = (deal: Deal) => {
     setEditingId(deal.id);
     setOriginalStageId(deal.deal_stages?.id || null);
+    itemsLoadFailedRef.current = false;
     setFormData({
       title: deal.title,
       value: deal.value?.toString() || "",
-      value_max: (deal as any).value_max?.toString() || "",
+      value_max: deal.value_max?.toString() || "",
       stage_id: deal.deal_stages?.id || stages[0]?.id || "",
       lead_id: deal.lead_id || "",
       client_id: deal.client_id || "",
@@ -1193,9 +1368,11 @@ const Deals = () => {
       const name = deal.entity_name || `Cliente #${deal.client_id.slice(0, 8)}`;
       setSelectedEntity({ type: 'client', id: deal.client_id, name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id || undefined });
     } else if (deal.contact_id && deal.entity_id && deal.entity_name) {
-      // Deal has a modern contact FK but no lead/client — use the actual contact id
-      setEntityType('contact');
-      setSelectedEntity({ type: 'contact', id: deal.contact_id, name: deal.entity_name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id });
+      // Deal only has a legacy contact_id (no lead/client) — Contact merged into
+      // Lead, so display/resolve it as a lead reference; handleSubmit still
+      // falls back to anew_contacts by id to preserve the historical contact_id.
+      setEntityType('lead');
+      setSelectedEntity({ type: 'lead', id: deal.contact_id, name: deal.entity_name, email: deal.entity_email || undefined, phone: deal.entity_phone || undefined, entityId: deal.entity_id });
     } else {
       setEntityType('lead');
       setSelectedEntity(null);
@@ -1223,8 +1400,8 @@ const Deals = () => {
             const productIds = items.filter((i: any) => i.product_id).map((i: any) => i.product_id);
             const serviceIds = items.filter((i: any) => i.service_id).map((i: any) => i.service_id);
             
-            let productMap: Record<string, { name: string; price: number }> = {};
-            let serviceMap: Record<string, { name: string; price: number }> = {};
+            const productMap: Record<string, { name: string; price: number }> = {};
+            const serviceMap: Record<string, { name: string; price: number }> = {};
             
             if (productIds.length > 0) {
               const { data: products } = await supabase.from("products").select("id, name, base_price").in("id", productIds);
@@ -1253,7 +1430,13 @@ const Deals = () => {
           }
         }
       } catch (err) {
+        itemsLoadFailedRef.current = true;
         console.error("Error loading deal items:", err);
+        toast({
+          title: t('deals.toast.itemsLoadErrorTitle'),
+          description: t('deals.toast.itemsLoadErrorDesc'),
+          variant: "destructive",
+        });
       }
     })();
     
@@ -1274,7 +1457,15 @@ const Deals = () => {
     if (!deletingId) return;
 
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "deal", p_id: deletingId });
+      const deleteBusinessUserId = await resolveCurrentBusinessUserId();
+      if (!deleteBusinessUserId) {
+        toast({ title: t('deals.toast.deleteError'), description: "Não foi possível identificar o utilizador.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, deleteBusinessUserId, () =>
+        (supabase as any).rpc("soft_delete_business_entity", { p_kind: "deal", p_id: deletingId })
+      );
 
       if (error) throw error;
 
@@ -1304,20 +1495,16 @@ const Deals = () => {
         return;
       }
 
-      const { error } = await supabase.from("deals").insert({
-        title: `${deal.title} (cópia)`,
-        value: deal.value,
-        probability: deal.probability,
-        description: deal.description,
-        stage_id: stages[0]?.id || deal.deal_stages?.id,
-        lead_id: deal.lead_id,
-        client_id: deal.client_id,
-        entity_id: deal.entity_id,
-        organization_id: deal.organization_id,
-        expected_close_date: deal.expected_close_date,
-        created_by: businessUserId,
-        assigned_to: deal.assigned_to,
-      } as any);
+      if (!deal.organization_id) {
+        toast({ title: "Erro ao duplicar", description: "Este pedido não tem uma organização associada.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await supabase.rpc("rpc_duplicate_deal", {
+        p_source_deal_id: deal.id,
+        p_organization_id: deal.organization_id,
+        p_target_stage_id: stages[0]?.id || deal.deal_stages?.id || null,
+      });
 
       if (error) throw error;
 
@@ -1351,12 +1538,12 @@ const Deals = () => {
     e.preventDefault();
     if (submitLockRef.current) return;
 
-    // Validate that either lead, client, or contact is selected
+    // Validate that either a lead or a client is selected
     if (!formData.lead_id && !formData.client_id && !selectedEntity?.entityId) {
-      setFieldErrors({ entity: t('deals.form.leadOrClientRequired') || 'Selecione uma lead, contacto ou cliente' });
+      setFieldErrors({ entity: t('deals.form.leadOrClientRequired') || 'Selecione uma lead ou cliente' });
       toast({
         title: t('deals.toast.validationError'),
-        description: t('deals.form.leadOrClientRequired') || 'Selecione uma lead, contacto ou cliente',
+        description: t('deals.form.leadOrClientRequired') || 'Selecione uma lead ou cliente',
         variant: "destructive",
       });
       return;
@@ -1409,7 +1596,11 @@ const Deals = () => {
       let resolvedContactId: string | null = null;
 
       if (selectedEntity) {
-        if (selectedEntity.type === 'contact') {
+        if (selectedEntity.type === 'lead') {
+          // Contact merged into Lead: still probe the legacy anew_contacts table
+          // (by direct id, then by entity_id) so contact_id keeps being populated
+          // as history for entities that used to be tracked there. This is a
+          // no-op for genuinely new leads with no matching legacy contact row.
           const candidateContactId = selectedEntity.id || null;
           if (candidateContactId) {
             const { data: directContact } = await (supabase as any)
@@ -1466,12 +1657,32 @@ const Deals = () => {
         }
       }
 
+      // Guard: activeCompany?.id must be present before any write.
+      // If absent, .eq("organization_id", undefined) in Supabase JS v2 coerces undefined to the
+      // string "undefined", making the WHERE clause match nothing — a silent no-op update/insert.
+      if (!activeCompany?.id) {
+        throw new Error("Nenhuma organização ativa. Selecione uma organização e tente novamente.");
+      }
+
+      // Guard against data loss: if the existing deal_need_items failed to load when
+      // the edit form was opened, dealLineItems is empty/stale — saving now would send
+      // that incomplete list as p_items and the RPC would overwrite deal_need_items with it.
+      if (editingId && itemsLoadFailedRef.current) {
+        toast({
+          title: t('deals.toast.itemsLoadErrorTitle'),
+          description: t('deals.toast.itemsLoadErrorBlockDesc'),
+          variant: "destructive",
+        });
+        return;
+      }
+
       const dealData = {
         title: formData.title,
         value,
+        value_max: formData.value_max ? (parseFloat(formData.value_max) || null) : null,
         stage_id: formData.stage_id,
-        organization_id: activeCompany?.id || null,
-        root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
+        organization_id: activeCompany.id,
+        root_organization_id: resolvedRootOrgId || activeCompany.id,
         lead_id: formData.lead_id || null,
         client_id: resolvedClientId,
         contact_id: resolvedContactId,
@@ -1479,16 +1690,35 @@ const Deals = () => {
         probability,
         description: formData.description || null,
         expected_close_date: formData.expected_close_date || null,
-        lost_reason: isDisqualifiedStage() ? (formData.lost_reason || null) : null,
+        lost_reason: isDisqualifiedStage ? (formData.lost_reason || null) : null,
       };
 
+      // Line items are passed as-is; the RPC decides create/reuse-need semantics
+      // and, on the edit path, uses p_update_need_columns=false so it never
+      // overwrites a deal_needs row that DealNeedsSection.tsx may have edited
+      // independently — it only rewrites deal_need_items.
+      const itemsPayload = dealLineItems.map((item, idx) => ({
+        item_type: item.type,
+        product_id: item.product_id || null,
+        service_id: item.service_id || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price || 0,
+        notes: item.name,
+        sort_order: idx,
+      }));
+
       if (editingId) {
-        const { error } = await (supabase.from("deals") as any)
-          .update(dealData)
-          .eq("id", editingId);
+        const { data: updatedDeal, error } = await supabase.rpc("rpc_update_deal", {
+          p_deal_id: editingId,
+          p_deal_data: dealData,
+          p_organization_id: activeCompany.id,
+          p_items: itemsPayload,
+        });
 
         if (error) throw error;
+        if (!updatedDeal) throw new Error("Deal not found or access denied.");
 
+        let updateWorkflowFailed = false;
         if (originalStageId && formData.stage_id !== originalStageId) {
           try {
             await supabase.functions.invoke('execute-workflow', {
@@ -1502,56 +1732,21 @@ const Deals = () => {
               },
             });
           } catch (wfError) {
-            console.error("Workflow execution error:", wfError);
+            updateWorkflowFailed = true;
+            const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+            console.error("Workflow execution error:", friendlyWfMessage);
           }
         }
 
-        try {
-          const { data: existingNeed } = await (supabase as any)
-            .from("deal_needs")
-            .select("id")
-            .eq("deal_id", editingId)
-            .limit(1)
-            .maybeSingle();
-
-          if (dealLineItems.length > 0) {
-            let needId = existingNeed?.id;
-            
-            if (needId) {
-              await (supabase as any).from("deal_need_items").delete().eq("deal_need_id", needId);
-            } else {
-              const { data: newNeed } = await (supabase as any).from("deal_needs").insert({
-                deal_id: editingId,
-                title: formData.title || "Itens do pedido",
-                status: "pending",
-                created_by: businessUserId,
-                sort_order: 0,
-              }).select("id").single();
-              needId = newNeed?.id;
-            }
-
-            if (needId) {
-              const needItems = dealLineItems.map((item, idx) => ({
-                deal_need_id: needId,
-                item_type: item.type,
-                product_id: item.product_id || null,
-                service_id: item.service_id || null,
-                quantity: item.quantity,
-                unit_price: item.unit_price || 0,
-                notes: item.name,
-                sort_order: idx,
-              }));
-              await (supabase as any).from("deal_need_items").insert(needItems);
-            }
-          } else if (existingNeed?.id) {
-            await (supabase as any).from("deal_need_items").delete().eq("deal_need_id", existingNeed.id);
-            await (supabase as any).from("deal_needs").delete().eq("id", existingNeed.id);
-          }
-        } catch (itemErr) {
-          console.error("Error syncing deal items on update:", itemErr);
+        if (updateWorkflowFailed) {
+          toast({
+            title: t('deals.toast.workflowFailedTitle'),
+            description: t('deals.toast.workflowFailedDesc'),
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: t('deals.toast.updateSuccess') });
         }
-
-        toast({ title: t('deals.toast.updateSuccess') });
       } else {
         const recentDuplicateWindow = new Date(Date.now() - 30_000).toISOString();
         let recentDuplicateQuery = (supabase.from("deals") as any)
@@ -1584,28 +1779,11 @@ const Deals = () => {
           return;
         }
 
-        const insertData = {
-          ...dealData,
-          created_by: businessUserId,
-          assigned_to: businessUserId,
-        };
-        const { data: newDeal, error } = await (supabase.from("deals") as any).insert(insertData).select("id").single();
-
-        if (error) throw error;
-
+        // Resolve the 'proposta' lead_workflow_stages id (FE-owned resolution, as before);
+        // the RPC applies it to the lead only when the lead is not already converted —
+        // identical to the previous isAlreadyConverted check.
+        let leadWorkflowStageId: string | null = null;
         if (formData.lead_id) {
-          // Check current lead state before updating — don't overwrite already-converted leads
-          const { data: currentLead } = await (supabase.from("anew_leads") as any)
-            .select("status, converted_to_contact_id, client_id")
-            .eq("id", formData.lead_id)
-            .single();
-
-          const isAlreadyConverted = currentLead && (
-            currentLead.status === "converted" ||
-            currentLead.converted_to_contact_id != null ||
-            currentLead.client_id != null
-          );
-
           const { data: propostaStage } = await supabase
             .from("lead_workflow_stages")
             .select("id")
@@ -1614,83 +1792,25 @@ const Deals = () => {
             .order("organization_id", { ascending: false, nullsFirst: false })
             .limit(1)
             .maybeSingle();
-
-          if (!isAlreadyConverted) {
-            const leadUpdate: Record<string, any> = { status: "qualified" };
-            if (propostaStage?.id) {
-              leadUpdate.workflow_stage_id = propostaStage.id;
-            }
-
-            await (supabase.from("anew_leads") as any)
-              .update(leadUpdate)
-              .eq("id", formData.lead_id);
-          }
+          leadWorkflowStageId = propostaStage?.id || null;
 
           // NOTE: We intentionally do NOT call execute-workflow for the lead here.
-          // The deal was already created above, so the workflow's auto "create_deal_from_lead"
-          // action would race and create a duplicate. The lead stage is already updated.
+          // The deal is created by the RPC below, so the workflow's auto "create_deal_from_lead"
+          // action would race and create a duplicate. The lead stage transition happens inside the RPC.
         }
 
-        if (newDeal?.id) {
-          try {
-            const linkData: Record<string, any> = {
-              deal_id: newDeal.id,
-              organization_id: activeCompany?.id || dealData.organization_id,
-              root_organization_id: resolvedRootOrgId || activeCompany?.id || dealData.organization_id,
-              status: "active",
-            };
-            if (formData.lead_id) {
-              const { data: existingLink } = await (supabase.from("pipeline_links") as any)
-                .select("id")
-                .eq("lead_id", formData.lead_id)
-                .eq("status", "active")
-                .maybeSingle();
-              if (existingLink) {
-                await (supabase.from("pipeline_links") as any)
-                  .update({ deal_id: newDeal.id, updated_at: new Date().toISOString() })
-                  .eq("id", existingLink.id);
-              } else {
-                linkData.lead_id = formData.lead_id;
-                await (supabase.from("pipeline_links") as any).insert(linkData);
-              }
-            } else {
-              await (supabase.from("pipeline_links") as any).insert(linkData);
-            }
-          } catch (linkErr) {
-            console.error("Pipeline link creation error:", linkErr);
-          }
-        }
+        const { data: newDeal, error } = await supabase.rpc("rpc_create_deal", {
+          p_deal_data: dealData,
+          p_organization_id: activeCompany.id,
+          p_root_organization_id: resolvedRootOrgId || activeCompany.id,
+          p_lead_workflow_stage_id: leadWorkflowStageId,
+          p_items: itemsPayload,
+        });
 
-        // Insert deal line items BEFORE workflow so quote creation can copy them
-        if (newDeal?.id && dealLineItems.length > 0) {
-          try {
-            const { data: dealNeed } = await (supabase as any).from("deal_needs").insert({
-              deal_id: newDeal.id,
-              title: formData.title || "Itens do pedido",
-              status: "pending",
-              created_by: businessUserId,
-              sort_order: 0,
-            }).select("id").single();
+        if (error) throw error;
 
-            if (dealNeed?.id) {
-              const needItems = dealLineItems.map((item, idx) => ({
-                deal_need_id: dealNeed.id,
-                item_type: item.type,
-                product_id: item.product_id || null,
-                service_id: item.service_id || null,
-                quantity: item.quantity,
-                unit_price: item.unit_price || 0,
-                notes: item.name,
-                sort_order: idx,
-              }));
-              await (supabase as any).from("deal_need_items").insert(needItems);
-            }
-          } catch (itemErr) {
-            console.error("Error saving deal items:", itemErr);
-          }
-        }
-
-        // Execute workflow AFTER items are saved so auto-created quotes get the line items
+        // Execute workflow AFTER the RPC persists items so auto-created quotes get the line items
+        let createWorkflowFailed = false;
         if (newDeal?.id && formData.stage_id) {
           try {
             await supabase.functions.invoke('execute-workflow', {
@@ -1703,11 +1823,21 @@ const Deals = () => {
               },
             });
           } catch (wfError) {
-            console.error("Workflow execution on create error:", wfError);
+            createWorkflowFailed = true;
+            const friendlyWfMessage = await getFriendlyErrorMessage(wfError, t('deals.toast.workflowFailedDesc'));
+            console.error("Workflow execution on create error:", friendlyWfMessage);
           }
         }
 
-        toast({ title: t('deals.toast.createSuccess') });
+        if (createWorkflowFailed) {
+          toast({
+            title: t('deals.toast.workflowFailedTitle'),
+            description: t('deals.toast.workflowFailedDesc'),
+            variant: "destructive",
+          });
+        } else {
+          toast({ title: t('deals.toast.createSuccess') });
+        }
       }
 
       setOpen(false);
@@ -1746,6 +1876,7 @@ const Deals = () => {
     setSearchResults([]);
     setFieldErrors({});
     setDealLineItems([]);
+    itemsLoadFailedRef.current = false;
   };
 
 
@@ -1939,12 +2070,12 @@ const Deals = () => {
                           onChange={(e) => setFormData({ ...formData, expected_close_date: e.target.value })}
                         />
                       </div>
-                      {/* Lead / Client / Contact selection */}
+                      {/* Lead / Client selection */}
                       <div className="col-span-2 space-y-2">
                         <Label>{t('deals.form.leadOrClient')} <span className="text-destructive">*</span></Label>
                         <EntitySearchInput
                           value={selectedEntity ? {
-                            type: selectedEntity.type as "lead" | "client" | "contact",
+                            type: selectedEntity.type,
                             id: selectedEntity.id,
                             name: selectedEntity.name,
                             email: selectedEntity.email,
@@ -1952,33 +2083,13 @@ const Deals = () => {
                           } : null}
                           onChange={(entity) => {
                             if (entity) {
-                              setSelectedEntity({ type: entity.type, id: entity.id, name: entity.name, email: entity.email, phone: entity.phone, entityId: entity.entityId });
-                              setEntityType(entity.type);
-                              // Contacts are treated as leads for deals (use entity_id to resolve the lead)
-                              if (entity.type === 'contact' && entity.entityId) {
-                                // Find the lead linked to the same entity
-                                (supabase.from("anew_leads") as any).select("id").eq("entity_id", entity.entityId).eq("organization_id", activeCompany?.id || "").maybeSingle().then(({ data: linkedLead }: any) => {
-                                  if (linkedLead) {
-                                    setFormData(prev => ({ ...prev, lead_id: linkedLead.id, client_id: "" }));
-                                  } else {
-                                    // No lead found — check if client exists for this entity
-                                    (supabase as any).from("anew_clients").select("id").eq("entity_id", entity.entityId).eq("organization_id", activeCompany?.id || "").maybeSingle().then(({ data: linkedClient }: any) => {
-                                      if (linkedClient) {
-                                        setFormData(prev => ({ ...prev, lead_id: "", client_id: linkedClient.id }));
-                                      } else {
-                                        // No lead or client found — use entity_id only
-                                        setFormData(prev => ({ ...prev, lead_id: "", client_id: "" }));
-                                      }
-                                    });
-                                  }
-                                });
-                              } else {
-                                setFormData({
-                                  ...formData,
-                                  lead_id: entity.type === 'lead' ? entity.id : "",
-                                  client_id: entity.type === 'client' ? entity.id : "",
-                                });
-                              }
+                              setSelectedEntity({ type: entity.type as "lead" | "client", id: entity.id, name: entity.name, email: entity.email, phone: entity.phone, entityId: entity.entityId });
+                              setEntityType(entity.type as "lead" | "client");
+                              setFormData({
+                                ...formData,
+                                lead_id: entity.type === 'lead' ? entity.id : "",
+                                client_id: entity.type === 'client' ? entity.id : "",
+                              });
                             } else {
                               setSelectedEntity(null);
                               setFormData({ ...formData, lead_id: "", client_id: "" });
@@ -1986,7 +2097,7 @@ const Deals = () => {
                             setFieldErrors(prev => ({ ...prev, entity: "" }));
                           }}
                           error={fieldErrors.entity}
-                          searchTypes={["lead", "client", "contact"]}
+                          searchTypes={["lead", "client"]}
                         />
                       </div>
 
@@ -1999,7 +2110,7 @@ const Deals = () => {
                           rows={3}
                         />
                       </div>
-                      {isDisqualifiedStage() && (
+                      {isDisqualifiedStage && (
                         <div className="col-span-2 space-y-2">
                           <Label htmlFor="lost_reason">Motivo da Desqualificação *</Label>
                           <Textarea
@@ -2099,10 +2210,10 @@ const Deals = () => {
                     <CardTitle className="text-xs font-medium uppercase tracking-wide" style={{ color: stage.color }}>{getDealStageLabel(stage, t)}</CardTitle>
                   </CardHeader>
                   <CardContent className="p-3 pt-0">
-                    <span className="text-2xl font-bold" style={{ color: stage.color }}>{(dealsDashboardStats?.stageStats[stage.id] ?? stats.stageStats[stage.id]) || 0}</span>
+                    <span className="text-2xl font-bold" style={{ color: stage.color }}>{dealsDashboardStats ? (dealsDashboardStats.stageStats[stage.id] ?? 0) : stats.stageStats[stage.id] || 0}</span>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {formatCurrency((dealsDashboardStats?.stageValues[stage.id] ?? stats.stageValues[stage.id]) || 0)}
-                      {((dealsDashboardStats?.stageValues[stage.id] ?? stats.stageValues[stage.id]) || 0) === 0 && ((dealsDashboardStats?.stageStats[stage.id] ?? stats.stageStats[stage.id]) || 0) > 0 && (
+                      {formatCurrency(dealsDashboardStats ? (dealsDashboardStats.stageValues[stage.id] ?? 0) : stats.stageValues[stage.id] || 0)}
+                      {(dealsDashboardStats ? (dealsDashboardStats.stageValues[stage.id] ?? 0) : stats.stageValues[stage.id] || 0) === 0 && (dealsDashboardStats ? (dealsDashboardStats.stageStats[stage.id] ?? 0) : stats.stageStats[stage.id] || 0) > 0 && (
                         <AlertTriangle className="inline h-3 w-3 ml-1 text-amber-500" />
                       )}
                     </p>
@@ -2186,10 +2297,15 @@ const Deals = () => {
                 </div>
                 
                 <div className="w-[160px]">
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateFrom') || 'Data desde'}</label>
+                  <Label htmlFor="filter-date-from" className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateFrom') || 'Data desde'}</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}>
+                      <Button
+                        id="filter-date-from"
+                        variant="outline"
+                        aria-label={t('deals.dateFrom') || 'Data desde'}
+                        className={cn("w-full justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}
+                      >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {dateFrom ? format(dateFrom, "dd/MM/yyyy") : t('deals.selectDate') || 'Selecionar'}
                       </Button>
@@ -2199,12 +2315,17 @@ const Deals = () => {
                     </PopoverContent>
                   </Popover>
                 </div>
-                
+
                 <div className="w-[160px]">
-                  <label className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateTo') || 'Data até'}</label>
+                  <Label htmlFor="filter-date-to" className="text-xs font-medium text-muted-foreground mb-1 block">{t('deals.dateTo') || 'Data até'}</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !dateTo && "text-muted-foreground")}>
+                      <Button
+                        id="filter-date-to"
+                        variant="outline"
+                        aria-label={t('deals.dateTo') || 'Data até'}
+                        className={cn("w-full justify-start text-left font-normal", !dateTo && "text-muted-foreground")}
+                      >
                         <CalendarIcon className="mr-2 h-4 w-4" />
                         {dateTo ? format(dateTo, "dd/MM/yyyy") : t('deals.selectDate') || 'Selecionar'}
                       </Button>
@@ -2262,6 +2383,7 @@ const Deals = () => {
               hasError={statsError}
               rpcStageStats={dealsDashboardStats?.stageStats}
               rpcStageValues={dealsDashboardStats?.stageValues}
+              totalDeals={dealsDashboardStats?.total}
             />
           </div>
         ) : (
@@ -2301,7 +2423,7 @@ const Deals = () => {
                               {getSortIcon('title')}
                             </div>
                           </TableHead>
-                          <TableHead className="hidden md:table-cell">Contacto</TableHead>
+                          <TableHead className="hidden md:table-cell">Lead/Cliente</TableHead>
                           <TableHead className="hidden lg:table-cell">Comercial</TableHead>
                           <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort('value')}>
                             <div className="flex items-center">
@@ -2337,16 +2459,20 @@ const Deals = () => {
                           const isLost = isLostStage(deal.deal_stages);
 
                           return (
-                            <TableRow 
-                              key={deal.id} 
+                            <TableRow
+                              key={deal.id}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Ver detalhes do pedido: ${deal.title}`}
                               className={cn(
-                                "cursor-pointer hover:bg-muted/50",
+                                "cursor-pointer hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                                 selectedIds.has(deal.id) && "bg-muted/30",
                                 isStalled && !isWon && !isLost && "bg-amber-50/50 dark:bg-amber-950/10",
                                 isWon && "bg-emerald-50/50 dark:bg-emerald-950/10",
                                 isZeroValueAdvanced && "bg-red-50/30 dark:bg-red-950/10"
                               )}
                               onClick={() => handleViewDetails(deal)}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleViewDetails(deal); } }}
                             >
                               <TableCell onClick={(e) => e.stopPropagation()}>
                                 <Checkbox
@@ -2396,7 +2522,7 @@ const Deals = () => {
                                       </div>
                                     </>
                                   ) : (
-                                    <span className="text-sm text-muted-foreground">— Sem contacto associado</span>
+                                    <span className="text-sm text-muted-foreground">— Sem lead associado</span>
                                   )}
                                 </div>
                               </TableCell>

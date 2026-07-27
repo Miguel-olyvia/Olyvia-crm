@@ -1,4 +1,6 @@
 import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays } from "date-fns";
+import { pt } from "date-fns/locale";
+import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 
 export type LeadsDashboardScope = "ORG" | "TEAM" | "OWNED";
 
@@ -28,6 +30,12 @@ export interface DashboardDateRange {
   to: Date;
 }
 
+export interface AvgDaysToQualify {
+  sql: number | null;
+  mql: number | null;
+  overall: number | null;
+}
+
 export interface DashboardStats {
   active_pipeline?: number | null;
   leads_in_period?: number | null;
@@ -42,6 +50,20 @@ export interface DashboardStats {
   campaign_counts?: Array<{ campaign_id?: string | null; campaign_name?: string | null; count: number }> | null;
   daily_counts?: Array<{ date: string; count: number }> | null;
   assigned_counts?: Record<string, number> | null;
+  /** SQL/MQL classification, orthogonal to `status_counts` — see migration 20261110480000. */
+  qualification_counts?: Record<string, number> | null;
+  avg_days_to_qualify?: AvgDaysToQualify | null;
+  /**
+   * Rule-driven bucket counts from compute_lead_stage_v2 (configurable
+   * per-organization pipeline stages), see migration 20261110520000.
+   * Falls back to raw status_counts/converted_in_period below when absent.
+   */
+  resolved_stage_counts?: {
+    qualified?: number;
+    negotiation?: number;
+    converted?: number;
+    lost?: number;
+  } | null;
 }
 
 export type DashboardRenderState = "missing_query" | "loading" | "error" | "ready";
@@ -176,7 +198,7 @@ export function deriveDashboardKpis({
   const leadsInPeriod = readNumber(stats?.leads_in_period);
   const comparisonTotal = readNumber(comparisonStats?.leads_in_period);
   const leadsToday = readNumber(stats?.leads_today);
-  const convertedLeads = readNumber(stats?.converted_in_period);
+  const convertedLeads = readNumber(stats?.resolved_stage_counts?.converted) ?? readNumber(stats?.converted_in_period);
   const cohortConversions = readNumber(stats?.cohort_conversions);
   const totalContactAttempts =
     readNumber(stats?.contact_attempts_in_period) ?? readNumber(stats?.contact_attempts);
@@ -207,7 +229,8 @@ export function deriveDashboardKpis({
     leadsToday,
     pendingLeads: readStatusCount(stats, ["pending", "new", "novo"]),
     contactedLeads: readStatusCount(stats, ["contacted", "contactado"]),
-    qualifiedLeads: readStatusCount(stats, ["qualified", "qualificado"]),
+    qualifiedLeads:
+      readNumber(stats?.resolved_stage_counts?.qualified) ?? readStatusCount(stats, ["qualified", "qualificado"]),
     convertedLeads,
     cohortConversions,
     conversionRate,
@@ -331,6 +354,49 @@ export function deriveStatusDistribution(stats: DashboardStats | null) {
     .sort((left, right) => right.value - left.value);
 }
 
+// SQL/MQL classification is a NEW dimension, orthogonal to status_counts
+// above (a lead can be "qualified"/"negotiation"/"converted" in status and
+// still carry qualification_type sql/mql/null). Colors are deliberately
+// distinct from STATUS_COLORS.qualified's green to avoid visual collision
+// when the two are shown side by side.
+export const QUALIFICATION_LABELS: Record<string, string> = {
+  sql: "SQL",
+  mql: "MQL",
+  unclassified: "Não classificado",
+};
+
+export const QUALIFICATION_COLORS: Record<string, string> = {
+  sql: "#a855f7",
+  mql: "#3b82f6",
+  unclassified: "#94a3b8",
+};
+
+const QUALIFICATION_KEY_ORDER = ["sql", "mql", "unclassified"];
+
+export interface QualificationBreakdownItem {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+export function deriveQualificationBreakdown(stats: DashboardStats | null): QualificationBreakdownItem[] {
+  const counts = stats?.qualification_counts;
+  if (!counts) return [];
+
+  return QUALIFICATION_KEY_ORDER.map((key) => ({
+    key,
+    label: QUALIFICATION_LABELS[key] ?? key,
+    value: counts[key] ?? 0,
+    color: QUALIFICATION_COLORS[key] ?? "#94a3b8",
+  }));
+}
+
+export function formatDaysMetric(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return `${value.toFixed(1)} dias`;
+}
+
 const SOURCE_LABELS: Record<string, string> = {
   public_form: "Formulário Público",
   manual: "Manual",
@@ -358,4 +424,169 @@ export function deriveCampaignDistribution(stats: DashboardStats | null) {
       leads: campaign.count,
     }))
     .slice(0, 5);
+}
+
+export interface WorkflowStageLike {
+  id: string;
+  name: string;
+  label: string;
+  color: string;
+  stage_order: number;
+}
+
+export interface StageFunnelItem {
+  id: string;
+  name: string;
+  label: string;
+  color: string;
+  count: number;
+}
+
+// Same underlying stats.status_counts data used by deriveStatusDistribution,
+// but ordered by the org's actual configured workflow stage_order instead of
+// by count — needed to render a real pipeline funnel (new -> ... -> converted).
+export function deriveStageFunnel(
+  stats: DashboardStats | null,
+  workflowStages: readonly WorkflowStageLike[],
+): StageFunnelItem[] {
+  const counts = stats?.status_counts ?? {};
+  return [...workflowStages]
+    .sort((left, right) => left.stage_order - right.stage_order)
+    .map((stage) => ({
+      id: stage.id,
+      name: stage.name,
+      label: stage.label,
+      color: stage.color,
+      count: counts[stage.name] ?? 0,
+    }));
+}
+
+export interface NegotiationLeadRow {
+  id: string;
+  entity_id: string | null;
+  assigned_to: string | null;
+  updated_at: string;
+  created_at: string;
+}
+
+// Mirrors the ORG/TEAM/OWNED visibility narrowing applied to the scoped RPC
+// (buildDashboardScopedRpcParams) and to AnewLeads.tsx's buildLeadsBaseQuery,
+// but returns a plain PostgREST .or() filter string for a direct anew_leads
+// row query (the RPC only returns aggregates, not rows). Returns null for
+// ORG scope, where no assignee/creator narrowing beyond organization_id applies.
+export function buildNegotiationScopeFilter(
+  query: LeadsDashboardQuery,
+  teamMemberIds: readonly string[] = [],
+): string | null {
+  const scope = resolveDashboardScope(query);
+  if (scope === "ORG" || !query.anewUserId) return null;
+
+  const ids =
+    scope === "OWNED"
+      ? getLeadScopeUserIds(query.anewUserId, query.authUserId ?? null)
+      : getLeadScopeUserIds(query.anewUserId, query.authUserId ?? null, teamMemberIds);
+
+  return `assigned_to.in.(${ids.join(",")}),created_by.in.(${ids.join(",")})`;
+}
+
+// "Days in stage" approximation: anew_leads has no dedicated
+// status_changed_at column, so updated_at is the closest available signal
+// (bumped whenever the lead row changes, not exclusively on status change).
+export function daysBetween(from: string | Date, now: Date = new Date()): number {
+  const start = typeof from === "string" ? parseISO(from) : from;
+  if (!isValid(start)) return 0;
+  return Math.max(0, differenceInDays(startOfDay(now), startOfDay(start)));
+}
+
+// ── MQL -> SQL conversion rate (KPI card) ─────────────────────────────────
+// Sourced from anew_entity_history rows with change_type='qualification_changed'
+// (written by rpc_update_lead, see migration 20261110480000). RLS on that
+// table already scopes rows via is_entity_in_user_scope, so a plain
+// authenticated select naturally respects the caller's ORG/TEAM/OWNED
+// visibility without extra client-side org filtering.
+export interface QualificationHistoryRow {
+  entity_id: string;
+  new_value: string | null;
+  created_at: string;
+}
+
+export interface MqlToSqlConversion {
+  totalMql: number;
+  convertedToSql: number;
+  rate: number | null;
+}
+
+// Definition: percentage of leads whose history shows an MQL entry ever
+// followed later by a SQL entry, divided by total leads ever classified MQL.
+export function computeMqlToSqlConversionRate(rows: readonly QualificationHistoryRow[]): MqlToSqlConversion {
+  const byEntity = new Map<string, QualificationHistoryRow[]>();
+  for (const row of rows) {
+    const existing = byEntity.get(row.entity_id);
+    if (existing) {
+      existing.push(row);
+    } else {
+      byEntity.set(row.entity_id, [row]);
+    }
+  }
+
+  let totalMql = 0;
+  let convertedToSql = 0;
+
+  for (const entityRows of byEntity.values()) {
+    const sorted = [...entityRows].sort(
+      (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+    );
+    const firstMqlIndex = sorted.findIndex((row) => row.new_value === "mql");
+    if (firstMqlIndex === -1) continue;
+
+    totalMql += 1;
+    const hasLaterSql = sorted.slice(firstMqlIndex + 1).some((row) => row.new_value === "sql");
+    if (hasLaterSql) convertedToSql += 1;
+  }
+
+  const rate = totalMql > 0 ? roundToOneDecimal((convertedToSql / totalMql) * 100) : null;
+  return { totalMql, convertedToSql, rate };
+}
+
+// ── Monthly SQL vs MQL cohort trend (chart) ───────────────────────────────
+// Derived client-side from anew_leads.qualified_at/qualification_type
+// (RLS-scoped like the rest of anew_leads reads in this dashboard), bucketed
+// by calendar month, reusing the same "yyyy-MM" grouping idea already used
+// by deriveLeadsOverTime's day buckets above.
+export interface QualificationLeadRow {
+  qualification_type: string | null;
+  qualified_at: string | null;
+}
+
+export interface MonthlyQualificationTrendPoint {
+  month: string;
+  monthLabel: string;
+  sql: number;
+  mql: number;
+}
+
+export function deriveMonthlyQualificationTrend(
+  rows: readonly QualificationLeadRow[],
+): MonthlyQualificationTrendPoint[] {
+  const byMonth = new Map<string, { sql: number; mql: number }>();
+
+  for (const row of rows) {
+    if (!row.qualified_at || (row.qualification_type !== "sql" && row.qualification_type !== "mql")) continue;
+    const date = parseISO(row.qualified_at);
+    if (!isValid(date)) continue;
+
+    const monthKey = format(date, "yyyy-MM");
+    const bucket = byMonth.get(monthKey) ?? { sql: 0, mql: 0 };
+    if (row.qualification_type === "sql") bucket.sql += 1;
+    else bucket.mql += 1;
+    byMonth.set(monthKey, bucket);
+  }
+
+  return Array.from(byMonth.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([monthKey, counts]) => ({
+      month: monthKey,
+      monthLabel: format(parseISO(`${monthKey}-01`), "MMM/yy", { locale: pt }),
+      ...counts,
+    }));
 }

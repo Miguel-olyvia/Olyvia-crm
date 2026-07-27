@@ -75,6 +75,16 @@ Antes de aplicar alterações na base de dados ativa:
 3. Executa sempre o `dry-run`.
 4. Não alteres migrações que já tenham sido aplicadas.
 
+### Secrets das Edge Functions
+
+As funcionalidades de IA (`ai-assistant`, `chat-widget-ai`, `quote-ai-assistant`, `generate-proposal-ai`, `import-contract-pdf`, `suggest-schedule-assignee`) chamam o Google Gemini através de `supabase/functions/_shared/aiGateway.ts`, que requer o secret `GEMINI_API_KEY` configurado no projeto Supabase:
+
+```bash
+supabase secrets set GEMINI_API_KEY="your-key-here"
+```
+
+Obtém uma chave em https://aistudio.google.com/apikey.
+
 ## Branches
 
 - `development`: desenvolvimento e integração.

@@ -1,0 +1,117 @@
+-- Suppliers Audit Triggers — Wave 1
+-- 2026-07-14 | Module: Suppliers (Fornecedores) | Wave: 1 (audit trigger registration)
+-- Forward-only migration. Do not fold into the baseline.
+--
+-- Sections:
+--   1. Trigger registration (DROP IF EXISTS + CREATE, idempotent).
+--   2. Verification notes (not executed).
+--
+-- This migration follows the exact same convention as the deals, quotes,
+-- services and brands audit migrations: it reuses the shared
+-- fn_generic_entity_audit() (20260625010000_entity_audit_log.sql) rather than
+-- introducing a dedicated trigger function. No dedicated function is needed
+-- here because suppliers resolves organization_id via Strategy A (the table
+-- carries organization_id directly) and its primary key doubles as the
+-- entity_id — both cases are already handled by fn_generic_entity_audit():
+--   · organization_id → resolved directly from NEW/OLD.organization_id
+--     (Strategy A, line 198-204 of 20260625010000_entity_audit_log.sql).
+--   · entity_id       → suppliers has no separate entity_id column, so the
+--     generic function falls back to the row's own id
+--     (line 182-195 of 20260625010000_entity_audit_log.sql).
+--
+-- Conventions inherited from fn_generic_entity_audit():
+--   · SECURITY DEFINER + pinned search_path = public, pg_temp
+--   · Actor resolved via app.audit_user_id GUC, fallback to current_business_user_id()
+--     then to the anew_users row for the current auth.uid()
+--   · UPDATE rows skipped when only noise columns changed
+--   · Any exception is swallowed so the audit trigger NEVER blocks originating DML
+--   · changed_fields shape: { "col": { "old": <v>, "new": <v> } } for UPDATE,
+--                           NULL for INSERT/DELETE (full_record carries the row)
+--
+-- Prerequisites:
+--   20260625010000_entity_audit_log.sql — entity_audit_log table + fn_generic_entity_audit()
+--
+-- Table audited:
+--   suppliers — fn_generic_entity_audit()  Strategy A (organization_id direct).
+--               entity_id falls back to suppliers.id (no separate entity_id column).
+--               suppliers is strictly org-scoped: every RLS policy in the baseline
+--               filters on organization_id via get_user_visible_org_ids(). There are
+--               no global/system suppliers, so the sentinel-UUID pattern used for
+--               uom/brands/attributes is deliberately NOT applied here. If a row
+--               ever had organization_id IS NULL, fn_generic_entity_audit() skips it
+--               silently (line 228-231), which is the intended behaviour.
+--
+-- suppliers columns (from baseline 20260615130000_baseline_new_database.sql):
+--   id, organization_id, name, vat_number, email, phone, website, address, city,
+--   postal_code, country, supplier_type, primary_contact_name, primary_contact_email,
+--   primary_contact_phone, rating, notes, is_active, created_by, created_at,
+--   updated_at, contact_person, tax_id, phone_country_code,
+--   primary_contact_phone_country_code, business_unit_id, department_id
+--
+-- Existing triggers on suppliers (baseline — confirmed):
+--   update_suppliers_updated_at — BEFORE UPDATE (updated_at maintenance).
+--   No audit trigger exists at this timestamp. DROP IF EXISTS below is idempotent.
+--
+-- Tables explicitly NOT covered (do not exist in the schema — confirmed against
+-- the baseline): vendor_contacts, anew_suppliers. Neither is created nor referenced.
+--
+-- Gaps addressed:
+--   SUPPLIERS-01 (CRITICAL) — no audit trigger on suppliers (module status: missing).
+
+
+-- ============================================================
+-- 1. Trigger registration
+-- ============================================================
+-- Fires AFTER the DML so it sees the committed row state.
+-- DROP IF EXISTS + CREATE is idempotent (Postgres 13 does not support
+-- CREATE OR REPLACE TRIGGER; DROP+CREATE is portable across Supabase versions).
+--
+-- Alphabetical execution order (same timing, same event): trg_audit_suppliers
+-- sorts after update_suppliers_updated_at, so the audit trigger sees the final
+-- updated_at value in the row.
+
+DROP TRIGGER IF EXISTS trg_audit_suppliers ON public.suppliers;
+CREATE TRIGGER trg_audit_suppliers
+  AFTER INSERT OR UPDATE OR DELETE ON public.suppliers
+  FOR EACH ROW EXECUTE FUNCTION public.fn_generic_entity_audit();
+
+
+-- ============================================================
+-- 2. Verification notes (for human review, not executed)
+-- ============================================================
+-- 1. Confirm trigger is registered and points to fn_generic_entity_audit:
+--
+--   SELECT t.tgname, p.proname AS function_name, t.tgenabled
+--   FROM pg_trigger t
+--   JOIN pg_proc p ON p.oid = t.tgfoid
+--   WHERE t.tgrelid = 'public.suppliers'::regclass
+--   ORDER BY t.tgname;
+--
+-- Expected (2 rows):
+--   trg_audit_suppliers          | fn_generic_entity_audit | enabled
+--   update_suppliers_updated_at  | update_updated_at_column | enabled
+--
+-- 2. Confirm exactly one audit trigger on suppliers:
+--
+--   SELECT tgname FROM pg_trigger
+--   WHERE tgrelid = 'public.suppliers'::regclass
+--     AND tgname LIKE '%audit%';
+--
+-- Expected: exactly one row — trg_audit_suppliers.
+--
+-- 3. Smoke-test org-scoped supplier audit (run as an authenticated user with
+--    suppliers.create in a known organization):
+--
+--   INSERT INTO public.suppliers (organization_id, name, created_by)
+--   VALUES ('<org-uuid>', 'Audit Smoke Test', '<user-uuid>');
+--
+--   SELECT organization_id, entity_id, table_name, operation, changed_by, source
+--   FROM public.entity_audit_log
+--   WHERE table_name = 'suppliers'
+--   ORDER BY created_at DESC
+--   LIMIT 1;
+--
+-- Expected: organization_id matches the inserting org, entity_id = the new
+--           supplier's id, operation = 'INSERT'.
+--
+--   DELETE FROM public.suppliers WHERE name = 'Audit Smoke Test';

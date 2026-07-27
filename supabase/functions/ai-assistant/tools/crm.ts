@@ -5,8 +5,27 @@
 
 import { findLocalEntityForOrg, ensureEntityOrgLinkSR } from "../../_shared/entityScopedLookup.ts";
 import { sanitizeEmail, sanitizePhone } from "../../_shared/inputSanitizers.ts";
+import { deriveKeyFromEnv, hashNif } from "../../_shared/nifCrypto.ts";
 import { requireWrite } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
+
+/**
+ * Computes the HMAC-SHA256 hash of a NIF for local-entity lookup, so the
+ * plaintext value never has to be sent in a query built for cross-checking
+ * later output. Returns null (never throws) when the NIF_HMAC_KEY env var is
+ * missing/misconfigured or the value is empty — callers must fail open to
+ * "no hash available" rather than surface crypto internals to the model.
+ */
+async function safeHashNif(nif: string | null): Promise<string | null> {
+  if (!nif) return null;
+  try {
+    const hmacKey = deriveKeyFromEnv("NIF_HMAC_KEY", "HMAC");
+    return await hashNif(nif, hmacKey);
+  } catch (e) {
+    console.error("resolveEntityForCreation: failed to hash nif", e);
+    return null;
+  }
+}
 
 /**
  * @deprecated — DO NOT use in create_lead / create_contact (Fase 0A guardrail).
@@ -127,12 +146,20 @@ async function resolveEntityForCreation(
 
   if (!email && !phone && !nif) return { mode: "create" };
 
+  // The cleartext NIF is only ever used locally, in-process, to derive its
+  // HMAC hash — it must never be embedded in a query result or response that
+  // could round-trip back through the LLM. On any crypto/config failure,
+  // safeHashNif returns null and no plaintext NIF is passed onward at all —
+  // findLocalEntityForOrg then skips NIF-based matching entirely rather than
+  // falling back to a plaintext comparison.
+  const nifHash = await safeHashNif(nif);
+
   const hit = await findLocalEntityForOrg({
     supabase: ctx.supabase,
     organizationId: ctx.organizationId as string,
     email,
     phone,
-    nif,
+    nifHash,
   });
   if (!hit) return { mode: "create" };
 
@@ -151,8 +178,25 @@ async function resolveEntityForCreation(
       candidate_entity_id: hit.entityId,
       candidate_name: ent?.display_name ?? null,
       match_field: hit.matchField,
-      proposed_payload: proposedPayload,
+      proposed_payload: sanitizeProposedPayloadForModel(proposedPayload),
     },
+  };
+}
+
+/**
+ * Never echo a cleartext NIF back to the LLM. The model only needs to know
+ * that a NIF was supplied (to ask "is this the same person?"), never the
+ * value itself — the NIF must not round-trip through an external LLM.
+ * Returns a new object; the input is never mutated.
+ */
+function sanitizeProposedPayloadForModel(proposedPayload: Record<string, unknown>): Record<string, unknown> {
+  if (!proposedPayload || typeof proposedPayload !== "object") return proposedPayload;
+  if (!Object.prototype.hasOwnProperty.call(proposedPayload, "nif")) return proposedPayload;
+
+  const { nif, ...rest } = proposedPayload;
+  return {
+    ...rest,
+    ...(nif ? { nif_provided: true } : {}),
   };
 }
 
@@ -258,12 +302,13 @@ export const updateLeadStatusDef: ToolDef = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LEAD_STATUSES = ["new","contacted","callback_scheduled","no_answer","qualified","scheduled","visit_scheduled","rejected","incomplete"] as const;
 const CONTACT_STATUSES = ["active","inactive"] as const;
+const QUALIFICATION_TYPES = ["sql", "mql"] as const;
 
 export const updateLeadDef: ToolDef = {
   type: "function",
   function: {
     name: "update_lead",
-    description: "Edita um lead (assigned_to, status e/ou workflow_stage_id). 'status' é o enum CRM em inglês (new|contacted|...); 'workflow_stage_id' é o UUID definido pela organização em lead_workflow_stages — são independentes. Para mover um lead no pipeline visual usa workflow_stage_id (NÃO update_lead_status). Quando workflow_stage_id muda, dispara automaticamente execute-workflow (stage_actions + workflow_rules). 'converted' não é aceite — usa convert_lead.",
+    description: "Edita um lead (assigned_to, status, workflow_stage_id e/ou qualification_type). 'status' é o enum CRM em inglês (new|contacted|...); 'workflow_stage_id' é o UUID definido pela organização em lead_workflow_stages; 'qualification_type' ('sql'|'mql'|null) classifica o lead como Sales/Marketing Qualified Lead — os três são totalmente independentes entre si. Para mover um lead no pipeline visual usa workflow_stage_id (NÃO update_lead_status). Quando workflow_stage_id muda, dispara automaticamente execute-workflow (stage_actions + workflow_rules). qualification_type só faz sentido depois do lead estar 'qualified'; omitir o parâmetro mantém a classificação atual, enviar null limpa-a. 'converted' não é aceite — usa convert_lead.",
     parameters: {
       type: "object",
       properties: {
@@ -271,6 +316,7 @@ export const updateLeadDef: ToolDef = {
         assigned_to: { type: "string", description: "UUID anew_users.id" },
         status: { type: "string", enum: [...LEAD_STATUSES] },
         workflow_stage_id: { type: "string", description: "UUID de lead_workflow_stages — obter via list_workflow_stages({module:'lead'})" },
+        qualification_type: { type: ["string", "null"], enum: [...QUALIFICATION_TYPES, null], description: "Classificação SQL/MQL do lead. Omitir = não alterar; null = limpar classificação existente." },
       },
       required: ["id"],
     },
@@ -583,6 +629,16 @@ const updateLead: Handler = async (ctx, args): Promise<ToolResult> => {
     patch.assigned_to = args.assigned_to;
   }
 
+  // qualification_type: validado aqui, mas NÃO entra no `patch` directo — é
+  // escrito via rpc_update_lead (chamada mais abaixo), que implementa a regra
+  // sticky de qualified_at e o histórico dedicado em anew_entity_history.
+  const hasQualificationChange = args.qualification_type !== undefined;
+  if (hasQualificationChange) {
+    if (args.qualification_type !== null && !QUALIFICATION_TYPES.includes(args.qualification_type)) {
+      return { success: false, message: `qualification_type inválido. Aceites: ${QUALIFICATION_TYPES.join(", ")} ou null.` };
+    }
+  }
+
   // workflow_stage_id: validar pertença à org + activo, capturar old, e disparar execute-workflow se mudou.
   let oldStageId: string | null = null;
   let newStageId: string | null = null;
@@ -617,17 +673,64 @@ const updateLead: Handler = async (ctx, args): Promise<ToolResult> => {
     willTriggerWorkflow = oldStageId !== newStageId;
   }
 
-  if (Object.keys(patch).length === 0) return { success: false, message: "Nada para atualizar." };
-  const { data, error } = await supabase
-    .from("anew_leads")
-    .update(patch)
-    .eq("id", args.id)
-    .eq("organization_id", organizationId)
-    .is("deleted_at", null)
-    .select("id, status, assigned_to, workflow_stage_id")
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return { success: false, message: "Lead não encontrado ou fora de scope." };
+  if (Object.keys(patch).length === 0 && !hasQualificationChange) return { success: false, message: "Nada para atualizar." };
+
+  // Selecionar field_values/source/notes só quando necessário (ecoados,
+  // sem alteração, na chamada a rpc_update_lead abaixo).
+  const selectCols = hasQualificationChange
+    ? "id, status, assigned_to, workflow_stage_id, field_values, source, notes"
+    : "id, status, assigned_to, workflow_stage_id";
+
+  let row: Record<string, any> | null = null;
+  if (Object.keys(patch).length > 0) {
+    const { data: updated, error } = await supabase
+      .from("anew_leads")
+      .update(patch)
+      .eq("id", args.id)
+      .eq("organization_id", organizationId)
+      .is("deleted_at", null)
+      .select(selectCols)
+      .maybeSingle();
+    if (error) throw error;
+    if (!updated) return { success: false, message: "Lead não encontrado ou fora de scope." };
+    row = updated;
+  } else {
+    const { data: cur, error } = await supabase
+      .from("anew_leads")
+      .select(selectCols)
+      .eq("id", args.id)
+      .eq("organization_id", organizationId)
+      .is("deleted_at", null)
+      .maybeSingle();
+    if (error) throw error;
+    if (!cur) return { success: false, message: "Lead não encontrado ou fora de scope." };
+    row = cur;
+  }
+  if (!row) return { success: false, message: "Lead não encontrado ou fora de scope." };
+
+  let data: Record<string, any> = { id: row.id, status: row.status, assigned_to: row.assigned_to, workflow_stage_id: row.workflow_stage_id };
+
+  if (hasQualificationChange) {
+    const { error: qualErr } = await supabase.rpc("rpc_update_lead", {
+      p_lead_id: args.id,
+      p_field_values: row.field_values ?? null,
+      p_status: row.status,
+      p_source: row.source ?? null,
+      p_notes: row.notes ?? null,
+      p_assigned_to: row.assigned_to ?? null,
+      p_status_changed: false,
+      p_workflow_stage_id: null,
+      p_display_name: null,
+      p_first_name: null,
+      p_last_name: null,
+      p_qualification_type: args.qualification_type,
+      p_qualification_changed: true,
+    });
+    if (qualErr) {
+      return { success: true, message: `Lead atualizado, mas qualificação SQL/MQL falhou: ${String(qualErr.message).slice(0, 160)}`, data };
+    }
+    data = { ...data, qualification_type: args.qualification_type };
+  }
 
   // Disparar execute-workflow se stage mudou e há sessão.
   if (willTriggerWorkflow && newStageId) {

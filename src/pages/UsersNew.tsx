@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { useColumnResize, ColumnWidths } from "@/hooks/useColumnResize";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,7 @@ import {
   Search,
   Pencil,
   Trash2,
+  RotateCcw,
   User,
   Loader2,
   MoreHorizontal,
@@ -73,7 +76,6 @@ import { UsersFAQDialog } from "@/components/users/UsersFAQDialog";
 import UserHistoryDialog from "@/components/users/UserHistoryDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
-import { EmailEntry } from "@/components/users/MultiValueEmailInput";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { UsersTableColumns, UserColumnConfig } from "@/components/users/UsersTableColumns";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -228,8 +230,12 @@ export default function UsersNew() {
   const canCreate = hasPermission("users.create");
   const canEdit = hasPermission("users.edit");
   const canDelete = hasPermission("users.delete");
-  const canViewHistory = hasPermission("users.view_history");
-  const historyScope = getPermissionScope("users.view_history");
+  // "users.view_history" is not a real permission code in anew_permissions (phantom
+  // permission, unreachable by any real role). "users.edit" is the real permission
+  // already used for this same user-management capability (this menu item sits next
+  // to the edit action, gated the same way).
+  const canViewHistory = hasPermission("users.edit");
+  const historyScope = getPermissionScope("users.edit");
   const editScope = getPermissionScope("users.edit");
   const deleteScope = getPermissionScope("users.delete");
 
@@ -292,7 +298,10 @@ export default function UsersNew() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  // Defaults to "active": deactivated ("inactive") users are recoverable via
+  // rpc_restore_user but must not clutter the normal list — the "Inactive"
+  // filter option still lets an admin find and restore them.
+  const [statusFilter, setStatusFilter] = useState("active");
   const [userTab, setUserTab] = useState<"users" | "clients">("users");
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
   const [selectedUser, setSelectedUser] = useState<AnewUser | null>(null);
@@ -352,8 +361,7 @@ export default function UsersNew() {
     location: "",
   });
   
-  // Multi-value email and phone states
-  const [formEmails, setFormEmails] = useState<EmailEntry[]>([]);
+  // Multi-value phone state (users only ever have one login email — see formData.email)
   const [formPhones, setFormPhones] = useState<PhoneEntry[]>([]);
   const [formSocialLinks, setFormSocialLinks] = useState({
     angellist: "",
@@ -506,7 +514,7 @@ export default function UsersNew() {
         orgsQuery = orgsQuery.in("id", Array.from(scopeOrgIds));
       }
 
-      let filteredOrgsData = await orgsQuery;
+      const filteredOrgsData = await orgsQuery;
       
       if (filteredOrgsData.error) throw filteredOrgsData.error;
       
@@ -552,7 +560,7 @@ export default function UsersNew() {
 
       // Fetch all memberships separately
       const userIds = (usersData || []).map((u: any) => u.id);
-      let membershipsMap: Record<string, any[]> = {};
+      const membershipsMap: Record<string, any[]> = {};
       if (userIds.length > 0) {
         const { data: membershipsData } = await (supabase as any)
           .from("anew_memberships")
@@ -561,7 +569,7 @@ export default function UsersNew() {
 
         // Fetch roles for these memberships
         const roleIds = [...new Set((membershipsData || []).map((m: any) => m.role_id).filter(Boolean))];
-        let rolesMap: Record<string, { code: string; name: string }> = {};
+        const rolesMap: Record<string, { code: string; name: string }> = {};
         if (roleIds.length > 0) {
           const { data: rolesData } = await (supabase as any)
             .from("anew_roles")
@@ -574,7 +582,7 @@ export default function UsersNew() {
 
         // Fetch organizations for memberships
         const memberOrgIds = [...new Set((membershipsData || []).map((m: any) => m.organization_id).filter(Boolean))];
-        let memberOrgsMap: Record<string, { id: string; name: string; type: string }> = {};
+        const memberOrgsMap: Record<string, { id: string; name: string; type: string }> = {};
         if (memberOrgIds.length > 0) {
           const { data: memberOrgsData } = await (supabase as any)
             .from("anew_organizations")
@@ -598,7 +606,7 @@ export default function UsersNew() {
 
       // Fetch phones from unified entity table
       const entityIds = (usersData || []).map((u: any) => u.entity_id).filter(Boolean);
-      let phonesMap: Record<string, any[]> = {};
+      const phonesMap: Record<string, any[]> = {};
       if (entityIds.length > 0) {
         const { data: phonesData } = await (supabase as any)
           .from("anew_entity_phones")
@@ -765,7 +773,6 @@ export default function UsersNew() {
       position: "",
       location: "",
     });
-    setFormEmails([]);
     setFormPhones([]);
     setFormSocialLinks({ angellist: "", facebook: "", linkedin: "" });
     setFormMemberships([]);
@@ -825,25 +832,11 @@ export default function UsersNew() {
         }))
     );
     
-    // Load emails from the new table (keyed by entity_id, NOT anew_users.id)
-    const { data: emailsData } = user.entity_id ? await supabase
-      .from("anew_entity_emails")
-      .select("*")
-      .eq("entity_id", user.entity_id) : { data: [] as any[] };
-    
-    setFormEmails(
-      (emailsData || []).map((e: any) => ({
-        email: e.email,
-        email_type: e.email_type || "personal",
-        is_primary: e.is_primary || false,
-      }))
-    );
-    
-    // If no emails in new table, use the main email
-    if (!emailsData || emailsData.length === 0) {
-      setFormEmails([{ email: user.email, email_type: "personal", is_primary: true }]);
-    }
-    
+    // Internal users only ever have one email — the login email stored on
+    // anew_users/auth.users. It was already set into formData.email above.
+    // (Multi-email support via anew_entity_emails is reserved for Contacts/
+    // Clients/Leads — see anew_entities — not for internal Users.)
+
     // Load phones from the new table (keyed by entity_id)
     const { data: phonesData } = user.entity_id ? await supabase
       .from("anew_entity_phones")
@@ -911,15 +904,16 @@ export default function UsersNew() {
     // Load user fiscal entity from unified table
     const { data: fiscalLinks } = await (supabase as any)
       .from("anew_entity_fiscal_entities")
-      .select("*, fiscal_entity:fiscal_entities(*)")
+      .select("*, fiscal_entity:fiscal_entities(id, commercial_name, country_code)")
       .eq("entity_id", user.entity_id)
       .is("valid_to", null)
       .limit(1);
 
     if (fiscalLinks && fiscalLinks.length > 0) {
       const fe = fiscalLinks[0].fiscal_entity;
+      const nif = await callNifRevealSingle(fe?.id);
       setFormFiscalData({
-        nif: fe?.nif || "",
+        nif: nif || "",
         commercial_name: fe?.commercial_name || "",
         country_code: fe?.country_code || "PT",
       });
@@ -932,6 +926,11 @@ export default function UsersNew() {
   };
 
   const handleSave = async () => {
+    if (companyLoading || !activeCompany) {
+      toast.warning("Aguarda...", { description: "Contexto da organização ainda a carregar. Tenta novamente." });
+      return;
+    }
+
     // Helper to check if address field is visible based on template
     const isAddressVisible = (): boolean => {
       // No template = base mode, address is visible by default
@@ -942,15 +941,15 @@ export default function UsersNew() {
       return addressField.isVisible !== false;
     };
 
-    // Get primary email or first email for auth
-    const primaryEmail = formEmails.find(e => e.is_primary)?.email || formEmails[0]?.email;
+    // Internal users have a single login email (formData.email).
+    const primaryEmail = formData.email?.trim();
 
     if (!formData.name) {
       toast.error(t("users.requiredFields"));
       return;
     }
 
-    if (formEmails.length === 0 || !primaryEmail) {
+    if (!primaryEmail) {
       toast.error(t("users.atLeastOneEmail"));
       return;
     }
@@ -1010,125 +1009,64 @@ export default function UsersNew() {
         filteredCustomAttributes.social_linkedin = formSocialLinks.linkedin || null;
         filteredCustomAttributes.social_angellist = formSocialLinks.angellist || null;
 
-        console.log("[UserEdit] Updating anew_users for", selectedUser.id);
-        const { error: updateError } = await supabase
-          .from("anew_users")
-          .update({
-            name: formData.name,
-            email: primaryEmail,
-            phone: primaryPhoneFormatted,
-            status: formData.status,
-            description: formData.description || null,
-            position: formData.position || null,
-            location: formData.location || null,
-            template_id: formTemplateId || null,
-            custom_attributes: filteredCustomAttributes,
-          })
-          .eq("id", selectedUser.id);
-
-        if (updateError) {
-          console.error("[UserEdit] anew_users update failed:", updateError);
-          throw updateError;
-        }
-
-        if (selectedUser.entity_id) {
-          await (supabase as any)
-            .from("anew_entities")
-            .update({ display_name: formData.name, updated_at: new Date().toISOString() })
-            .eq("id", selectedUser.entity_id);
-        }
-
-        // Use canonical entity_id, NOT anew_users.id, for entity-keyed tables.
-        // Atomic upsert via RPC (rolls back if any sub-step fails).
-        if (selectedUser.entity_id) {
-          console.log("[UserEdit] Upserting identity for entity", selectedUser.entity_id);
-          const { error: identityError } = await (supabase as any).rpc("upsert_entity_identity", {
-            p_entity_id: selectedUser.entity_id,
-            p_emails: formEmails.map((e) => ({
-              email: e.email,
-              email_type: e.email_type,
-              is_primary: e.is_primary,
-            })),
-            p_phones: formPhones.map((p) => ({
-              phone_number: p.phone_number,
-              country_code: p.country_code,
-              phone_type: p.phone_type,
-              is_primary: p.is_primary,
-            })),
-            p_addresses: null, // addresses handled separately further down
-            p_created_by: createdBy,
-          });
-          if (identityError) {
-            console.error("[UserEdit] upsert_entity_identity failed:", identityError);
-            throw identityError;
-          }
-        } else {
-          console.warn("[UserEdit] selectedUser has no entity_id; skipping identity upsert");
-        }
-
         const existingMembershipIds = (selectedUser.memberships || []).map(m => m.id);
-        const formMembershipIds = formMemberships.filter(m => m.id).map(m => m.id);
-        const toDelete = existingMembershipIds.filter(id => !formMembershipIds.includes(id));
 
-        if (toDelete.length > 0) {
-          await supabase
-            .from("anew_membership_permission_scopes")
-            .delete()
-            .in("membership_id", toDelete);
+        const validAddressesForRpc = isAddressVisible() ? prepareValidAddresses(formAddresses) : null;
 
-          await supabase
-            .from("anew_memberships")
-            .delete()
-            .in("id", toDelete);
-        }
+        console.log("[UserEdit] Calling rpc_update_user for", selectedUser.id);
+        // NIF is optional for Users: an empty string must be treated as "no
+        // NIF" (null), never sent to nif-write-proxy as a non-empty-but-blank
+        // value — the proxy treats any non-null `nif` as "provided" and
+        // rejects a blank/whitespace-only string with "NIF inválido" 400,
+        // which previously blocked saving ANY user without a NIF.
+        const nif = formFiscalData.nif.trim() ? formFiscalData.nif : null;
+        const params = {
+          p_user_id: selectedUser.id,
+          p_entity_id: selectedUser.entity_id ?? null,
+          p_name: formData.name,
+          p_email: primaryEmail,
+          p_phone: primaryPhoneFormatted,
+          p_status: formData.status,
+          p_description: formData.description || null,
+          p_position: formData.position || null,
+          p_location: formData.location || null,
+          p_template_id: formTemplateId || null,
+          p_custom_attributes: filteredCustomAttributes,
+          // Internal users have exactly one login email. The RPC still expects
+          // p_emails as an array (it syncs anew_entity_emails), so we build a
+          // single-item array from the simple email field rather than
+          // changing the RPC's contract — this keeps the server side untouched.
+          p_emails: [
+            { email: primaryEmail, email_type: "work", is_primary: true },
+          ],
+          p_phones: formPhones.map((p) => ({
+            phone_number: p.phone_number,
+            country_code: p.country_code,
+            phone_type: p.phone_type,
+            is_primary: p.is_primary,
+          })),
+          p_memberships: formMemberships.map((m) => ({
+            id: m.id ?? null,
+            organization_id: m.organization_id,
+            relationship_type: m.relationship_type,
+            role_id: m.role_id,
+          })),
+          p_existing_membership_ids: existingMembershipIds,
+          p_pending_scopes: pendingScopeChanges,
+          p_addresses: validAddressesForRpc,
+          p_fiscal: formFiscalData.nif
+            ? {
+                nif: formFiscalData.nif,
+                commercial_name: formFiscalData.commercial_name || null,
+                country_code: formFiscalData.country_code,
+              }
+            : null,
+        };
+        const { error: rpcError } = await callNifWriteProxy("rpc_update_user", params, nif);
 
-        for (const m of formMemberships) {
-          if (!m.organization_id) continue;
-
-          if (m.id && existingMembershipIds.includes(m.id)) {
-            await supabase
-              .from("anew_memberships")
-              .update({
-                organization_id: m.organization_id,
-                relationship_type: m.relationship_type,
-                role_id: m.role_id,
-                status: "active",
-              })
-              .eq("id", m.id);
-          } else {
-            await supabase
-              .from("anew_memberships")
-              .insert({
-                user_id: selectedUser.id,
-                organization_id: m.organization_id,
-                relationship_type: m.relationship_type,
-                role_id: m.role_id,
-                status: "active",
-                created_by: createdBy,
-              });
-          }
-        }
-
-        if (Object.keys(pendingScopeChanges).length > 0) {
-          for (const [membershipId, scopes] of Object.entries(pendingScopeChanges)) {
-            await supabase
-              .from("anew_membership_permission_scopes")
-              .delete()
-              .eq("membership_id", membershipId);
-
-            const scopesToInsert = scopes.filter(s => s.scope_level !== "OWNED");
-            if (scopesToInsert.length > 0) {
-              await supabase
-                .from("anew_membership_permission_scopes")
-                .insert(
-                  scopesToInsert.map(s => ({
-                    membership_id: membershipId,
-                    permission_code: s.permission_code,
-                    scope_level: s.scope_level,
-                  }))
-                );
-            }
-          }
+        if (rpcError) {
+          console.error("[UserEdit] rpc_update_user failed:", rpcError);
+          throw rpcError;
         }
 
         if (formData.password && formData.password.trim().length >= 6 && selectedUser.auth_user_id) {
@@ -1144,101 +1082,10 @@ export default function UsersNew() {
           console.log("[UserEdit] Password updated successfully");
         }
 
-        if (isAddressVisible()) {
-          if (!selectedUser.entity_id) {
-            throw new Error("Utilizador sem entity_id; não é possível gravar moradas.");
-          }
-
-          const validAddresses = prepareValidAddresses(formAddresses);
-
-          await supabase
-            .from("anew_entity_addresses")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", selectedUser.entity_id)
-            .is("valid_to", null);
-
-          for (const addr of validAddresses) {
-            const { data: newAddress, error: addressError } = await (supabase as any)
-              .from("anew_addresses")
-              .insert({
-                address_key: addr.address_key,
-                street: addr.street,
-                number: addr.number,
-                floor: addr.floor || null,
-                unit: addr.unit || null,
-                postal_code: addr.postal_code,
-                city: addr.city,
-                district: addr.district || null,
-                country: addr.country || "PT",
-                extra: addr.extra || null,
-                created_by: createdBy,
-              })
-              .select("id")
-              .single();
-
-            if (addressError) throw addressError;
-
-            const { error: linkError } = await (supabase as any).from("anew_entity_addresses").insert({
-              entity_id: selectedUser.entity_id,
-              address_id: newAddress.id,
-              address_type: addr.address_type || "home",
-              is_primary: addr.is_primary,
-              valid_from: new Date().toISOString(),
-              created_by: createdBy,
-            });
-
-            if (linkError) throw linkError;
-          }
-        }
-
-        if (formFiscalData.nif) {
-          await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", selectedUser.entity_id)
-            .is("valid_to", null);
-
-          let { data: existingFiscal } = await supabase
-            .from("fiscal_entities")
-            .select("id")
-            .eq("nif", formFiscalData.nif)
-            .eq("country_code", formFiscalData.country_code)
-            .limit(1)
-            .single();
-
-          let fiscalEntityId = existingFiscal?.id;
-
-          if (!fiscalEntityId) {
-            const { data: newFiscal, error: fiscalError } = await supabase
-              .from("fiscal_entities")
-              .insert({
-                nif: formFiscalData.nif,
-                commercial_name: formFiscalData.commercial_name || null,
-                country_code: formFiscalData.country_code,
-                created_by: createdBy,
-              })
-              .select("id")
-              .single();
-
-            if (fiscalError) throw fiscalError;
-            fiscalEntityId = newFiscal?.id;
-          }
-
-          if (fiscalEntityId) {
-            await (supabase as any).from("anew_entity_fiscal_entities").insert({
-              entity_id: selectedUser.entity_id,
-              fiscal_entity_id: fiscalEntityId,
-              is_primary: true,
-              valid_from: new Date().toISOString(),
-              created_by: createdBy,
-            });
-          }
-        }
-
         toast.success(t("users.updated"));
         setPendingScopeChanges({});
       } else {
-        const primaryEmailForAuth = formEmails.find(e => e.is_primary)?.email || formEmails[0]?.email;
+        const primaryEmailForAuth = formData.email.trim();
         const primaryPhone = formPhones.find(p => p.is_primary) || formPhones[0];
 
         const validMembershipsForEdge = formMemberships
@@ -1246,10 +1093,10 @@ export default function UsersNew() {
           .map(m => ({ organization_id: m.organization_id, relationship_type: m.relationship_type, role_id: m.role_id }));
 
         const validAddressesForEdge = isAddressVisible() ? prepareValidAddresses(formAddresses) : [];
-        const primaryEmailLower = primaryEmailForAuth.toLowerCase().trim();
-        const additionalEmailsForEdge = formEmails
-          .filter((e) => e.email && e.email.toLowerCase().trim() !== primaryEmailLower)
-          .map((e) => ({ email: e.email, email_type: e.email_type, is_primary: false }));
+        // Internal users have exactly one login email, so there are no
+        // "additional emails" to send — the Edge Function already supports
+        // an empty array here without any server-side changes.
+        const additionalEmailsForEdge: Array<{ email: string; email_type: string; is_primary: boolean }> = [];
         const primaryPhoneKey = primaryPhone
           ? `${primaryPhone.country_code || ""}${primaryPhone.phone_number || ""}`.replace(/\s+/g, "")
           : "";
@@ -1262,6 +1109,21 @@ export default function UsersNew() {
             is_primary: false,
           }));
 
+        // Full anew_users field set the Edge Function will write in ONE
+        // rpc_finalize_user_profile call (see that migration + create-user/index.ts).
+        // Must mirror the EDIT path's filteredCustomAttributes construction above
+        // so CREATE and EDIT persist custom attributes/social links consistently.
+        const filteredCustomAttributesForEdge: Record<string, any> = {};
+        const socialKeysForEdge = ['social_facebook', 'social_linkedin', 'social_angellist'];
+        Object.keys(formCustomAttributes).forEach(key => {
+          if (socialKeysForEdge.includes(key) || formTemplateAttrKeys.includes(key)) {
+            filteredCustomAttributesForEdge[key] = formCustomAttributes[key];
+          }
+        });
+        filteredCustomAttributesForEdge.social_facebook = formSocialLinks.facebook || null;
+        filteredCustomAttributesForEdge.social_linkedin = formSocialLinks.linkedin || null;
+        filteredCustomAttributesForEdge.social_angellist = formSocialLinks.angellist || null;
+
         const createInvoke = await supabase.functions.invoke("create-user", {
           body: {
             email: primaryEmailForAuth,
@@ -1270,6 +1132,10 @@ export default function UsersNew() {
             tipo: "worker_user",
             phone: primaryPhone ? `${primaryPhone.country_code} ${primaryPhone.phone_number}` : null,
             template_id: formTemplateId || null,
+            description: formData.description || null,
+            position: formData.position || null,
+            location: formData.location || null,
+            custom_attributes: Object.keys(filteredCustomAttributesForEdge).length > 0 ? filteredCustomAttributesForEdge : null,
             memberships: validMembershipsForEdge,
             fiscal: formFiscalData.nif ? { nif: formFiscalData.nif, country_code: formFiscalData.country_code } : null,
             addresses: validAddressesForEdge.length > 0 ? validAddressesForEdge : null,
@@ -1292,29 +1158,12 @@ export default function UsersNew() {
         const finalUserId = createResult?.anew_user_id;
         if (!finalUserId) throw new Error("Failed to resolve created user");
 
-        const primaryPhoneForUpdate = formPhones.find(p => p.is_primary) || formPhones[0];
-        const primaryPhoneFormattedForUpdate = primaryPhoneForUpdate
-          ? `${primaryPhoneForUpdate.country_code} ${primaryPhoneForUpdate.phone_number}`
-          : null;
-
-        await supabase
-          .from("anew_users")
-          .update({
-            phone: primaryPhoneFormattedForUpdate,
-            description: formData.description || null,
-            position: formData.position || null,
-            location: formData.location || null,
-            template_id: formTemplateId || null,
-            custom_attributes: Object.keys(formCustomAttributes).length > 0
-              ? {
-                  ...formCustomAttributes,
-                  social_facebook: formSocialLinks.facebook || null,
-                  social_linkedin: formSocialLinks.linkedin || null,
-                  social_angellist: formSocialLinks.angellist || null,
-                }
-              : null,
-          })
-          .eq("id", finalUserId);
+        // NOTE: the full anew_users field set (phone, description, position,
+        // location, template_id, custom_attributes) is now written ONCE by
+        // the create-user Edge Function via rpc_finalize_user_profile, so
+        // this single "create user" action produces exactly one
+        // entity_audit_log row. Do not add a follow-up .update() here — see
+        // supabase/migrations/20260825010000_rpc_finalize_user_profile.sql.
 
         toast.success(t("users.created"));
       }
@@ -1343,36 +1192,77 @@ export default function UsersNew() {
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteUserId) return;
 
     const user = users.find((u) => u.id === deleteUserId);
 
-    const deleteFlow = user?.auth_user_id
-      ? supabase.functions.invoke("delete-user", {
-          body: { userId: user.auth_user_id },
-        }).then((response) => {
-          if (response.error) throw response.error;
-        })
-      : Promise.resolve();
+    try {
+      const {
+        data: { user: authUser },
+      } = await supabase.auth.getUser();
+      const { resolveBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
+      const deletedBy = await resolveBusinessUserId(authUser?.id);
 
-    deleteFlow
-      .then(() =>
-        supabase
-          .from("anew_users")
-          .delete()
-          .eq("id", deleteUserId)
-      )
-      .then(({ error }) => {
-        if (error) throw error;
-        toast.success(t("users.deleted"));
-        setDeleteUserId(null);
-        fetchData();
-      })
-      .catch((error: any) => {
-        console.error("Error deleting:", error);
-        toast.error(error.message || t("common.error"));
+      if (!deletedBy) {
+        throw new Error("Não foi possível resolver o utilizador de negócio do operador.");
+      }
+
+      // "Delete" is a recoverable deactivation (mirrors HubSpot): it revokes
+      // login access but keeps the user's profile and everything they
+      // created/own completely untouched — see
+      // supabase/migrations/20261107090000_rpc_delete_user_soft_delete_and_restore.sql.
+      if (user?.auth_user_id) {
+        const deleteInvoke = await supabase.functions.invoke("delete-user", {
+          body: { userId: user.auth_user_id },
+        });
+        if (deleteInvoke.error) {
+          const detailedError = await extractFunctionErrorMessage(deleteInvoke, deleteInvoke.error);
+          throw new Error(detailedError || deleteInvoke.error.message);
+        }
+      }
+
+      // rpc_delete_user runs the soft-deactivation UPDATE + audit-log write
+      // in a single transaction. It no longer removes the anew_users row —
+      // it marks status='inactive'/deleted_at=now(), fully reversible via
+      // rpc_restore_user (see handleRestore below).
+      const { error: deleteUserError } = await supabase.rpc("rpc_delete_user", {
+        p_user_id: deleteUserId,
       });
+      if (deleteUserError) throw deleteUserError;
+
+      toast.success(t("users.deleted"));
+      setDeleteUserId(null);
+      fetchData();
+    } catch (error: any) {
+      console.error("Error deleting:", error);
+      toast.error(error.message || t("common.error"));
+    }
+  };
+
+  const handleRestore = async (targetUser: AnewUser) => {
+    try {
+      if (targetUser.auth_user_id) {
+        const restoreInvoke = await supabase.functions.invoke("restore-user", {
+          body: { userId: targetUser.auth_user_id },
+        });
+        if (restoreInvoke.error) {
+          const detailedError = await extractFunctionErrorMessage(restoreInvoke, restoreInvoke.error);
+          throw new Error(detailedError || restoreInvoke.error.message);
+        }
+      }
+
+      const { error: restoreUserError } = await supabase.rpc("rpc_restore_user", {
+        p_user_id: targetUser.id,
+      });
+      if (restoreUserError) throw restoreUserError;
+
+      toast.success(t("users.restored"));
+      fetchData();
+    } catch (error: any) {
+      console.error("Error restoring:", error);
+      toast.error(error.message || t("common.error"));
+    }
   };
 
   if (companyLoading) {
@@ -1755,7 +1645,7 @@ export default function UsersNew() {
                               {t("common.history")}
                             </DropdownMenuItem>
                             )}
-                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && (
+                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && user.status !== "inactive" && (
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1765,6 +1655,17 @@ export default function UsersNew() {
                               >
                                 <Trash2 className="w-4 h-4 mr-2" />
                                 {t("common.delete")}
+                              </DropdownMenuItem>
+                            )}
+                            {canDeleteUser(user) && user.auth_user_id !== currentAuthUserId && user.status === "inactive" && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRestore(user);
+                                }}
+                              >
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                                {t("users.restore.action")}
                               </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
@@ -1793,8 +1694,6 @@ export default function UsersNew() {
           <UserFormEnhanced
             formData={formData}
             setFormData={setFormData}
-            emails={formEmails}
-            setEmails={setFormEmails}
             phones={formPhones}
             setPhones={setFormPhones}
             socialLinks={formSocialLinks}

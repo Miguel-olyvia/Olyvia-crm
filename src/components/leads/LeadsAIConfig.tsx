@@ -106,7 +106,7 @@ export const LeadsAIConfig: React.FC<LeadsAIConfigProps> = ({
           callback_reminder_enabled: data.callback_reminder_enabled ?? true,
           callback_reminder_hours_before: data.callback_reminder_hours_before ?? 1,
           priority_leads_enabled: data.priority_leads_enabled ?? true,
-          high_value_threshold: Number(data.high_value_threshold) ?? 1000,
+          high_value_threshold: Number(data.high_value_threshold) || 1000,
           new_leads_alert_enabled: data.new_leads_alert_enabled ?? true,
           new_leads_check_hours: data.new_leads_check_hours ?? 24,
           follow_up_reminder_enabled: data.follow_up_reminder_enabled ?? true,

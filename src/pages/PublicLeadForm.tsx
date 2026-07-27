@@ -20,6 +20,8 @@ import { Progress } from "@/components/ui/progress";
 import * as LucideIcons from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { sanitizeCSSValue, sanitizeCustomCss } from "@/lib/forms/sanitizeCssValue";
+import { validateStepFieldFormats } from "@/lib/forms/publicFormValidation";
 
 // Animation variants for step transitions
 const stepVariants = {
@@ -175,18 +177,26 @@ const injectMetaPixel = (pixelId: string) => {
 // Inject TikTok Pixel
 const injectTikTokPixel = (pixelId: string) => {
   if (!pixelId || !isValidTrackingId(pixelId, "tiktok") || document.getElementById(`tiktok-pixel-${pixelId}`)) return;
-  
+
   const script = document.createElement('script');
   script.id = `tiktok-pixel-${pixelId}`;
-  script.innerHTML = `
-    !function (w, d, t) {
-      w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie"],ttq.setAndDefer=function(t,e){t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e},ttq.load=function(e,n){var i="https://analytics.tiktok.com/i18n/pixel/events.js";ttq._i=ttq._i||{},ttq._i[e]=[],ttq._i[e]._u=i,ttq._t=ttq._t||{},ttq._t[e]=+new Date,ttq._o=ttq._o||{},ttq._o[e]=n||{};var o=document.createElement("script");o.type="text/javascript",o.async=!0,o.src=i+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(o,a)};
-      ttq.load('${pixelId}');
-      ttq.page();
-    }(window, document, 'ttq');
-  `;
+  script.async = true;
+  // Load the stub from a static file so no inline script is needed (CSP: script-src 'self').
+  // After the stub initialises the ttq queue, call load() and page() with the runtime pixel ID.
+  script.src = '/tiktok-pixel-stub.js';
+  script.onload = () => {
+    try {
+      window.ttq?.load(pixelId);
+      window.ttq?.page();
+    } catch (err) {
+      console.warn('[Tracking] TikTok Pixel init failed', err);
+    }
+  };
+  script.onerror = () => {
+    console.warn('[Tracking] TikTok Pixel stub failed to load', pixelId);
+  };
   document.head.appendChild(script);
-  
+
   console.log('[Tracking] TikTok Pixel injected:', pixelId);
 };
 
@@ -211,25 +221,35 @@ const injectGoogleAdsTag = (tagId: string) => {
 // Inject LinkedIn Insight Tag
 const injectLinkedInTag = (partnerId: string) => {
   if (!partnerId || !isValidTrackingId(partnerId, "linkedin") || document.getElementById(`linkedin-${partnerId}`)) return;
-  
-  const script = document.createElement('script');
-  script.id = `linkedin-${partnerId}`;
-  script.innerHTML = `
-    _linkedin_partner_id = "${partnerId}";
-    window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
-    window._linkedin_data_partner_ids.push(_linkedin_partner_id);
-    (function(l) {
-      if (!l){window.lintrk = function(a,b){window.lintrk.q.push([a,b])};
-      window.lintrk.q=[]}
-      var s = document.getElementsByTagName("script")[0];
-      var b = document.createElement("script");
-      b.type = "text/javascript";b.async = true;
-      b.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
-      s.parentNode.insertBefore(b, s);
-    })(window.lintrk);
-  `;
-  document.head.appendChild(script);
-  
+
+  // Step 1: load the lintrk stub from a static file (CSP: script-src 'self').
+  const stub = document.createElement('script');
+  stub.id = `linkedin-${partnerId}`;
+  stub.async = true;
+  stub.src = '/linkedin-insight-stub.js';
+  stub.onload = () => {
+    try {
+      // Step 2: set partner ID globals that the LinkedIn SDK reads on load.
+      (window as any)._linkedin_partner_id = partnerId;
+      (window as any)._linkedin_data_partner_ids = (window as any)._linkedin_data_partner_ids || [];
+      (window as any)._linkedin_data_partner_ids.push(partnerId);
+
+      // Step 3: load the LinkedIn analytics SDK from their CDN.
+      const sdk = document.createElement('script');
+      sdk.type = 'text/javascript';
+      sdk.async = true;
+      sdk.src = 'https://snap.licdn.com/li.lms-analytics/insight.min.js';
+      const first = document.getElementsByTagName('script')[0];
+      first.parentNode?.insertBefore(sdk, first);
+    } catch (err) {
+      console.warn('[Tracking] LinkedIn Insight Tag init failed', err);
+    }
+  };
+  stub.onerror = () => {
+    console.warn('[Tracking] LinkedIn Insight stub failed to load', partnerId);
+  };
+  document.head.appendChild(stub);
+
   console.log('[Tracking] LinkedIn Insight Tag injected:', partnerId);
 };
 
@@ -260,7 +280,7 @@ const pushTrackingEvent = (eventName: string, eventData: Record<string, any> = {
         event: eventName,
         data: eventData,
         timestamp,
-      }, '*');
+      }, window.location.origin);
       console.log('[postMessage to parent]', eventName, eventData);
     } catch (e) {
       // Cross-origin or blocked - silently fail
@@ -405,6 +425,7 @@ interface FormStep {
   scheduling_duration_minutes?: number;
   scheduling_board_id?: string | null;
   scheduling_postal_code_field_key?: string | null;
+  scheduling_district_field_key?: string | null;
   fields: FormField[];
   info_blocks?: InfoBlock[];
   sections?: FormSection[];
@@ -606,6 +627,9 @@ export default function PublicLeadForm() {
   };
   const [formValues, setFormValues] = useState<Record<string, any>>({});
   const [leadId, setLeadId] = useState<string | null>(null);
+  // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
+  // "lead" when only an older lead_id-only response shape is ever received.
+  const [targetType, setTargetType] = useState<"lead" | "contact" | "client">("lead");
   const [isComplete, setIsComplete] = useState(false);
   const [locationRejected, setLocationRejected] = useState(false);
   const [resolvedSourceId, setResolvedSourceId] = useState<string | null>(querySourceId);
@@ -628,7 +652,7 @@ export default function PublicLeadForm() {
         window.parent.postMessage({
           type: 'IFRAME_RESIZE',
           height: height,
-        }, '*');
+        }, window.location.origin);
       } catch {
         // Cross-origin error - silently fail
       }
@@ -681,8 +705,8 @@ export default function PublicLeadForm() {
 
       // 4) Notify parent if in iframe (support both message types)
       try {
-        window.parent?.postMessage({ type: 'lovable_scroll_top' }, '*');
-        window.parent?.postMessage({ type: 'scroll_top' }, '*');
+        window.parent?.postMessage({ type: 'lovable_scroll_top' }, window.location.origin);
+        window.parent?.postMessage({ type: 'scroll_top' }, window.location.origin);
       } catch {
         // Ignore cross-origin errors
       }
@@ -984,7 +1008,7 @@ export default function PublicLeadForm() {
           window.parent.postMessage({
             type: 'FORM_VALIDATION_ERROR',
             fieldKey,
-          }, '*');
+          }, window.location.origin);
         } catch (e) {
           // Cross-origin - silently fail
         }
@@ -1017,19 +1041,33 @@ export default function PublicLeadForm() {
         const value = formValues[field.field_key];
         if (!value || (Array.isArray(value) && value.length === 0)) {
           toast.error(`O campo "${field.field_label}" é obrigatório`);
-          
+
           setTimeout(() => scrollToAndFocusField(field.field_key), 100);
-          
+
           return false;
         }
       }
     }
-    
+
+    // Format/bounds validation (email shape, phone digits, min/max length,
+    // min/max value, custom pattern). Only checks fields that already have a
+    // non-empty value — required-ness was already enforced above — so this
+    // never blocks data that passed validation before this check existed.
+    const formatError = validateStepFieldFormats(
+      step.fields.filter(field => !(hasSchedulingStep && field.field_type === 'ref_service')),
+      formValues
+    );
+    if (formatError) {
+      toast.error(formatError.message);
+      setTimeout(() => scrollToAndFocusField(formatError.fieldKey), 100);
+      return false;
+    }
+
     if (locationRejected) {
       toast.error("A localização selecionada não está disponível.");
       return false;
     }
-    
+
     return true;
   };
 
@@ -1048,6 +1086,10 @@ export default function PublicLeadForm() {
         postal_code: (() => {
           const pcKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key;
           return pcKey ? formValues[pcKey] : undefined;
+        })(),
+        district_id: (() => {
+          const districtKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key;
+          return districtKey ? formValues[districtKey] : undefined;
         })(),
         field_values: formValues,
         campaign_id: formConfig.campaign_id || campaignId || undefined,
@@ -1124,14 +1166,18 @@ export default function PublicLeadForm() {
         }
 
 
-        let resolvedLeadId = data.lead_id;
+        // Prefer the polymorphic target_type/target_id continuation key;
+        // fall back to lead_id/"lead" if an older response shape is ever received.
+        const resolvedTargetType: "lead" | "contact" | "client" = data.target_type || "lead";
+        let resolvedLeadId = data.target_id || data.lead_id;
 
-        if (data.is_complete && hasSchedulingStep && schedulingSlot) {
-          resolvedLeadId = await completeScheduledBooking(data.lead_id);
+        if (data.is_complete && hasSchedulingStep && schedulingSlot && resolvedTargetType === "lead") {
+          resolvedLeadId = await completeScheduledBooking(resolvedLeadId);
         }
-        
+
+        setTargetType(resolvedTargetType);
         setLeadId(resolvedLeadId);
-        
+
         // GTM: Lead created event (first step completed)
         pushGTMEvent('lead_created', {
           lead_id: resolvedLeadId,
@@ -1165,6 +1211,8 @@ export default function PublicLeadForm() {
         }
       } else {
         const updateBody: any = {
+          target_type: targetType,
+          target_id: leadId,
           lead_id: leadId,
           campaign_id: formConfig?.campaign_id || campaignId,
           step_number: currentStep,
@@ -1177,16 +1225,16 @@ export default function PublicLeadForm() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updateBody)
         });
-        
+
         const data = await response.json();
-        
+
         if (!response.ok) {
           throw new Error(data.error || "Erro ao enviar dados");
         }
 
         let resolvedLeadId = leadId;
 
-        if (data.is_complete && hasSchedulingStep && schedulingSlot && leadId) {
+        if (data.is_complete && hasSchedulingStep && schedulingSlot && leadId && targetType === "lead") {
           resolvedLeadId = await completeScheduledBooking(leadId);
         }
         
@@ -1732,10 +1780,10 @@ export default function PublicLeadForm() {
 
   // Generate dynamic styles - unified background color
   // In iframe context, force white background for consistency
-  const bgColor = isInIframe ? "#ffffff" : (branding?.background_color || "#ffffff");
-  const stepBorderWidth = branding?.step_border_width || '1px';
-  const stepBorderColor = branding?.step_border_color || '#e5e7eb';
-  const stepShadow = branding?.step_shadow || '0 1px 3px 0 rgb(0 0 0 / 0.1)';
+  const bgColor = isInIframe ? "#ffffff" : sanitizeCSSValue(branding?.background_color || "#ffffff", 'color');
+  const stepBorderWidth = sanitizeCSSValue(branding?.step_border_width || '1px', 'size');
+  const stepBorderColor = sanitizeCSSValue(branding?.step_border_color || '#e5e7eb', 'color');
+  const stepShadow = sanitizeCSSValue(branding?.step_shadow || '0 1px 3px 0 rgb(0 0 0 / 0.1)', 'shadow');
   const hasMainContainerBorder = stepBorderWidth !== '0px' && stepBorderColor !== 'transparent';
   const mainContainerShadow = hasMainContainerBorder ? stepShadow : 'none';
   const layout = resolveLayout(branding, { isInIframe });
@@ -1798,12 +1846,14 @@ export default function PublicLeadForm() {
     return cn(styleClass, radiusClass, mainContainerClass);
   };
 
-  const primaryColor = branding?.primary_color || "#85D3BE";
-  const radioButtonColor = branding?.radio_button_color || primaryColor;
+  const primaryColor = sanitizeCSSValue(branding?.primary_color || "#85D3BE", 'color');
+  const radioButtonColor = sanitizeCSSValue(branding?.radio_button_color || primaryColor, 'color');
   
+  const buttonTextColor = sanitizeCSSValue(branding?.button_text_color || "#ffffff", 'color');
+
   const buttonStyle: React.CSSProperties = {
     backgroundColor: primaryColor,
-    color: branding?.button_text_color || "#ffffff",
+    color: buttonTextColor,
   };
 
   const headingStyle: React.CSSProperties = {
@@ -1916,56 +1966,60 @@ export default function PublicLeadForm() {
   };
 
   // Granular styling variables
-  const inputBorderRadius = branding?.input_border_radius || '12px';
-  const inputBorderWidth = branding?.input_border_width || '1px';
-  const inputBorderColor = branding?.input_border_color || '#e5e7eb';
-  const inputFocusBorderColor = branding?.input_focus_border_color || primaryColor;
-  const inputBgColor = branding?.input_background_color || branding?.background_color || '#ffffff';
-  const inputPadding = layout.inputs.padding;
-  const inputFontSize = branding?.input_font_size || '15px';
-  
-  const cardBorderRadius = branding?.card_border_radius || '16px';
-  const cardBorderWidth = branding?.card_border_width || '2px';
-  const cardBorderColor = branding?.card_border_color || '#e5e7eb';
-  const cardIconSize = branding?.card_icon_size || '56px';
-  const cardIconBorderRadius = branding?.card_icon_border_radius || '14px';
-  const cardPadding = layout.options.cardPadding;
-  const cardMinHeight = branding?.card_min_height || '140px';
-  
-  const radioBorderRadius = branding?.radio_border_radius || '12px';
-  const radioBorderWidth = branding?.radio_border_width || '2px';
-  const radioCircleSize = branding?.radio_circle_size || '20px';
-  const radioInnerSize = branding?.radio_inner_size || '10px';
-  const radioPadding = layout.options.radioPadding;
-  
-  const checkboxBorderRadius = branding?.checkbox_border_radius || '12px';
-  const checkboxBorderWidth = branding?.checkbox_border_width || '2px';
-  const checkboxSize = branding?.checkbox_size || '20px';
-  const checkboxPadding = layout.options.checkboxPadding;
-  
-  const buttonOptionBorderRadius = branding?.button_option_border_radius || '12px';
-  const buttonOptionBorderWidth = branding?.button_option_border_width || '2px';
-  const buttonOptionPadding = layout.options.buttonPadding;
-  
-  const navButtonBorderRadius = branding?.nav_button_border_radius || '12px';
-  const navButtonPadding = layout.buttons.navPadding;
-  const navButtonFontSize = branding?.nav_button_font_size || '15px';
-  
-  const stepBorderRadius = branding?.step_border_radius || '16px';
-  const stepPadding = layout.step.padding;
-  
-  const infoBlockBorderRadius = branding?.info_block_border_radius || '12px';
-  const infoBlockPadding = branding?.info_block_padding || '16px 20px';
+  // NOTE: all `branding?.*` values below are configurable by whoever manages
+  // the campaign and are interpolated into a raw <style> block rendered on
+  // this public, unauthenticated page. Every one of them must be sanitized
+  // via `sanitizeCSSValue` to prevent CSS injection.
+  const inputBorderRadius = sanitizeCSSValue(branding?.input_border_radius || '12px', 'size');
+  const inputBorderWidth = sanitizeCSSValue(branding?.input_border_width || '1px', 'size');
+  const inputBorderColor = sanitizeCSSValue(branding?.input_border_color || '#e5e7eb', 'color');
+  const inputFocusBorderColor = sanitizeCSSValue(branding?.input_focus_border_color || primaryColor, 'color');
+  const inputBgColor = sanitizeCSSValue(branding?.input_background_color || branding?.background_color || '#ffffff', 'color');
+  const inputPadding = sanitizeCSSValue(layout.inputs.padding, 'padding');
+  const inputFontSize = sanitizeCSSValue(branding?.input_font_size || '15px', 'size');
+
+  const cardBorderRadius = sanitizeCSSValue(branding?.card_border_radius || '16px', 'size');
+  const cardBorderWidth = sanitizeCSSValue(branding?.card_border_width || '2px', 'size');
+  const cardBorderColor = sanitizeCSSValue(branding?.card_border_color || '#e5e7eb', 'color');
+  const cardIconSize = sanitizeCSSValue(branding?.card_icon_size || '56px', 'size');
+  const cardIconBorderRadius = sanitizeCSSValue(branding?.card_icon_border_radius || '14px', 'size');
+  const cardPadding = sanitizeCSSValue(layout.options.cardPadding, 'padding');
+  const cardMinHeight = sanitizeCSSValue(branding?.card_min_height || '140px', 'size');
+
+  const radioBorderRadius = sanitizeCSSValue(branding?.radio_border_radius || '12px', 'size');
+  const radioBorderWidth = sanitizeCSSValue(branding?.radio_border_width || '2px', 'size');
+  const radioCircleSize = sanitizeCSSValue(branding?.radio_circle_size || '20px', 'size');
+  const radioInnerSize = sanitizeCSSValue(branding?.radio_inner_size || '10px', 'size');
+  const radioPadding = sanitizeCSSValue(layout.options.radioPadding, 'padding');
+
+  const checkboxBorderRadius = sanitizeCSSValue(branding?.checkbox_border_radius || '12px', 'size');
+  const checkboxBorderWidth = sanitizeCSSValue(branding?.checkbox_border_width || '2px', 'size');
+  const checkboxSize = sanitizeCSSValue(branding?.checkbox_size || '20px', 'size');
+  const checkboxPadding = sanitizeCSSValue(layout.options.checkboxPadding, 'padding');
+
+  const buttonOptionBorderRadius = sanitizeCSSValue(branding?.button_option_border_radius || '12px', 'size');
+  const buttonOptionBorderWidth = sanitizeCSSValue(branding?.button_option_border_width || '2px', 'size');
+  const buttonOptionPadding = sanitizeCSSValue(layout.options.buttonPadding, 'padding');
+
+  const navButtonBorderRadius = sanitizeCSSValue(branding?.nav_button_border_radius || '12px', 'size');
+  const navButtonPadding = sanitizeCSSValue(layout.buttons.navPadding, 'padding');
+  const navButtonFontSize = sanitizeCSSValue(branding?.nav_button_font_size || '15px', 'size');
+
+  const stepBorderRadius = sanitizeCSSValue(branding?.step_border_radius || '16px', 'size');
+  const stepPadding = sanitizeCSSValue(layout.step.padding, 'padding');
+
+  const infoBlockBorderRadius = sanitizeCSSValue(branding?.info_block_border_radius || '12px', 'size');
+  const infoBlockPadding = sanitizeCSSValue(branding?.info_block_padding || '16px 20px', 'padding');
   const infoBlockBgOpacity = branding?.info_block_background_opacity || '15';
-  
-  const progressBarHeight = branding?.progress_bar_height || '4px';
-  const progressBarBorderRadius = branding?.progress_bar_border_radius || '2px';
-  
-  const selectBorderRadius = branding?.select_border_radius || '10px';
-  const selectBorderWidth = branding?.select_border_width || '1px';
-  
-  const successIconSize = branding?.success_icon_size || '80px';
-  const successBorderRadius = branding?.success_border_radius || '16px';
+
+  const progressBarHeight = sanitizeCSSValue(branding?.progress_bar_height || '4px', 'size');
+  const progressBarBorderRadius = sanitizeCSSValue(branding?.progress_bar_border_radius || '2px', 'size');
+
+  const selectBorderRadius = sanitizeCSSValue(branding?.select_border_radius || '10px', 'size');
+  const selectBorderWidth = sanitizeCSSValue(branding?.select_border_width || '1px', 'size');
+
+  const successIconSize = sanitizeCSSValue(branding?.success_icon_size || '80px', 'size');
+  const successBorderRadius = sanitizeCSSValue(branding?.success_border_radius || '16px', 'size');
 
   return (
     <div ref={formContainerRef} className={`${isInIframe ? 'min-h-fit' : 'min-h-screen'} ${hasCustomPadding ? '' : (useFlushEmbed ? 'p-0' : 'py-4 sm:py-8 px-3 sm:px-4')}`} style={containerStyle}>
@@ -2028,15 +2082,15 @@ export default function PublicLeadForm() {
         /* Select dropdown styling - applied globally since SelectContent uses Portal */
         [data-radix-select-content] [data-highlighted] {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         [data-radix-select-content] [data-state="checked"] {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         [data-radix-select-content] [role="option"]:focus {
           background-color: ${primaryColor} !important;
-          color: ${branding?.button_text_color || '#fff'} !important;
+          color: ${buttonTextColor} !important;
         }
         .form-card .option-card {
           border-radius: ${cardBorderRadius} !important;
@@ -2102,7 +2156,7 @@ export default function PublicLeadForm() {
           width: ${successIconSize} !important;
           height: ${successIconSize} !important;
         }
-        ${branding?.custom_css || ''}
+        ${sanitizeCustomCss(branding?.custom_css)}
         ${useFlushEmbed ? `
           .form-card.form-card {
             border-radius: 0 !important;
@@ -2274,6 +2328,10 @@ export default function PublicLeadForm() {
                     postalCode={(() => {
                       const pcKey = currentStepData.scheduling_postal_code_field_key;
                       return pcKey ? formValues[pcKey] : undefined;
+                    })()}
+                    districtId={(() => {
+                      const districtKey = currentStepData.scheduling_district_field_key;
+                      return districtKey ? formValues[districtKey] : undefined;
                     })()}
                     primaryColor={primaryColor}
                     textColor={branding?.text_color}

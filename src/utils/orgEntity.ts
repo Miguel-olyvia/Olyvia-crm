@@ -1,4 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
+import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 export type EntityMatchScope = "same_org" | "group";
 
@@ -13,7 +15,8 @@ export interface EntityMatchResult {
 }
 
 /**
- * Cross-org duplicate detection. Wraps the `find_entity_matches` RPC.
+ * Cross-org duplicate detection. Wraps the `find-entity-matches-proxy` Edge
+ * Function (which in turn calls the `find_entity_matches` RPC server-side).
  * Never reveals entities from organizations the caller cannot see.
  */
 export async function findEntityMatches(params: {
@@ -27,15 +30,43 @@ export async function findEntityMatches(params: {
   if (!orgId) return [];
   if (!email && !phone && !nif) return [];
 
-  const { data, error } = await (supabase as any).rpc("find_entity_matches", {
-    p_org_id: orgId,
-    p_email: email ?? null,
-    p_phone: phone ?? null,
-    p_nif: nif ?? null,
-    p_country_code: countryCode,
+  // The browser has no access to the HMAC key used to compute nif_hash, so
+  // plaintext nif matching can never be done client-side. This calls the
+  // find-entity-matches-proxy Edge Function, which derives nif_hash
+  // server-side (deriveKeyFromEnv + hashNif, same pattern as
+  // fiscal-entity-resolve / nif-write-proxy) and forwards only the hash to
+  // find_entity_matches — the plaintext nif never reaches Postgres.
+  const { data, error } = await supabase.functions.invoke<{
+    success: boolean;
+    data?: Array<{
+      entity_id: string;
+      scope: EntityMatchScope;
+      primary_org_id: string | null;
+      primary_org_name: string | null;
+      owner_org_accessible: boolean;
+      match_field: "email" | "phone" | "nif";
+      display_name: string | null;
+    }>;
+    error?: string;
+    code?: string;
+  }>("find-entity-matches-proxy", {
+    body: {
+      orgId,
+      email: email ?? null,
+      phone: phone ?? null,
+      nif: nif ?? null,
+      countryCode,
+    },
   });
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+
+  if (error) {
+    throw new Error(await getFriendlyErrorMessage(error));
+  }
+  if (!data?.success) {
+    throw new Error(await getFriendlyErrorMessage(data?.error ?? null));
+  }
+
+  return (data.data ?? []).map((r) => ({
     entityId: r.entity_id,
     scope: r.scope,
     primaryOrgId: r.primary_org_id ?? null,
@@ -99,20 +130,14 @@ type EnsureOrgEntityOptions = {
 };
 
 async function findEntityByFiscalIdentity(nif: string, countryCode: string): Promise<string | null> {
-  const { data: fiscalEntities, error: fiscalError } = await (supabase as any)
-    .from("fiscal_entities")
-    .select("id")
-    .eq("nif", nif)
-    .eq("country_code", countryCode)
-    .limit(2);
-
-  if (fiscalError) throw fiscalError;
-  if (!fiscalEntities || fiscalEntities.length !== 1) return null;
+  const { data: resolved, error: resolveError } = await callFiscalEntityResolve({ nif, countryCode });
+  if (resolveError) throw resolveError;
+  if (!resolved) return null;
 
   const { data: links, error: linkError } = await (supabase as any)
     .from("anew_entity_fiscal_entities")
     .select("entity_id")
-    .eq("fiscal_entity_id", fiscalEntities[0].id)
+    .eq("fiscal_entity_id", resolved.fiscalEntityId)
     .limit(2);
 
   if (linkError) throw linkError;

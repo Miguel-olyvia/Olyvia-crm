@@ -1,0 +1,66 @@
+-- Agendamentos (Scheduling) — documentation-only reconciliation note (LOW fix)
+-- 2026-07-29 | Module: Fase · Agendamentos
+-- Forward-only migration. Do not fold into the baseline. Do not edit an already-applied migration.
+--
+-- Why this migration exists
+-- -------------------------
+-- The LOW review finding on the scheduling audit-bypass work asked for the
+-- narrative around the holiday guard (trg_prevent_schedule_items_on_holidays)
+-- to enumerate the FULL set of watched columns explicitly and to clarify that
+-- company_id is watched by the trigger but is never emitted by the RPC (it is
+-- not in the FE whitelist / validColumns). That fix was written into
+-- 20260726010000_scheduling_audit_bypass_and_rpcs.sql (three comment sites:
+-- the RPC narrative, the inline UPDATE comment, and test note 3b) and the TEXT
+-- of that fix was APPROVED in review.
+--
+-- BUT: 20260726010000 has already been APPLIED to the linked remote database.
+-- Evidence gathered in this session (CLI 2.78.1, no psql / no SUPABASE_DB_PASSWORD /
+-- no local Postgres, so a direct pg_proc query was NOT possible — the project rule's
+-- `supabase db query --linked` does not exist in this CLI version):
+--   1. `supabase migration list --linked` shows 20260726010000 populated in the
+--      REMOTE column (registered in supabase_migrations.schema_migrations remotely).
+--   2. `supabase db push --linked --dry-run` reports "Remote database is up to date"
+--      (no pending migrations — this one included).
+--   3. Later migrations 20260727010000 and 20260728010000 are ALSO present remotely,
+--      which is only possible if 20260726010000 was applied before them.
+-- Conclusion: 20260726010000 is applied and therefore IMMUTABLE. Per CLAUDE.md
+-- ("Nunca editar uma migração já aplicada à BD remota; corrigir sempre com uma nova
+-- migração de timestamp posterior") the approved comment fix must live in this new,
+-- later-timestamped migration rather than being edited into the applied file.
+--
+-- Behavioral effect: NONE.
+-- ------------------------
+-- This migration contains ZERO executable SQL. It does NOT recreate or alter
+-- fn_audit_schedule_with_sentinel, rpc_create_schedule_item, rpc_update_schedule_item
+-- or rpc_delete_schedule_item — their bodies in 20260726010000 are correct and remain
+-- the source of truth. Re-issuing CREATE OR REPLACE for them here would be a needless
+-- no-op with real regression surface, so it is deliberately omitted. SQL comments never
+-- persist into pg_proc, so there is genuinely nothing in the live database to change;
+-- this file simply records the reconciliation outcome and the corrected watched-column
+-- narrative in a tracked, forward-only place.
+--
+-- Corrected watched-column narrative (for the record — matches the approved text)
+-- -------------------------------------------------------------------------------
+-- trg_prevent_schedule_items_on_holidays is a BEFORE UPDATE OF trigger whose FULL set
+-- of watched columns is:
+--     start_datetime, end_datetime, organization_id, company_id, board_id, status.
+-- Postgres fires an "UPDATE OF <cols>" trigger whenever any listed column APPEARS in the
+-- SET clause, regardless of whether its value actually changes.
+-- company_id is watched too, but it is NOT in the FE whitelist / validColumns and is
+-- therefore NEVER emitted by rpc_update_schedule_item. In practice, then, only the other
+-- five watched columns can trip the guard through the RPC:
+--     start_datetime, end_datetime, organization_id, board_id, status.
+-- rpc_update_schedule_item builds its SET list DYNAMICALLY (only columns whose
+-- p_set_<col> flag is true are emitted), so a title-only edit omits every watched column
+-- and the holiday guard never fires — byte-for-byte parity with the pre-RPC FE
+-- behavior (cleanUpdates).
+--
+-- No-op guard: this DO block asserts nothing and changes nothing. It exists only so the
+-- migration is a syntactically valid, applied-once file with no side effects.
+DO $$
+BEGIN
+  -- Documentation-only migration for the scheduling module. No schema, RLS,
+  -- function, trigger, grant, or data change is performed here.
+  NULL;
+END
+$$;

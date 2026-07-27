@@ -68,7 +68,10 @@ import { CSS } from "@dnd-kit/utilities";
 import { WorkflowAutomationRules } from "@/components/workflows/WorkflowAutomationRules";
 import { WorkflowFlowchart } from "./WorkflowFlowchart";
 import { LeadStageActionsConfig } from "./LeadStageActionsConfig";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { StageRulesEditor } from "./workflow/StageRulesEditor";
+import { QualificationRulesTab } from "./workflow/QualificationRulesTab";
+import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
+import type { RuleGroup } from "./workflow/conditionCatalog";
 
 export interface WorkflowStage {
   id: string;
@@ -84,6 +87,14 @@ export interface WorkflowStage {
   created_at: string;
   created_by: string;
   default_status: string | null;
+  matching_statuses?: string[] | null;
+  reached_when?: RuleGroup | null;
+  auto_advance?: boolean;
+  qualification_hint?: "none" | "mql" | "sql";
+  counts_as_qualified?: boolean;
+  counts_as_negotiation?: boolean;
+  counts_as_converted?: boolean;
+  counts_as_lost?: boolean;
 }
 
 export const LEAD_STATUS_OPTIONS = [
@@ -198,7 +209,7 @@ function SortableStageRow({
                   </Badge>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Conversão: Lead → Contacto</p>
+                  <p>Conversão: Lead → Cliente</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -272,7 +283,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editingStage, setEditingStage] = useState<WorkflowStage | null>(null);
   const [isUsingTemplate, setIsUsingTemplate] = useState(false);
   const [activeTab, setActiveTab] = useState("stages");
+  const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
+  const [recomputing, setRecomputing] = useState(false);
 
   const [deletingStage, setDeletingStage] = useState<WorkflowStage | null>(null);
   const [migrationTargetId, setMigrationTargetId] = useState<string>("");
@@ -344,27 +357,85 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   };
 
   // ─── CRUD ──────────────────────────────────────────────────
+  // All stage writes funnel through rpc_save_lead_workflow_stages, which
+  // takes the full desired stage list for the org in one call, reconciles
+  // creates/updates/soft-deletes against current DB state, and writes
+  // exactly one audited entity_audit_log row per save action.
+  interface StagePayload {
+    id: string | null;
+    name: string;
+    label: string;
+    color: string;
+    is_final: boolean;
+    is_conversion: boolean;
+    is_rejection: boolean;
+    default_status: string | null;
+    matching_statuses: string[];
+    reached_when: RuleGroup | null;
+    auto_advance: boolean;
+    qualification_hint: "none" | "mql" | "sql";
+    counts_as_qualified: boolean;
+    counts_as_negotiation: boolean;
+    counts_as_converted: boolean;
+    counts_as_lost: boolean;
+  }
+
+  const toStagePayload = (s: WorkflowStage): StagePayload => ({
+    id: s.id,
+    name: s.name,
+    label: s.label,
+    color: s.color,
+    is_final: s.is_final,
+    is_conversion: s.is_conversion,
+    is_rejection: s.is_rejection,
+    default_status: s.default_status ?? null,
+    matching_statuses: s.matching_statuses ?? [s.name],
+    reached_when: s.reached_when ?? null,
+    auto_advance: s.auto_advance ?? false,
+    qualification_hint: s.qualification_hint ?? "none",
+    counts_as_qualified: s.counts_as_qualified ?? false,
+    counts_as_negotiation: s.counts_as_negotiation ?? false,
+    counts_as_converted: s.counts_as_converted ?? false,
+    counts_as_lost: s.counts_as_lost ?? false,
+  });
+
+  const saveStages = async (payload: StagePayload[]) => {
+    const { data, error } = await (supabase as any).rpc("rpc_save_lead_workflow_stages", {
+      p_organization_id: companyId,
+      p_stages: payload,
+    });
+    return { data, error };
+  };
+
   const handleAddStage = async () => {
     if (!companyId || !newStage.name || !newStage.label) {
       toast({ title: "Preencha nome e label", variant: "destructive" });
       return;
     }
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    const nextOrder = stages.length > 0 ? Math.max(...stages.map(s => s.stage_order)) + 1 : 1;
 
-    const { error } = await (supabase.from("lead_workflow_stages") as any).insert({
-      organization_id: companyId,
-      name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
-      label: newStage.label,
-      color: newStage.color,
-      stage_order: nextOrder,
-      is_final: newStage.is_final,
-      is_conversion: newStage.is_conversion,
-      is_rejection: newStage.is_rejection,
-      default_status: newStage.default_status || null,
-      created_by: businessUserId,
-    });
+    const payload: StagePayload[] = [
+      ...stages.map(toStagePayload),
+      {
+        id: null,
+        name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
+        label: newStage.label,
+        color: newStage.color,
+        is_final: newStage.is_final,
+        is_conversion: newStage.is_conversion,
+        is_rejection: newStage.is_rejection,
+        default_status: newStage.default_status || null,
+        matching_statuses: [newStage.name.toLowerCase().replace(/\s+/g, '_')],
+        reached_when: null,
+        auto_advance: false,
+        qualification_hint: "none",
+        counts_as_qualified: false,
+        counts_as_negotiation: false,
+        counts_as_converted: newStage.is_conversion,
+        counts_as_lost: newStage.is_rejection,
+      },
+    ];
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao adicionar estágio", description: error.message, variant: "destructive" });
     } else {
@@ -379,17 +450,12 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   const handleUpdateStage = async () => {
     if (!editingStage) return;
-    const { error } = await (supabase
-      .from("lead_workflow_stages") as any)
-      .update({
-        label: editingStage.label,
-        color: editingStage.color,
-        is_final: editingStage.is_final,
-        is_conversion: editingStage.is_conversion,
-        is_rejection: editingStage.is_rejection,
-        default_status: (editingStage as any).default_status || null,
-      })
-      .eq("id", editingStage.id);
+
+    const payload: StagePayload[] = stages.map(s =>
+      s.id === editingStage.id ? toStagePayload(editingStage) : toStagePayload(s)
+    );
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
     } else {
@@ -416,10 +482,12 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       }
     }
 
-    const { error } = await (supabase
-      .from("lead_workflow_stages") as any)
-      .update({ is_active: false })
-      .eq("id", deletingStage.id);
+    // Omit the deleted stage from the payload -> RPC soft-deletes it.
+    const payload: StagePayload[] = stages
+      .filter(s => s.id !== deletingStage.id)
+      .map(toStagePayload);
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" });
     } else {
@@ -434,20 +502,30 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   const handleDuplicateStage = async (stage: WorkflowStage) => {
     if (!companyId) return;
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    const nextOrder = stages.length > 0 ? Math.max(...stages.map(s => s.stage_order)) + 1 : 1;
-    const { error } = await (supabase.from("lead_workflow_stages") as any).insert({
-      organization_id: companyId,
-      name: stage.name + "_copy",
-      label: stage.label + " (cópia)",
-      color: stage.color,
-      stage_order: nextOrder,
-      is_final: stage.is_final,
-      is_conversion: false,
-      is_rejection: false,
-      created_by: businessUserId,
-    });
+
+    const payload: StagePayload[] = [
+      ...stages.map(toStagePayload),
+      {
+        id: null,
+        name: stage.name + "_copy",
+        label: stage.label + " (cópia)",
+        color: stage.color,
+        is_final: stage.is_final,
+        is_conversion: false,
+        is_rejection: false,
+        default_status: null,
+        matching_statuses: [stage.name + "_copy"],
+        reached_when: stage.reached_when ?? null,
+        auto_advance: stage.auto_advance ?? false,
+        qualification_hint: stage.qualification_hint ?? "none",
+        counts_as_qualified: stage.counts_as_qualified ?? false,
+        counts_as_negotiation: stage.counts_as_negotiation ?? false,
+        counts_as_converted: false,
+        counts_as_lost: false,
+      },
+    ];
+
+    const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao duplicar", description: error.message, variant: "destructive" });
     } else {
@@ -455,6 +533,24 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       loadStages();
       onStagesUpdated?.();
     }
+  };
+
+  const handleRecompute = async () => {
+    if (!companyId) return;
+    setRecomputing(true);
+    const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
+      p_org: companyId,
+    });
+    setRecomputing(false);
+
+    if (error) {
+      toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
+      return;
+    }
+    const updatedCount = data?.[0]?.updated_count ?? 0;
+    toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
+    loadLeadCounts();
+    onStagesUpdated?.();
   };
 
   // ─── Drag & Drop ──────────────────────────────────────────
@@ -468,32 +564,36 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
     setStages(reordered);
 
-    for (let i = 0; i < reordered.length; i++) {
-      await (supabase
-        .from("lead_workflow_stages") as any)
-        .update({ stage_order: i + 1 })
-        .eq("id", reordered[i].id);
+    const payload: StagePayload[] = reordered.map(toStagePayload);
+    const { error } = await saveStages(payload);
+    if (error) {
+      toast({ title: "Erro ao reordenar", description: error.message, variant: "destructive" });
+      loadStages();
+      return;
     }
     onStagesUpdated?.();
   };
 
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
-    const businessUserId = await resolveCurrentBusinessUserId();
-    if (!businessUserId) throw new Error("Business user not resolved");
-    for (const stage of templateStages) {
-      await (supabase.from("lead_workflow_stages") as any).insert({
+
+    const payload: StagePayload[] = templateStages
+      .sort((a, b) => a.stage_order - b.stage_order)
+      .map(stage => ({
+        id: null,
         name: stage.name,
         label: stage.label,
         color: stage.color,
-        stage_order: stage.stage_order,
         is_final: stage.is_final,
         is_conversion: stage.is_conversion,
         is_rejection: stage.is_rejection,
-        default_status: stage.default_status,
-        organization_id: companyId,
-        created_by: businessUserId,
-      });
+        default_status: stage.default_status ?? null,
+      }));
+
+    const { error } = await saveStages(payload);
+    if (error) {
+      toast({ title: "Erro ao copiar template", description: error.message, variant: "destructive" });
+      return;
     }
     toast({ title: "Template copiado", description: "Pode agora personalizar os estágios." });
     loadStages();
@@ -542,7 +642,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
           </DialogHeader>
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="stages">Estágios</TabsTrigger>
               <TabsTrigger value="flow" className="gap-1.5">
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -555,6 +655,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               <TabsTrigger value="automations" className="gap-1.5">
                 <Zap className="w-3.5 h-3.5" />
                 Automações
+              </TabsTrigger>
+              <TabsTrigger value="qualification" className="gap-1.5">
+                <Target className="w-3.5 h-3.5" />
+                Qualificação
               </TabsTrigger>
             </TabsList>
 
@@ -643,6 +747,36 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   Adicionar Estágio
                 </Button>
               )}
+
+              {!isUsingTemplate && displayStages.length > 0 && (
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Regras de resolução de etapa</p>
+                      <p className="text-xs text-muted-foreground">
+                        Simule o impacto das regras configuradas acima antes de recalcular as leads existentes.
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={handleRecompute} disabled={recomputing}>
+                      {recomputing ? "A recalcular..." : "Guardar & Recalcular"}
+                    </Button>
+                  </div>
+                  <DryRunPanel
+                    companyId={companyId}
+                    stages={displayStages.map(s => ({
+                      id: s.id,
+                      label: s.label,
+                      stage_order: s.stage_order,
+                      reached_when: s.reached_when ?? null,
+                      matching_statuses: s.matching_statuses ?? [s.name],
+                      counts_as_qualified: s.counts_as_qualified ?? false,
+                      counts_as_negotiation: s.counts_as_negotiation ?? false,
+                      counts_as_converted: s.counts_as_converted ?? false,
+                      counts_as_lost: s.counts_as_lost ?? false,
+                    }))}
+                  />
+                </div>
+              )}
             </TabsContent>
 
             {/* ─── Flow Tab ────────────────────────────────── */}
@@ -653,6 +787,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
             {/* ─── Actions Tab ───────────────────────────────── */}
             <TabsContent value="actions" className="mt-4">
               <LeadStageActionsConfig stages={displayStages} companyId={companyId} />
+            </TabsContent>
+
+            {/* ─── Qualification Tab ─────────────────────────── */}
+            <TabsContent value="qualification" className="mt-4">
+              <QualificationRulesTab companyId={companyId} />
             </TabsContent>
 
             {/* ─── Automations Tab ───────────────────────────── */}
@@ -750,74 +889,202 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
       {/* ─── Edit Stage Dialog ──────────────────────────────── */}
       <Dialog open={!!editingStage} onOpenChange={() => setEditingStage(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Estágio</DialogTitle>
           </DialogHeader>
           {editingStage && (
-            <div className="space-y-4">
-              <div>
-                <Label>Nome (key)</Label>
-                <Input value={editingStage.name} disabled className="bg-muted" />
-              </div>
-              <div>
-                <Label>Label</Label>
-                <Input
-                  value={editingStage.label}
-                  onChange={e => setEditingStage({ ...editingStage, label: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label>Cor</Label>
-                <div className="flex gap-2 mt-2">
-                  {DEFAULT_COLORS.map(color => (
-                    <button
-                      key={color}
-                      className={`w-8 h-8 rounded-full border-2 transition-all ${
-                        editingStage.color === color ? 'border-foreground scale-110' : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: color }}
-                      onClick={() => setEditingStage({ ...editingStage, color })}
-                    />
-                  ))}
+            <Tabs value={editStageTab} onValueChange={setEditStageTab}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="general">Geral</TabsTrigger>
+                <TabsTrigger value="rules">Regras</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="general" className="space-y-4 mt-4">
+                <div>
+                  <Label>Nome (key)</Label>
+                  <Input value={editingStage.name} disabled className="bg-muted" />
+                </div>
+                <div>
+                  <Label>Label</Label>
                   <Input
-                    type="color"
-                    value={editingStage.color}
-                    onChange={e => setEditingStage({ ...editingStage, color: e.target.value })}
-                    className="w-8 h-8 p-0 border-0"
+                    value={editingStage.label}
+                    onChange={e => setEditingStage({ ...editingStage, label: e.target.value })}
                   />
                 </div>
-              </div>
-              <div>
-                <Label>Status automático da Lead</Label>
-                <Select value={(editingStage as any).default_status || "none"} onValueChange={v => setEditingStage({ ...editingStage, default_status: v === "none" ? null : v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Nenhum (sem alteração)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {LEAD_STATUS_OPTIONS.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                <div>
+                  <Label>Cor</Label>
+                  <div className="flex gap-2 mt-2">
+                    {DEFAULT_COLORS.map(color => (
+                      <button
+                        key={color}
+                        className={`w-8 h-8 rounded-full border-2 transition-all ${
+                          editingStage.color === color ? 'border-foreground scale-110' : 'border-transparent'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setEditingStage({ ...editingStage, color })}
+                      />
                     ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">Status que a lead recebe ao entrar neste estágio</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_final} onCheckedChange={v => setEditingStage({ ...editingStage, is_final: v })} />
-                  <Label>Final</Label>
+                    <Input
+                      type="color"
+                      value={editingStage.color}
+                      onChange={e => setEditingStage({ ...editingStage, color: e.target.value })}
+                      className="w-8 h-8 p-0 border-0"
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_conversion} onCheckedChange={v => setEditingStage({ ...editingStage, is_conversion: v, is_rejection: v ? false : editingStage.is_rejection })} />
-                  <Label>Win (Conversão)</Label>
+                <div>
+                  <Label>Status automático da Lead</Label>
+                  <Select value={(editingStage as any).default_status || "none"} onValueChange={v => setEditingStage({ ...editingStage, default_status: v === "none" ? null : v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Nenhum (sem alteração)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhum</SelectItem>
+                      {LEAD_STATUS_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">Status que a lead recebe ao entrar neste estágio</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
-                  <Label>Lost</Label>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_final} onCheckedChange={v => setEditingStage({ ...editingStage, is_final: v })} />
+                    <Label>Final</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_conversion} onCheckedChange={v => setEditingStage({ ...editingStage, is_conversion: v, is_rejection: v ? false : editingStage.is_rejection })} />
+                    <Label>Win (Conversão)</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
+                    <Label>Lost</Label>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </TabsContent>
+
+              <TabsContent value="rules" className="space-y-4 mt-4">
+                <div>
+                  <Label className="text-sm">Status literais associados</Label>
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {LEAD_STATUS_OPTIONS.map(opt => {
+                      const selected = (editingStage.matching_statuses ?? [editingStage.name]).includes(opt.value);
+                      return (
+                        <Badge
+                          key={opt.value}
+                          variant={selected ? "default" : "outline"}
+                          className="cursor-pointer text-xs"
+                          onClick={() => {
+                            const current = editingStage.matching_statuses ?? [editingStage.name];
+                            const next = selected ? current.filter(v => v !== opt.value) : [...current, opt.value];
+                            setEditingStage({ ...editingStage, matching_statuses: next });
+                          }}
+                        >
+                          {opt.label}
+                        </Badge>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Condições de entrada</Label>
+                  <div className="mt-2">
+                    <StageRulesEditor
+                      value={editingStage.reached_when ?? null}
+                      onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={editingStage.auto_advance ?? false}
+                    onCheckedChange={v => setEditingStage({ ...editingStage, auto_advance: v })}
+                  />
+                  <Label>Auto-avançar quando as condições forem cumpridas</Label>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Contabiliza como</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Cada estágio conta apenas para um bucket — ligar um desliga os outros.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-4 mt-2">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_qualified ?? false}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_qualified: v,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
+                      />
+                      <Label className="text-sm">Qualificado</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_negotiation ?? false}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_negotiation: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
+                      />
+                      <Label className="text-sm">Negociação</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_converted ?? false}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_converted: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_lost: v ? false : editingStage.counts_as_lost,
+                        })}
+                      />
+                      <Label className="text-sm">Convertido</Label>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={editingStage.counts_as_lost ?? false}
+                        onCheckedChange={v => setEditingStage({
+                          ...editingStage,
+                          counts_as_lost: v,
+                          counts_as_qualified: v ? false : editingStage.counts_as_qualified,
+                          counts_as_negotiation: v ? false : editingStage.counts_as_negotiation,
+                          counts_as_converted: v ? false : editingStage.counts_as_converted,
+                        })}
+                      />
+                      <Label className="text-sm">Perdido</Label>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="text-sm">Sugestão de qualificação</Label>
+                  <Select
+                    value={editingStage.qualification_hint ?? "none"}
+                    onValueChange={(v: "none" | "mql" | "sql") => setEditingStage({ ...editingStage, qualification_hint: v })}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhuma</SelectItem>
+                      <SelectItem value="mql">MQL</SelectItem>
+                      <SelectItem value="sql">SQL</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </TabsContent>
+            </Tabs>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingStage(null)}>Cancelar</Button>
@@ -939,7 +1206,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 flex-1 mb-2">
                       <p className="font-semibold text-purple-700 dark:text-purple-400 text-sm">✅ Lead Qualificada</p>
                       <p className="text-muted-foreground text-xs mt-1">
-                        A lead tem interesse real e capacidade de compra. O sistema pode <strong>converter automaticamente a lead em Contacto</strong>.
+                        A lead tem interesse real e capacidade de compra. Fica marcada como <strong>"Qualificada"</strong>, ainda sem orçamento ou proposta associados.
                       </p>
                     </div>
                   </div>
@@ -952,7 +1219,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3 flex-1 mb-2">
                       <p className="font-semibold text-orange-700 dark:text-orange-400 text-sm">📄 Proposta Enviada</p>
                       <p className="text-muted-foreground text-xs mt-1">
-                        Envia um orçamento ou proposta comercial ao cliente.
+                        Envia um orçamento ou proposta comercial à lead. O sistema associa o orçamento/proposta e o status muda automaticamente para <strong>"Em Negociação"</strong>.
                       </p>
                     </div>
                   </div>
@@ -965,7 +1232,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
                         <p className="font-semibold text-emerald-700 dark:text-emerald-400 text-sm">🎉 Ganho!</p>
                         <p className="text-muted-foreground text-xs mt-1">
-                          O negócio é fechado! O sistema converte automaticamente o <strong>Contacto em Cliente</strong>.
+                          O negócio é fechado! O sistema converte automaticamente a <strong>Lead em Cliente</strong>.
                         </p>
                         <div className="mt-2 flex items-center gap-1">
                           <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px]">Win</Badge>
@@ -987,16 +1254,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                 </div>
 
                 <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 mt-3">
-                  <p className="font-semibold text-sm mb-2">🔄 Conversões Automáticas do Sistema</p>
+                  <p className="font-semibold text-sm mb-2">🔄 Conversão Automática do Sistema</p>
                   <div className="space-y-1.5 text-xs text-muted-foreground">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="bg-blue-500/20 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded font-medium">Lead</span>
-                      <ArrowRight className="w-3 h-3" />
-                      <span className="bg-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded font-medium">Contacto</span>
-                      <span>— Quando a lead é qualificada</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="bg-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-0.5 rounded font-medium">Contacto</span>
+                      <span className="text-[10px] text-muted-foreground">(Qualificada / Em Negociação)</span>
                       <ArrowRight className="w-3 h-3" />
                       <span className="bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2 py-0.5 rounded font-medium">Cliente</span>
                       <span>— Quando o negócio é ganho</span>
@@ -1011,7 +1273,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   O que é um Workflow?
                 </h3>
                 <p className="text-muted-foreground leading-relaxed">
-                  Um <strong>workflow</strong> é o caminho que cada potencial cliente (lead) percorre desde o primeiro contacto até se tornar cliente.
+                  Um <strong>workflow</strong> é o caminho que cada potencial cliente (lead) percorre desde o primeiro contacto até se tornar cliente. A lead evolui pelos estados "Qualificada" e "Em Negociação" sem passar por nenhuma etapa intermédia de "Contacto" — é a mesma entidade do início ao fim.
                 </p>
               </div>
 

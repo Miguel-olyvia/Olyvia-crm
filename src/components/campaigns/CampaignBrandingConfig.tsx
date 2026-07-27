@@ -15,6 +15,8 @@ import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, Imag
 import { ColorPickerInput, SliderInput, ElementPreview, PaddingInput } from "./ElementStyleInput";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface CampaignBrandingConfigProps {
   open: boolean;
@@ -316,6 +318,7 @@ function ImageUrlField({ label, value, onChange }: { label: string; value: strin
 }
 
 export function CampaignBrandingConfig({ open, onOpenChange, campaignId, campaignName }: CampaignBrandingConfigProps) {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [branding, setBranding] = useState<BrandingData>(defaultBranding);
@@ -457,7 +460,8 @@ export function CampaignBrandingConfig({ open, onOpenChange, campaignId, campaig
         setBranding(defaultBranding);
       }
     } catch (error: any) {
-      toast.error("Erro ao carregar configurações: " + error.message);
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(`${t('campaigns.branding.toast.loadError')}: ${description}`);
     } finally {
       setLoading(false);
     }
@@ -622,11 +626,12 @@ export function CampaignBrandingConfig({ open, onOpenChange, campaignId, campaig
         setExistingId(data.id);
       }
 
-      toast.success("Configurações guardadas com sucesso!");
+      toast.success(t('campaigns.branding.toast.saveSuccess'));
       onOpenChange(false);
     } catch (error: any) {
       console.error("Save error:", error);
-      toast.error("Erro ao guardar: " + error.message);
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(`${t('campaigns.branding.toast.saveError')}: ${description}`);
     } finally {
       setSaving(false);
     }

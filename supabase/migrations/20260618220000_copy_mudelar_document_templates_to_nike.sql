@@ -14,14 +14,19 @@ DECLARE
   v_contract_count integer;
 BEGIN
   SELECT id
-    INTO STRICT v_source_org_id
+    INTO v_source_org_id
   FROM public.anew_organizations
   WHERE lower(btrim(name)) = 'mudelar';
 
   SELECT id
-    INTO STRICT v_target_org_id
+    INTO v_target_org_id
   FROM public.anew_organizations
   WHERE lower(btrim(name)) = 'nike';
+
+  IF v_source_org_id IS NULL OR v_target_org_id IS NULL THEN
+    RAISE NOTICE 'Skipping Mudelar -> nike template copy: source and/or target organization not found in this database.';
+    RETURN;
+  END IF;
 
   SELECT m.user_id
     INTO v_target_creator_id

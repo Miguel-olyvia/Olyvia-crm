@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+﻿import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
+import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { searchEntityIds } from "@/lib/clientSearch";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -68,11 +70,11 @@ import { format, startOfDay, endOfDay, differenceInDays, parseISO, isPast } from
 import { pt } from "date-fns/locale";
 import ProposalItemsEditor, { ProposalItem, calculateProposalItemsTotal } from "@/components/proposals/ProposalItemsEditor";
 import { Checkbox } from "@/components/ui/checkbox";
-import { BulkActionsBar } from "@/components/BulkActionsBar";
 
 import { SendProposalDialog } from "@/components/proposals/SendProposalDialog";
 import { ProposalSendHistory } from "@/components/proposals/ProposalSendHistory";
 import { ProposalDetailsDialog } from "@/components/proposals/ProposalDetailsDialog";
+import { ProposalRejectReasonDialog, type ProposalRejectionDecision } from "@/components/proposals/ProposalRejectReasonDialog";
 import { ProposalWorkflowConfig } from "@/components/proposals/ProposalWorkflowConfig";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
@@ -90,6 +92,8 @@ import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote, calcInline
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sparkles } from "lucide-react";
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
+import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 
 interface WorkflowStage {
   id: string;
@@ -124,6 +128,7 @@ interface Proposal {
   accepted_at?: string | null;
   rejected_at?: string | null;
   rejection_reason?: string | null;
+  sent_at?: string | null;
 }
 
 interface Deal {
@@ -165,15 +170,20 @@ const Proposals = () => {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
+  const [rejectReasonDialogOpen, setRejectReasonDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
   const { t } = useTranslation();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
-  const { comercialUsers } = useComercialUsers(activeCompany?.id || null);
-  const { isSystemAdmin } = usePermissions();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("proposals.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   const { alerts: proposalAlerts, dismissAlert: dismissProposalAlert } = useModuleAlerts('proposal', activeCompany?.id);
   const alertSettings = useAlertSettings();
 
@@ -233,7 +243,7 @@ const Proposals = () => {
       setSearchEntityIdSet(new Set(ids));
     })();
     return () => { cancelled = true; };
-  }, [debouncedSearch]);
+  }, [debouncedSearch, toast]);
   const [statusFilter, setStatusFilter] = useState<string>(stageFromUrl || "all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -288,13 +298,19 @@ const Proposals = () => {
   
   const [visualEditorProposalId, setVisualEditorProposalId] = useState<string | null>(null);
 
-  // Auto-fill value field from inline quotes + selected quotes total
+  // Auto-fill value field from inline quotes + selected quotes total.
+  // Compares the computed total against the current formData.value before writing
+  // to avoid unnecessary re-renders when selectedQuotes' reference changes but
+  // the actual total is unchanged.
   useEffect(() => {
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
     const inlineTotal = inlineQuotes.reduce((sum, q) => sum + calcInlineQuoteTotal(q), 0);
     const total = quotesTotal + inlineTotal;
     if (total > 0) {
-      setFormData(prev => ({ ...prev, value: total.toFixed(2) }));
+      setFormData(prev => {
+        const next = total.toFixed(2);
+        return prev.value === next ? prev : { ...prev, value: next };
+      });
     }
   }, [inlineQuotes, selectedQuotes]);
 
@@ -483,11 +499,23 @@ const Proposals = () => {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("");
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkStatusChanging, setIsBulkStatusChanging] = useState(false);
+  const [duplicatingProposalId, setDuplicatingProposalId] = useState<string | null>(null);
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => loadData() });
 
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendProposal, setSendProposal] = useState<any>(null);
-  
+
+  const [callDialogOpen, setCallDialogOpen] = useState(false);
+  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string }>({ entityId: "", name: "" });
+
+  const [whatsAppDialogOpen, setWhatsAppDialogOpen] = useState(false);
+  const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
+
+  const [bulkEmailSending, setBulkEmailSending] = useState(false);
+  const [bulkPdfExporting, setBulkPdfExporting] = useState(false);
+
   const [sendHistoryOpen, setSendHistoryOpen] = useState(false);
   const [sendHistoryProposalId, setSendHistoryProposalId] = useState<string | null>(null);
   const [sendHistoryProposalTitle, setSendHistoryProposalTitle] = useState<string>("");
@@ -504,13 +532,16 @@ const Proposals = () => {
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
+  const [dealEntityIds, setDealEntityIds] = useState<Record<string, string>>({}); // deal_id -> entity_id, for proposals without a direct entity_id
   const submitLockRef = useRef(false);
+  const acceptProposalLockRef = useRef(false);
+  const [isAcceptingProposal, setIsAcceptingProposal] = useState(false);
 
   useEffect(() => {
-    if (!permissionsLoading && activeCompany && !hasPermission("proposals.view")) {
+    if (!permissionsLoading && activeCompany && !isSystemAdmin && !hasPermission("proposals.view")) {
       navigate("/dashboard");
     }
-  }, [permissionsLoading, hasPermission, navigate, activeCompany]);
+  }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
   const loadWorkflowStages = useCallback(async () => {
     const { data: orgStages } = await (supabase
@@ -660,7 +691,8 @@ const Proposals = () => {
         const proposalIds = proposalsData.map(p => p.id);
         const { data: links } = await (supabase.from("pipeline_links") as any)
           .select("id, proposal_id, deal_id, quote_id, contract_id, status")
-          .in("proposal_id", proposalIds);
+          .in("proposal_id", proposalIds)
+          .eq("organization_id", activeCompany?.id);
         
         const linksMap: Record<string, any> = {};
         (links || []).forEach((l: any) => {
@@ -672,6 +704,7 @@ const Proposals = () => {
         const { data: quotesLinked } = await (supabase.from("quotes") as any)
           .select("proposal_id")
           .in("proposal_id", proposalIds)
+          .eq("organization_id", activeCompany?.id)
           .not("proposal_id", "is", null);
         const quotesSet = new Set<string>();
         (quotesLinked || []).forEach((q: any) => {
@@ -697,7 +730,7 @@ const Proposals = () => {
         const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
         
         // Fetch deal entity_ids for proposals without entity_id
-        let dealEntityMap: Record<string, string> = {};
+        const dealEntityMap: Record<string, string> = {};
         if (dealIds.length > 0) {
           const { data: dealEntities } = await supabase
             .from("deals")
@@ -739,10 +772,12 @@ const Proposals = () => {
           setEntityNames(nameMap);
           setEntityEmails(emailMap);
           setEntityPhones(phoneMap);
+          setDealEntityIds(dealEntityMap);
         } else {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
+          setDealEntityIds({});
         }
       }
 
@@ -768,7 +803,6 @@ const Proposals = () => {
     t,
     activeCompany?.id,
     isSystemAdmin,
-    companyUserType,
     permissionsLoading,
     scopeLoading,
     getPermissionScope,
@@ -781,14 +815,20 @@ const Proposals = () => {
     }
   }, [loadData, permissionsLoading, scopeLoading]);
 
+  const handleViewDetails = useCallback((proposal: Proposal) => {
+    setSelectedProposal(proposal);
+    setDetailsOpen(true);
+  }, []);
+
   useEffect(() => {
     const openId = searchParams.get("open");
     if (!openId || selectedProposal) return;
 
+    let cancelled = false;
     const openFromQuery = async () => {
       const found = proposals.find(p => p.id === openId);
       if (found) {
-        handleViewDetails(found);
+        if (!cancelled) handleViewDetails(found);
         return;
       }
 
@@ -796,15 +836,17 @@ const Proposals = () => {
         .from("proposals")
         .select("*")
         .eq("id", openId)
+        .eq("organization_id", activeCompany?.id)
         .maybeSingle();
 
-      if (fetchedProposal) {
+      if (!cancelled && fetchedProposal) {
         handleViewDetails(fetchedProposal as Proposal);
       }
     };
 
     void openFromQuery();
-  }, [searchParams, proposals, selectedProposal]);
+    return () => { cancelled = true; };
+  }, [searchParams, proposals, selectedProposal, handleViewDetails, activeCompany?.id]);
 
   useEffect(() => {
     if (workflowStages.length > 0 && !formData.stage_id) {
@@ -812,21 +854,27 @@ const Proposals = () => {
     }
   }, [workflowStages, formData.stage_id]);
 
-  // Resolve commercial names
+  // Resolve commercial names.
+  // comercialNamesMap is included in deps so the effect re-evaluates which IDs
+  // are still missing after each resolution batch.  The cancelled flag prevents
+  // a stale async call from overwriting a later result.
   useEffect(() => {
     const ids = new Set<string>();
     proposals.forEach(p => { const a = (p as any).assigned_to; if (a) ids.add(a); });
     const missing = Array.from(ids).filter(id => !comercialNamesMap[id]);
     if (missing.length === 0) return;
+    let cancelled = false;
     (async () => {
       const { data } = await supabase.from("anew_users").select("id, name").in("id", missing);
+      if (cancelled) return;
       if (data) setComercialNamesMap(prev => {
         const next = { ...prev };
         (data as any[]).forEach(u => { next[u.id] = u.name || "Utilizador"; });
         return next;
       });
     })();
-  }, [proposals]);
+    return () => { cancelled = true; };
+  }, [proposals, comercialNamesMap]);
 
   const handleEdit = async (proposal: Proposal) => {
     setEditingId(proposal.id);
@@ -862,7 +910,7 @@ const Proposals = () => {
         ]);
         if (entRes.data) {
           setSelectedEntity({
-            type: "contact",
+            type: entRes.data.type === "client" ? "client" : "lead",
             id: propEntityId,
             entityId: propEntityId,
             name: entRes.data.display_name,
@@ -877,49 +925,44 @@ const Proposals = () => {
       }
     }
     setDealSearch("");
-    
-    const { data: quotesData } = await supabase
-      .from("quotes")
-      .select("id, quote_number, total, estado")
-      .eq("proposal_id", proposal.id);
-    
-    if (quotesData) {
-      setSelectedQuotes(quotesData.map(q => ({
+    setQuoteSearch("");
+
+    // Fetch quotes and proposal items in parallel — no data dependency between them.
+    const [quotesRes, itemsRes] = await Promise.all([
+      supabase
+        .from("quotes")
+        .select("id, quote_number, total, estado")
+        .eq("proposal_id", proposal.id)
+        .eq("organization_id", activeCompany?.id),
+      supabase
+        .from("proposal_items")
+        .select("id, description, quantity, unit_price, vat_rate, sort_order")
+        .eq("proposal_id", proposal.id)
+        .eq("organization_id", activeCompany?.id)
+        .order("sort_order"),
+    ]);
+
+    setSelectedQuotes(
+      (quotesRes.data || []).map(q => ({
         id: q.id,
         quote_number: q.quote_number,
         total: q.total,
         estado: q.estado,
-      })));
-    } else {
-      setSelectedQuotes([]);
-    }
-    setQuoteSearch("");
-    
-    const { data: itemsData } = await supabase
-      .from("proposal_items")
-      .select("id, description, quantity, unit_price, vat_rate, sort_order")
-      .eq("proposal_id", proposal.id)
-      .order("sort_order");
-    
-    if (itemsData) {
-      setProposalItems(itemsData.map(item => ({
+      }))
+    );
+
+    setProposalItems(
+      (itemsRes.data || []).map(item => ({
         id: item.id,
         description: item.description,
         quantity: Number(item.quantity),
         unit_price: Number(item.unit_price),
         vat_rate: Number(item.vat_rate),
         sort_order: item.sort_order || 0,
-      })));
-    } else {
-      setProposalItems([]);
-    }
-    
-    setOpen(true);
-  };
+      }))
+    );
 
-  const handleViewDetails = (proposal: Proposal) => {
-    setSelectedProposal(proposal);
-    setDetailsOpen(true);
+    setOpen(true);
   };
 
   const openProposalById = async (proposalId?: string | null) => {
@@ -935,6 +978,7 @@ const Proposals = () => {
       .from("proposals")
       .select("*")
       .eq("id", proposalId)
+      .eq("organization_id", activeCompany?.id)
       .maybeSingle();
 
     if (fetchedProposal) {
@@ -950,6 +994,9 @@ const Proposals = () => {
   const handleDeleteConfirm = async () => {
     if (!deletingId) return;
     try {
+      const businessUserIdDel = await resolveCurrentBusinessUserId();
+      if (!businessUserIdDel) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdDel, p_source: 'ui' });
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: deletingId });
       if (error) throw error;
       toast({ title: t('proposals.toast.deleteSuccess'), description: t('proposals.toast.movedToTrashDesc') });
@@ -979,29 +1026,39 @@ const Proposals = () => {
   };
 
   const handleBulkDelete = async () => {
+    setIsBulkDeleting(true);
     try {
-      const results = await Promise.all(
-        selectedIds.map(id => (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: id }))
-      );
-      const firstError = results.find(r => r.error)?.error;
-      if (firstError) throw firstError;
+      const businessUserIdBulkDel = await resolveCurrentBusinessUserId();
+      if (!businessUserIdBulkDel) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      for (const id of selectedIds) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkDel, p_source: 'ui' });
+        const { error: delErr } = await (supabase as any).rpc('soft_delete_business_entity', { p_kind: 'proposal', p_id: id });
+        if (delErr) throw delErr;
+      }
       toast({ title: t('common.deleteSuccess'), description: `${selectedIds.length} propostas movidas para o lixo.` });
       setSelectedIds([]);
       setBulkDeleteDialogOpen(false);
       loadData();
     } catch (error: any) {
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
   const handleBulkStatusChange = async () => {
     if (!bulkNewStatus) return;
+    if (!activeCompany?.id) return;
+    setIsBulkStatusChanging(true);
     try {
-      const stage = workflowStages.find(s => s.id === bulkNewStatus);
+      const businessUserIdBulkSt = await resolveCurrentBusinessUserId();
+      if (!businessUserIdBulkSt) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdBulkSt, p_source: 'ui' });
       const { error } = await supabase
         .from("proposals")
-        .update({ stage_id: bulkNewStatus, status: stage?.name || 'draft' })
-        .in("id", selectedIds);
+        .update({ stage_id: bulkNewStatus })
+        .in("id", selectedIds)
+        .eq("organization_id", activeCompany.id);
       if (error) throw error;
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
       setSelectedIds([]);
@@ -1010,10 +1067,93 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkStatusChanging(false);
+    }
+  };
+
+  // Bulk email: reuses the same send-proposal-email edge function as
+  // SendProposalDialog (single-row send), applied sequentially to every
+  // selected proposal that has a resolvable recipient email. Kept simple on
+  // purpose — no per-proposal message editing UI for the bulk case.
+  const handleBulkSendEmail = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkEmailSending(true);
+    let successCount = 0;
+    let skipCount = 0;
+    let failCount = 0;
+    try {
+      for (const id of selectedIds) {
+        const proposal = proposals.find(p => p.id === id);
+        if (!proposal) { failCount++; continue; }
+        const directEntityId = (proposal as any).entity_id as string | null;
+        const eid = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null);
+        const email = (eid ? entityEmails[eid] : entityEmails[`deal:${id}`]) || "";
+        const name = (eid ? entityNames[eid] : entityNames[`deal:${id}`]) || "";
+        if (!email) { skipCount++; continue; }
+        try {
+          const { error } = await supabase.functions.invoke("send-proposal-email", {
+            body: {
+              proposal_id: id,
+              recipient_email: email,
+              recipient_name: name,
+              recipients: [email],
+              cc: [],
+              subject: `Proposta ${proposal.title}`,
+              message: `Olá${name ? ` ${name}` : ""},\n\nSegue a proposta "${proposal.title}" para a sua análise.\n\nCumprimentos`,
+            },
+          });
+          if (error) throw error;
+          successCount++;
+        } catch (sendError) {
+          console.error(`Error sending proposal ${id}:`, sendError);
+          failCount++;
+        }
+      }
+      toast({
+        title: "Envio em lote concluído",
+        description: `${successCount} enviada(s), ${skipCount} sem email, ${failCount} com erro.`,
+        variant: failCount > 0 ? "destructive" : undefined,
+      });
+      setSelectedIds([]);
+      loadData();
+    } finally {
+      setBulkEmailSending(false);
+    }
+  };
+
+  // Bulk PDF export: reuses generateProposalPdfBlob (same as the row-level
+  // "Descarregar PDF" dropdown item) and triggers a browser download per
+  // selected proposal, sequentially to avoid overwhelming the download manager.
+  const handleBulkExportPdf = async () => {
+    if (selectedIds.length === 0) return;
+    setBulkPdfExporting(true);
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      toast({ title: "A gerar PDFs…", description: "Pode demorar alguns segundos." });
+      for (const id of selectedIds) {
+        try {
+          const { blob, fileName } = await generateProposalPdfBlob(id);
+          downloadBlob(blob, fileName);
+          successCount++;
+        } catch (exportError) {
+          console.error(`Error exporting PDF for proposal ${id}:`, exportError);
+          failCount++;
+        }
+      }
+      toast({
+        title: "Exportação concluída",
+        description: `${successCount} PDF(s) gerado(s)${failCount > 0 ? `, ${failCount} com erro` : ""}.`,
+        variant: failCount > 0 ? "destructive" : undefined,
+      });
+    } finally {
+      setBulkPdfExporting(false);
     }
   };
 
   const handleDuplicate = async (proposalId: string) => {
+    setDuplicatingProposalId(proposalId);
     try {
       const { data, error } = await supabase.rpc('duplicate_proposal', {
         source_proposal_id: proposalId,
@@ -1024,8 +1164,29 @@ const Proposals = () => {
       loadData();
     } catch (error: any) {
       toast({ title: t('proposals.toast.duplicateError'), description: error.message, variant: "destructive" });
+    } finally {
+      setDuplicatingProposalId(null);
     }
   };
+
+  // Recursive top-ancestor walk via the shared resolveRootOrgIdLogic helper (same
+  // as AnewLeads.tsx) — replaces the previous one-hop activeCompany.parent_id,
+  // which under-resolved root_organization_id for orgs more than one level below
+  // the true root. NOTE: QuoteBuilder.tsx/ClientContracts.tsx compute the same
+  // concept via their own inline walk that filters relationship_type to
+  // ('PARENT_OF','parent_of','parent_child') and has no cycle guard — unlike
+  // this unfiltered, cycle-capped version. The three implementations can
+  // disagree on edge cases; unifying them is a tracked follow-up, not done here.
+  const resolveRootOrgId = useCallback(async (orgId: string): Promise<string> => {
+    return resolveRootOrgIdLogic(orgId, async (childOrgId) => {
+      const { data } = await supabase
+        .from("anew_hierarchy")
+        .select("parent_org_id")
+        .eq("child_org_id", childOrgId)
+        .maybeSingle();
+      return data?.parent_org_id ?? null;
+    });
+  }, []);
 
   /**
    * Save proposal as draft (if new) and open the full Quote Builder pre-linked.
@@ -1067,6 +1228,7 @@ const Proposals = () => {
       const templateId = formData.template_id || defaultTemplate?.id || null;
       const probability = selectedDeal?.probability ?? 50;
       const proposalEntityId = !formData.deal_id ? (selectedEntity?.entityId || null) : (selectedDeal?.entity_id || null);
+      const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
         title: formData.title,
@@ -1080,11 +1242,13 @@ const Proposals = () => {
         stage_id: formData.stage_id || null,
         status: stage?.name || 'draft',
         organization_id: activeCompany.id,
-        root_organization_id: (activeCompany as any).parent_id || activeCompany.id,
+        root_organization_id: rootOrgId,
         template_id: templateId,
         assigned_to: formData.assigned_to || null,
       };
 
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
         .insert({ ...proposalData, created_by: businessUserId })
@@ -1178,6 +1342,7 @@ const Proposals = () => {
 
       const defaultTemplate = proposalTemplates.find(t => t.is_default);
       const templateId = formData.template_id || defaultTemplate?.id || null;
+      const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
         title: formData.title,
@@ -1191,12 +1356,15 @@ const Proposals = () => {
         stage_id: formData.stage_id || null,
         status: stage?.name || 'draft',
         organization_id: activeCompany.id,
-        root_organization_id: (activeCompany as any).parent_id || activeCompany.id,
+        root_organization_id: rootOrgId,
         template_id: templateId,
         assigned_to: formData.assigned_to || null,
       };
 
       let savedProposalId: string | null = null;
+      // Hoisted here so it is accessible both inside the if (savedProposalId) block
+      // and in the post-block check below — avoids the previous @ts-ignore workaround.
+      const skippedQuotes: Array<{ title: string; reason: string }> = [];
 
       // Resolve business user id up-front: required for inline quote inserts in
       // both edit and create paths (identity boundary — quotes.created_by is a
@@ -1207,14 +1375,100 @@ const Proposals = () => {
         return;
       }
 
+      // Pre-compute inline quotes payload up-front — needed for the RPC call either way
+      // (create or update). Preserves the exact same skip logic: quotes whose lines are
+      // all qt <= 0 are dropped and reported to the user via skippedQuotes/toast below.
+      const inlineQuotesPayload: any[] = [];
+      for (const iq of inlineQuotes) {
+        const validLines = (iq.lines || []).filter(l => l.qt > 0);
+        if (validLines.length === 0) {
+          const reason = (iq.lines || []).length === 0
+            ? "sem linhas"
+            : "todas as linhas com quantidade 0";
+          console.warn('[Proposals.submit] skipping inline quote', { title: iq.title, reason, totalLines: (iq.lines || []).length });
+          skippedQuotes.push({ title: iq.title || "(sem título)", reason });
+          continue;
+        }
+
+        const linesToInsert = validLines.map(l => {
+          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
+          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
+          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
+          const precoSemIvaBase = unitPrice * l.qt;
+          const lineDiscount = l.discount_percent || 0;
+          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const ivaValor = precoSemIva * (l.iva_percent / 100);
+          const totalComIva = precoSemIva + ivaValor;
+          const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
+
+          return {
+            catalog_item_id: l.catalog_item_id || null,
+            product_id: l.product_id || null,
+            service_id: l.service_id || null,
+            selected_attributes: l.selected_attributes || {},
+            descricao_snapshot: l.descricao_snapshot,
+            qt: l.qt,
+            custo_material_unit: l.custo_material_unit,
+            custo_mao_obra_unit: l.custo_mao_obra_unit,
+            margem_percent: l.margem_percent,
+            iva_percent: l.iva_percent,
+            int_percent: l.int_percent,
+            discount_percent: lineDiscount,
+            total_sem_iva: precoSemIva,
+            total_com_iva: totalComIva,
+            total_com_desconto: totalComDesconto,
+            ordem: l.ordem,
+            section_name: l.section_name || "Geral",
+            unidade: l.unidade || null,
+            item_description: l.item_description || null,
+            cost_price: l.cost_price || 0,
+          };
+        });
+
+        inlineQuotesPayload.push({
+          title: iq.title || null,
+          obra_notas: iq.obra_notas || null,
+          modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
+          desconto_global_percent: iq.desconto_global_percent,
+          validade_dias: iq.validade_dias,
+          iva_rate: iq.iva_rate,
+          client_notes: iq.client_notes || null,
+          conditions: iq.conditions || null,
+          lines: linesToInsert,
+        });
+      }
+
+      const selectedQuoteIds = selectedQuotes.map(q => q.id);
+      const proposalItemsPayload = proposalItems.map((item, index) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        vat_rate: item.vat_rate,
+        sort_order: index,
+      }));
+
+      // Same cascade used for the inline-quote entity below — passed explicitly to the RPC
+      // because it is NOT the same cascade as proposals.entity_id.
+      const quoteEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || null;
+
+      let savedProposal: any = null;
       if (editingId) {
-        const { error } = await supabase.from("proposals").update(proposalData).eq("id", editingId);
+        const { data, error } = await supabase.rpc('rpc_update_proposal', {
+          p_id: editingId,
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = editingId;
 
+        let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
           try {
-            await supabase.functions.invoke('execute-workflow', {
+            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
               body: {
                 source_entity: 'proposal',
                 entity_id: editingId,
@@ -1224,182 +1478,42 @@ const Proposals = () => {
                 triggered_by: user.id,
               }
             });
+            if (workflowError) throw workflowError;
           } catch (workflowError) {
             console.error("Workflow execution error:", workflowError);
+            workflowFailed = true;
           }
         }
-        toast({ title: t('proposals.toast.updateSuccess') });
+        toast({
+          title: t('proposals.toast.updateSuccess'),
+          description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+        });
       } else {
-        const { data, error } = await supabase.from("proposals").insert({
-          ...proposalData,
-          created_by: businessUserId,
-        }).select("id").single();
+        const { data, error } = await supabase.rpc('rpc_create_proposal', {
+          p_proposal_data: proposalData,
+          p_selected_quote_ids: selectedQuoteIds,
+          p_inline_quotes: inlineQuotesPayload,
+          p_proposal_items: proposalItemsPayload,
+          p_quote_entity_id: quoteEntityId,
+        });
         if (error) throw error;
+        savedProposal = data;
         savedProposalId = data.id;
         toast({ title: t('proposals.toast.createSuccess') });
       }
 
       if (savedProposalId) {
-        const proposalEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || proposalData.entity_id || null;
+        const proposalEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || savedProposal?.entity_id || proposalData.entity_id || null;
         await resolveSendProposalAlerts(proposalEntityId, activeCompany.id);
-
-        const selectedQuoteIds = selectedQuotes.map(q => q.id);
-        if (selectedQuoteIds.length > 0) {
-          const { error: unlinkError } = await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId).not("id", "in", `(${selectedQuoteIds.join(",")})`);
-          if (unlinkError) console.error("Error unlinking quotes:", unlinkError);
-          const { error: linkError } = await supabase.from("quotes").update({ proposal_id: savedProposalId }).in("id", selectedQuoteIds);
-          if (linkError) console.error("Error linking quotes:", linkError);
-        } else {
-          await supabase.from("quotes").update({ proposal_id: null }).eq("proposal_id", savedProposalId);
-        }
-
-        // Save inline quotes
-        console.log('[Proposals.submit] inlineQuotes snapshot', {
-          proposalId: savedProposalId,
-          count: inlineQuotes.length,
-          quotes: inlineQuotes.map(q => ({
-            title: q.title,
-            totalLines: q.lines?.length ?? 0,
-            validLines: (q.lines || []).filter(l => l.qt > 0).length,
-            linesPreview: (q.lines || []).map(l => ({
-              qt: l.qt,
-              desc: l.descricao_snapshot?.slice(0, 40),
-            })),
-          })),
-        });
-
-        const skippedQuotes: Array<{ title: string; reason: string }> = [];
-
-        for (const iq of inlineQuotes) {
-          // Pre-compute valid lines and skip the quote entirely if there is nothing to persist.
-          const validLines = (iq.lines || []).filter(l => l.qt > 0);
-          if (validLines.length === 0) {
-            const reason = (iq.lines || []).length === 0
-              ? "sem linhas"
-              : "todas as linhas com quantidade 0";
-            console.warn('[Proposals.submit] skipping inline quote', { title: iq.title, reason, totalLines: (iq.lines || []).length });
-            skippedQuotes.push({ title: iq.title || "(sem título)", reason });
-            continue;
-          }
-
-          const dealOrgId = selectedDeal ? (selectedDeal as any).organization_id : activeCompany?.id;
-          const quoteEntityId = selectedDeal?.entity_id || selectedEntity?.entityId || null;
-          const quoteData = {
-            deal_id: formData.deal_id || null,
-            entity_id: quoteEntityId,
-            organization_id: dealOrgId || activeCompany?.id || null,
-            root_organization_id: (activeCompany as any)?.parent_id || activeCompany?.id || null,
-            title: iq.title || null,
-            obra_notas: iq.obra_notas || null,
-            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-            desconto_global_percent: iq.desconto_global_percent,
-            estado: "finalizado",
-            validade_dias: iq.validade_dias,
-            iva_rate: iq.iva_rate,
-            client_notes: iq.client_notes || null,
-            conditions: iq.conditions || null,
-            proposal_id: savedProposalId,
-            created_by: businessUserId,
-          };
-
-          const linesToInsert = validLines.map(l => {
-            const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-            const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-            const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-            const precoSemIvaBase = unitPrice * l.qt;
-            const lineDiscount = l.discount_percent || 0;
-            const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
-            const ivaValor = precoSemIva * (l.iva_percent / 100);
-            const totalComIva = precoSemIva + ivaValor;
-            const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
-
-            return {
-              quote_id: "" /* set below */,
-              catalog_item_id: l.catalog_item_id || null,
-              product_id: l.product_id || null,
-              service_id: l.service_id || null,
-              selected_attributes: l.selected_attributes || {},
-              categoria: "",
-              descricao_snapshot: l.descricao_snapshot,
-              qt: l.qt,
-              custo_material_unit: l.custo_material_unit,
-              custo_mao_obra_unit: l.custo_mao_obra_unit,
-              margem_percent: l.margem_percent,
-              iva_percent: l.iva_percent,
-              int_percent: l.int_percent,
-              discount_percent: lineDiscount,
-              total_sem_iva: precoSemIva,
-              total_com_iva: totalComIva,
-              total_com_desconto: totalComDesconto,
-              ordem: l.ordem,
-              section_name: l.section_name || "Geral",
-              unidade: l.unidade || null,
-              item_description: l.item_description || null,
-              cost_price: l.cost_price || 0,
-            };
-          });
-
-          // Validate FK references: drop product_id/service_id/catalog_item_id that don't exist
-          const candidateProductIds = [...new Set(linesToInsert.map(l => l.product_id).filter(Boolean) as string[])];
-          const candidateServiceIds = [...new Set(linesToInsert.map(l => l.service_id).filter(Boolean) as string[])];
-          const candidateCatalogIds = [...new Set(linesToInsert.map(l => l.catalog_item_id).filter(Boolean) as string[])];
-
-          const [existingProductsRes, existingServicesRes, existingCatalogRes] = await Promise.all([
-            candidateProductIds.length > 0 ? supabase.from("products").select("id").in("id", candidateProductIds) : Promise.resolve({ data: [] as any[] }),
-            candidateServiceIds.length > 0 ? supabase.from("services").select("id").in("id", candidateServiceIds) : Promise.resolve({ data: [] as any[] }),
-            candidateCatalogIds.length > 0 ? supabase.from("catalog_items").select("id").in("id", candidateCatalogIds) : Promise.resolve({ data: [] as any[] }),
-          ]);
-          const validProductIds = new Set((existingProductsRes.data || []).map((r: any) => r.id));
-          const validServiceIds = new Set((existingServicesRes.data || []).map((r: any) => r.id));
-          const validCatalogIds = new Set((existingCatalogRes.data || []).map((r: any) => r.id));
-
-          const sanitizedLines = linesToInsert.map(l => ({
-            ...l,
-            product_id: l.product_id && validProductIds.has(l.product_id) ? l.product_id : null,
-            service_id: l.service_id && validServiceIds.has(l.service_id) ? l.service_id : null,
-            catalog_item_id: l.catalog_item_id && validCatalogIds.has(l.catalog_item_id) ? l.catalog_item_id : null,
-          }));
-
-          const totalSemIva = sanitizedLines.reduce((s, l) => s + l.total_sem_iva, 0);
-          const grandTotal = sanitizedLines.reduce((s, l) => s + l.total_com_desconto, 0);
-
-          const { data: newQuote, error: qError } = await (supabase.from("quotes") as any)
-            .insert({ ...quoteData, subtotal: totalSemIva, total: grandTotal })
-            .select("id")
-            .single();
-
-          if (qError) throw qError;
-
-          const finalLines = sanitizedLines.map(l => ({ ...l, quote_id: newQuote.id }));
-          const { error: linesError } = await supabase.from("quote_lines").insert(finalLines);
-          if (linesError) throw linesError;
-        }
-        await supabase.from("proposal_items").delete().eq("proposal_id", savedProposalId);
-        if (proposalItems.length > 0) {
-          await supabase.from("proposal_items").insert(
-            proposalItems.map((item, index) => ({
-              proposal_id: savedProposalId,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              vat_rate: item.vat_rate,
-              sort_order: index,
-            }))
-          );
-        }
       }
 
       // If any inline quote was skipped, warn the user explicitly and keep the dialog open
       // so they can fix the offending lines and re-submit.
-      // (skippedQuotes only exists in the create/edit branch above; guard with a local check.)
-      const lateSkipped: Array<{ title: string; reason: string }> =
-        // @ts-ignore - skippedQuotes is declared in the inner block scope above
-        typeof skippedQuotes !== "undefined" ? skippedQuotes : [];
-      if (lateSkipped.length > 0) {
-        const list = lateSkipped.map(s => `• "${s.title}" — ${s.reason}`).join("\n");
-        console.warn('[Proposals.submit] some inline quotes were not persisted', lateSkipped);
+      if (skippedQuotes.length > 0) {
+        const list = skippedQuotes.map(s => `• "${s.title}" — ${s.reason}`).join("\n");
+        console.warn('[Proposals.submit] some inline quotes were not persisted', skippedQuotes);
         toast({
-          title: `${lateSkipped.length} orçamento(s) não gravado(s)`,
+          title: `${skippedQuotes.length} orçamento(s) não gravado(s)`,
           description: `A proposta foi gravada mas o(s) seguinte(s) orçamento(s) foi(ram) ignorado(s):\n${list}\n\nCorrija e grave novamente.`,
           variant: "destructive",
         });
@@ -1438,6 +1552,12 @@ const Proposals = () => {
   const handleRenewValidity = async () => {
     if (!renewProposalId || !renewDate) return;
     try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: 'Utilizador não identificado', variant: 'destructive' });
+        return;
+      }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { error } = await supabase
         .from("proposals")
         .update({ valid_until: renewDate })
@@ -1463,27 +1583,83 @@ const Proposals = () => {
   };
 
 
-  const handleAcceptProposal = async () => {
-    if (!selectedProposal) return;
+  const handleMarkAsSent = async (proposal: Proposal) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
-      if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
-      const oldStageId = selectedProposal.stage_id;
-      await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", selectedProposal.id);
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      const sentStage = workflowStages.find(s => s.name === "sent" || s.name === "enviada");
+      if (!sentStage) { toast({ title: "Erro", description: "Estágio 'Enviada' não encontrado", variant: "destructive" }); return; }
+      const oldStageId = proposal.stage_id;
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase
+        .from("proposals")
+        .update({ stage_id: sentStage.id, status: "sent", sent_at: new Date().toISOString() })
+        .eq("id", proposal.id);
+      if (error) throw error;
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta marcada como enviada",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta aceite com sucesso" });
-      setDetailsOpen(false);
       loadData();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
 
-  const handleRejectProposal = async () => {
+  const handleAcceptProposal = async (proposalToAccept?: Proposal) => {
+    if (acceptProposalLockRef.current) return;
+    const targetProposal = proposalToAccept ?? selectedProposal;
+    if (!targetProposal) return;
+    acceptProposalLockRef.current = true;
+    setIsAcceptingProposal(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
+      if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
+      const oldStageId = targetProposal.stage_id;
+      const businessUserIdAccept = await resolveCurrentBusinessUserId();
+      if (!businessUserIdAccept) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdAccept, p_source: 'ui' });
+      const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
+      if (error) throw error;
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta aceite com sucesso",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+      });
+      setDetailsOpen(false);
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    } finally {
+      acceptProposalLockRef.current = false;
+      setIsAcceptingProposal(false);
+    }
+  };
+
+  const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -1491,15 +1667,79 @@ const Proposals = () => {
       const rejectedStage = workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
       if (!rejectedStage) { toast({ title: "Erro", description: "Estágio 'Rejeitada' não encontrado", variant: "destructive" }); return; }
       const oldStageId = selectedProposal.stage_id;
-      await supabase.from("proposals").update({ stage_id: rejectedStage.id, status: "rejected", rejected_at: new Date().toISOString() }).eq("id", selectedProposal.id);
-      await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      const businessUserIdReject = await resolveCurrentBusinessUserId();
+      if (!businessUserIdReject) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
+      const { error } = await supabase.from("proposals").update({
+        stage_id: rejectedStage.id,
+        status: "rejected",
+        rejected_at: new Date().toISOString(),
+        rejection_reason_id: reason.reasonId,
+        rejection_reason_code: reason.code,
+        rejection_reason: reason.label,
+        rejection_notes: reason.notes,
+      }).eq("id", selectedProposal.id);
+      if (error) throw error;
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta recusada",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      toast({ title: "Proposta recusada" });
+      setRejectReasonDialogOpen(false);
       setDetailsOpen(false);
       loadData();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleReopenProposal = async (proposal: Proposal) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+      const draftStage = workflowStages.find(s => s.name === "draft" || s.name === "rascunho");
+      if (!draftStage) { toast({ title: "Erro", description: "Estágio 'Rascunho' não encontrado", variant: "destructive" }); return; }
+      const oldStageId = proposal.stage_id;
+      const businessUserIdReopen = await resolveCurrentBusinessUserId();
+      if (!businessUserIdReopen) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReopen, p_source: 'ui' });
+      const { error: reopenError } = await supabase.from("proposals").update({
+        stage_id: draftStage.id,
+        status: "draft",
+        accepted_at: null,
+        rejected_at: null,
+        rejection_reason: null,
+        rejection_reason_id: null,
+        rejection_reason_code: null,
+        rejection_notes: null,
+      }).eq("id", proposal.id);
+      if (reopenError) throw reopenError;
+      let workflowFailed = false;
+      try {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+        });
+        if (workflowError) throw workflowError;
+      } catch (workflowError) {
+        console.error("Workflow execution error:", workflowError);
+        workflowFailed = true;
+      }
+      toast({
+        title: "Proposta reaberta",
+        description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+      });
+      loadData();
+    } catch (error: any) {
+      toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });
     }
   };
 
@@ -1518,95 +1758,33 @@ const Proposals = () => {
     );
   };
 
-  // Helper to get stage name
-  const getStageName = (proposal: Proposal): string => {
+  // Helper to get stage name — memoised so useMemo dep arrays are stable.
+  const getStageName = useCallback((proposal: Proposal): string => {
     const stage = getProposalStage(proposal);
     return stage?.name || proposal.status || "";
-  };
-
-  // Stats
-  const stats = useMemo(() => {
-    const now = new Date();
-    const total = proposals.length;
-    const totalValue = proposals.reduce((sum, p) => sum + Number(p.value), 0);
-    
-    const stageCounts: Record<string, number> = {};
-    const stageValues: Record<string, number> = {};
-    
-    workflowStages.forEach(stage => {
-      stageCounts[stage.id] = 0;
-      stageValues[stage.id] = 0;
-    });
-    
-    proposals.forEach(p => {
-      const stage = getProposalStage(p);
-      if (stage) {
-        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
-        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
-      }
-    });
-    
-    const wonValue = proposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value), 0);
-
-    // Extra KPIs
-    const sentProposals = proposals.filter(p => {
-      const sn = getStageName(p);
-      return sn === "sent" || sn === "enviada";
-    });
-    const acceptedProposals = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage?.is_won;
-    });
-    const totalSentOrLater = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage && stage.stage_order > 1; // sent or later
-    }).length;
-    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
-    
-    // Avg close time (days from created_at to accepted_at for accepted proposals)
-    const closeTimes = acceptedProposals.map(p => {
-      const accepted = (p as any).accepted_at;
-      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
-      return differenceInDays(now, parseISO(p.created_at));
-    }).filter(d => d >= 0);
-    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
-
-    const noResponse5d = proposals.filter(p => {
-      const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
-    });
-    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
-
-    const noValidity = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return !p.valid_until && !stage?.is_lost;
-    });
-
-    const expired = proposals.filter(p => {
-      const stage = getProposalStage(p);
-      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
-    });
-
-    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
-  }, [proposals, workflowStages, getProposalStage]);
+  }, [getProposalStage]);
 
   // Filter and sort
   const filteredProposals = useMemo(() => {
     const now = new Date();
     return proposals
       .filter(proposal => {
+        // "Só os meus" — filter to proposals assigned to the current user.
+        // scopeAnewUserId is the anew_users.id of the current user.
+        if (onlyMine && scopeAnewUserId) {
+          if ((proposal as any).assigned_to !== scopeAnewUserId) return false;
+        }
+
         if (statusFilter !== "all") {
           const stage = getProposalStage(proposal);
           if (stage?.id !== statusFilter && proposal.status !== statusFilter) return false;
         }
-        
+
         if (noResponseFilter) {
           const sn = getStageName(proposal);
           if (!((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5)) return false;
         }
-        
+
         if (expiredFilter) {
           if (!(proposal.valid_until && isPast(parseISO(proposal.valid_until)))) return false;
         }
@@ -1614,7 +1792,7 @@ const Proposals = () => {
         if (noValidityFilter) {
           if (proposal.valid_until) return false;
         }
-        
+
         const term = debouncedSearch.trim();
         const searchLower = term.toLowerCase();
         const proposalDate = new Date(proposal.created_at);
@@ -1652,7 +1830,71 @@ const Proposals = () => {
         if (typeof aVal === "string" && typeof bVal === "string") return sortDirection === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
         return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
       });
-  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, workflowStages, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, comercialFilter]);
+  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, getStageName, comercialFilter, onlyMine, scopeAnewUserId]);
+
+  // Stats — computed over filteredProposals so KPI cards reflect active filters
+  const stats = useMemo(() => {
+    const now = new Date();
+    const total = filteredProposals.length;
+    const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
+
+    const stageCounts: Record<string, number> = {};
+    const stageValues: Record<string, number> = {};
+
+    workflowStages.forEach(stage => {
+      stageCounts[stage.id] = 0;
+      stageValues[stage.id] = 0;
+    });
+
+    filteredProposals.forEach(p => {
+      const stage = getProposalStage(p);
+      if (stage) {
+        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
+        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
+      }
+    });
+
+    const wonValue = filteredProposals
+      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
+      .reduce((sum, p) => sum + Number(p.value), 0);
+
+    // Extra KPIs
+    const acceptedProposals = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return stage?.is_won;
+    });
+    const totalSentOrLater = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return stage && stage.stage_order > 1; // sent or later
+    }).length;
+    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
+
+    // Avg close time (days from created_at to accepted_at for accepted proposals)
+    const closeTimes = acceptedProposals.map(p => {
+      const accepted = (p as any).accepted_at;
+      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
+      return differenceInDays(now, parseISO(p.created_at));
+    }).filter(d => d >= 0);
+    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
+
+    const noResponse5d = filteredProposals.filter(p => {
+      const sn = getStageName(p);
+      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
+    });
+    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
+
+    const noValidity = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return !p.valid_until && !stage?.is_lost;
+    });
+
+    const expired = filteredProposals.filter(p => {
+      const stage = getProposalStage(p);
+      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
+    });
+
+    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
+  }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -1713,6 +1955,46 @@ const Proposals = () => {
   };
 
   // Row background color
+  // Resolves the client/lead entity linked to a proposal (direct entity_id, or
+  // via its deal), used to wire up phone/call/WhatsApp actions consistently
+  // across the quick-actions row and the row dropdown.
+  const getProposalEntityInfo = (proposal: Proposal) => {
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const entityId = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null) || "";
+    const name = (directEntityId ? entityNames[directEntityId] : entityNames[`deal:${proposal.id}`]) || proposal.title;
+    const phone = (directEntityId ? entityPhones[directEntityId] : entityPhones[`deal:${proposal.id}`]) || "";
+    return { entityId, name, phone };
+  };
+
+  const handleQuickCall = (proposal: Proposal) => {
+    const { entityId, name } = getProposalEntityInfo(proposal);
+    if (!entityId) {
+      toast({ title: "Sem entidade associada", description: "Esta proposta não tem um cliente/lead associado.", variant: "destructive" });
+      return;
+    }
+    setCallTarget({ entityId, name });
+    setCallDialogOpen(true);
+  };
+
+  const handleQuickWhatsApp = (proposal: Proposal) => {
+    const { name, phone, entityId } = getProposalEntityInfo(proposal);
+    if (!phone) {
+      toast({ title: "Sem telefone", description: "Este cliente/lead não tem telefone associado.", variant: "destructive" });
+      return;
+    }
+    setWhatsAppContext({
+      module: "proposals",
+      recipientName: name,
+      recipientPhone: phone,
+      entityId: entityId || undefined,
+      organizationId: (proposal as any).organization_id || activeCompany?.id || undefined,
+      proposalId: proposal.id,
+      proposalTitle: proposal.title,
+      proposalValue: proposal.value ?? undefined,
+    });
+    setWhatsAppDialogOpen(true);
+  };
+
   const getRowBg = (proposal: Proposal): string => {
     const now = new Date();
     const stage = getProposalStage(proposal);
@@ -1750,7 +2032,7 @@ const Proposals = () => {
     if (sn === "sent" || sn === "enviada") {
       return (
         <>
-          <Button size="icon" variant={isNoResponse ? "default" : "ghost"} className={cn("h-7 w-7", isNoResponse && "animate-pulse")} title="Follow-up">
+          <Button size="icon" variant={isNoResponse ? "default" : "ghost"} className={cn("h-7 w-7", isNoResponse && "animate-pulse")} onClick={() => handleQuickCall(proposal)} title="Follow-up">
             <Phone className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
@@ -1772,7 +2054,10 @@ const Proposals = () => {
             onClick={() => { const link = pipelineLinks[proposal.id]; if (link?.contract_id) navigate(`/contracts?open=${link.contract_id}`); }}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} title="Duplicar">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id} title="Duplicar">
             <Copy className="w-3.5 h-3.5" />
           </Button>
         </>
@@ -1784,10 +2069,10 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Reabrir">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" title="Follow-up">
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Follow-up">
             <Phone className="w-3.5 h-3.5" />
           </Button>
         </>
@@ -1799,7 +2084,7 @@ const Proposals = () => {
         <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
           <Eye className="w-3.5 h-3.5" />
         </Button>
-        <Button size="icon" variant="ghost" className="h-7 w-7" title="Ligar">
+        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleQuickCall(proposal)} title="Ligar">
           <Phone className="w-3.5 h-3.5" />
         </Button>
       </>
@@ -1811,6 +2096,9 @@ const Proposals = () => {
     const sn = getStageName(proposal);
     const stage = getProposalStage(proposal);
     const link = pipelineLinks[proposal.id];
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const proposalEntityId = directEntityId || (proposal.deal_id ? dealEntityIds[proposal.deal_id] : null) || "";
+    const proposalEntityName = (directEntityId ? entityNames[directEntityId] : entityNames[`deal:${proposal.id}`]) || proposal.title;
 
     return (
       <DropdownMenuContent align="end" className="w-56">
@@ -1819,7 +2107,7 @@ const Proposals = () => {
         <DropdownMenuItem onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }}>
           <Mail className="w-3.5 h-3.5 mr-2" /> {sn === "sent" || sn === "enviada" ? "Reenviar email" : "Enviar por email"}
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleQuickWhatsApp(proposal)}>
           <MessageSquare className="w-3.5 h-3.5 mr-2" /> WhatsApp
         </DropdownMenuItem>
         <DropdownMenuItem
@@ -1835,25 +2123,34 @@ const Proposals = () => {
         >
           <Download className="w-3.5 h-3.5 mr-2" /> Descarregar PDF
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!proposalEntityId}
+          onClick={() => {
+            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName });
+            setCallDialogOpen(true);
+          }}
+        >
           <Phone className="w-3.5 h-3.5 mr-2" /> Registar atividade
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📊 Avançar</DropdownMenuLabel>
         {(sn === "draft" || sn === "rascunho") && (
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleMarkAsSent(proposal)}>
             <Send className="w-3.5 h-3.5 mr-2" /> Marcar como Enviada
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
-          <DropdownMenuItem className="text-green-600" onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(); }}>
+          <DropdownMenuItem className="text-green-600" onClick={() => { setSelectedProposal(proposal); handleAcceptProposal(proposal); }}>
             <CheckSquare className="w-3.5 h-3.5 mr-2" /> Aceitar
             <span className="text-[10px] text-muted-foreground ml-1">⚡ cria contrato</span>
           </DropdownMenuItem>
         )}
         {!stage?.is_won && !stage?.is_lost && (
-          <DropdownMenuItem className="text-red-500">
+          <DropdownMenuItem
+            className="text-red-500"
+            onClick={() => { setSelectedProposal(proposal); setRejectReasonDialogOpen(true); }}
+          >
             <X className="w-3.5 h-3.5 mr-2" /> Rejeitar (com motivo)
           </DropdownMenuItem>
         )}
@@ -1916,7 +2213,7 @@ const Proposals = () => {
         <DropdownMenuItem onClick={() => { setVisualEditorProposalId(proposal.id); setPortalPreviewOpen(true); }}>
           <Eye className="w-3.5 h-3.5 mr-2" /> Preview Portal
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)}>
+        <DropdownMenuItem onClick={() => handleDuplicate(proposal.id)} disabled={duplicatingProposalId === proposal.id}>
           <Copy className="w-3.5 h-3.5 mr-2" /> Duplicar
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => { setSendHistoryProposalId(proposal.id); setSendHistoryProposalTitle(proposal.title); setSendHistoryOpen(true); }}>
@@ -1927,11 +2224,21 @@ const Proposals = () => {
           <>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
-            <DropdownMenuItem>
-              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir com desconto (v2)
+            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleQuickCall(proposal)}>
               <Phone className="w-3.5 h-3.5 mr-2" /> Contactar cliente
+            </DropdownMenuItem>
+          </>
+        )}
+
+        {stage?.is_won && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔄 Recuperação</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => handleReopenProposal(proposal)}>
+              <RotateCcw className="w-3.5 h-3.5 mr-2" /> Reabrir
             </DropdownMenuItem>
           </>
         )}
@@ -2204,7 +2511,7 @@ const Proposals = () => {
                                     }
 
                                     const entityIds = dealsData.map((d: any) => d.entity_id).filter(Boolean);
-                                    let entityMap: Record<string, any> = {};
+                                    const entityMap: Record<string, any> = {};
                                     if (entityIds.length > 0) {
                                       const [entRes, emailRes, phoneRes] = await Promise.all([
                                         supabase.from("anew_entities").select("id, display_name").in("id", entityIds),
@@ -2241,7 +2548,7 @@ const Proposals = () => {
                                         setDealSearchResults([]);
                                         
                                         // Load existing quotes for this deal
-                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).neq("estado", "rascunho").order("created_at", { ascending: false });
+                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).neq("estado", "rascunho").order("created_at", { ascending: false });
                                         if (dealQuotes && dealQuotes.length > 0) {
                                           setSelectedQuotes(dealQuotes.map(q => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
                                         } else {
@@ -2390,15 +2697,15 @@ const Proposals = () => {
                       {/* Entity (contact/client) — only shown when no Deal is selected */}
                       {!selectedDeal && !formData.deal_id && (
                         <div className="col-span-2 space-y-2">
-                          <Label>Contacto ou Cliente</Label>
+                          <Label>Lead ou Cliente</Label>
                           <EntitySearchInput
                             value={selectedEntity}
                             onChange={handleEntityChange}
-                            searchTypes={["contact", "client"]}
-                            placeholder="Pesquisar contacto ou cliente para associar..."
+                            searchTypes={["lead", "client"]}
+                            placeholder="Pesquisar lead ou cliente para associar..."
                           />
                           <p className="text-xs text-muted-foreground">
-                            Opcional — associe um contacto ou cliente diretamente quando não existe Pedido de Proposta.
+                            Opcional — associe um lead ou cliente diretamente quando não existe Pedido de Proposta.
                           </p>
                         </div>
                       )}
@@ -2674,7 +2981,7 @@ const Proposals = () => {
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Taxa Conversão</div>
                 <div className="text-xl font-bold text-primary">{stats.conversionRate}%</div>
-                <div className="text-xs text-muted-foreground">{proposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
+                <div className="text-xs text-muted-foreground">{filteredProposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
               </CardContent>
             </Card>
 
@@ -2718,11 +3025,12 @@ const Proposals = () => {
         {/* Content area */}
         {viewMode === "dashboard" ? (
           <ProposalsDashboardView
-            proposals={proposals}
+            proposals={filteredProposals}
             workflowStages={workflowStages}
             getProposalStage={getProposalStage}
             comercialNamesMap={comercialNamesMap}
             isLoading={loading}
+            hasAnyProposals={proposals.length > 0}
           />
         ) : viewMode === "kanban" ? (
           <ProposalsKanbanView
@@ -2842,12 +3150,15 @@ const Proposals = () => {
               <div className="mb-4 flex items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/30 bg-primary/5">
                 <span className="text-sm font-medium text-primary">{selectedIds.length} proposta{selectedIds.length > 1 ? "s" : ""} seleccionada{selectedIds.length > 1 ? "s" : ""}</span>
                 <div className="flex gap-2 ml-auto">
-                  <Button variant="outline" size="sm"><Mail className="w-3.5 h-3.5 mr-1" /> Enviar email</Button>
+                  <Button variant="outline" size="sm" disabled={bulkEmailSending} onClick={handleBulkSendEmail}>
+                    <Mail className="w-3.5 h-3.5 mr-1" /> {bulkEmailSending ? "A enviar…" : "Enviar email"}
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => setBulkStatusDialogOpen(true)}>
                     <Columns3 className="w-3.5 h-3.5 mr-1" /> Mover estado
                   </Button>
-                  <Button variant="outline" size="sm"><FileText className="w-3.5 h-3.5 mr-1" /> Exportar PDF</Button>
-                  <Button variant="outline" size="sm"><Link2 className="w-3.5 h-3.5 mr-1" /> Gerar links públicos</Button>
+                  <Button variant="outline" size="sm" disabled={bulkPdfExporting} onClick={handleBulkExportPdf}>
+                    <FileText className="w-3.5 h-3.5 mr-1" /> {bulkPdfExporting ? "A gerar…" : "Exportar PDF"}
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
                     <X className="w-4 h-4" />
                   </Button>
@@ -3041,8 +3352,16 @@ const Proposals = () => {
       <ProposalDetailsDialog open={detailsOpen} onOpenChange={setDetailsOpen} proposal={selectedProposal}
         onSendProposal={() => { if (selectedProposal) { setSendProposal(selectedProposal); setSendDialogOpen(true); setDetailsOpen(false); } }}
         onViewHistory={() => { if (selectedProposal) { setSendHistoryProposalId(selectedProposal.id); setSendHistoryProposalTitle(selectedProposal.title); setSendHistoryOpen(true); setDetailsOpen(false); } }}
-        onAccept={handleAcceptProposal}
-        onReject={handleRejectProposal}
+        onAccept={() => handleAcceptProposal(selectedProposal ?? undefined)}
+        onReject={() => setRejectReasonDialogOpen(true)}
+        isAccepting={isAcceptingProposal}
+      />
+
+      <ProposalRejectReasonDialog
+        open={rejectReasonDialogOpen}
+        onOpenChange={setRejectReasonDialogOpen}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={handleRejectProposal}
       />
 
       <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
@@ -3085,6 +3404,20 @@ const Proposals = () => {
       <ProposalWorkflowConfig open={showWorkflowConfig} onOpenChange={setShowWorkflowConfig} companyId={activeCompany?.id || null} onStagesUpdated={loadWorkflowStages} />
 
       <SendProposalDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} proposal={sendProposal} onSent={() => loadData()} />
+      <RegisterCallDialog
+        open={callDialogOpen}
+        onOpenChange={setCallDialogOpen}
+        entityId={callTarget.entityId}
+        entityName={callTarget.name}
+        organizationId={activeCompany?.id || ""}
+        contactId=""
+        onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
+      />
+      <WhatsAppSendDialog
+        open={whatsAppDialogOpen}
+        onOpenChange={setWhatsAppDialogOpen}
+        context={whatsAppContext}
+      />
       <ProposalSendHistory open={sendHistoryOpen} onOpenChange={setSendHistoryOpen} proposalId={sendHistoryProposalId} proposalTitle={sendHistoryProposalTitle} />
       {(visualEditorProposalId || editingId) && (
         <ProposalPortalPreview open={portalPreviewOpen} onOpenChange={(open) => { setPortalPreviewOpen(open); if (!open) setVisualEditorProposalId(null); }} proposalId={(visualEditorProposalId || editingId)!} />
@@ -3097,8 +3430,8 @@ const Proposals = () => {
             <AlertDialogDescription>{`Tem a certeza que deseja eliminar ${selectedIds.length} propostas?`}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('common.delete')}</AlertDialogAction>
+            <AlertDialogCancel disabled={isBulkDeleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete} disabled={isBulkDeleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('common.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -3123,8 +3456,8 @@ const Proposals = () => {
             </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus}>{t('common.save')}</Button>
+            <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)} disabled={isBulkStatusChanging}>{t('common.cancel')}</Button>
+            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus || isBulkStatusChanging}>{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

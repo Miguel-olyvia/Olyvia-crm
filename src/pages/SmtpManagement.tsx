@@ -15,7 +15,8 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Mail, Plus, Pencil, Trash2, Loader2, Star, CheckCircle, XCircle, Send, Building2, User, ArrowRight, Globe, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { smtpConfigSchema } from "@/lib/validations";
+import { z } from "zod";
 
 interface SmtpConfig {
   id: string;
@@ -23,7 +24,9 @@ interface SmtpConfig {
   smtp_host: string;
   smtp_port: number;
   smtp_username: string;
-  smtp_password: string;
+  // Note: the password is never returned by the API — it's stored in
+  // Supabase Vault and only decrypted server-side by trusted Edge
+  // Functions. Editing always starts with a blank password field.
   smtp_secure: boolean;
   encryption: string | null;
   from_email: string;
@@ -79,6 +82,7 @@ export default function SmtpManagement() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     loadSmtpConfigs();
@@ -119,18 +123,22 @@ export default function SmtpManagement() {
     setEditingId(null);
     setFormData(defaultFormData);
     setShowPassword(false);
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
   const openEditDialog = (smtp: SmtpConfig, mode: "user" | "org") => {
     setDialogMode(mode);
     setEditingId(smtp.id);
+    setFieldErrors({});
     setFormData({
       name: smtp.name || "",
       smtp_host: smtp.smtp_host,
       smtp_port: smtp.smtp_port,
       smtp_username: smtp.smtp_username,
-      smtp_password: smtp.smtp_password,
+      // Always blank on edit — the real password is never sent back by the
+      // API. Leaving this blank on save keeps the existing vaulted password.
+      smtp_password: "",
       encryption: smtp.encryption || (smtp.smtp_secure ? "tls" : "none"),
       from_email: smtp.from_email,
       from_name: smtp.from_name,
@@ -145,6 +153,14 @@ export default function SmtpManagement() {
   const handleTestConnection = async () => {
     if (!formData.smtp_host || !formData.from_email) {
       toast({ title: "Erro", description: "Preencha pelo menos o host e email do remetente", variant: "destructive" });
+      return;
+    }
+    if (editingId && !formData.smtp_password) {
+      toast({
+        title: "Password necessária para testar",
+        description: "A password guardada não é reexibida por segurança. Insira-a novamente para testar a ligação (não é obrigatório para apenas guardar as outras alterações).",
+        variant: "destructive",
+      });
       return;
     }
     setTesting(true);
@@ -186,84 +202,71 @@ export default function SmtpManagement() {
   };
 
   const handleSave = async () => {
-    if (!formData.smtp_host || !formData.from_email || !formData.name) {
-      toast({ title: "Erro", description: "Preencha todos os campos obrigatórios", variant: "destructive" });
+    // On edit, a blank password means "keep the existing vaulted password" —
+    // only require/validate it when creating a new config or when the user
+    // actually typed a replacement value.
+    const validationSchema = editingId && !formData.smtp_password
+      ? smtpConfigSchema.extend({ smtp_password: z.literal("") })
+      : smtpConfigSchema;
+    const validation = validationSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({ title: "Erro", description: validation.error.errors[0]?.message || "Preencha todos os campos obrigatórios", variant: "destructive" });
       return;
     }
+    setFieldErrors({});
     setSaving(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Utilizador não autenticado");
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
 
       const smtp_secure = formData.encryption === "tls" || formData.encryption === "ssl";
+      // Password field is left blank on edit (see openEditDialog — the API
+      // never returns the real password anymore, it's vaulted server-side).
+      // An empty string here means "keep the existing password", enforced
+      // by the RPC itself (only rotates the vault secret when non-empty).
+      const passwordToSend = formData.smtp_password || null;
 
       if (dialogMode === "user") {
-        const payload: any = {
-          user_id: user.id,
-          organization_id: activeCompany?.id || null,
-          name: formData.name,
-          smtp_host: formData.smtp_host,
-          smtp_port: formData.smtp_port,
-          smtp_username: formData.smtp_username,
-          smtp_password: formData.smtp_password,
-          smtp_secure,
-          encryption: formData.encryption,
-          from_email: formData.from_email,
-          from_name: formData.from_name,
-          reply_to: formData.reply_to || null,
-          daily_limit: formData.daily_limit,
-          is_default: formData.is_default,
-          is_active: true,
-        };
-
-        // If setting as default, unset other defaults first
-        if (formData.is_default) {
-          await (supabase as any)
-            .from("user_smtp_settings")
-            .update({ is_default: false })
-            .eq("user_id", user.id)
-            .neq("id", editingId || "");
-        }
-
-        if (editingId) {
-          await (supabase as any).from("user_smtp_settings").update(payload).eq("id", editingId);
-        } else {
-          await (supabase as any).from("user_smtp_settings").insert(payload);
-        }
+        const { error } = await (supabase as any).rpc("rpc_upsert_user_smtp_settings", {
+          p_id: editingId,
+          p_organization_id: activeCompany?.id || null,
+          p_name: formData.name,
+          p_smtp_host: formData.smtp_host,
+          p_smtp_port: formData.smtp_port,
+          p_smtp_username: formData.smtp_username,
+          p_smtp_password: passwordToSend,
+          p_smtp_secure: smtp_secure,
+          p_encryption: formData.encryption,
+          p_from_email: formData.from_email,
+          p_from_name: formData.from_name,
+          p_reply_to: formData.reply_to || null,
+          p_daily_limit: formData.daily_limit,
+          p_is_default: formData.is_default,
+        });
+        if (error) throw error;
       } else {
         if (!activeCompany) throw new Error("Sem empresa ativa");
-        const payload: any = {
-          organization_id: activeCompany.id,
-          name: formData.name,
-          smtp_host: formData.smtp_host,
-          smtp_port: formData.smtp_port,
-          smtp_username: formData.smtp_username,
-          smtp_password: formData.smtp_password,
-          smtp_secure,
-          encryption: formData.encryption,
-          from_email: formData.from_email,
-          from_name: formData.from_name,
-          daily_limit: formData.daily_limit,
-          is_default: formData.is_default,
-          is_active: true,
-          created_by: businessUserId,
-        };
-
-        if (formData.is_default) {
-          await (supabase as any)
-            .from("organization_smtp_settings")
-            .update({ is_default: false })
-            .eq("organization_id", activeCompany.id)
-            .neq("id", editingId || "");
-        }
-
-        if (editingId) {
-          await (supabase as any).from("organization_smtp_settings").update(payload).eq("id", editingId);
-        } else {
-          await (supabase as any).from("organization_smtp_settings").insert(payload);
-        }
+        const { error } = await (supabase as any).rpc("rpc_upsert_org_smtp_settings", {
+          p_id: editingId,
+          p_organization_id: activeCompany.id,
+          p_name: formData.name,
+          p_smtp_host: formData.smtp_host,
+          p_smtp_port: formData.smtp_port,
+          p_smtp_username: formData.smtp_username,
+          p_smtp_password: passwordToSend,
+          p_smtp_secure: smtp_secure,
+          p_encryption: formData.encryption,
+          p_from_email: formData.from_email,
+          p_from_name: formData.from_name,
+          p_daily_limit: formData.daily_limit,
+          p_is_default: formData.is_default,
+        });
+        if (error) throw error;
       }
 
       toast({ title: "Guardado", description: "Configuração SMTP guardada com sucesso" });
@@ -442,16 +445,19 @@ export default function SmtpManagement() {
             <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto">
               <div className="space-y-2">
                 <Label>Nome do perfil *</Label>
-                <Input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="ex: Gmail Principal" />
+                <Input value={formData.name} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder="ex: Gmail Principal" className={fieldErrors.name ? "border-destructive" : ""} />
+                {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Servidor SMTP *</Label>
-                  <Input value={formData.smtp_host} onChange={e => setFormData(p => ({ ...p, smtp_host: e.target.value }))} placeholder="smtp.gmail.com" />
+                  <Input value={formData.smtp_host} onChange={e => setFormData(p => ({ ...p, smtp_host: e.target.value }))} placeholder="smtp.gmail.com" className={fieldErrors.smtp_host ? "border-destructive" : ""} />
+                  {fieldErrors.smtp_host && <p className="text-sm text-destructive">{fieldErrors.smtp_host}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label>Porta</Label>
-                  <Input type="number" value={formData.smtp_port} onChange={e => setFormData(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} />
+                  <Input type="number" value={formData.smtp_port} onChange={e => setFormData(p => ({ ...p, smtp_port: parseInt(e.target.value) || 587 }))} className={fieldErrors.smtp_port ? "border-destructive" : ""} />
+                  {fieldErrors.smtp_port && <p className="text-sm text-destructive">{fieldErrors.smtp_port}</p>}
                 </div>
               </div>
               <div className="space-y-2">
@@ -483,10 +489,12 @@ export default function SmtpManagement() {
                     value={formData.smtp_username}
                     onChange={e => setFormData(p => ({ ...p, smtp_username: e.target.value }))}
                     placeholder="user@gmail.com"
+                    className={fieldErrors.smtp_username ? "border-destructive" : ""}
                   />
+                  {fieldErrors.smtp_username && <p className="text-sm text-destructive">{fieldErrors.smtp_username}</p>}
                 </div>
                 <div className="space-y-2">
-                  <Label>Password *</Label>
+                  <Label>Password {editingId ? "" : "*"}</Label>
                   <Input
                     type={showPassword ? "text" : "password"}
                     name="smtp-password-no-autofill"
@@ -495,14 +503,22 @@ export default function SmtpManagement() {
                     data-lpignore="true"
                     value={formData.smtp_password}
                     onChange={e => setFormData(p => ({ ...p, smtp_password: e.target.value }))}
-                    placeholder="••••••••"
+                    placeholder={editingId ? "Deixe em branco para manter a password atual" : "••••••••"}
+                    className={fieldErrors.smtp_password ? "border-destructive" : ""}
                   />
+                  {editingId && !fieldErrors.smtp_password && (
+                    <p className="text-xs text-muted-foreground">
+                      A password guardada não é reexibida por segurança. Deixe em branco para não a alterar.
+                    </p>
+                  )}
+                  {fieldErrors.smtp_password && <p className="text-sm text-destructive">{fieldErrors.smtp_password}</p>}
                 </div>
               </form>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Email do remetente *</Label>
-                  <Input value={formData.from_email} onChange={e => setFormData(p => ({ ...p, from_email: e.target.value }))} placeholder="vendas@empresa.com" />
+                  <Input value={formData.from_email} onChange={e => setFormData(p => ({ ...p, from_email: e.target.value }))} placeholder="vendas@empresa.com" className={fieldErrors.from_email ? "border-destructive" : ""} />
+                  {fieldErrors.from_email && <p className="text-sm text-destructive">{fieldErrors.from_email}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label>Nome do remetente</Label>
@@ -512,7 +528,8 @@ export default function SmtpManagement() {
               {dialogMode === "user" && (
                 <div className="space-y-2">
                   <Label>Reply-To (opcional)</Label>
-                  <Input value={formData.reply_to} onChange={e => setFormData(p => ({ ...p, reply_to: e.target.value }))} placeholder="resposta@empresa.com" />
+                  <Input value={formData.reply_to} onChange={e => setFormData(p => ({ ...p, reply_to: e.target.value }))} placeholder="resposta@empresa.com" className={fieldErrors.reply_to ? "border-destructive" : ""} />
+                  {fieldErrors.reply_to && <p className="text-sm text-destructive">{fieldErrors.reply_to}</p>}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">

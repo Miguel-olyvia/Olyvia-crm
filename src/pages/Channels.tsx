@@ -20,6 +20,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { channelSchema } from "@/lib/validations";
 import {
   Table,
   TableBody,
@@ -57,6 +58,8 @@ const Channels = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -88,16 +91,27 @@ const Channels = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [activeCompany?.id]);
 
   const loadData = async () => {
     try {
+      // campaigns is filtered to the active org: RLS (get_user_visible_org_ids)
+      // already allows any org the user is a real member of, which for a
+      // multi-org user includes campaigns from orgs other than the one
+      // currently active — without this filter, the create-channel picker
+      // listed campaigns from every org the user belongs to, risking a
+      // channel meant for the active org getting attached to a different one.
+      let campaignsQuery = supabase.from("campaigns").select("id, name, status").order("name");
+      if (activeCompany?.id) {
+        campaignsQuery = campaignsQuery.eq("organization_id", activeCompany.id);
+      }
+
       const [channelsRes, campaignsRes, channelTypesRes] = await Promise.all([
         supabase
           .from("channels")
           .select("*, campaigns(name)")
           .order("created_at", { ascending: false }),
-        supabase.from("campaigns").select("id, name, status").order("name"),
+        campaignsQuery,
         supabase.from("channel_types").select("*").eq("is_active", true).order("label"),
       ]);
 
@@ -126,14 +140,25 @@ const Channels = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.campaign_id) {
+    const validation = channelSchema.safeParse({
+      name: formData.name,
+      type: formData.type,
+      campaign_id: formData.campaign_id,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('channels.toast.validationError'),
-        description: t('channels.toast.required'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -190,14 +215,25 @@ const Channels = () => {
     e.preventDefault();
     if (!editingChannel) return;
 
-    if (!editFormData.name || !editFormData.campaign_id) {
+    const validation = channelSchema.safeParse({
+      name: editFormData.name,
+      type: editFormData.type,
+      campaign_id: editFormData.campaign_id,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setEditFieldErrors(errors);
       toast({
         title: t('channels.toast.validationError'),
-        description: t('channels.toast.required'),
+        description: validation.error.errors[0]?.message,
         variant: "destructive",
       });
       return;
     }
+    setEditFieldErrors({});
 
     try {
       const { error } = await supabase
@@ -346,7 +382,11 @@ const Channels = () => {
             <h1 className="text-3xl font-bold mb-2">{t('channels.title')}</h1>
             <p className="text-muted-foreground">{t('channels.subtitle')}</p>
           </div>
-          <PermissionGate permission="channels.create">
+          {/* RLS on `channels` actually checks campaigns.create/edit/delete
+              (see 20260615130000_baseline_new_database.sql ~L25855-25884) —
+              there is no channels.* permission seeded anywhere, so gating on
+              "channels.create" hid this button from everyone but system admins. */}
+          <PermissionGate permission="campaigns.create">
             <Dialog open={open} onOpenChange={setOpen}>
               <DialogTrigger asChild>
                 <Button>
@@ -378,6 +418,7 @@ const Channels = () => {
                         ))}
                       </SelectContent>
                     </Select>
+                    {fieldErrors.campaign_id && <p className="text-sm text-destructive">{fieldErrors.campaign_id}</p>}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -389,7 +430,9 @@ const Channels = () => {
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                         placeholder={t('channels.form.namePlaceholder')}
                         required
+                        className={fieldErrors.name ? "border-destructive" : ""}
                       />
+                      {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                     </div>
 
                     <div className="space-y-2">
@@ -517,14 +560,21 @@ const Channels = () => {
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Radio className="w-12 h-12 text-muted-foreground mb-4" />
               <p className="text-muted-foreground mb-4">{t('channels.empty.title')}</p>
-              <Dialog open={open} onOpenChange={setOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t('channels.empty.create')}
-                  </Button>
-                </DialogTrigger>
-              </Dialog>
+              {/* This button shares `open`/setOpen with the main Dialog above,
+                  but that Dialog's DialogContent only mounts inside the
+                  campaigns.create PermissionGate — without that permission
+                  there's no content anywhere to display, so clicking this
+                  silently did nothing. Gate it the same way instead. */}
+              <PermissionGate permission="campaigns.create">
+                <Dialog open={open} onOpenChange={setOpen}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="w-4 h-4 mr-2" />
+                      {t('channels.empty.create')}
+                    </Button>
+                  </DialogTrigger>
+                </Dialog>
+              </PermissionGate>
             </CardContent>
           </Card>
         ) : filteredChannels.length === 0 ? (
@@ -590,7 +640,7 @@ const Channels = () => {
                       </TableCell>
                       <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex justify-end gap-1">
-                          <PermissionGate permission="channels.edit">
+                          <PermissionGate permission="campaigns.edit">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -599,7 +649,7 @@ const Channels = () => {
                               <Pencil className="w-4 h-4" />
                             </Button>
                           </PermissionGate>
-                          <PermissionGate permission="channels.delete">
+                          <PermissionGate permission="campaigns.delete">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -644,6 +694,7 @@ const Channels = () => {
                       ))}
                     </SelectContent>
                   </Select>
+                  {editFieldErrors.campaign_id && <p className="text-sm text-destructive">{editFieldErrors.campaign_id}</p>}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -655,7 +706,9 @@ const Channels = () => {
                       onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
                       placeholder={t('channels.form.namePlaceholder')}
                       required
+                      className={editFieldErrors.name ? "border-destructive" : ""}
                     />
+                    {editFieldErrors.name && <p className="text-sm text-destructive">{editFieldErrors.name}</p>}
                   </div>
 
                   <div className="space-y-2">

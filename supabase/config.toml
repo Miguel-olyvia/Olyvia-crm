@@ -1,8 +1,5 @@
 project_id = "tzbfgwpckrfbqcolqxtm"
 
-[functions.fix-converted-contacts]
-verify_jwt = false
-
 [functions.insert-lead]
 verify_jwt = false
 
@@ -15,6 +12,9 @@ verify_jwt = true
 [functions.create-user]
 verify_jwt = false
 
+[functions.restore-user]
+verify_jwt = false
+
 [functions.delete-user]
 verify_jwt = false
 
@@ -24,12 +24,12 @@ verify_jwt = false
 [functions.validate-contract-signature]
 verify_jwt = false
 
-[functions.generate-contract-pdf]
-verify_jwt = true
-
 [functions.fetch-holidays]
 verify_jwt = false
 
+
+[functions.portal-login]
+verify_jwt = false
 
 [functions.create-lead]
 verify_jwt = false
@@ -52,10 +52,6 @@ verify_jwt = false
 
 [functions.send-proposal-email]
 verify_jwt = true
-
-[functions.send-verification-code]
-verify_jwt = false
-
 
 [functions.generate-proposal-ai]
 verify_jwt = true

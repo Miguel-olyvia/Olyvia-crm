@@ -1,9 +1,11 @@
 /**
  * Shared Auth Helper for Edge Functions
- * 
+ *
  * Provides reusable identity resolution and scope validation.
  * Handles both user JWT tokens and internal SERVICE_ROLE calls.
  */
+
+import { withRetry } from "./retry.ts";
 
 export interface CallerIdentity {
   authUid: string;
@@ -57,10 +59,14 @@ export async function resolveCallerIdentity(
 }
 
 /**
- * Validates that the caller has an active membership in the given organization.
- * 
+ * Validates that the caller has visibility over the given organization.
+ *
+ * Delegates to the canonical DB function get_user_visible_org_ids(_auth_uid)
+ * which handles all cases: direct membership, hierarchy ancestors/descendants,
+ * cross-associations, and the system_admin full-access shortcut.
+ *
  * SERVICE_ROLE callers always pass (internal calls).
- * 
+ *
  * @returns true if authorized, false otherwise.
  */
 export async function validateOrgScope(
@@ -74,41 +80,84 @@ export async function validateOrgScope(
   // If no organization_id provided, we can't validate scope
   if (!organizationId) return false;
 
-  const { data: membership } = await supabaseAdmin
-    .from("anew_memberships")
-    .select("id")
-    .eq("user_id", caller.anewUserId)
-    .eq("organization_id", organizationId)
-    .eq("status", "active")
-    .maybeSingle();
+  const { data, error } = await supabaseAdmin.rpc(
+    "get_user_visible_org_ids",
+    { _auth_uid: caller.authUid }
+  );
 
-  if (membership) return true;
+  if (error) {
+    console.error("validateOrgScope: RPC get_user_visible_org_ids failed", error);
+    return false;
+  }
 
-  // Check if user has access via hierarchy (parent org membership gives access to child orgs)
-  const { data: userMemberships } = await supabaseAdmin
-    .from("anew_memberships")
-    .select("organization_id")
-    .eq("user_id", caller.anewUserId)
-    .eq("status", "active");
-
-  if (!userMemberships || userMemberships.length === 0) return false;
-
-  const userOrgIds = userMemberships.map((m: any) => m.organization_id);
-
-  // Check if organizationId is a descendant of any of the user's orgs
-  const { data: hierarchyMatch } = await supabaseAdmin
-    .from("anew_hierarchy")
-    .select("id")
-    .eq("child_org_id", organizationId)
-    .in("parent_org_id", userOrgIds)
-    .maybeSingle();
-
-  return !!hierarchyMatch;
+  // data is an array of UUIDs (SETOF uuid returned as rows by PostgREST)
+  const visibleOrgIds: string[] = Array.isArray(data) ? data : [];
+  return visibleOrgIds.includes(organizationId);
 }
 
 /**
- * Checks if the caller has an admin role (system_admin or super_admin).
- * Used for maintenance/admin-only endpoints.
+ * Checks whether an anew_user (identified by anewUserId) holds a specific
+ * permission code via their active memberships in a given organization.
+ *
+ * Looks up: anew_memberships → anew_role_permissions
+ * Does NOT fall back to system-wide permissions — the organization_id scope
+ * is intentional for the portal RBAC gate.
+ *
+ * anew_memberships has no FK constraints (contype='f' returns zero rows in
+ * pg_constraint), so PostgREST cannot resolve an embedded
+ * `anew_role_permissions!inner(permission_code)` select — it fails with
+ * PGRST200 ("Could not find a relationship..."). Resolved with a decoupled
+ * two-step lookup instead, same pattern as create-client-portal-access's
+ * hasNonClientRole() and export-data's authorizeExport().
+ *
+ * @returns true if the user has the permission in the org, false otherwise.
+ */
+export async function checkUserPermission(
+  supabaseAdmin: any,
+  anewUserId: string,
+  permissionCode: string,
+  organizationId?: string
+): Promise<boolean> {
+  let membershipQuery = supabaseAdmin
+    .from("anew_memberships")
+    .select("role_id")
+    .eq("user_id", anewUserId)
+    .eq("status", "active");
+
+  if (organizationId) {
+    membershipQuery = membershipQuery.eq("organization_id", organizationId);
+  }
+
+  const { data: memberships, error: membershipsError } = await membershipQuery;
+
+  if (membershipsError) {
+    console.error("checkUserPermission: memberships query failed", { permissionCode, error: membershipsError });
+    return false;
+  }
+
+  const roleIds = [...new Set((memberships || []).map((m: any) => m.role_id).filter(Boolean))];
+  if (roleIds.length === 0) return false;
+
+  const { data: rolePermissions, error: rolePermissionsError } = await supabaseAdmin
+    .from("anew_role_permissions")
+    .select("permission_code")
+    .in("role_id", roleIds)
+    .eq("permission_code", permissionCode)
+    .limit(1);
+
+  if (rolePermissionsError) {
+    console.error("checkUserPermission: role_permissions query failed", { permissionCode, error: rolePermissionsError });
+    return false;
+  }
+
+  return Array.isArray(rolePermissions) && rolePermissions.length > 0;
+}
+
+/**
+ * Checks if the caller has the global system_admin role.
+ * Used for maintenance/admin-only endpoints that operate across all tenants
+ * with no organization_id filter — super_admin is intentionally excluded
+ * because it is a tenant-scoped role, not a global one.
  */
 export async function requireAdminRole(
   supabaseAdmin: any,
@@ -130,7 +179,7 @@ export async function requireAdminRole(
     .from("anew_roles")
     .select("id")
     .in("id", roleIds)
-    .in("code", ["system_admin", "super_admin"]);
+    .eq("code", "system_admin");
 
   return adminRoles && adminRoles.length > 0;
 }

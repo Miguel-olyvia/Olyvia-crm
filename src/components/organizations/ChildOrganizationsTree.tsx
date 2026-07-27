@@ -40,6 +40,7 @@ import {
 } from '@dnd-kit/core';
 import { resolveBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { resolveOrganizationEntityId } from '@/utils/orgEntity';
+import { withAuditContext } from '@/utils/auditContext';
 import { toast } from 'sonner';
 
 interface Organization {
@@ -626,11 +627,13 @@ export function ChildOrganizationsTree({
     try {
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const { error } = await (supabase as any).rpc('move_organization_node', {
-        p_child_org_id: moveDialog.draggedOrg.id,
-        p_new_parent_org_id: moveDialog.newParentOrg.id,
-        p_created_by: businessUserId,
-      });
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        (supabase as any).rpc('move_organization_node', {
+          p_child_org_id: moveDialog.draggedOrg.id,
+          p_new_parent_org_id: moveDialog.newParentOrg.id,
+          p_created_by: businessUserId,
+        })
+      );
 
       if (error) throw error;
 
@@ -672,39 +675,42 @@ export function ChildOrganizationsTree({
     try {
       const { data: userData } = await supabase.auth.getUser();
       const businessUserId = await resolveBusinessUserId(userData.user?.id);
-      const entityId = await resolveOrganizationEntityId({
-        orgName: newChildForm.name.trim(),
-        createdBy: businessUserId,
-      });
 
-      // Create the new organization
-      const { data: newOrg, error: createError } = await (supabase as any)
-        .from('anew_organizations')
-        .insert({
-          name: newChildForm.name.trim(),
-          type: newChildForm.type,
-          description: newChildForm.description.trim() || null,
-          status: 'active',
-          entity_id: entityId,
-          created_by: businessUserId,
-        })
-        .select()
-        .single();
-
-      if (createError) throw createError;
-
-      // Create the hierarchy relationship
-      const { error: hierarchyError } = await (supabase as any)
-        .from('anew_hierarchy')
-        .insert({
-          parent_org_id: addChildDialog.parentOrg.id,
-          child_org_id: newOrg.id,
-          relationship_type: 'parent_of',
-          is_primary: true,
-          created_by: businessUserId,
+      await withAuditContext(supabase, businessUserId, async () => {
+        const entityId = await resolveOrganizationEntityId({
+          orgName: newChildForm.name.trim(),
+          createdBy: businessUserId,
         });
 
-      if (hierarchyError) throw hierarchyError;
+        // Create the new organization
+        const { data: newOrg, error: createError } = await (supabase as any)
+          .from('anew_organizations')
+          .insert({
+            name: newChildForm.name.trim(),
+            type: newChildForm.type,
+            description: newChildForm.description.trim() || null,
+            status: 'active',
+            entity_id: entityId,
+            created_by: businessUserId,
+          })
+          .select()
+          .single();
+
+        if (createError) throw createError;
+
+        // Create the hierarchy relationship
+        const { error: hierarchyError } = await (supabase as any)
+          .from('anew_hierarchy')
+          .insert({
+            parent_org_id: addChildDialog.parentOrg.id,
+            child_org_id: newOrg.id,
+            relationship_type: 'parent_of',
+            is_primary: true,
+            created_by: businessUserId,
+          });
+
+        if (hierarchyError) throw hierarchyError;
+      });
 
       toast.success(t('common.created'));
       setAddChildDialog(null);

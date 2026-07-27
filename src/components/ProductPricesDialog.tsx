@@ -12,6 +12,7 @@ import { TrendingUp, TrendingDown, DollarSign, AlertTriangle, Percent } from "lu
 import { calculateMargin, formatMarginBadge } from "@/utils/productsExportImport";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface ProductPricesDialogProps {
   open: boolean;
@@ -135,40 +136,49 @@ export default function ProductPricesDialog({
         { type: 'promotional', value: finalPromotionalPrice }
       ];
 
-      for (const { type, value } of priceTypes) {
-        if (value && value > 0) {
-          const priceData: any = {
-            product_id: productId,
-            price_type: type,
-            price: value,
-            currency: prices.currency,
-            vat_rate: prices.vat_rate,
-            created_by: businessUserId
-          };
+      await withAuditContext(supabase, businessUserId, async () => {
+        for (const { type, value } of priceTypes) {
+          // `value` is always a number here (never null/undefined) because
+          // PriceData types every price field as `number` and the onChange
+          // handlers fall back to 0. That means 0 is a legitimate, explicitly
+          // saved price and must NOT be treated as "no value" — only the
+          // absence of a pre-existing row means "nothing to save/delete".
+          if (existingPriceIds[type] || value > 0) {
+            const priceData: any = {
+              product_id: productId,
+              price_type: type,
+              price: value,
+              currency: prices.currency,
+              vat_rate: prices.vat_rate,
+              created_by: businessUserId
+            };
 
-          if (type === 'promotional') {
-            if (prices.promo_from) priceData.valid_from = prices.promo_from;
-            if (prices.promo_to) priceData.valid_to = prices.promo_to;
-          }
+            if (type === 'promotional') {
+              if (prices.promo_from) priceData.valid_from = prices.promo_from;
+              if (prices.promo_to) priceData.valid_to = prices.promo_to;
+            }
 
-          if (existingPriceIds[type]) {
-            // Update existing price
-            const { error } = await supabase
-              .from('product_prices')
-              .update(priceData)
-              .eq('id', existingPriceIds[type]);
-            
-            if (error) throw error;
-          } else {
-            // Insert new price
-            const { error } = await supabase
-              .from('product_prices')
-              .insert(priceData);
-            
-            if (error) throw error;
+            if (existingPriceIds[type]) {
+              // Update existing price
+              const { error } = await supabase
+                .from('product_prices')
+                .update(priceData)
+                .eq('id', existingPriceIds[type]);
+
+              if (error) throw error;
+            } else {
+              // Insert new price
+              const { error } = await supabase
+                .from('product_prices')
+                .insert(priceData);
+
+              if (error) throw error;
+            }
           }
+          // else: no existing row and value is 0 (field left untouched) —
+          // nothing to save and nothing to delete.
         }
-      }
+      });
 
       toast({
         title: t('productPrices.toast.updateSuccess')
@@ -241,7 +251,7 @@ export default function ProductPricesDialog({
               step="0.01"
               min="0"
               max="100"
-              value={prices.vat_rate || ''}
+              value={prices.vat_rate}
               onChange={(e) => setPrices({ ...prices, vat_rate: parseFloat(e.target.value) || 0 })}
               placeholder="23"
             />
@@ -264,7 +274,7 @@ export default function ProductPricesDialog({
               id="purchase_price"
               type="number"
               step="0.01"
-              value={prices.purchase || ''}
+              value={prices.purchase}
               onChange={(e) => setPrices({ ...prices, purchase: parseFloat(e.target.value) || 0 })}
               placeholder="0.00"
             />
@@ -282,7 +292,7 @@ export default function ProductPricesDialog({
               id="retail_price"
               type="number"
               step="0.01"
-              value={prices.retail || ''}
+              value={prices.retail}
               onChange={(e) => setPrices({ ...prices, retail: parseFloat(e.target.value) || 0 })}
               placeholder="0.00"
             />
@@ -297,7 +307,7 @@ export default function ProductPricesDialog({
               id="wholesale_price"
               type="number"
               step="0.01"
-              value={prices.wholesale || ''}
+              value={prices.wholesale}
               onChange={(e) => setPrices({ ...prices, wholesale: parseFloat(e.target.value) || 0 })}
               placeholder="0.00"
             />
@@ -310,7 +320,7 @@ export default function ProductPricesDialog({
               id="distributor_price"
               type="number"
               step="0.01"
-              value={prices.distributor || ''}
+              value={prices.distributor}
               onChange={(e) => setPrices({ ...prices, distributor: parseFloat(e.target.value) || 0 })}
               placeholder="0.00"
             />
@@ -342,7 +352,7 @@ export default function ProductPricesDialog({
                     id="promotional_price"
                     type="number"
                     step="0.01"
-                    value={prices.promotional || ''}
+                    value={prices.promotional}
                     onChange={(e) => setPrices({ ...prices, promotional: parseFloat(e.target.value) || 0 })}
                     placeholder="0.00"
                   />
@@ -359,7 +369,7 @@ export default function ProductPricesDialog({
                     step="0.01"
                     min="0"
                     max="100"
-                    value={promoPercentage || ''}
+                    value={promoPercentage}
                     onChange={(e) => setPromoPercentage(parseFloat(e.target.value) || 0)}
                     placeholder="0.00"
                   />

@@ -66,6 +66,24 @@ export function safeSmtpMetadata(smtp: any, source: SmtpSource, extra: Record<st
   };
 }
 
+// smtp_password no longer exists as a plaintext column (see
+// 20261110750000_encrypt_smtp_passwords_with_vault.sql) — every row only
+// carries a smtp_password_secret_id. This decrypts it via
+// vault.decrypted_secrets, which requires a service-role client; the caller
+// is responsible for passing one (RLS-bound clients get no rows back here,
+// since authenticated/anon have no grant on that view).
+async function attachDecryptedPassword(supabase: any, row: any): Promise<any> {
+  if (!row || !row.smtp_password_secret_id) return row;
+  const { data, error } = await supabase
+    .schema("vault")
+    .from("decrypted_secrets")
+    .select("decrypted_secret")
+    .eq("id", row.smtp_password_secret_id)
+    .maybeSingle();
+  if (error || !data) return row;
+  return { ...row, smtp_password: data.decrypted_secret };
+}
+
 async function getActiveUserSmtp(supabase: any, authUserId?: string | null, organizationId?: string | null) {
   if (!authUserId) return null;
   let query = supabase
@@ -79,7 +97,7 @@ async function getActiveUserSmtp(supabase: any, authUserId?: string | null, orga
   const rows = data || [];
   if (rows.length === 0) return null;
 
-  return rows.sort((a: any, b: any) => {
+  const winner = rows.sort((a: any, b: any) => {
     const aOrg = organizationId && a.organization_id === organizationId ? 1 : 0;
     const bOrg = organizationId && b.organization_id === organizationId ? 1 : 0;
     if (aOrg !== bOrg) return bOrg - aOrg;
@@ -88,6 +106,8 @@ async function getActiveUserSmtp(supabase: any, authUserId?: string | null, orga
     if (aGlobal !== bGlobal) return bGlobal - aGlobal;
     return Number(!!b.is_default) - Number(!!a.is_default);
   })[0];
+
+  return await attachDecryptedPassword(supabase, winner);
 }
 
 export async function resolveOrganizationSmtp(supabase: any, organizationId?: string | null): Promise<ResolvedSmtp | null> {
@@ -102,7 +122,8 @@ export async function resolveOrganizationSmtp(supabase: any, organizationId?: st
     .maybeSingle();
 
   if (!data) return null;
-  return { smtp: data, source: "organization", metadata: safeSmtpMetadata(data, "organization", { organization_id: organizationId }) };
+  const decrypted = await attachDecryptedPassword(supabase, data);
+  return { smtp: decrypted, source: "organization", metadata: safeSmtpMetadata(decrypted, "organization", { organization_id: organizationId }) };
 }
 
 export async function resolveSmtpForAuthenticatedUser(
@@ -112,12 +133,14 @@ export async function resolveSmtpForAuthenticatedUser(
   const { authUserId, organizationId, smtpId } = options;
 
   if (smtpId) {
-    const { data: userSmtp } = await supabase.from("user_smtp_settings").select("*").eq("id", smtpId).eq("is_active", true).maybeSingle();
-    if (userSmtp && (!authUserId || userSmtp.user_id === authUserId)) {
+    const { data: userSmtpRaw } = await supabase.from("user_smtp_settings").select("*").eq("id", smtpId).eq("is_active", true).maybeSingle();
+    if (userSmtpRaw && (!authUserId || userSmtpRaw.user_id === authUserId)) {
+      const userSmtp = await attachDecryptedPassword(supabase, userSmtpRaw);
       return { smtp: userSmtp, source: "user", metadata: safeSmtpMetadata(userSmtp, "user", { auth_user_id: authUserId, organization_id: organizationId }) };
     }
-    const { data: orgSmtp } = await supabase.from("organization_smtp_settings").select("*").eq("id", smtpId).eq("is_active", true).maybeSingle();
-    if (orgSmtp) {
+    const { data: orgSmtpRaw } = await supabase.from("organization_smtp_settings").select("*").eq("id", smtpId).eq("is_active", true).maybeSingle();
+    if (orgSmtpRaw && (!organizationId || orgSmtpRaw.organization_id === organizationId)) {
+      const orgSmtp = await attachDecryptedPassword(supabase, orgSmtpRaw);
       return { smtp: orgSmtp, source: "organization", metadata: safeSmtpMetadata(orgSmtp, "organization", { organization_id: organizationId }) };
     }
   }

@@ -51,6 +51,7 @@ import {
 import { EntryComments } from "@/components/team-hub/EntryComments";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { teamHubEntrySchema, teamHubFilterTypeSchema } from "@/lib/validations";
 
 type EntryType = "bug" | "improvement" | "task" | "knowledge";
 type EntryStatus = "pending" | "in_progress" | "done";
@@ -104,7 +105,8 @@ export default function TeamHub() {
   const [currentUserName, setCurrentUserName] = useState<string>("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRoleLoading, setIsRoleLoading] = useState(true);
-  
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   const [formData, setFormData] = useState({
     type: "bug" as EntryType,
     title: "",
@@ -211,6 +213,7 @@ export default function TeamHub() {
       tags: ""
     });
     setEditingEntry(null);
+    setFieldErrors({});
   };
 
   const openCreateDialog = () => {
@@ -232,10 +235,17 @@ export default function TeamHub() {
   };
 
   const handleSubmit = async () => {
-    if (!formData.title || !formData.description) {
-      toast({ title: "Campos obrigatórios", description: "Preencha o título e a descrição.", variant: "destructive" });
+    const validation = teamHubEntrySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({ title: "Campos obrigatórios", description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
+    setFieldErrors({});
 
     const tags = formData.tags.split(",").map(t => t.trim()).filter(Boolean);
     const status = formData.type === "task" || formData.type === "knowledge" ? "done" : formData.status;
@@ -443,7 +453,13 @@ export default function TeamHub() {
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm text-muted-foreground">Filtros:</span>
           </div>
-          <Select value={filterType} onValueChange={setFilterType}>
+          <Select
+            value={filterType}
+            onValueChange={(v) => {
+              const validation = teamHubFilterTypeSchema.safeParse(v);
+              if (validation.success) setFilterType(validation.data);
+            }}
+          >
             <SelectTrigger className="w-[150px]">
               <SelectValue placeholder="Tipo" />
             </SelectTrigger>
@@ -626,21 +642,25 @@ export default function TeamHub() {
 
                 <div className="space-y-2">
                   <Label>Título</Label>
-                  <Input 
+                  <Input
                     placeholder="Resumo breve..."
                     value={formData.title}
                     onChange={(e) => setFormData({...formData, title: e.target.value})}
+                    className={fieldErrors.title ? "border-destructive" : ""}
                   />
+                  {fieldErrors.title && <p className="text-sm text-destructive">{fieldErrors.title}</p>}
                 </div>
 
                 <div className="space-y-2">
                   <Label>Descrição</Label>
-                  <Textarea 
+                  <Textarea
                     placeholder="Descreve em detalhe..."
                     rows={4}
                     value={formData.description}
                     onChange={(e) => setFormData({...formData, description: e.target.value})}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 {(formData.type === "bug" || formData.type === "improvement") && (

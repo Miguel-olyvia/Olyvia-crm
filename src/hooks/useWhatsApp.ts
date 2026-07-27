@@ -3,6 +3,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export type WhatsAppModule = "leads" | "contacts" | "clients" | "proposals" | "quotes" | "contracts";
 
@@ -103,6 +104,7 @@ export function buildWhatsAppMessage(ctx: WhatsAppContext, commercialName: strin
 
 export function useWhatsApp() {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const { activeCompany } = useCompany();
 
   const openWhatsApp = useCallback((phone: string, message: string): boolean => {
@@ -178,7 +180,7 @@ export function useWhatsApp() {
 
     // Get commercial name and company name
     let commercialName = "Equipa Comercial";
-    let companyName = activeCompany?.name || "";
+    const companyName = activeCompany?.name || "";
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -248,6 +250,9 @@ export function useWhatsApp() {
       // Document send tracking (channel = whatsapp). Failure must NOT mark send as failed.
       if (ctx.module === "contracts" && ctx.contractId) {
         try {
+          if (createdBy) {
+            await supabase.rpc('set_audit_context', { p_user_id: createdBy, p_source: 'ui' });
+          }
           await (supabase as any).from("contract_sends").insert({
             contract_id: ctx.contractId,
             organization_id: organizationId,
@@ -317,7 +322,7 @@ export function useWhatsApp() {
           .eq("id", ctx.leadId);
       }
 
-      toast({ title: "Registado na timeline" });
+      toast({ title: t('whatsapp.timeline.registerSuccess') });
       if (ctx.entityId) {
         window.dispatchEvent(new CustomEvent("entity-interaction-created", {
           detail: { entityId: ctx.entityId }
@@ -326,10 +331,10 @@ export function useWhatsApp() {
       return true;
     } catch (err) {
       console.error("Failed to register WhatsApp in timeline:", err);
-      toast({ title: "Erro", description: "Não foi possível registar na timeline.", variant: "destructive" });
+      toast({ title: t('common.error'), description: t('whatsapp.timeline.registerError'), variant: "destructive" });
       return false;
     }
-  }, [activeCompany, toast]);
+  }, [activeCompany, toast, t]);
 
   return { sendWhatsApp, openWhatsApp, registerInTimeline, formatWhatsAppPhone, buildWhatsAppMessage: buildWhatsAppMessage };
 }

@@ -30,10 +30,13 @@ interface Deal {
   id: string;
   title: string;
   value: number;
+  entity_id?: string | null;
   entity_name?: string | null;
   entity_phone?: string | null;
   entity_email?: string | null;
   assigned_to_name?: string | null;
+  organization_id?: string | null;
+  lead_id?: string | null;
   created_at: string;
   deal_stages: {
     id: string;
@@ -76,7 +79,7 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
     newStageName: string;
     message: string;
   } | null>(null);
-  const [emailDeal, setEmailDeal] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [emailDeal, setEmailDeal] = useState<{ id: string; entityId: string; name: string; email: string; orgId: string; leadId: string | null } | null>(null);
 
   const dealsByStage = useMemo(() => {
     const map: Record<string, Deal[]> = {};
@@ -232,7 +235,7 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
                                     </Button>
                                   )}
                                   {deal.entity_email && (
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={e => { e.stopPropagation(); setEmailDeal({ id: deal.id, name: deal.entity_name || "", email: deal.entity_email! }); }}>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={e => { e.stopPropagation(); setEmailDeal({ id: deal.id, entityId: deal.entity_id ?? "", name: deal.entity_name || "", email: deal.entity_email!, orgId: deal.organization_id ?? "", leadId: deal.lead_id ?? null }); }}>
                                       <Mail className="h-3 w-3 text-primary" />
                                     </Button>
                                   )}
@@ -259,10 +262,11 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
         open={!!emailDeal}
         onOpenChange={open => { if (!open) setEmailDeal(null); }}
         module="leads"
-        entityId={emailDeal?.id ?? ""}
+        entityId={emailDeal?.entityId ?? ""}
         entityName={emailDeal?.name ?? ""}
         entityEmail={emailDeal?.email ?? ""}
-        leadId={emailDeal?.id}
+        organizationId={emailDeal?.orgId}
+        leadId={emailDeal?.leadId ?? undefined}
         onSent={() => setEmailDeal(null)}
       />
 

@@ -49,8 +49,9 @@ export const listDealsDef: ToolDef = {
 
 const createDeal: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, businessUserId, organizationId } = ctx;
-  const createdBy = businessUserId || null;
   if (!organizationId) return { success: false, message: "Organização não definida." };
+  if (!businessUserId) return { success: false, message: "Utilizador não identificado." };
+  const createdBy = businessUserId;
   const permD = requireWrite(ctx, "deals.create", "criar PP");
   if (permD) return permD;
   // deal_stages is global (no organization_id, no is_active) — use order_index
@@ -63,6 +64,7 @@ const createDeal: Handler = async (ctx, args): Promise<ToolResult> => {
 
   if (!stage) return { success: false, message: "Nenhum stage configurado em deal_stages." };
 
+  await supabase.rpc("set_audit_context", { p_user_id: createdBy, p_source: "ai-assistant" });
   const { data, error } = await supabase
     .from("deals")
     .insert({
@@ -192,8 +194,9 @@ const createDealFromLead: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const updateDeal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
+  if (!businessUserId) return { success: false, message: "Utilizador não identificado." };
   const perm = requireWrite(ctx, "deals.edit", "editar PP");
   if (perm) return perm;
   if (!args?.id || !UUID_RE.test(String(args.id))) return { success: false, message: "id inválido." };
@@ -215,6 +218,7 @@ const updateDeal: Handler = async (ctx, args): Promise<ToolResult> => {
     patch.stage_id = args.stage_id;
   }
   if (Object.keys(patch).length === 0) return { success: false, message: "Nada para atualizar." };
+  await supabase.rpc("set_audit_context", { p_user_id: businessUserId, p_source: "ai-assistant" });
   const { data, error } = await supabase
     .from("deals")
     .update(patch)
@@ -229,8 +233,9 @@ const updateDeal: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const closeDeal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, businessUserId, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
+  if (!businessUserId) return { success: false, message: "Utilizador não identificado." };
   const perm = requireWrite(ctx, "deals.edit", "fechar PP");
   if (perm) return perm;
   if (!args?.id || !UUID_RE.test(String(args.id))) return { success: false, message: "id inválido." };
@@ -246,6 +251,7 @@ const closeDeal: Handler = async (ctx, args): Promise<ToolResult> => {
     .maybeSingle();
   if (!stage) return { success: false, message: `Nenhum stage com ${flagCol}=true em deal_stages.` };
 
+  await supabase.rpc("set_audit_context", { p_user_id: businessUserId, p_source: "ai-assistant" });
   const { data, error } = await supabase
     .from("deals")
     .update({ stage_id: stage.id, closed_at: new Date().toISOString() })
@@ -354,7 +360,7 @@ const getDealDetails: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 const cancelDeal: Handler = async (ctx, args): Promise<ToolResult> => {
-  const { supabase, organizationId } = ctx;
+  const { supabase, organizationId, authUid } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!args?.deal_id || !UUID_RE.test(String(args.deal_id))) {
     return { success: false, message: "deal_id inválido." };
@@ -381,6 +387,7 @@ const cancelDeal: Handler = async (ctx, args): Promise<ToolResult> => {
   const { error: rpcErr } = await supabase.rpc("soft_delete_business_entity", {
     p_kind: "deal",
     p_id: args.deal_id,
+    p_actor_id: authUid,
   });
   if (rpcErr) return { success: false, message: `Falha ao cancelar: ${rpcErr.message}` };
 

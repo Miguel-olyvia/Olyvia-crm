@@ -139,6 +139,112 @@ export async function cleanupCreatedEntityArtifacts(
   await supabase.from("anew_entities").delete().eq("id", entityId);
 }
 
+export interface LocationValidationResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface FieldDefinitionForLocation {
+  field_key?: string | null;
+  field_type?: string | null;
+  field_label?: string | null;
+}
+
+/**
+ * Server-side enforcement of campaign/form `location_required` + allowed
+ * districts on the public lead endpoints (create-lead, update-lead,
+ * insert-lead). Mirrors the read-only calculation already done in
+ * get-form-data/index.ts (~lines 299-345): campaign.location_required takes
+ * priority over form.location_required, and the allowed district set comes
+ * from campaign_districts when the campaign requires location, otherwise
+ * from form_districts.
+ *
+ * The district field is located using the same heuristic the public form
+ * client uses to decide which field is "the" district selector
+ * (PublicLeadForm.tsx `isDistrictField`): field_type === "ref_district", or
+ * field_key/field_label containing "district"/"distrito".
+ *
+ * This is intentionally permissive when nothing is submitted yet (multi-step
+ * forms may not have reached the district step) or when no districts are
+ * configured (matches get-form-data's own permissive fallback) — required-ness
+ * of the field itself is enforced separately by the existing required-field
+ * validation in each endpoint.
+ */
+export async function validateLocationDistrict(params: {
+  supabase: any;
+  campaignId?: string | null;
+  campaignLocationRequired?: boolean | null;
+  formId?: string | null;
+  formLocationRequired?: boolean | null;
+  definitions: FieldDefinitionForLocation[];
+  fieldValues: Record<string, unknown>;
+}): Promise<LocationValidationResult> {
+  const {
+    supabase,
+    campaignId,
+    campaignLocationRequired,
+    formId,
+    formLocationRequired,
+    definitions,
+    fieldValues,
+  } = params;
+
+  const locationRequired = !!campaignLocationRequired || !!formLocationRequired;
+  if (!locationRequired) return { ok: true };
+
+  const isDistrictDef = (d: FieldDefinitionForLocation): boolean => {
+    const key = String(d.field_key || "").toLowerCase();
+    const label = String(d.field_label || "").toLowerCase();
+    return (
+      d.field_type === "ref_district" ||
+      key.includes("district") ||
+      key.includes("distrito") ||
+      label.includes("district") ||
+      label.includes("distrito")
+    );
+  };
+
+  const districtDef = (definitions || []).find(isDistrictDef);
+  const districtFieldKey = districtDef?.field_key || null;
+  const submittedDistrictId = districtFieldKey ? (fieldValues || {})[districtFieldKey] : null;
+
+  // Nothing submitted for the district field on this request/step — nothing
+  // to validate here yet.
+  if (submittedDistrictId === undefined || submittedDistrictId === null || submittedDistrictId === "") {
+    return { ok: true };
+  }
+
+  let allowedDistrictIds: string[] = [];
+  if (campaignLocationRequired && campaignId) {
+    const { data } = await supabase
+      .from("campaign_districts")
+      .select("district_id")
+      .eq("campaign_id", campaignId);
+    allowedDistrictIds = (data || []).map((r: { district_id: string }) => r.district_id);
+  } else if (formLocationRequired && formId) {
+    const { data } = await supabase
+      .from("form_districts")
+      .select("district_id")
+      .eq("form_id", formId);
+    allowedDistrictIds = (data || []).map((r: { district_id: string }) => r.district_id);
+  }
+
+  // No districts configured to restrict against — permissive, matching
+  // get-form-data's own fallback (an empty allowed_districts array).
+  if (allowedDistrictIds.length === 0) {
+    return { ok: true };
+  }
+
+  if (!allowedDistrictIds.includes(String(submittedDistrictId))) {
+    return {
+      ok: false,
+      error: "Selected district is not within the allowed service area for this campaign/form",
+    };
+  }
+
+  return { ok: true };
+}
+
 export function getWorkflowPermissionForSourceEntity(sourceEntity: string): string | null {
   return WORKFLOW_PERMISSION_BY_SOURCE_ENTITY[sourceEntity] ?? null;
 }

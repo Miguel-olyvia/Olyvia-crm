@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { HelpButton } from "@/components/HelpButton";
+import { generateSecureFileName, getSafeFileExtension } from "@/utils/secureFileUpload";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -223,6 +225,11 @@ const formatFileSize = (bytes: number) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 };
 
+// Forces Content-Disposition: attachment so a malicious file opened via
+// window.open() downloads instead of rendering inline (e.g. an SVG/HTML
+// payload disguised with an allowed extension and a forged Content-Type).
+const withForceDownload = (url: string) => `${url}${url.includes("?") ? "&" : "?"}download`;
+
 export default function Gallery() {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -301,9 +308,43 @@ export default function Gallery() {
     }
   };
 
+  const MEDIA_ALLOWED_MIME_PREFIXES = ["image/", "video/", "audio/"];
+  const MEDIA_ALLOWED_MIME_TYPES = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ];
+  const MEDIA_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
+  const validateFile = (file: File): string | null => {
+    const isAllowedMime =
+      MEDIA_ALLOWED_MIME_PREFIXES.some(prefix => file.type.startsWith(prefix)) ||
+      MEDIA_ALLOWED_MIME_TYPES.includes(file.type);
+
+    if (!isAllowedMime) {
+      return t('gallery.toast.invalidFileType');
+    }
+
+    if (file.size > MEDIA_MAX_FILE_SIZE_BYTES) {
+      return t('gallery.toast.fileTooLarge');
+    }
+
+    return null;
+  };
+
   const handleUpload = async () => {
     if (!selectedFile || !selectedCompanyId) {
       toast({ title: t('gallery.toast.selectFile'), variant: "destructive" });
+      return;
+    }
+
+    const validationError = validateFile(selectedFile);
+    if (validationError) {
+      toast({ title: validationError, variant: "destructive" });
       return;
     }
 
@@ -312,14 +353,23 @@ export default function Gallery() {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
 
-      const fileExt = selectedFile.name.split(".").pop();
-      const fileName = `${selectedCompanyId}/${Date.now()}-${newAsset.name || selectedFile.name}.${fileExt}`;
-      
+      const fileExt = getSafeFileExtension(selectedFile);
+      const fileName = `${selectedCompanyId}/${generateSecureFileName(selectedFile)}`;
+
       const { error: uploadError } = await supabase.storage
-        .from("media")
+        .from("media-quarantine")
         .upload(fileName, selectedFile);
 
       if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "media-quarantine", finalBucket: "media", path: fileName },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({ title: t('gallery.toast.uploadError'), description: await resolveValidateUploadErrorMessage(validateResult, validateError), variant: "destructive" });
+        return;
+      }
 
       const { data: urlData } = supabase.storage.from("media").getPublicUrl(fileName);
       const fileUrl = urlData.publicUrl;
@@ -346,7 +396,7 @@ export default function Gallery() {
       loadAssets();
     } catch (error: unknown) {
       console.error("Upload error:", error);
-      toast({ title: t('gallery.toast.uploadError'), description: (error as Error).message, variant: "destructive" });
+      toast({ title: t('gallery.toast.uploadError'), description: getUploadErrorMessage(error), variant: "destructive" });
     } finally {
       setUploading(false);
     }
@@ -612,7 +662,7 @@ export default function Gallery() {
                               <DropdownMenuItem onClick={() => copyUrl(asset.file_url)}>
                                 <Copy className="h-4 w-4 mr-2" /> {t('gallery.actions.copyUrl')}
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => window.open(asset.file_url, "_blank")}>
+                              <DropdownMenuItem onClick={() => window.open(withForceDownload(asset.file_url), "_blank")}>
                                 <ExternalLink className="h-4 w-4 mr-2" /> {t('gallery.actions.openNew')}
                               </DropdownMenuItem>
                               <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(asset)}>
@@ -844,7 +894,7 @@ export default function Gallery() {
                   <p className="mt-4">{t('gallery.preview.close')}</p>
                   <Button 
                     className="mt-2"
-                    onClick={() => window.open(previewAsset?.file_url, "_blank")}
+                    onClick={() => previewAsset?.file_url && window.open(withForceDownload(previewAsset.file_url), "_blank")}
                   >
                     <ExternalLink className="h-4 w-4 mr-2" />
                     {t('gallery.actions.openNew')}
@@ -858,7 +908,7 @@ export default function Gallery() {
                     <Copy className="h-4 w-4 mr-2" />
                     {t('gallery.actions.copyUrl')}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => window.open(previewAsset.file_url, "_blank")}>
+                  <Button variant="outline" size="sm" onClick={() => window.open(withForceDownload(previewAsset.file_url), "_blank")}>
                     <ExternalLink className="h-4 w-4 mr-2" />
                     {t('gallery.actions.openNew')}
                   </Button>

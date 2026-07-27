@@ -481,7 +481,7 @@ function FlowBuilderCanvas({ flow, onBack, onSave, onRename, canCreate, canEdit,
     if (swimLanes.length === 0) return;
 
     const getAbsPos = (node: Node): { x: number; y: number } => {
-      let pos = { ...node.position };
+      const pos = { ...node.position };
       let cur = node;
       while ((cur as any).parentId) {
         const parent = currentNodes.find(n => n.id === (cur as any).parentId);
@@ -586,7 +586,7 @@ function FlowBuilderCanvas({ flow, onBack, onSave, onRename, canCreate, canEdit,
   const findParentSwimLane = useCallback((flowPos: { x: number; y: number }, excludeId?: string, excludeIds?: Set<string>) => {
     const currentNodes = nodesRef.current;
     const getAbsolutePosition = (node: Node): { x: number; y: number } => {
-      let pos = { ...node.position };
+      const pos = { ...node.position };
       let current = node;
       while ((current as any).parentId) {
         const parent = currentNodes.find(n => n.id === (current as any).parentId);
@@ -619,7 +619,7 @@ function FlowBuilderCanvas({ flow, onBack, onSave, onRename, canCreate, canEdit,
   ) => {
     const currentNodes = nodesRef.current;
     const getAbsolutePosition = (node: Node): { x: number; y: number } => {
-      let pos = { ...node.position };
+      const pos = { ...node.position };
       let current = node;
       while ((current as any).parentId) {
         const parent = currentNodes.find(n => n.id === (current as any).parentId);

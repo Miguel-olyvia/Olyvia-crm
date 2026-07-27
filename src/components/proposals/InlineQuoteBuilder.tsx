@@ -15,6 +15,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
+import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
 
 export interface InlineQuoteLine {
   id: string;
@@ -595,11 +596,13 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     return afterDiscount;
   };
 
-  const totalSemIva = quote.lines.reduce((sum, l) => sum + calcLinePrice(l), 0);
-  const totalIva = quote.lines.reduce((sum, l) => sum + calcLinePrice(l) * (l.iva_percent / 100), 0);
-  const totalAfterGlobalDiscount = totalSemIva * (1 - quote.desconto_global_percent / 100);
-  const totalIvaAfterDiscount = totalIva * (1 - quote.desconto_global_percent / 100);
-  const grandTotal = totalAfterGlobalDiscount + totalIvaAfterDiscount;
+  // Bundle-aware VAT calculation shared with QuoteBuilderSidebar's consolidated
+  // totals, so this card's own badge/totals can never disagree with the sidebar.
+  const inlineTotals = calculateInlineQuoteTotals(quote);
+  const totalSemIva = inlineTotals.totalSemIva;
+  const totalAfterGlobalDiscount = inlineTotals.totalSemIvaComDesconto;
+  const totalIvaAfterDiscount = inlineTotals.totalIva;
+  const grandTotal = inlineTotals.totalComIva;
 
   const sectionNames = quote.sections.length > 0 ? quote.sections : ["Geral"];
 
@@ -644,7 +647,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
           {templates.length > 0 && (
             <div className="flex items-center gap-2">
               <Label className="text-xs text-muted-foreground whitespace-nowrap">Template:</Label>
-              <Select value={quote.modelo_base} onValueChange={(v) => { if (v !== "0") loadTemplate(v); }}>
+              <Select value={quote.modelo_base} onValueChange={(v) => { if (v !== "0") { loadTemplate(v); } else { onChange({ ...quote, modelo_base: "0" }); } }}>
                 <SelectTrigger className="h-8 text-xs">
                   <SelectValue placeholder="Selecionar template..." />
                 </SelectTrigger>
@@ -699,6 +702,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                       const isManual = custoUnit === 0;
                       const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
                       const lineTotal = calcLinePrice(line);
+                      const isBundleLine = getLineBundleComponents(line).length > 0;
 
                       return (
                         <div key={line.id} className="grid grid-cols-[1fr_60px_60px_80px_80px_60px_80px_28px] gap-1 items-center">
@@ -763,12 +767,28 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                             className="h-8 text-xs text-right"
                             step="0.01"
                           />
-                          <Input
-                            type="number"
-                            value={line.iva_percent}
-                            onChange={(e) => updateLine(line.id, "iva_percent", parseFloat(e.target.value) || 0)}
-                            className="h-8 text-xs text-center"
-                          />
+                          {isBundleLine ? (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Input
+                                    type="number"
+                                    value={line.iva_percent}
+                                    disabled
+                                    className="h-8 text-xs text-center opacity-60 cursor-not-allowed"
+                                  />
+                                </TooltipTrigger>
+                                <TooltipContent>IVA calculado por componente</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ) : (
+                            <Input
+                              type="number"
+                              value={line.iva_percent}
+                              onChange={(e) => updateLine(line.id, "iva_percent", parseFloat(e.target.value) || 0)}
+                              className="h-8 text-xs text-center"
+                            />
+                          )}
                           <div className="text-xs text-right font-medium pr-1">
                             {formatCurrency(lineTotal)}
                           </div>
@@ -873,21 +893,11 @@ export const createEmptyInlineQuote = (proposalTitle?: string): InlineQuoteData 
   modelo_base: "0",
 });
 
+// Delegates to the shared, bundle-aware VAT helper so the value persisted as
+// `proposal.value` (consumed by Proposals.tsx / ProposalCreateDialog.tsx)
+// always matches what this component's own header badge/totals display —
+// previously this computed its own naive, non-bundle-aware total that could
+// silently disagree with what was shown on screen.
 export const calcInlineQuoteTotal = (quote: InlineQuoteData): number => {
-  const calcLinePrice = (line: InlineQuoteLine) => {
-    const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-    const isManual = custoUnit === 0 && line.retail_price_unit !== undefined && line.retail_price_unit !== null;
-    const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-    const base = unitPrice * line.qt;
-    return base * (1 - (line.discount_percent || 0) / 100);
-  };
-
-  // Only count lines that will actually be persisted (qt > 0).
-  // Keeps `proposal.value` consistent with the rows inserted into `quote_lines`.
-  const validLines = quote.lines.filter(l => l.qt > 0);
-  const totalSemIva = validLines.reduce((sum, l) => sum + calcLinePrice(l), 0);
-  const totalIva = validLines.reduce((sum, l) => sum + calcLinePrice(l) * (l.iva_percent / 100), 0);
-  const afterDiscount = totalSemIva * (1 - quote.desconto_global_percent / 100);
-  const ivaAfterDiscount = totalIva * (1 - quote.desconto_global_percent / 100);
-  return afterDiscount + ivaAfterDiscount;
+  return calculateInlineQuoteTotals(quote).totalComIva;
 };

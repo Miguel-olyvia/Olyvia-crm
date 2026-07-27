@@ -78,14 +78,13 @@ const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 
 
 const AnewLeads = lazy(() => import("./pages/AnewLeads"));
-const AnewContacts = lazy(() => import("./pages/AnewContacts"));
+// AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
 const Gallery = lazy(() => import("./pages/Gallery"));
 const MarketingApi = lazy(() => import("./pages/MarketingApi"));
 const MarketingIntegration = lazy(() => import("./pages/MarketingIntegration"));
 const PostalCodesImport = lazy(() => import("./pages/PostalCodesImport"));
 const PublicLeadForm = lazy(() => import("./pages/PublicLeadForm"));
-const PublicProposal = lazy(() => import("./pages/PublicProposal"));
 const TestIframe = lazy(() => import("./pages/TestIframe"));
 const TestWidget = lazy(() => import("./pages/TestWidget"));
 const AcquisitionHelp = lazy(() => import("./pages/AcquisitionHelp"));
@@ -119,6 +118,9 @@ const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const AlertSettings = lazy(() => import("./pages/AlertSettings"));
+const ExportAudit = lazy(() => import("./pages/ExportAudit"));
+const SupportAccess = lazy(() => import("./pages/SupportAccess"));
+const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -163,7 +165,6 @@ const App = () => (
                   <Route path="/form/:formId" element={<PublicLeadForm />} />
                   <Route path="/lead-form/:formId" element={<PublicLeadForm />} />
                   <Route path="/campaign/:campaignId" element={<PublicLeadForm />} />
-                  <Route path="/proposal/:token" element={<PublicProposal />} />
                   <Route path="/test-iframe" element={<TestIframe />} />
                   <Route path="/test-widget" element={<TestWidget />} />
 
@@ -184,12 +185,12 @@ const App = () => (
                       <Route path="/dashboard" element={<Dashboard />} />
                       <Route path="/anew-clients" element={<Navigate to="/clients" replace />} />
                       <Route path="/company-groups" element={<Navigate to="/organizations" replace />} />
-                      <Route path="/anew-contacts" element={<Navigate to="/contacts" replace />} />
+                      <Route path="/anew-contacts" element={<Navigate to="/leads" replace />} />
                       <Route path="/anew-leads" element={<Navigate to="/leads" replace />} />
                       <Route path="/calendar" element={<Navigate to="/scheduling" replace />} />
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
-                      <Route path="/contacts" element={<ProtectedRoute permission="contacts.view"><AnewContacts /></ProtectedRoute>} />
+                      <Route path="/contacts" element={<Navigate to="/leads" replace />} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
@@ -228,7 +229,7 @@ const App = () => (
                       <Route path="/service-catalog-items" element={<ServiceCatalogItems />} />
                       <Route path="/service-fees" element={<ServiceFees />} />
                       <Route path="/settings" element={<ProtectedRoute permission="settings.update"><Settings /></ProtectedRoute>} />
-                      <Route path="/alert-settings" element={<AlertSettings />} />
+                      <Route path="/alert-settings" element={<ProtectedRoute permission="settings.update"><AlertSettings /></ProtectedRoute>} />
                       <Route path="/docs/architecture" element={<DocsArchitecture />} />
                       <Route path="/docs/user-model" element={<DocsUserModel />} />
                       <Route path="/docs/api" element={<DocsApi />} />
@@ -267,6 +268,9 @@ const App = () => (
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<Trash />} />
+                      <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
+                      <Route path="/platform/support-access" element={<ProtectedRoute permission="platform.support_access.view"><SupportAccess /></ProtectedRoute>} />
+                      <Route path="/platform/auth-audit-log" element={<ProtectedRoute permission="platform.auth_audit_log.view"><AuthAuditLog /></ProtectedRoute>} />
                     </Route>
                   </Route>
 

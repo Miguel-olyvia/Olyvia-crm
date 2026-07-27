@@ -1,4 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
@@ -43,11 +45,11 @@ import {
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
-  Search, Plus, RefreshCw, UserPlus, Eye, Trash2, Pencil, GripVertical,
+  Search, Plus, RefreshCw, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
   LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
   Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
-  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload
+  Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload, Columns3
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -65,7 +67,8 @@ import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkfl
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
-import { LeadsTableColumns, ColumnConfig } from "@/components/leads/LeadsTableColumns";
+import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
+import { LeadsTableColumns, ColumnConfig, DEFAULT_SYSTEM_COLUMNS } from "@/components/leads/LeadsTableColumns";
 import { LeadsAIOrganization } from "@/components/leads/LeadsAIOrganization";
 import { LeadsAIConfig } from "@/components/leads/LeadsAIConfig";
 import { DynamicFormField } from "@/components/leads/DynamicFormField";
@@ -98,7 +101,7 @@ import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
-import { LeadTableRow } from "@/components/leads/LeadTableRow";
+import { LeadTableRow, LeadPipelineEntry } from "@/components/leads/LeadTableRow";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { calculateLeadHealthScore, type LeadHealthScore } from "@/hooks/useLeadHealthScore";
 import { LeadDetailHeader } from "@/components/leads/detail/LeadDetailHeader";
@@ -109,13 +112,13 @@ import { LeadInfoTab } from "@/components/leads/detail/LeadInfoTab";
 import { LeadTimelineTab } from "@/components/leads/detail/LeadTimelineTab";
 import { LeadJourneyTab } from "@/components/leads/detail/LeadJourneyTab";
 import { ClientNotesTab } from "@/components/clients/detail/ClientNotesTab";
+import { ClientContractsTab } from "@/components/clients/detail/ClientContractsTab";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
   getLeadScopeUserIds,
-  identityContactIsPrimary,
   mapWithConcurrency,
   normalizeLeadScope,
   reconcileRefreshedLead,
@@ -174,11 +177,6 @@ interface FieldDefinition {
   [key: string]: any;
 }
 
-interface ContactOption {
-  id: string;
-  entity_id: string | null;
-}
-
 interface ClientOption {
   id: string;
   entity_id: string | null;
@@ -226,6 +224,123 @@ interface Campaign {
   form_id?: string | null;
 }
 
+// Canonical column list for a leads list/kanban fetch — shared so both call sites
+// always request (and therefore can filter/display) the exact same shape.
+const LEADS_LIST_COLUMNS = `
+  id, entity_id, campaign_id,
+  status, workflow_stage_id, assigned_to, created_by,
+  organization_id, root_organization_id,
+  created_at, updated_at, converted_at,
+  converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
+  field_values, notes, source, source_id,
+  last_contact_at, last_contact_result, contact_attempts,
+  callback_scheduled_at, callback_notes,
+  tags, search_text,
+  qualification_type, qualified_at,
+  campaigns(id, name)
+`;
+
+interface LeadsQueryFilters {
+  statusFilter: string;
+  campaignFilter: string;
+  assignedToFilter: string;
+  contactResultFilter: string;
+  dateFrom?: Date;
+  dateTo?: Date;
+  effectiveSearch: string;
+  sourceFilter: string;
+  // Orthogonal to statusFilter: qualification_type is sticky and survives
+  // status changes, so it's filtered independently (AND'ed with the other
+  // clauses) rather than folded into the status filter above.
+  qualificationFilter?: string;
+}
+
+// Single source of truth for the filter clauses applied to anew_leads —
+// used by the list query, the kanban query, and nothing else builds its own
+// version of these .eq/.in/.ilike clauses. Keeps list and kanban guaranteed
+// in sync: a new filter added here applies to both automatically.
+function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
+  const {
+    statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+    dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+  } = filters;
+
+  if (statusFilter !== "all") {
+    if (statusFilter === "lost") {
+      q = q.in("status", ["lost", "rejected"]);
+    } else if (statusFilter === "visit_scheduled") {
+      q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
+    } else if (statusFilter === "new") {
+      q = q.eq("status", "new").is("scheduled_visit_id", null);
+    } else {
+      q = q.eq("status", statusFilter);
+    }
+  }
+  if (campaignFilter !== "all") q = q.eq("campaign_id", campaignFilter);
+  if (assignedToFilter !== "all") {
+    if (assignedToFilter === "unassigned") {
+      q = q.is("assigned_to", null);
+    } else {
+      q = q.eq("assigned_to", assignedToFilter);
+    }
+  }
+  if (contactResultFilter !== "all") {
+    if (contactResultFilter === "none") {
+      q = q.is("last_contact_result", null);
+    } else {
+      q = q.eq("last_contact_result", contactResultFilter);
+    }
+  }
+  if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
+  if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
+  if (effectiveSearch) q = q.ilike("search_text", `%${effectiveSearch}%`);
+  if (sourceFilter === "none") {
+    q = q.is("source", null);
+  } else if (sourceFilter !== "all") {
+    q = q.eq("source", sourceFilter);
+  }
+  if (qualificationFilter && qualificationFilter !== "all") {
+    if (qualificationFilter === "unclassified") {
+      q = q.is("qualification_type", null);
+    } else {
+      q = q.eq("qualification_type", qualificationFilter);
+    }
+  }
+  return q;
+}
+
+// Base anew_leads query (visibility scope + filters), shared by list + kanban.
+// Callers add their own .order()/.range()/.limit() on top.
+function buildLeadsBaseQuery(params: {
+  organizationId: string;
+  requestedScope: string;
+  scopeAnewUserId?: string | null;
+  scopeAuthUserId?: string | null;
+  teamMemberIds?: string[];
+  filters: LeadsQueryFilters;
+  columns?: string;
+}) {
+  let query = supabase
+    .from("anew_leads")
+    .select(params.columns ?? LEADS_LIST_COLUMNS)
+    .is("deleted_at", null)
+    .neq("status", "converted")
+    .is("converted_to_contact_id", null)
+    .is("converted_at", null);
+
+  query = query.eq("organization_id", params.organizationId);
+
+  if (params.requestedScope === "OWNED" && params.scopeAnewUserId) {
+    const ownerIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId);
+    query = query.or(`assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`);
+  } else if (params.requestedScope === "TEAM" && params.scopeAnewUserId) {
+    const visibleUserIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId, params.teamMemberIds);
+    query = query.or(`assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`);
+  }
+
+  return applyLeadsServerFilters(query, params.filters);
+}
+
 export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -249,9 +364,10 @@ export default function AnewLeads() {
   const { hasPermission } = usePermissions();
   
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
+  const [kanbanLoading, setKanbanLoading] = useState(false);
+  const [kanbanTruncated, setKanbanTruncated] = useState(false);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
   const [contactResults, setContactResults] = useState<ContactResultConfig[]>([]);
   const [referenceData, setReferenceData] = useState<Record<string, Record<string, string>>>({});
   const [loading, setLoading] = useState(true);
@@ -277,6 +393,9 @@ export default function AnewLeads() {
   const [campaignFilter, setCampaignFilter] = useState<string>("all");
   const [contactResultFilter, setContactResultFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
+  // Orthogonal to statusFilter: qualification_type (SQL/MQL) is sticky and
+  // survives status changes, so it's a separate, AND'ed filter dimension.
+  const [qualificationFilter, setQualificationFilter] = useState<string>("all");
   const [onlyMine, setOnlyMine] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -323,10 +442,11 @@ export default function AnewLeads() {
               field_values, notes, source, source_id,
               last_contact_at, last_contact_result, contact_attempts,
               callback_scheduled_at, callback_notes, tags,
+              qualification_type, qualified_at,
               campaigns(id, name)
             `)
             .eq("id", openId)
-            .or(`organization_id.eq.${activeCompanyId},root_organization_id.eq.${activeCompanyId}`)
+            .eq("organization_id", activeCompanyId)
             .is("deleted_at", null);
           const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
           if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -351,7 +471,7 @@ export default function AnewLeads() {
             setDetailTab("info");
             setShowDetails(true);
           } else if (!cancelled) {
-            toast({ title: "Lead não encontrado", description: "Pode não existir ou não tens permissão.", variant: "destructive" });
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
           }
         }
       } finally {
@@ -364,6 +484,10 @@ export default function AnewLeads() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    // selectedLead is intentionally excluded: re-running when a dialog is already
+    // open would clobber the in-flight open state. The effect must only fire when
+    // the ?open= param or org/scope context changes, not when the user navigates
+    // within the already-open detail dialog.
   }, [
     searchParams,
     activeCompanyId,
@@ -386,10 +510,13 @@ export default function AnewLeads() {
     return statusCounts[statusFilter] || 0;
   }, [statusFilter, statusCounts, globalTotal]);
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
-  const [companyUsers, setCompanyUsers] = useState<{ id: string; name: string }[]>([]);
-  const [comercialUsers, setComercialUsers] = useState<{ id: string; name: string; districts: string[]; org_ids: string[] }[]>([]);
   const [assignOrgFilter, setAssignOrgFilter] = useState<string>("all");
-  const [assignOrgTree, setAssignOrgTree] = useState<{ id: string; name: string; type: string; depth: number }[]>([]);
+  // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
+  // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
+  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  // NOTE: assignableCompanyUsers/assignableComercialUsers are declared further below
+  // (after companyUsers/comercialUsers are defined via useQuery) to avoid a
+  // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [sortColumn, setSortColumn] = useState<string>("created_at");
@@ -407,15 +534,13 @@ export default function AnewLeads() {
   const [extraCampaignFieldDefs, setExtraCampaignFieldDefs] = useState<FieldDefinition[]>([]);
   const [newLeadValues, setNewLeadValues] = useState<Record<string, any>>({});
   const [creatingLead, setCreatingLead] = useState(false);
-  const [availableForms, setAvailableForms] = useState<{id: string; name: string; is_primary: boolean; form_id?: string}[]>([]);
-  const [leadSources, setLeadSources] = useState<{id: string; name: string; icon: string | null; color: string | null}[]>([]);
   const [createLeadSourceId, setCreateLeadSourceId] = useState<string>("");
 
   // Duplicate detection state
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<import("@/components/shared/DuplicateEntityDialog").DuplicateMatch[]>([]);
   const [pendingLeadData, setPendingLeadData] = useState<{ entityId: string; fieldValues: Record<string, any>; assignedTo: string | null; resolvedRootOrgId: string | null; createdBy: string; displayName: string; emailValue: string; phoneValue: string; allFieldDefs: any[] } | null>(null);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "list">("list");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "list" | "kanban">("list");
   const [detailTab, setDetailTab] = useState("info");
   const [showFilters, setShowFilters] = useState(true);
   
@@ -432,16 +557,34 @@ export default function AnewLeads() {
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   
   // Contact/Client association state
-  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
   const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
-  const [searchingContacts, setSearchingContacts] = useState(false);
   const [searchingClients, setSearchingClients] = useState(false);
   
-  // Column customization state
-  const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>([]);
+  // Column customization state — initialized from the default set (rather
+  // than []) so the table doesn't render with only the fixed checkbox/Ações
+  // columns for the brief moment before LeadsTableColumns' mount effect
+  // calls onColumnsChange with the persisted (or default) configuration.
+  const [visibleColumns, setVisibleColumns] = useState<ColumnConfig[]>(
+    DEFAULT_SYSTEM_COLUMNS.filter(c => c.visible)
+  );
+  // Pipeline (Deals/Propostas/Orçamentos) aggregate per lead entity_id,
+  // mirroring the Pipeline column already shown in the retired Contactos
+  // listing. Sourced from get_lead_page_pipeline() — see
+  // 20261110430000_lead_page_pipeline_rpc.sql.
+  const [leadPipelineData, setLeadPipelineData] = useState<Record<string, LeadPipelineEntry>>({});
+  // Memoized so LeadsTableColumns' `[campaignId, fieldDefinitions]` mount
+  // effect doesn't re-fire (and silently reset any unsaved toggle/reorder in
+  // its dialog) on every AnewLeads re-render — an inline .map() below would
+  // produce a brand-new array reference every render, confirmed live to
+  // make the "Personalizar Colunas" checkboxes visually toggle for an
+  // instant and then snap back, since the effect immediately reloaded the
+  // persisted config over the in-progress edit.
+  const columnFieldDefinitions = useMemo(
+    () => fieldDefs.map(f => ({ field_key: f.field_key, field_label: f.field_label })),
+    [fieldDefs]
+  );
 
   // Callbacks state
-  const [todayCallbacks, setTodayCallbacks] = useState<Lead[]>([]);
   const [callbacksChecked, setCallbacksChecked] = useState(false);
   const [showCallbackAlert, setShowCallbackAlert] = useState(true);
   const [showAISchedulingConfig, setShowAISchedulingConfig] = useState(false);
@@ -456,12 +599,11 @@ export default function AnewLeads() {
   const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
-  const [isRootOrg, setIsRootOrg] = useState<boolean | null>(null);
 
   // Conversion dialog state
   const [showConversionDialog, setShowConversionDialog] = useState(false);
   const [conversionLead, setConversionLead] = useState<Lead | null>(null);
-  const [conversionType, setConversionType] = useState<'contact' | 'client'>('contact');
+  const [conversionType, setConversionType] = useState<'client'>('client');
   const [conversionCampaignId, setConversionCampaignId] = useState<string>("");
   const [isConverting, setIsConverting] = useState(false);
   const conversionLockRef = useRef(false);
@@ -525,12 +667,77 @@ export default function AnewLeads() {
     };
   }, []);
 
+  // Deals / proposals / quotes for the lead detail drawer (Negócios, Propostas,
+  // Orçamentos tabs) — scoped by entity_id, following the same
+  // deal-first-then-merge-direct pattern used for clients in
+  // ClientDetailsDialog.loadClientDetails.
+  const leadDetailEntityId = selectedLead?.entity_id || null;
+  const leadDetailOrganizationId = selectedLead?.organization_id || null;
+  const { data: leadDetailFinanceData, isLoading: leadDetailFinanceLoading } = useQuery({
+    queryKey: ["lead-detail-deals-proposals-quotes", leadDetailEntityId, leadDetailOrganizationId],
+    queryFn: async () => {
+      const entityId = leadDetailEntityId as string;
+      const organizationId = leadDetailOrganizationId as string;
+
+      const { data: dealsData } = await supabase
+        .from("deals")
+        .select("id, title, value, stage_id, probability, created_at, assigned_to, stages:deal_stages(name, color)")
+        .eq("entity_id", entityId)
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false });
+      const deals = dealsData || [];
+      const dealIds = deals.map((d) => d.id);
+
+      const dedupeByIdSortedByDate = (a: any[], b: any[]) =>
+        Array.from(new Map([...(a || []), ...(b || [])].map((row: any) => [row.id, row])).values())
+          .sort((x: any, y: any) => new Date(y.created_at || 0).getTime() - new Date(x.created_at || 0).getTime());
+
+      const [dealProposalsRes, directProposalsRes, dealQuotesRes, directQuotesRes] = await Promise.all([
+        dealIds.length > 0
+          ? supabase
+              .from("proposals")
+              .select("id, title, value, status, valid_until, created_at, deal_id")
+              .in("deal_id", dealIds)
+              .eq("organization_id", organizationId)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase
+          .from("proposals")
+          .select("id, title, value, status, valid_until, created_at, deal_id")
+          .eq("entity_id", entityId)
+          .eq("organization_id", organizationId),
+        dealIds.length > 0
+          ? supabase
+              .from("quotes")
+              .select("id, title, quote_number, total, estado, created_at, deal_id")
+              .in("deal_id", dealIds)
+              .eq("organization_id", organizationId)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase
+          .from("quotes")
+          .select("id, title, quote_number, total, estado, created_at, deal_id")
+          .eq("entity_id", entityId)
+          .eq("organization_id", organizationId),
+      ]);
+
+      return {
+        deals,
+        proposals: dedupeByIdSortedByDate(dealProposalsRes.data || [], directProposalsRes.data || []),
+        quotes: dedupeByIdSortedByDate(dealQuotesRes.data || [], directQuotesRes.data || []),
+      };
+    },
+    enabled: showDetails && !!leadDetailEntityId && !!leadDetailOrganizationId,
+  });
+  const leadDetailDeals = leadDetailFinanceData?.deals || [];
+  const leadDetailProposals = leadDetailFinanceData?.proposals || [];
+  const leadDetailQuotes = leadDetailFinanceData?.quotes || [];
+
   // Dedicated query for today's callbacks (independent of pagination/filters).
   // Ensures the banner reflects ALL callbacks scheduled for today, not only the page rows.
-  useEffect(() => {
-    if (!activeCompanyId) return;
-    let cancelled = false;
-    (async () => {
+  const callbacksScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+  const teamMemberIdsKey = (teamMemberIds || []).join(",");
+  const { data: todayCallbacks = [], isFetched: todayCallbacksIsFetched } = useQuery({
+    queryKey: ["lead-todays-callbacks", activeCompanyId, callbacksScope, scopeAnewUserId, scopeAuthUserId, teamMemberIdsKey],
+    queryFn: async () => {
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 999);
       let callbacksQuery = supabase
@@ -540,17 +747,14 @@ export default function AnewLeads() {
         .neq("status", "converted")
         .gte("callback_scheduled_at", todayStart.toISOString())
         .lte("callback_scheduled_at", todayEnd.toISOString());
-      callbacksQuery = isRootOrg
-        ? callbacksQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
-        : callbacksQuery.eq("organization_id", activeCompanyId);
+      callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId as string);
 
-      const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-      if (requestedScope === "OWNED" && scopeAnewUserId) {
+      if (callbacksScope === "OWNED" && scopeAnewUserId) {
         const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
         callbacksQuery = callbacksQuery.or(
           `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
         );
-      } else if (requestedScope === "TEAM" && scopeAnewUserId) {
+      } else if (callbacksScope === "TEAM" && scopeAnewUserId) {
         const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
         callbacksQuery = callbacksQuery.or(
           `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
@@ -558,63 +762,52 @@ export default function AnewLeads() {
       }
 
       const { data } = await callbacksQuery;
-      if (cancelled) return;
-      const list = (data || []) as any[];
-      setTodayCallbacks(list as Lead[]);
-      if (!callbacksChecked) {
-        setCallbacksChecked(true);
-        if (list.length === 0) {
-          toast({
-            title: `📅 ${t('leads.noCallbacksToday')}`,
-            description: t('leads.noCallbacksTodayDesc'),
-          });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine, scopeAnewUserId, scopeAuthUserId, teamMemberIds]);
+      return (data || []) as unknown as Lead[];
+    },
+    enabled: !!activeCompanyId,
+  });
 
-  // Determine if active company is a root org (no parent in hierarchy)
+  // One-shot toast when today's callbacks resolve to an empty list. Kept as a
+  // separate effect (not inside the queryFn above) so React Query can safely
+  // dedupe/retry/cache the fetch without ever double-firing the toast.
   useEffect(() => {
-    const checkRoot = async () => {
-      if (!activeCompanyId) return;
-      // Invalidate descendant cache and reset root flag so guards wait for fresh value
-      descendantCacheRef.current = null;
-      setIsRootOrg(null);
-      // Force the consolidated load effect to re-run as a "first mount" for this org
-      initialLoadDoneRef.current = false;
-      const { data } = await supabase
-        .from("anew_hierarchy")
-        .select("id")
-        .eq("child_org_id", activeCompanyId)
-        .limit(1);
-      setIsRootOrg(!data || data.length === 0);
-    };
-    checkRoot();
-  }, [activeCompanyId]);
+    if (!activeCompanyId || callbacksChecked) return;
+    if (todayCallbacks.length === 0 && todayCallbacksIsFetched) {
+      setCallbacksChecked(true);
+      toast({
+        title: `📅 ${t('leads.noCallbacksToday')}`,
+        description: t('leads.noCallbacksTodayDesc'),
+      });
+    } else if (todayCallbacksIsFetched) {
+      setCallbacksChecked(true);
+    }
+  }, [activeCompanyId, callbacksChecked, todayCallbacks, todayCallbacksIsFetched, toast, t]);
 
   // Single consolidated effect for initial load + filter/search changes
   const initialLoadDoneRef = useRef(false);
-  
+
+  // Force the consolidated load effect below to treat an org switch as a
+  // fresh "first mount" (previously done inside the now-removed isRootOrg
+  // resolution effect).
   useEffect(() => {
-    if (!activeCompanyId || isRootOrg === null || scopeLoading) return;
+    initialLoadDoneRef.current = false;
+  }, [activeCompanyId]);
+
+  useEffect(() => {
+    if (!activeCompanyId || scopeLoading) return;
     
     if (!initialLoadDoneRef.current) {
-      // First mount: load everything, defer secondary data
+      // First mount: load everything, defer secondary data.
+      // campaigns, lead sources, workflow stages, forms, company users, and
+      // comercial users are fetched via useQuery (see below) and no longer
+      // orchestrated from here.
       initialLoadDoneRef.current = true;
       loadStatusCounts();
       loadLeads();
-      loadWorkflowStages();
-      
+
       // Defer secondary loads so critical path renders first
       const timer = setTimeout(() => {
-        loadCampaigns();
-        loadLeadSources();
         loadContactResults();
-        loadForms();
-        loadCompanyUsers();
-        loadComercialUsers();
       }, 200);
       return () => clearTimeout(timer);
     } else {
@@ -622,7 +815,14 @@ export default function AnewLeads() {
       loadLeads();
       loadStatusCounts();
     }
-  }, [activeCompanyId, isRootOrg, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+    // loadContactResults is intentionally excluded from the dep array. This
+    // effect is a one-shot initialiser guarded by initialLoadDoneRef — adding
+    // it would cause it to re-run on every render that touches its closure
+    // values. It is a plain async function that recreates on every render; it
+    // is safe here because initialLoadDoneRef.current prevents re-entry, and
+    // the org-change path resets that ref via the effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
 
 
@@ -654,7 +854,6 @@ export default function AnewLeads() {
     try {
       const rpcParams: Record<string, any> = {
         p_org_id: activeCompanyId,
-        p_is_root: isRootOrg || false,
         p_scope: normalizeLeadScope(viewScope, onlyMine),
         p_anew_user_id: scopeAnewUserId || null,
         p_auth_user_id: scopeAuthUserId || null,
@@ -695,14 +894,14 @@ export default function AnewLeads() {
     } catch (error) {
       console.error("Error loading status counts:", error);
     }
-  }, [activeCompanyId, isRootOrg, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
 
     return {
       orgId: activeCompanyId,
-      isRoot: isRootOrg,
+      isRoot: false,
       requestedScope: normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
       anewUserId: scopeAnewUserId,
       authUserId: scopeAuthUserId,
@@ -720,7 +919,6 @@ export default function AnewLeads() {
   }, [
     activeCompanyId,
     scopeLoading,
-    isRootOrg,
     getPermissionScope,
     onlyMine,
     scopeAnewUserId,
@@ -790,243 +988,241 @@ export default function AnewLeads() {
     return root;
   };
 
-  const loadCompanyUsers = async () => {
-    if (!activeCompanyId) return;
-    
-    // Get all descendant org IDs (company + children)
-    const orgIds = await getDescendantOrgIds(activeCompanyId);
-    
-    // Get active members of this organization and all descendants
-    const { data: memberships } = await supabase
-      .from("anew_memberships")
-      .select("user_id, role_id")
-      .in("organization_id", orgIds)
-      .eq("status", "active");
-    
-    if (!memberships || memberships.length === 0) {
-      setCompanyUsers([]);
-      return;
-    }
+  const { data: companyUsers = [] } = useQuery({
+    queryKey: ["company-users", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string }[]> => {
+      // Get all descendant org IDs (company + children)
+      const orgIds = await getDescendantOrgIds(activeCompanyId as string);
 
-    // Filter out client/portal/contact/lead roles so they don't appear in
-    // internal assignment dropdowns (e.g. "Atribuído a" in Leads).
-    const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
-    const roleCodeMap: Record<string, string> = {};
-    if (roleIds.length > 0) {
-      const { data: rolesData } = await supabase
-        .from("anew_roles")
-        .select("id, code")
-        .in("id", roleIds);
-      (rolesData || []).forEach((r: any) => {
-        roleCodeMap[r.id] = (r.code || "").toLowerCase();
+      // Get active members of this organization and all descendants
+      const { data: memberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, role_id")
+        .in("organization_id", orgIds)
+        .eq("status", "active");
+
+      if (!memberships || memberships.length === 0) {
+        return [];
+      }
+
+      // Filter out client/portal/contact/lead roles so they don't appear in
+      // internal assignment dropdowns (e.g. "Atribuído a" in Leads).
+      const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => {
+          roleCodeMap[r.id] = (r.code || "").toLowerCase();
+        });
+      }
+      const filteredMemberships = memberships.filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
       });
-    }
-    const filteredMemberships = memberships.filter((m: any) => {
-      const code = roleCodeMap[m.role_id];
-      return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
-    });
 
-    const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
-    
-    const { data: usersData } = await supabase
-      .from("anew_users")
-      .select("id, name")
-      .in("id", userIds);
-    
-    if (usersData) {
-      setCompanyUsers(
-        usersData.map(u => ({
-          id: u.id,
-          name: u.name || "Utilizador"
-        }))
-      );
-    }
-  };
+      const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
+
+      const { data: usersData } = await supabase
+        .from("anew_users")
+        .select("id, name")
+        .in("id", userIds);
+
+      return (usersData || []).map(u => ({
+        id: u.id,
+        name: u.name || "Utilizador",
+      }));
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Load members from the "Comercial" department with their address districts
   // Now searches the entire descendant tree for Comercial departments
-  const loadComercialUsers = async () => {
-    if (!activeCompanyId) return;
+  interface ComercialUser { id: string; name: string; districts: string[]; org_ids: string[] }
+  interface AssignOrgTreeNode { id: string; name: string; type: string; depth: number }
+  const { data: comercialUsersData } = useQuery({
+    queryKey: ["comercial-users", activeCompanyId],
+    queryFn: async (): Promise<{ users: ComercialUser[]; tree: AssignOrgTreeNode[] }> => {
+      const orgId = activeCompanyId as string;
 
-    // Get all descendant org IDs from activeCompany (uses cache)
-    const allOrgIds = await getDescendantOrgIds(activeCompanyId);
+      // Get all descendant org IDs from activeCompany (uses cache)
+      const allOrgIds = await getDescendantOrgIds(orgId);
 
-    // Fetch orgs and reuse cached hierarchy in parallel
-    const [orgsResult] = await Promise.all([
-      supabase
+      // Fetch orgs and reuse cached hierarchy in parallel
+      const [orgsResult] = await Promise.all([
+        supabase
+          .from("anew_organizations")
+          .select("id, name, type")
+          .in("id", allOrgIds),
+      ]);
+      const allOrgs = orgsResult.data;
+
+      // Reuse hierarchy from cache instead of fetching again
+      const allHierarchy = descendantCacheRef.current?.hierarchy || [];
+
+      const comercialDeptIds = (allOrgs || [])
+        .filter((o: any) => o.name?.toLowerCase() === 'comercial' && o.type === 'departamento')
+        .map((o: any) => o.id);
+
+      // Build BFS tree for the assignment org filter
+      const orgMap = new Map((allOrgs || []).map(o => [o.id, { name: o.name, type: o.type || '' }]));
+      const childrenMap = new Map<string, string[]>();
+      (allHierarchy || []).forEach(h => {
+        const children = childrenMap.get(h.parent_org_id) || [];
+        children.push(h.child_org_id);
+        childrenMap.set(h.parent_org_id, children);
+      });
+
+      const tree: AssignOrgTreeNode[] = [];
+      const bfsQueue: { id: string; depth: number }[] = [{ id: orgId, depth: 0 }];
+      const visited = new Set<string>();
+      while (bfsQueue.length > 0) {
+        const current = bfsQueue.shift()!;
+        if (visited.has(current.id)) continue;
+        visited.add(current.id);
+        const orgInfo = orgMap.get(current.id);
+        if (orgInfo) {
+          tree.push({ id: current.id, name: orgInfo.name, type: orgInfo.type, depth: current.depth });
+        }
+        const children = childrenMap.get(current.id) || [];
+        for (const childId of children) {
+          if (!visited.has(childId)) {
+            bfsQueue.push({ id: childId, depth: current.depth + 1 });
+          }
+        }
+      }
+
+      // Fallback: if no "Comercial" department found, load all active members from org tree
+      const membershipOrgIds = comercialDeptIds.length > 0 ? comercialDeptIds : allOrgIds;
+
+      // Get active members
+      const { data: rawMemberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, organization_id, role_id")
+        .in("organization_id", membershipOrgIds)
+        .eq("status", "active");
+
+      const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+      const memberships = (rawMemberships || []).filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+
+      if (memberships.length === 0) {
+        return { users: [], tree };
+      }
+
+      const userIds = [...new Set(memberships.map(m => m.user_id))];
+
+      // Get user info
+      const { data: usersData } = await supabase
+        .from("anew_users")
+        .select("id, name, entity_id, status")
+        .in("id", userIds)
+        .eq("status", "active");
+
+      if (!usersData) {
+        return { users: [], tree };
+      }
+
+      // Build user -> department mapping
+      const userDeptMap: Record<string, string[]> = {};
+      memberships.forEach(m => {
+        if (!userDeptMap[m.user_id]) userDeptMap[m.user_id] = [];
+        if (!userDeptMap[m.user_id].includes(m.organization_id)) {
+          userDeptMap[m.user_id].push(m.organization_id);
+        }
+      });
+
+      // Map dept -> parent org (to know which company/loja the comercial dept belongs to)
+      const deptParentMap = new Map<string, string>();
+      (allHierarchy || []).forEach(h => {
+        if (comercialDeptIds.includes(h.child_org_id)) {
+          deptParentMap.set(h.child_org_id, h.parent_org_id);
+        }
+      });
+
+      // Build user -> org_ids (parent orgs of their comercial depts)
+      const userOrgMap: Record<string, string[]> = {};
+      memberships.forEach(m => {
+        const parentOrg = deptParentMap.get(m.organization_id) || m.organization_id;
+        if (!userOrgMap[m.user_id]) userOrgMap[m.user_id] = [];
+        if (!userOrgMap[m.user_id].includes(parentOrg)) {
+          userOrgMap[m.user_id].push(parentOrg);
+        }
+        // Also include the dept itself
+        if (!userOrgMap[m.user_id].includes(m.organization_id)) {
+          userOrgMap[m.user_id].push(m.organization_id);
+        }
+      });
+
+      // 1. Get personal addresses (work addresses) for users
+      const entityIds = usersData.map(u => u.entity_id).filter(Boolean) as string[];
+      const userPersonalDistricts: Record<string, string[]> = {};
+
+      if (entityIds.length > 0) {
+        const { data: userAddresses } = await (supabase as any)
+          .from("anew_entity_addresses")
+          .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
+          .in("entity_id", entityIds)
+          .is("valid_to", null);
+
+        (userAddresses || []).forEach((ea: any) => {
+          const district = ea.address?.district || ea.address?.city;
+          if (district && ea.entity_id) {
+            if (!userPersonalDistricts[ea.entity_id]) userPersonalDistricts[ea.entity_id] = [];
+            if (!userPersonalDistricts[ea.entity_id].includes(district)) {
+              userPersonalDistricts[ea.entity_id].push(district);
+            }
+          }
+        });
+      }
+
+      // 2. Get department addresses as fallback
+      const { data: deptOrgs } = await (supabase as any)
         .from("anew_organizations")
-        .select("id, name, type")
-        .in("id", allOrgIds),
-    ]);
-    const allOrgs = orgsResult.data;
+        .select("id, entity_id")
+        .in("id", comercialDeptIds);
 
-    // Reuse hierarchy from cache instead of fetching again
-    const allHierarchy = descendantCacheRef.current?.hierarchy || [];
-
-    const comercialDeptIds = (allOrgs || [])
-      .filter((o: any) => o.name?.toLowerCase() === 'comercial' && o.type === 'departamento')
-      .map((o: any) => o.id);
-
-    // Build BFS tree for the assignment org filter
-    const orgMap = new Map((allOrgs || []).map(o => [o.id, { name: o.name, type: o.type || '' }]));
-    const childrenMap = new Map<string, string[]>();
-    (allHierarchy || []).forEach(h => {
-      const children = childrenMap.get(h.parent_org_id) || [];
-      children.push(h.child_org_id);
-      childrenMap.set(h.parent_org_id, children);
-    });
-
-    const tree: { id: string; name: string; type: string; depth: number }[] = [];
-    const bfsQueue: { id: string; depth: number }[] = [{ id: activeCompanyId, depth: 0 }];
-    const visited = new Set<string>();
-    while (bfsQueue.length > 0) {
-      const current = bfsQueue.shift()!;
-      if (visited.has(current.id)) continue;
-      visited.add(current.id);
-      const orgInfo = orgMap.get(current.id);
-      if (orgInfo) {
-        tree.push({ id: current.id, name: orgInfo.name, type: orgInfo.type, depth: current.depth });
-      }
-      const children = childrenMap.get(current.id) || [];
-      for (const childId of children) {
-        if (!visited.has(childId)) {
-          bfsQueue.push({ id: childId, depth: current.depth + 1 });
-        }
-      }
-    }
-    setAssignOrgTree(tree);
-
-    // Fallback: if no "Comercial" department found, load all active members from org tree
-    const membershipOrgIds = comercialDeptIds.length > 0 ? comercialDeptIds : allOrgIds;
-
-    // Get active members
-    const { data: rawMemberships } = await supabase
-      .from("anew_memberships")
-      .select("user_id, organization_id, role_id")
-      .in("organization_id", membershipOrgIds)
-      .eq("status", "active");
-
-    const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
-    const roleCodeMap: Record<string, string> = {};
-    if (roleIds.length > 0) {
-      const { data: rolesData } = await supabase
-        .from("anew_roles")
-        .select("id, code")
-        .in("id", roleIds);
-      (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
-    }
-    const memberships = (rawMemberships || []).filter((m: any) => {
-      const code = roleCodeMap[m.role_id];
-      return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
-    });
-
-    if (memberships.length === 0) {
-      setComercialUsers([]);
-      return;
-    }
-
-    const userIds = [...new Set(memberships.map(m => m.user_id))];
-
-    // Get user info
-    const { data: usersData } = await supabase
-      .from("anew_users")
-      .select("id, name, entity_id, status")
-      .in("id", userIds)
-      .eq("status", "active");
-
-    if (!usersData) {
-      setComercialUsers([]);
-      return;
-    }
-
-    // Build user -> department mapping
-    const userDeptMap: Record<string, string[]> = {};
-    memberships.forEach(m => {
-      if (!userDeptMap[m.user_id]) userDeptMap[m.user_id] = [];
-      if (!userDeptMap[m.user_id].includes(m.organization_id)) {
-        userDeptMap[m.user_id].push(m.organization_id);
-      }
-    });
-
-    // Map dept -> parent org (to know which company/loja the comercial dept belongs to)
-    const deptParentMap = new Map<string, string>();
-    (allHierarchy || []).forEach(h => {
-      if (comercialDeptIds.includes(h.child_org_id)) {
-        deptParentMap.set(h.child_org_id, h.parent_org_id);
-      }
-    });
-
-    // Build user -> org_ids (parent orgs of their comercial depts)
-    const userOrgMap: Record<string, string[]> = {};
-    memberships.forEach(m => {
-      const parentOrg = deptParentMap.get(m.organization_id) || m.organization_id;
-      if (!userOrgMap[m.user_id]) userOrgMap[m.user_id] = [];
-      if (!userOrgMap[m.user_id].includes(parentOrg)) {
-        userOrgMap[m.user_id].push(parentOrg);
-      }
-      // Also include the dept itself
-      if (!userOrgMap[m.user_id].includes(m.organization_id)) {
-        userOrgMap[m.user_id].push(m.organization_id);
-      }
-    });
-
-    // 1. Get personal addresses (work addresses) for users
-    const entityIds = usersData.map(u => u.entity_id).filter(Boolean) as string[];
-    let userPersonalDistricts: Record<string, string[]> = {};
-
-    if (entityIds.length > 0) {
-      const { data: userAddresses } = await (supabase as any)
-        .from("anew_entity_addresses")
-        .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
-        .in("entity_id", entityIds)
-        .is("valid_to", null);
-
-      (userAddresses || []).forEach((ea: any) => {
-        const district = ea.address?.district || ea.address?.city;
-        if (district && ea.entity_id) {
-          if (!userPersonalDistricts[ea.entity_id]) userPersonalDistricts[ea.entity_id] = [];
-          if (!userPersonalDistricts[ea.entity_id].includes(district)) {
-            userPersonalDistricts[ea.entity_id].push(district);
-          }
-        }
+      const deptEntityMap: Record<string, string> = {};
+      (deptOrgs || []).forEach((o: any) => {
+        if (o.entity_id) deptEntityMap[o.id] = o.entity_id;
       });
-    }
 
-    // 2. Get department addresses as fallback
-    const { data: deptOrgs } = await (supabase as any)
-      .from("anew_organizations")
-      .select("id, entity_id")
-      .in("id", comercialDeptIds);
+      const deptEntityIds = Object.values(deptEntityMap).filter(Boolean);
+      const deptDistricts: Record<string, string[]> = {};
 
-    const deptEntityMap: Record<string, string> = {};
-    (deptOrgs || []).forEach((o: any) => {
-      if (o.entity_id) deptEntityMap[o.id] = o.entity_id;
-    });
+      if (deptEntityIds.length > 0) {
+        const { data: deptAddresses } = await (supabase as any)
+          .from("anew_entity_addresses")
+          .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
+          .in("entity_id", deptEntityIds)
+          .is("valid_to", null);
 
-    const deptEntityIds = Object.values(deptEntityMap).filter(Boolean);
-    let deptDistricts: Record<string, string[]> = {};
-
-    if (deptEntityIds.length > 0) {
-      const { data: deptAddresses } = await (supabase as any)
-        .from("anew_entity_addresses")
-        .select("entity_id, address:anew_addresses!anew_entity_addresses_address_id_fkey(district, city)")
-        .in("entity_id", deptEntityIds)
-        .is("valid_to", null);
-
-      (deptAddresses || []).forEach((ea: any) => {
-        const district = ea.address?.district || ea.address?.city;
-        if (district && ea.entity_id) {
-          if (!deptDistricts[ea.entity_id]) deptDistricts[ea.entity_id] = [];
-          if (!deptDistricts[ea.entity_id].includes(district)) {
-            deptDistricts[ea.entity_id].push(district);
+        (deptAddresses || []).forEach((ea: any) => {
+          const district = ea.address?.district || ea.address?.city;
+          if (district && ea.entity_id) {
+            if (!deptDistricts[ea.entity_id]) deptDistricts[ea.entity_id] = [];
+            if (!deptDistricts[ea.entity_id].includes(district)) {
+              deptDistricts[ea.entity_id].push(district);
+            }
           }
-        }
-      });
-    }
+        });
+      }
 
-    // Assign districts: prefer user's personal address, fallback to department's
-    setComercialUsers(
-      usersData.map(u => {
+      // Assign districts: prefer user's personal address, fallback to department's
+      const users = usersData.map(u => {
         // First check user's own addresses
         let districts: string[] = [];
         if (u.entity_id && userPersonalDistricts[u.entity_id]?.length > 0) {
@@ -1049,43 +1245,75 @@ export default function AnewLeads() {
           districts,
           org_ids: userOrgMap[u.id] || [],
         };
-      })
-    );
-  };
+      });
+
+      return { users, tree };
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
+  const comercialUsers = comercialUsersData?.users ?? [];
+  const assignOrgTree = comercialUsersData?.tree ?? [];
+
+  // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
+  // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
+  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  const assignableCompanyUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return companyUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return companyUsers.filter(u => allowedIds.has(u.id));
+    }
+    return companyUsers.filter(u => u.id === scopeAnewUserId);
+  }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
+  const assignableComercialUsers = useMemo(() => {
+    const scope = getPermissionScope("leads.view");
+    if (scope === "ORG") return comercialUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return comercialUsers.filter(u => allowedIds.has(u.id));
+    }
+    return comercialUsers.filter(u => u.id === scopeAnewUserId);
+  }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
 
-  const loadForms = async () => {
-    if (!activeCompanyId) return;
-    
-    // Load forms and campaign forms in parallel
-    const [formsResult, campaignFormsResult] = await Promise.all([
-      supabase
-        .from("forms")
-        .select("id, name, is_primary")
-        .eq("organization_id", activeCompanyId)
-        .eq("is_active", true)
-        .eq("form_type", "lead")
-        .order("is_primary", { ascending: false }),
-      supabase
-        .from("campaigns")
-        .select("form_id, forms!campaigns_form_id_fkey(id, name, is_primary)")
-        .eq("organization_id", activeCompanyId)
-        .not("form_id", "is", null),
-    ]);
-    
-    // Merge forms, avoiding duplicates
-    const allForms = [...(formsResult.data || [])];
-    (campaignFormsResult.data || []).forEach(cf => {
-      const form = cf.forms as unknown as { id: string; name: string; is_primary: boolean } | null;
-      if (form && !allForms.find(f => f.id === form.id)) {
-        allForms.push(form);
-      }
-    });
-    
-    setAvailableForms(allForms);
-  };
+  const { data: availableForms = [] } = useQuery({
+    queryKey: ["lead-forms", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string; is_primary: boolean; form_id?: string }[]> => {
+      // Load forms and campaign forms in parallel
+      const [formsResult, campaignFormsResult] = await Promise.all([
+        supabase
+          .from("forms")
+          .select("id, name, is_primary")
+          .eq("organization_id", activeCompanyId as string)
+          .eq("is_active", true)
+          .eq("form_type", "lead")
+          .order("is_primary", { ascending: false }),
+        supabase
+          .from("campaigns")
+          .select("form_id, forms!campaigns_form_id_fkey(id, name, is_primary)")
+          .eq("organization_id", activeCompanyId as string)
+          .not("form_id", "is", null),
+      ]);
+
+      // Merge forms, avoiding duplicates
+      const allForms = [...(formsResult.data || [])];
+      (campaignFormsResult.data || []).forEach(cf => {
+        const form = cf.forms as unknown as { id: string; name: string; is_primary: boolean } | null;
+        if (form && !allForms.find(f => f.id === form.id)) {
+          allForms.push(form);
+        }
+      });
+
+      return allForms;
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const loadContactResults = async () => {
+    if (!activeCompanyId) return;
     const { data } = await supabase
       .from("lead_contact_results")
       .select("id, name, icon, color")
@@ -1105,7 +1333,7 @@ export default function AnewLeads() {
   const performExport = async (includeSensitive: boolean) => {
     const organizationId = activeCompanyId;
     if (!organizationId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     setExporting(true);
@@ -1124,8 +1352,9 @@ export default function AnewLeads() {
         title: "Exportação concluída",
         description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
-    } catch (error: any) {
-      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.exportError'), description, variant: "destructive" });
     } finally {
       setExporting(false);
     }
@@ -1133,7 +1362,7 @@ export default function AnewLeads() {
 
   const handleExport = () => {
     if (!activeCompanyId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     if (hasPermission("leads.export_sensitive")) {
@@ -1145,11 +1374,11 @@ export default function AnewLeads() {
 
   const handleImport = async () => {
     if (!importFile) {
-      toast({ title: "Seleciona um ficheiro CSV", variant: "destructive" });
+      toast({ title: t('leads.toast.selectCsvFile'), variant: "destructive" });
       return;
     }
     if (!activeCompanyId) {
-      toast({ title: "Sem organização ativa", variant: "destructive" });
+      toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
       return;
     }
     setImporting(true);
@@ -1167,9 +1396,7 @@ export default function AnewLeads() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Sessão inválida");
 
-      const rootOrgId = (!isRootOrg && activeCompanyId)
-        ? await resolveRootOrgId(activeCompanyId)
-        : activeCompanyId;
+      const rootOrgId = activeCompanyId ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
 
       const { data: userData } = await supabase
         .from("anew_users")
@@ -1178,6 +1405,7 @@ export default function AnewLeads() {
         .single();
       const createdBy = userData?.id || null;
 
+      const auditUserId = createdBy || user.id;
       let imported = 0;
       let skipped = 0;
       for (const line of lines.slice(1)) {
@@ -1186,37 +1414,43 @@ export default function AnewLeads() {
         if (!name) { skipped++; continue; }
         const status = statusIdx !== -1 && cols[statusIdx] ? cols[statusIdx] : "new";
 
-        const { data: entityId, error: entityError } = await supabase.rpc(
-          "create_lead_entity_for_org",
-          { p_organization_id: activeCompanyId, p_display_name: name },
-        );
-        if (entityError || !entityId) { skipped++; continue; }
+        try {
+          await withAuditContext(supabase, auditUserId, async () => {
+            const { data: entityId, error: entityError } = await supabase.rpc(
+              "create_lead_entity_for_org",
+              { p_organization_id: activeCompanyId, p_display_name: name },
+            );
+            if (entityError || !entityId) { skipped++; return; }
 
-        const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
-          .insert({
-            organization_id: activeCompanyId,
-            root_organization_id: rootOrgId || activeCompanyId,
-            entity_id: entityId,
-            status,
-            source: "import",
-            field_values: {},
-            created_by: createdBy,
-          })
-          .select("id")
-          .single();
-        if (leadError || !newLead) { skipped++; continue; }
+            const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
+              .insert({
+                organization_id: activeCompanyId,
+                root_organization_id: rootOrgId || activeCompanyId,
+                entity_id: entityId,
+                status,
+                source: "csv_import",
+                field_values: {},
+                created_by: createdBy,
+              })
+              .select("id")
+              .single();
+            if (leadError || !newLead) { skipped++; return; }
 
-        await (supabase.from("anew_entity_roles") as any).upsert({
-          organization_id: activeCompanyId,
-          entity_id: entityId,
-          role: "lead",
-          status: "active",
-          source_type: "lead",
-          source_id: newLead.id,
-          created_by: createdBy,
-        });
+            await (supabase.from("anew_entity_roles") as any).upsert({
+              organization_id: activeCompanyId,
+              entity_id: entityId,
+              role: "lead",
+              status: "active",
+              source_type: "lead",
+              source_id: newLead.id,
+              created_by: createdBy,
+            });
 
-        imported++;
+            imported++;
+          });
+        } catch {
+          skipped++;
+        }
       }
       toast({
         title: "Importação concluída",
@@ -1225,37 +1459,40 @@ export default function AnewLeads() {
       setImportDialogOpen(false);
       setImportFile(null);
       loadLeads(false);
-    } catch (error: any) {
-      toast({ title: "Erro ao importar", description: error.message, variant: "destructive" });
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.importError'), description, variant: "destructive" });
     } finally {
       setImporting(false);
     }
   };
 
-  const loadWorkflowStages = async () => {
-    if (!activeCompanyId) return;
-    
-    const { data: allStages, error } = await supabase
-      .from("lead_workflow_stages")
-      .select("id, name, label, color, stage_order, is_active, is_conversion, is_rejection, is_final, organization_id, default_status")
-      .or(`organization_id.eq.${activeCompanyId},organization_id.is.null`)
-      .eq("is_active", true)
-      .order("stage_order");
+  const { data: workflowStages = [], refetch: refetchWorkflowStages } = useQuery({
+    queryKey: ["lead-workflow-stages", activeCompanyId],
+    queryFn: async (): Promise<WorkflowStage[]> => {
+      const { data: allStages, error } = await supabase
+        .from("lead_workflow_stages")
+        .select("id, name, label, color, stage_order, is_active, is_conversion, is_rejection, is_final, organization_id, default_status")
+        .or(`organization_id.eq.${activeCompanyId},organization_id.is.null`)
+        .eq("is_active", true)
+        .order("stage_order");
 
-    const mapStage = (s: any): WorkflowStage => ({
-      ...s,
-      organization_id: s.organization_id ?? null,
-      default_status: s.default_status ?? null,
-    });
+      const mapStage = (s: any): WorkflowStage => ({
+        ...s,
+        organization_id: s.organization_id ?? null,
+        default_status: s.default_status ?? null,
+      });
 
-    if (!error && allStages) {
-      const orgStages = allStages.filter(s => s.organization_id === activeCompanyId);
-      const globalStages = allStages.filter(s => !s.organization_id);
-      setWorkflowStages((orgStages.length > 0 ? orgStages : globalStages).map(mapStage));
-    } else {
-      setWorkflowStages([]);
-    }
-  };
+      if (!error && allStages) {
+        const orgStages = allStages.filter(s => s.organization_id === activeCompanyId);
+        const globalStages = allStages.filter(s => !s.organization_id);
+        return (orgStages.length > 0 ? orgStages : globalStages).map(mapStage);
+      }
+      return [];
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   // Helper to get status color from workflow stage or fallback
   const getStatusColor = useCallback((status: string) => {
@@ -1350,6 +1587,7 @@ export default function AnewLeads() {
     'lost',
     'converted',
     'qualified',
+    'negotiation',
     'proposal_sent',
   ]);
   const getEffectiveStatus = useCallback((lead: any): string => {
@@ -1360,41 +1598,124 @@ export default function AnewLeads() {
     return rawStatus;
   }, [isVisitScheduledSignal]);
 
+  const loadFieldDefinitions = useCallback(async (campaignId: string) => {
+    if (!campaignId) return;
+
+    // Try to get form_id from campaign — form_fields has correct contact_field_mapping
+    const { data: campaignRow } = await supabase
+      .from("campaigns")
+      .select("form_id")
+      .eq("id", campaignId)
+      .maybeSingle();
+
+    if (campaignRow?.form_id) {
+      // NOTE: `default_value` lives on `lead_field_definitions` (HubSpot Property Model),
+      // NOT on `form_fields` — including it here causes a 400 (column does not exist).
+      const { data: formFields, error: ffError } = await supabase
+        .from("form_fields")
+        .select("id, form_id, field_key, field_label, field_type, is_required, is_active, sort_order, options, placeholder, contact_field_mapping, client_field_mapping")
+        .eq("form_id", campaignRow.form_id)
+        .eq("is_active", true)
+        .order("sort_order");
+
+      if (!ffError && formFields && formFields.length > 0) {
+        // Map form_fields to same FieldDefinition shape
+        const mapped = formFields.map((f: any) => ({
+          id: f.id,
+          campaign_id: campaignId,
+          field_key: f.field_key,
+          field_label: f.field_label,
+          field_type: f.field_type,
+          is_required: f.is_required,
+          is_unique: false,
+          is_active: f.is_active,
+          sort_order: f.sort_order,
+          options: f.options,
+          placeholder: f.placeholder,
+          default_value: null,
+          organization_id: null,
+          contact_field_mapping: f.contact_field_mapping,
+          client_field_mapping: f.client_field_mapping,
+        }));
+        setFieldDefs(mapped as any);
+        loadReferenceData(mapped as any);
+        return;
+      }
+    }
+
+    // Fallback: legacy lead_field_definitions
+    const { data, error } = await supabase
+      .from("lead_field_definitions")
+      .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
+      .eq("campaign_id", campaignId)
+      .eq("is_active", true)
+      .order("sort_order");
+
+    if (error) {
+      console.error("Error loading field definitions:", error);
+    } else {
+      setFieldDefs(data || []);
+      loadReferenceData(data || []);
+    }
+  // loadReferenceData is a plain async function defined below; it captures activeCompanyId
+  // via its own closure. It is intentionally excluded here because wrapping it in
+  // useCallback would create a circular dependency chain — loadFieldDefinitions would
+  // depend on loadReferenceData which would depend on activeCompanyId, requiring both
+  // to be re-created together on every org change. The useEffect that calls this
+  // function depends on [configCampaignId, loadFieldDefinitions], ensuring it re-runs
+  // whenever the campaign or org changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (configCampaignId) {
       loadFieldDefinitions(configCampaignId);
     }
-  }, [configCampaignId]);
+  }, [configCampaignId, loadFieldDefinitions]);
 
-  const loadCampaigns = useCallback(async () => {
-    if (!activeCompanyId) return;
-    
-    const { data, error } = await supabase
-      .from("campaigns")
-      .select("id, name, status, form_id")
-      .eq("organization_id", activeCompanyId)
-      .eq("status", "active")
-      .order("name");
+  const { data: campaigns = [] } = useQuery({
+    queryKey: ["lead-campaigns", activeCompanyId],
+    queryFn: async (): Promise<Campaign[]> => {
+      const { data, error } = await supabase
+        .from("campaigns")
+        .select("id, name, status, form_id")
+        .eq("organization_id", activeCompanyId as string)
+        .eq("status", "active")
+        .order("name");
 
-    if (!error && data) {
-      setCampaigns(data.map(c => ({ id: c.id, name: c.name, form_id: c.form_id })));
-      // Set first campaign as default for config
-      if (data.length > 0 && !configCampaignId) {
-        setConfigCampaignId(data[0].id);
+      if (error) {
+        console.error("Error loading campaigns:", error);
+        return [];
       }
-    } else if (error) {
-      console.error("Error loading campaigns:", error);
-    }
-  }, [activeCompanyId, configCampaignId]);
+      return (data || []).map(c => ({ id: c.id, name: c.name, form_id: c.form_id }));
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
-  const loadLeadSources = async () => {
-    const { data } = await supabase
-      .from("lead_sources")
-      .select("id, name, icon, color")
-      .eq("is_active", true)
-      .order("name");
-    if (data) setLeadSources(data);
-  };
+  // Set the first campaign as the default for the workflow config selector.
+  // Mirrors the previous in-loader side effect, moved here since useQuery
+  // fetchers must stay free of UI/state side effects.
+  useEffect(() => {
+    if (campaigns.length > 0 && !configCampaignId) {
+      setConfigCampaignId(campaigns[0].id);
+    }
+  }, [campaigns, configCampaignId]);
+
+  const { data: leadSources = [] } = useQuery({
+    queryKey: ["lead-sources", activeCompanyId],
+    queryFn: async (): Promise<{ id: string; name: string; icon: string | null; color: string | null }[]> => {
+      let query = supabase
+        .from("lead_sources")
+        .select("id, name, icon, color")
+        .eq("is_active", true);
+      query = query.or(`organization_id.eq.${activeCompanyId},organization_id.is.null`);
+      const { data } = await query.order("name");
+      return data || [];
+    },
+    enabled: !!activeCompanyId,
+    staleTime: 5 * 60 * 1000,
+  });
 
 
   // Load leads with server-side pagination
@@ -1423,99 +1744,28 @@ export default function AnewLeads() {
       return;
     }
     
-    // Build server-side filters helper
-    const applyServerFilters = (q: any) => {
-      if (statusFilter !== "all") {
-        if (statusFilter === "lost") {
-          q = q.in("status", ["lost", "rejected"]);
-        } else if (statusFilter === "visit_scheduled") {
-          // Include raw visit_scheduled OR leads that are effectively visit_scheduled
-          // (status=new but have scheduled_visit_id or last_contact_result = Visita Agendada)
-          // We filter server-side for status=visit_scheduled, then also include new+signal client-side
-          q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
-        } else if (statusFilter === "new") {
-          // Exclude leads that are effectively visit_scheduled even though raw status is new
-          q = q.eq("status", "new").is("scheduled_visit_id", null);
-        } else {
-          q = q.eq("status", statusFilter);
-        }
-      }
-      if (campaignFilter !== "all") q = q.eq("campaign_id", campaignFilter);
-      if (assignedToFilter !== "all") {
-        if (assignedToFilter === "unassigned") {
-          q = q.is("assigned_to", null);
-        } else {
-          q = q.eq("assigned_to", assignedToFilter);
-        }
-      }
-      if (contactResultFilter !== "all") {
-        if (contactResultFilter === "none") {
-          q = q.is("last_contact_result", null);
-        } else {
-          q = q.eq("last_contact_result", contactResultFilter);
-        }
-      }
-      if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
-      if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
-      if (effectiveSearch) {
-        q = q.ilike("search_text", `%${effectiveSearch}%`);
-      }
-      if (sourceFilter === "none") {
-        q = q.is("source", null);
-      } else if (sourceFilter !== "all") {
-        q = q.eq("source", sourceFilter);
-      }
-      return q;
-    };
-
     // Total count is now derived from statusCounts (loaded via RPC) — no separate count query needed
-    
-    let query = supabase
-      .from("anew_leads")
-      .select(`
-        id, entity_id, campaign_id,
-        status, workflow_stage_id, assigned_to, created_by,
-        organization_id, root_organization_id,
-        created_at, updated_at, converted_at,
-        converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-        field_values, notes, source, source_id,
-        last_contact_at, last_contact_result, contact_attempts,
-        callback_scheduled_at, callback_notes,
-        tags, search_text,
-        campaigns(id, name)
-      `)
-      .is("deleted_at", null)
-      .neq("status", "converted")
-      .is("converted_to_contact_id", null)
-      .is("converted_at", null);
-    
-    if (isRootOrg) {
-      query = query.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`);
-    } else {
-      query = query.or(`organization_id.eq.${activeCompanyId}`);
-    }
 
     const requestedScope = normalizeLeadScope(viewScope, onlyMine);
-    if (requestedScope === "OWNED" && scopeAnewUserId) {
-      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-      query = query.or(
-        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-      );
-    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-      query = query.or(
-        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-      );
-    }
+    const query = buildLeadsBaseQuery({
+      organizationId: activeCompanyId,
+      requestedScope,
+      scopeAnewUserId,
+      scopeAuthUserId,
+      teamMemberIds,
+      filters: {
+        statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+        dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+      },
+    });
 
-    query = applyServerFilters(query);
-    
     const { data, error } = await query
       .order("created_at", { ascending: false })
       .range(from, to);
 
     if (error) {
-      toast({ title: "Error loading leads", description: error.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
     } else {
       const allUserIds = new Set<string>();
       for (const d of (data || [])) {
@@ -1585,7 +1835,6 @@ export default function AnewLeads() {
           .rpc("get_lead_page_health", {
             p_org_id: activeCompanyId,
             p_entity_ids: [...new Set(leadEntityIds)],
-            p_is_root: isRootOrg,
             p_scope: requestedScope,
             p_since: thirtyDaysAgo.toISOString(),
           });
@@ -1606,6 +1855,45 @@ export default function AnewLeads() {
         }
         setLeadInteractionCounts(counts);
         setLeadDealEntityIds(dealSet);
+
+        // Pipeline (Deals/Propostas/Orçamentos) aggregate for the new
+        // "Pipeline" column — same aggregate-RPC pattern as the health call
+        // above, never raw per-row queries (see anewLeadsAggregateRpc.test.ts).
+        const { data: pipelineRows, error: pipelineError } = await (supabase as any)
+          .rpc("get_lead_page_pipeline", {
+            p_org_id: activeCompanyId,
+            p_entity_ids: [...new Set(leadEntityIds)],
+            p_scope: requestedScope,
+          });
+
+        if (pipelineError) {
+          console.error("Error loading lead pipeline aggregates:", pipelineError);
+        } else {
+          const pipelineMap: Record<string, LeadPipelineEntry> = {};
+          (pipelineRows || []).forEach((row: {
+            entity_id: string;
+            deal_count: number | string;
+            deal_value: number | string;
+            proposal_count: number | string;
+            proposal_value: number | string;
+            proposal_value_with_iva: number | string;
+            quote_count: number | string;
+            quote_value: number | string;
+            quote_value_with_iva: number | string;
+          }) => {
+            pipelineMap[row.entity_id] = {
+              deal_count: Number(row.deal_count) || 0,
+              deal_value: Number(row.deal_value) || 0,
+              proposal_count: Number(row.proposal_count) || 0,
+              proposal_value: Number(row.proposal_value) || 0,
+              proposal_value_with_iva: Number(row.proposal_value_with_iva) || 0,
+              quote_count: Number(row.quote_count) || 0,
+              quote_value: Number(row.quote_value) || 0,
+              quote_value_with_iva: Number(row.quote_value_with_iva) || 0,
+            };
+          });
+          setLeadPipelineData(pipelineMap);
+        }
       }
 
       // Client-side post-filter: ensure effective status alignment
@@ -1639,7 +1927,165 @@ export default function AnewLeads() {
     isLoadingRef.current = false;
     setLoading(false);
     setLoadingMore(false);
-  }, [activeCompanyId, isRootOrg, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+
+  const KANBAN_LEADS_LIMIT = 500;
+
+  // Load ALL leads matching the current filters (unpaginated, capped) to feed
+  // the kanban board. Uses the exact same buildLeadsBaseQuery/filters as
+  // loadLeads above — list and kanban can never drift out of sync because
+  // they share this one query-building function.
+  const loadKanbanLeads = useCallback(async () => {
+    if (!activeCompanyId) return;
+
+    const viewScope = getPermissionScope("leads.view");
+    if (viewScope === "NONE") {
+      setKanbanLeads([]);
+      setKanbanTruncated(false);
+      return;
+    }
+
+    setKanbanLoading(true);
+    try {
+      const requestedScope = normalizeLeadScope(viewScope, onlyMine);
+      const query = buildLeadsBaseQuery({
+        organizationId: activeCompanyId,
+        requestedScope,
+        scopeAnewUserId,
+        scopeAuthUserId,
+        teamMemberIds,
+        filters: {
+          statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
+          dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+        },
+      });
+
+      const { data, error } = await query
+        .order("created_at", { ascending: false })
+        .limit(KANBAN_LEADS_LIMIT);
+
+      if (error) {
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.kanbanLoadError'), description, variant: "destructive" });
+        return;
+      }
+
+      const allUserIds = new Set<string>();
+      for (const d of (data || [])) {
+        if (d.assigned_to) allUserIds.add(d.assigned_to as string);
+      }
+
+      const userMap = new Map<string, { id: string; name: string }>();
+      if (allUserIds.size > 0) {
+        const { data: usersData } = await supabase
+          .from("anew_users")
+          .select("id, name")
+          .in("id", Array.from(allUserIds));
+        for (const u of (usersData || [])) userMap.set(u.id, u);
+      }
+
+      const mappedLeads = (data || []).map((d) => {
+        let assigned_user = null;
+        if (d.assigned_to) {
+          const u = userMap.get(d.assigned_to as string);
+          assigned_user = u ? { id: u.id, name: u.name } : null;
+        }
+        return {
+          ...d,
+          field_values: (d.field_values && typeof d.field_values === 'object' && !Array.isArray(d.field_values))
+            ? d.field_values as Record<string, any>
+            : {},
+          campaigns: d.campaigns as { id: string; name: string } | null,
+          profiles: null,
+          assigned_user,
+          assigned_to: d.assigned_to as string | null,
+          last_contact_at: d.last_contact_at as string | null,
+          callback_scheduled_at: d.callback_scheduled_at as string | null,
+          callback_notes: d.callback_notes as string | null,
+        };
+      }) as Lead[];
+
+      const entityIds = mappedLeads.map(l => l.entity_id).filter(Boolean) as string[];
+      if (entityIds.length > 0) {
+        await resolveEntities(entityIds);
+      }
+
+      setKanbanLeads(mappedLeads);
+      setKanbanTruncated(mappedLeads.length === KANBAN_LEADS_LIMIT);
+    } finally {
+      setKanbanLoading(false);
+    }
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+
+  // Persist a kanban drag: same status + workflow_stage_id update and
+  // execute-workflow automation trigger as handleBulkStatusChange, for a
+  // single lead moved between kanban columns instead of a bulk selection.
+  const handleKanbanStageDrop = useCallback(async (leadId: string, newStageId: string) => {
+    const newStage = workflowStages.find(s => s.id === newStageId);
+    if (!newStage) return;
+
+    if (newStage.is_conversion) {
+      toast({
+        title: "Não é possível mover diretamente para esta fase",
+        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" no lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updatePayload = { status: newStage.name, workflow_stage_id: newStage.id };
+
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updatePayload).eq("id", leadId)
+      );
+
+      if (error) {
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
+        return;
+      }
+
+      if (activeCompanyId) {
+        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+          body: {
+            source_entity: 'lead',
+            entity_id: leadId,
+            new_stage_id: newStage.id,
+            organization_id: activeCompanyId,
+            triggered_by: scopeAuthUserId,
+          },
+        });
+        if (workflowError) {
+          console.error("Kanban stage-drop workflow execution failed:", workflowError);
+          const workflowDescription = await getFriendlyErrorMessage(workflowError);
+          toast({
+            title: "Status atualizado com automações incompletas",
+            description: workflowDescription,
+            variant: "destructive",
+          });
+        }
+      }
+
+      loadKanbanLeads();
+      loadStatusCounts();
+      loadLeads();
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
+    }
+  }, [workflowStages, scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads, t]);
+
+  // Fetch kanban data only while that tab is visible, but keep it in sync
+  // with every filter change made anywhere on the page (same dependency list
+  // as the list/status-counts effect above), so switching to the kanban tab
+  // always shows the same filtered set as the list and the dashboard.
+  useEffect(() => {
+    if (activeTab !== "kanban" || !activeCompanyId || scopeLoading) return;
+    loadKanbanLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -1659,14 +2105,13 @@ export default function AnewLeads() {
         last_contact_at, last_contact_result, contact_attempts,
         callback_scheduled_at, callback_notes,
         tags,
+        qualification_type, qualified_at,
         campaigns(id, name)
       `)
       .eq("id", leadId)
       .is("deleted_at", null);
 
-    refreshQuery = isRootOrg
-      ? refreshQuery.or(`root_organization_id.eq.${activeCompanyId},organization_id.eq.${activeCompanyId}`)
-      : refreshQuery.eq("organization_id", activeCompanyId);
+    refreshQuery = refreshQuery.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
     if (requestedScope === "OWNED" && scopeAnewUserId) {
@@ -1754,7 +2199,6 @@ export default function AnewLeads() {
   }, [
     activeCompanyId,
     getPermissionScope,
-    isRootOrg,
     loadStatusCounts,
     onlyMine,
     scopeAnewUserId,
@@ -1781,39 +2225,7 @@ export default function AnewLeads() {
   });
 
   // Debounce timers for search inputs (300ms) — cancels pending query on each keystroke
-  const searchContactsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchClientsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Search contacts for association
-  const searchContacts = (query: string) => {
-    if (searchContactsTimer.current) clearTimeout(searchContactsTimer.current);
-    if (!query || query.length < 2) {
-      setContactOptions([]);
-      return;
-    }
-    searchContactsTimer.current = setTimeout(async () => {
-      setSearchingContacts(true);
-      // First resolve entity IDs matching the query, then find associated contacts
-      const { ids: matchingEntityIds } = await searchEntityIds(query);
-      if (matchingEntityIds.length === 0) {
-        setContactOptions([]);
-        setSearchingContacts(false);
-        return;
-      }
-      const { data } = await supabase
-        .from("anew_contacts")
-        .select("id, entity_id")
-        .eq("organization_id", activeCompanyId)
-        .eq("status", "active")
-        .in("entity_id", matchingEntityIds)
-        .limit(10);
-      const results = (data || []).map((c: any) => ({ id: c.id, entity_id: c.entity_id }));
-      const eIds = results.map((r: any) => r.entity_id).filter(Boolean);
-      if (eIds.length > 0) await resolveEntities(eIds);
-      setContactOptions(results as ContactOption[]);
-      setSearchingContacts(false);
-    }, 300);
-  };
 
   // Search clients for association
   const searchClients = (query: string) => {
@@ -1847,93 +2259,38 @@ export default function AnewLeads() {
 
   // Associate lead with contact (uses converted_to_contact_id → anew_contacts).
   const handleAssociateContact = async (leadId: string, contactId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ converted_to_contact_id: contactId } as any)
-      .eq("id", leadId);
-
-    if (error) {
-      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
-    } else {
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await supabase
+          .from("anew_leads")
+          .update({ converted_to_contact_id: contactId } as any)
+          .eq("id", leadId);
+        if (error) throw error;
+      });
       toast({ title: contactId ? t('leads.toast.contactAssociated') : t('leads.toast.contactRemoved') });
       refreshSingleLead(leadId);
+    } catch (error: any) {
+      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
     }
   };
 
   // Associate lead with client (uses converted_to_client_id → anew_clients).
   // Legacy column client_id references the deprecated `clients` table and must not be used.
   const handleAssociateClient = async (leadId: string, clientId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ converted_to_client_id: clientId } as any)
-      .eq("id", leadId);
-
-    if (error) {
-      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
-    } else {
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await supabase
+          .from("anew_leads")
+          .update({ converted_to_client_id: clientId } as any)
+          .eq("id", leadId);
+        if (error) throw error;
+      });
       toast({ title: clientId ? t('leads.toast.clientAssociated') : t('leads.toast.clientRemoved') });
       refreshSingleLead(leadId);
-    }
-  };
-
-  const loadFieldDefinitions = async (campaignId: string) => {
-    if (!campaignId) return;
-
-    // Try to get form_id from campaign — form_fields has correct contact_field_mapping
-    const { data: campaignRow } = await supabase
-      .from("campaigns")
-      .select("form_id")
-      .eq("id", campaignId)
-      .maybeSingle();
-
-    if (campaignRow?.form_id) {
-      // NOTE: `default_value` lives on `lead_field_definitions` (HubSpot Property Model),
-      // NOT on `form_fields` — including it here causes a 400 (column does not exist).
-      const { data: formFields, error: ffError } = await supabase
-        .from("form_fields")
-        .select("id, form_id, field_key, field_label, field_type, is_required, is_active, sort_order, options, placeholder, contact_field_mapping, client_field_mapping")
-        .eq("form_id", campaignRow.form_id)
-        .eq("is_active", true)
-        .order("sort_order");
-
-      if (!ffError && formFields && formFields.length > 0) {
-        // Map form_fields to same FieldDefinition shape
-        const mapped = formFields.map((f: any) => ({
-          id: f.id,
-          campaign_id: campaignId,
-          field_key: f.field_key,
-          field_label: f.field_label,
-          field_type: f.field_type,
-          is_required: f.is_required,
-          is_unique: false,
-          is_active: f.is_active,
-          sort_order: f.sort_order,
-          options: f.options,
-          placeholder: f.placeholder,
-          default_value: null,
-          organization_id: null,
-          contact_field_mapping: f.contact_field_mapping,
-          client_field_mapping: f.client_field_mapping,
-        }));
-        setFieldDefs(mapped as any);
-        loadReferenceData(mapped as any);
-        return;
-      }
-    }
-
-    // Fallback: legacy lead_field_definitions
-    const { data, error } = await supabase
-      .from("lead_field_definitions")
-      .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
-      .eq("campaign_id", campaignId)
-      .eq("is_active", true)
-      .order("sort_order");
-
-    if (error) {
-      console.error("Error loading field definitions:", error);
-    } else {
-      setFieldDefs(data || []);
-      loadReferenceData(data || []);
+    } catch (error: any) {
+      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -1945,7 +2302,7 @@ export default function AnewLeads() {
     const types = new Set(refFields.map(f => f.field_type));
     const newRefData: Record<string, Record<string, string>> = {};
 
-    // Pre-fetch orgIds once (shared by ref_company, ref_contact, ref_client)
+    // Pre-fetch orgIds once (shared by ref_company, ref_client)
     const orgIds = activeCompanyId ? await getDescendantOrgIds(activeCompanyId) : [];
 
     const loaders: Promise<void>[] = [];
@@ -1968,23 +2325,6 @@ export default function AnewLeads() {
             const map: Record<string, string> = {};
             (data || []).forEach(c => { map[c.id] = c.name; });
             refFields.filter(f => f.field_type === 'ref_company').forEach(f => { newRefData[f.field_key] = map; });
-          }))
-      );
-    }
-
-    if (types.has('ref_contact') && activeCompanyId && orgIds.length > 0) {
-      loaders.push(
-        Promise.resolve(supabase.from('anew_contacts').select('id, entity_id').in('organization_id', orgIds).eq('status', 'active')
-          .then(async ({ data: contacts }) => {
-            if (!contacts) return;
-            const eIds = contacts.map(c => c.entity_id).filter(Boolean);
-            if (eIds.length > 0) await resolveEntities(eIds);
-            const map: Record<string, string> = {};
-            contacts.forEach((c: any) => {
-              const identity = getIdentity(c.entity_id);
-              map[c.id] = identity?.display_name || `Contact #${c.id.slice(0, 8)}`;
-            });
-            refFields.filter(f => f.field_type === 'ref_contact').forEach(f => { newRefData[f.field_key] = map; });
           }))
       );
     }
@@ -2206,252 +2546,29 @@ export default function AnewLeads() {
   };
 
   // Opens the conversion dialog to ask about campaign association
-  const openConversionDialog = (lead: Lead, type: 'contact' | 'client') => {
+  const openConversionDialog = (lead: Lead, type: 'client') => {
     setConversionLead(lead);
     setConversionType(type);
     setConversionCampaignId(lead.campaign_id || "");
     setShowConversionDialog(true);
   };
 
-  // Execute the actual conversion (contact or client)
+  // Execute the actual conversion to client (converting to "contact" no longer
+  // exists -- Contacts were merged into the Lead lifecycle, see the
+  // 2026-07-15 contacts-to-leads merge).
   const executeConversion = async () => {
     if (!conversionLead || conversionLockRef.current) return;
 
     conversionLockRef.current = true;
     setIsConverting(true);
     try {
-      if (conversionType === 'contact') {
-        await doConvertToContact(conversionLead, conversionCampaignId || null);
-      } else {
-        await doConvertToClient(conversionLead, conversionCampaignId || null);
-      }
+      await doConvertToClient(conversionLead, conversionCampaignId || null);
       setShowConversionDialog(false);
       setConversionLead(null);
     } finally {
       conversionLockRef.current = false;
       setIsConverting(false);
     }
-  };
-
-  const doConvertToContact = async (lead: Lead, selectedCampaignId: string | null) => {
-    let contactData: Record<string, any> = {};
-    let usedAutoMapping = false;
-
-    // Try campaign-based mapping first if campaign exists
-    const campaignToUse = selectedCampaignId || lead.campaign_id;
-    if (campaignToUse) {
-      const { data: fieldDefsForConvert } = await supabase
-        .from("lead_field_definitions")
-        .select("id, campaign_id, field_key, field_label, field_type, is_required, is_unique, is_active, sort_order, options, placeholder, default_value, organization_id, contact_field_mapping, client_field_mapping")
-        .eq("campaign_id", campaignToUse)
-        .eq("is_active", true);
-
-      const fieldsWithMapping = (fieldDefsForConvert || []).filter(f => f.contact_field_mapping);
-      
-      if (fieldsWithMapping.length > 0) {
-        for (const field of fieldsWithMapping) {
-          const leadValue = lead.field_values?.[field.field_key];
-          if (leadValue && field.contact_field_mapping) {
-            contactData[field.contact_field_mapping] = leadValue;
-          }
-        }
-      } else {
-        contactData = extractFieldsWithAutoMapping(lead.field_values, 'contact');
-        usedAutoMapping = true;
-      }
-    } else {
-      contactData = extractFieldsWithAutoMapping(lead.field_values, 'contact');
-      usedAutoMapping = true;
-    }
-
-    // Entity data (name, email, phone, address, NIF) already lives in anew_entity_* tables
-    // via the lead's entity_id — no need to duplicate. Only extract name for the contact record.
-    const firstName = contactData.first_name || null;
-    const lastName = contactData.last_name || null;
-
-    const authUserId = scopeAuthUserId;
-    if (!authUserId) throw new Error('Utilizador não autenticado');
-    const convertedByUserId = scopeAnewUserId || authUserId;
-
-    // Garantir que a entidade tem link na org local antes de qualquer
-    // acesso a anew_contacts / anew_entity_roles (caso contrário RLS bloqueia silenciosamente).
-    if (lead.entity_id) {
-      try {
-        await ensureEntityOrgLink({
-          entityId: lead.entity_id,
-          organizationId: lead.organization_id,
-          isPrimary: false,
-        });
-      } catch (linkErr: any) {
-        console.error('[convertToContact] ensureEntityOrgLink failed', linkErr);
-        toast({
-          title: t('leads.toast.convertError'),
-          description: `Não foi possível associar a entidade à organização: ${linkErr?.message || linkErr}`,
-          variant: 'destructive',
-        });
-        return;
-      }
-    }
-
-    // Check if a contact already exists for this entity in this organization (anew_contacts first)
-    let newContact: any = null;
-    if (lead.entity_id) {
-      const { data: existingAnewContact } = await supabase
-        .from("anew_contacts")
-        .select("*")
-        .eq("entity_id", lead.entity_id)
-        .eq("organization_id", lead.organization_id)
-        .maybeSingle();
-      if (existingAnewContact) {
-        newContact = existingAnewContact;
-        // Reactivate and clear previous client conversion metadata
-        const updateFields: Record<string, any> = {};
-        if (existingAnewContact.status !== 'active') updateFields.status = 'active';
-        if (existingAnewContact.converted_to_client_id) {
-          updateFields.converted_to_client_id = null;
-          updateFields.converted_at = null;
-        }
-        if (Object.keys(updateFields).length > 0) {
-          await supabase.from("anew_contacts").update(updateFields as any).eq("id", existingAnewContact.id);
-        }
-      }
-    }
-
-    if (!newContact) {
-      // Determine root_organization_id
-      let rootOrgId = lead.organization_id;
-      const { data: hierarchyData } = await supabase
-        .from("anew_hierarchy")
-        .select("parent_org_id")
-        .eq("child_org_id", lead.organization_id)
-        .limit(1)
-        .maybeSingle();
-      if (hierarchyData?.parent_org_id) {
-        const { data: parentH } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id")
-          .eq("child_org_id", hierarchyData.parent_org_id)
-          .maybeSingle();
-        rootOrgId = parentH?.parent_org_id || hierarchyData.parent_org_id;
-      }
-
-      // Create in anew_contacts (primary destination)
-      const { data: createdContact, error: contactError } = await supabase
-        .from("anew_contacts")
-        .insert([{
-          organization_id: lead.organization_id,
-          root_organization_id: rootOrgId,
-          entity_id: lead.entity_id || null,
-          position: contactData.position || contactData.job_title || null,
-          notes: contactData.notes || null,
-          source_type: 'lead',
-          source_lead_id: lead.id,
-          created_by: convertedByUserId,
-          assigned_to: lead.assigned_to,
-          status: 'active',
-        }])
-        .select()
-        .single();
-
-      if (contactError) {
-        toast({ title: t('leads.toast.createContactError'), description: contactError.message, variant: "destructive" });
-        return;
-      }
-      newContact = createdContact;
-    }
-
-    // Entity role management: create contact role and inactivate lead role
-    if (lead.entity_id && lead.organization_id) {
-      const { data: existingContactRole } = await supabase
-        .from("anew_entity_roles")
-        .select("id")
-        .eq("entity_id", lead.entity_id)
-        .eq("role", "contact")
-        .eq("organization_id", lead.organization_id)
-        .maybeSingle();
-      if (!existingContactRole) {
-        await supabase.from("anew_entity_roles").insert({
-          entity_id: lead.entity_id,
-          role: "contact",
-          status: "active",
-          organization_id: lead.organization_id,
-          source_type: "lead",
-          source_id: lead.id,
-          created_by: convertedByUserId,
-        });
-      } else {
-        await supabase.from("anew_entity_roles").update({ status: "active" }).eq("id", existingContactRole.id);
-      }
-      // Inactivate lead role
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('organization_id', lead.organization_id)
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'lead');
-      // Deactivate client role ONLY in the lead's own organization (not cross-org)
-      // This allows the converted contact to appear in the contacts list for this org
-      // without affecting client roles the entity may have in other organizations
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('organization_id', lead.organization_id)
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'client');
-    }
-
-
-    // Sync primary address from lead.field_values (safe orchestrator)
-    if (lead.entity_id && lead.field_values) {
-      try {
-        const syncRes = await syncEntityPrimaryAddressFromLead({
-          supabase,
-          entityId: lead.entity_id,
-          fieldValues: lead.field_values as Record<string, any>,
-          actorId: convertedByUserId,
-          allowOverwriteValid: true, // explicit user-driven conversion
-        });
-        console.log("[address-sync/convert]", syncRes);
-      } catch (e) {
-        console.error("[address-sync/convert] failed", e);
-      }
-    }
-
-    // Update lead status
-    const updateData: Record<string, any> = {
-      status: "converted",
-      converted_to_contact_id: newContact.id,
-      converted_at: new Date().toISOString(),
-      converted_by: convertedByUserId
-    };
-    if (selectedCampaignId && !lead.campaign_id) {
-      updateData.campaign_id = selectedCampaignId;
-    }
-
-    const { error: leadError } = await supabase
-      .from("anew_leads")
-      .update(updateData as any)
-      .eq("id", lead.id);
-
-    if (leadError) {
-      toast({ title: t('leads.toast.updateLeadError'), description: leadError.message, variant: "destructive" });
-      return;
-    }
-
-    // Update entity first_name/last_name
-    if (lead.entity_id && (firstName || lastName)) {
-      const entityNameUpdate: Record<string, any> = {};
-      if (firstName) entityNameUpdate.first_name = firstName;
-      if (lastName) entityNameUpdate.last_name = lastName;
-      await supabase.from("anew_entities").update(entityNameUpdate as any).eq("id", lead.entity_id);
-    }
-
-    // Entity status stays 'active' — role transition handled by sync_contact_entity_role trigger
-
-    toast({ title: t('leads.toast.convertedToContact'), description: t('leads.toast.newContactCreated') });
-    setShowDetails(false);
-    loadLeads();
-    loadStatusCounts();
   };
 
   const doConvertToClient = async (lead: Lead, selectedCampaignId: string | null) => {
@@ -2534,7 +2651,10 @@ export default function AnewLeads() {
       sourceContactId = contactRows?.[0]?.id || null;
     }
 
-    let clientId: string | null = null;
+    // Detect whether a client facet already existed for this entity/root-org,
+    // purely to preserve the "reused vs newly created" toast copy below —
+    // the actual reuse-or-create decision itself now happens inside the RPC.
+    let clientAlreadyExisted = false;
     if (lead.entity_id) {
       const { data: existingClients, error: existingClientError } = await supabase
         .from("anew_clients")
@@ -2545,116 +2665,43 @@ export default function AnewLeads() {
         .limit(1);
 
       if (existingClientError) throw existingClientError;
-      clientId = existingClients?.[0]?.id || null;
+      clientAlreadyExisted = !!existingClients?.[0]?.id;
     }
 
-    if (!clientId) {
-      const { data: newClient, error: clientError } = await supabase
-        .from("anew_clients")
-        .insert([{
-          organization_id: lead.organization_id,
-          root_organization_id: rootOrgId,
-          entity_id: lead.entity_id || null,
-          client_type: clientType,
-          source_type: sourceContactId ? 'contact' : 'lead',
-          source_id: sourceContactId || lead.id,
-          status: 'active',
-          created_by: convertedByUserId,
-          assigned_to: lead.assigned_to,
-        }])
-        .select("id")
-        .single();
+    const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
 
-      if (clientError) {
-        toast({ title: t('leads.toast.createClientError'), description: clientError.message, variant: "destructive" });
+    const clientDataForRpc = {
+      ...clientData,
+      first_name: firstName,
+      last_name: lastName,
+      company_name: companyName,
+    };
+
+    let client: any = null;
+    try {
+      const { data, error: convertError } = await withAuditContext(supabase, convertedByUserId, async () =>
+        await supabase.rpc("rpc_convert_lead_to_client", {
+          p_lead_id: lead.id,
+          p_client_data: clientDataForRpc,
+          p_root_organization_id: rootOrgId,
+          p_source_contact_id: sourceContactId,
+          p_campaign_id: newCampaignId,
+        })
+      );
+
+      if (convertError) {
+        toast({ title: t('leads.toast.updateLeadError'), description: convertError.message, variant: "destructive" });
         return;
       }
-
-      clientId = newClient.id;
-    }
-
-    const nowIso = new Date().toISOString();
-    const updateData: Record<string, any> = {
-      status: "converted",
-      converted_to_client_id: clientId,
-      converted_to_contact_id: sourceContactId,
-      converted_at: nowIso,
-      converted_by: convertedByUserId,
-    };
-    if (selectedCampaignId && !lead.campaign_id) {
-      updateData.campaign_id = selectedCampaignId;
-    }
-
-    const { error: leadError } = await supabase
-      .from("anew_leads")
-      .update(updateData as any)
-      .eq("id", lead.id);
-
-    if (leadError) {
-      toast({ title: t('leads.toast.updateLeadError'), description: leadError.message, variant: "destructive" });
+      client = data;
+    } catch (error: any) {
+      toast({ title: t('leads.toast.updateLeadError'), description: error?.message || String(error), variant: "destructive" });
       return;
     }
 
-    if (sourceContactId && clientId) {
-      let contactUpdateQuery: any = supabase
-        .from("anew_contacts")
-        .update({ converted_to_client_id: clientId, converted_at: nowIso, status: "inactive" })
-        .eq("entity_id", lead.entity_id)
-        .eq("organization_id", lead.organization_id);
-      await contactUpdateQuery;
-    }
+    const clientId = client?.id ?? null;
 
-    if (lead.entity_id) {
-      const entityNameUpdate: Record<string, any> = {};
-      if (firstName) entityNameUpdate.first_name = firstName;
-      if (lastName) entityNameUpdate.last_name = lastName;
-      if (companyName && clientType === 'company') entityNameUpdate.display_name = companyName;
-      if (Object.keys(entityNameUpdate).length > 0) {
-        await supabase.from("anew_entities").update(entityNameUpdate as any).eq("id", lead.entity_id);
-      }
-
-      const { data: existingClientRoleRows, error: clientRoleLookupError } = await supabase
-        .from("anew_entity_roles")
-        .select("id")
-        .eq("entity_id", lead.entity_id)
-        .eq("role", "client")
-        .eq("organization_id", lead.organization_id)
-        .order("created_at", { ascending: true })
-        .limit(1);
-      if (clientRoleLookupError) throw clientRoleLookupError;
-
-      const existingClientRoleId = existingClientRoleRows?.[0]?.id;
-      if (!existingClientRoleId) {
-        await supabase.from("anew_entity_roles").insert({
-          entity_id: lead.entity_id,
-          role: "client",
-          status: "active",
-          organization_id: lead.organization_id,
-          source_type: sourceContactId ? "contact" : "lead",
-          source_id: sourceContactId || lead.id,
-          created_by: convertedByUserId,
-        });
-      } else {
-        await supabase.from("anew_entity_roles").update({ status: "active" }).eq("id", existingClientRoleId);
-      }
-
-      // Deactivate lead and contact roles ONLY in the lead's own organization
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'lead')
-        .eq('organization_id', lead.organization_id);
-
-      await supabase
-        .from("anew_entity_roles" as any)
-        .update({ status: 'inactive' })
-        .eq('entity_id', lead.entity_id)
-        .eq('role', 'contact')
-        .eq('organization_id', lead.organization_id);
-    }
-
-    toast({ title: t('leads.toast.convertedToClient'), description: clientId ? 'Cliente sincronizado sem duplicar registos.' : t('leads.toast.newClientCreated') });
+    toast({ title: t('leads.toast.convertedToClient'), description: clientAlreadyExisted ? 'Cliente sincronizado sem duplicar registos.' : t('leads.toast.newClientCreated') });
     setShowDetails(false);
     loadLeads();
     loadStatusCounts();
@@ -2666,6 +2713,10 @@ export default function AnewLeads() {
   }, [navigate]);
 
   const handleCreateLead = async () => {
+    if (!activeCompanyId) {
+      toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
+      return;
+    }
     // Merge base + extra campaign fields for validation
     const allFieldDefs = [...createLeadFieldDefs, ...extraCampaignFieldDefs];
     // Validate required fields
@@ -2689,7 +2740,7 @@ export default function AnewLeads() {
       return;
     }
     const createdByResolved = anewUserId || authUserId;
-    const resolvedRootOrgId = (!isRootOrg && activeCompanyId) ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
+    const resolvedRootOrgId = activeCompanyId ? await resolveRootOrgId(activeCompanyId) : activeCompanyId;
 
     // ─── Compensable-state tracking (best-effort frontend rollback) ───
     type CompensableTable = "anew_leads" | "anew_entities" | "anew_entity_emails" | "anew_entity_phones";
@@ -2708,8 +2759,8 @@ export default function AnewLeads() {
         try {
           const { error } = await supabase.from(rec.table).delete().eq("id", rec.id);
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
+        } catch (e: unknown) {
+          failures.push({ what: `${rec.table}:${rec.id}`, reason: e instanceof Error ? e.message : String(e) });
         }
       }
       if (failures.length > 0) {
@@ -2787,6 +2838,11 @@ export default function AnewLeads() {
         // --- 1. Resolve or create entity (deduplication by email/phone/vat) ---
         let entityId: string | null = null;
         let entityWasResolved = false;
+        // Only a FULL identity match justifies renaming the reused entity below —
+        // a partial match (e.g. matched only on email, name differs) means this
+        // may be a different real-world person sharing an identifier, and must
+        // never have its name silently overwritten.
+        let entityFullMatch = false;
         let coherenceWarning: { storedName: string | null; storedEmail: string | null; storedPhone: string | null; matched: string[] } | null = null;
 
         if (emailValue || phoneValue || vatValue) {
@@ -2794,6 +2850,7 @@ export default function AnewLeads() {
             email: emailValue || null,
             phone: phoneValue || null,
             vat: vatValue || null,
+            organizationId: activeCompanyId!,
           });
           if (candidate) {
             const coherence = await validateEntityCoherence(candidate, {
@@ -2805,6 +2862,16 @@ export default function AnewLeads() {
             if (coherence.level === 'full') {
               entityId = candidate;
               entityWasResolved = true;
+              entityFullMatch = true;
+            } else if (coherence.level === 'partial' && coherence.phoneOnlyMatch) {
+              // Phone is a weak signal (shared/reused far more than email or
+              // VAT) — never auto-merge on phone alone, same policy HubSpot
+              // uses for phone-based "potential duplicates".
+              console.warn('[lead-create] Entity match rejected (phone-only signal, not strong enough to auto-reuse)', {
+                rejectedEntityId: candidate,
+                submitted: { name: displayName, email: emailValue, phone: phoneValue, vat: vatValue },
+                stored: coherence.storedIdentity,
+              });
             } else if (coherence.level === 'partial') {
               entityId = candidate;
               entityWasResolved = true;
@@ -2985,6 +3052,7 @@ export default function AnewLeads() {
                 email: emailValue || null,
                 phone: phoneValue || null,
                 vat: vatValue || null,
+                organizationId: activeCompanyId!,
               });
 
               if (fallbackEntityId) {
@@ -3185,103 +3253,31 @@ export default function AnewLeads() {
           return;
         }
 
-        // ─── Critical sequential writes (each may trigger rollback on failure) ───
-
-        // Email handling — dedupe by ilike; for reused entity, snapshot+deactivate primary first.
-        if (emailValue) {
-          const existing = await assertNoSupabaseError<{ id: string } | null>(
-            supabase
-              .from("anew_entity_emails")
-              .select("id")
-              .eq("entity_id", entityId)
-              .ilike("email", emailValue)
-              .maybeSingle(),
-            "lookup existing email",
-          );
-          if (!existing) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_emails") as any)
-                .insert({
-                  entity_id: entityId, email: emailValue, email_type: 'personal',
-                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
-                })
-                .select("id")
-                .single(),
-              "insert email",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_emails", id: inserted.id });
-          }
-        }
-
-        // Phone handling — dedupe by 7-digit suffix; same snapshot semantics for reused entity.
-        if (phoneValue) {
-          const digits = String(phoneValue).replace(/\D/g, "");
-          const suffix = digits.length >= 7 ? digits.slice(-7) : digits;
-          let exists = false;
-          if (suffix.length >= 7) {
-            const rows = await assertNoSupabaseError<Array<{ id: string; phone_number: string | null }>>(
-              supabase
-                .from("anew_entity_phones")
-                .select("id, phone_number")
-                .eq("entity_id", entityId),
-              "lookup existing phone",
-            );
-            exists = (rows || []).some((r: any) => {
-              const d = String(r.phone_number || "").replace(/\D/g, "");
-              return d.length >= 7 && d.slice(-7) === suffix;
-            });
-          }
-          if (!exists) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_phones") as any)
-                .insert({
-                  entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                  is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdByResolved,
-                })
-                .select("id")
-                .single(),
-              "insert phone",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_phones", id: inserted.id });
-          }
-        }
-
-        // --- Lead INSERT ---
+        // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
         const assignedTo = newLeadValues._assigned_to || null;
         const { _assigned_to, ...cleanFieldValues } = newLeadValues;
+        const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
+          ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
+          : "manual";
+        const resolvedSourceId = (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null;
 
-        const newLead = await assertNoSupabaseError<{ id: string }>(
-          (supabase.from("anew_leads") as any)
-            .insert({
-              campaign_id: createLeadCampaignId || null,
-              organization_id: activeCompanyId,
-              root_organization_id: resolvedRootOrgId,
-              field_values: cleanFieldValues,
-              status: "new",
-              source: (createLeadSourceId && createLeadSourceId !== "none")
-                ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
-                : "manual",
-              source_id: (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null,
-              created_by: createdByResolved,
-              entity_id: entityId,
-              assigned_to: assignedTo,
-            })
-            .select("id")
-            .single(),
-          "insert lead",
+        const newLead = await assertNoSupabaseError(
+          supabase.rpc("rpc_create_lead_manual", {
+            p_organization_id: activeCompanyId,
+            p_root_organization_id: resolvedRootOrgId,
+            p_entity_id: entityId,
+            p_entity_created_here: entityCreatedHere,
+            p_field_values: cleanFieldValues,
+            p_email: emailValue || null,
+            p_phone: phoneValue || null,
+            p_source: resolvedSourceName,
+            p_source_id: resolvedSourceId,
+            p_campaign_id: createLeadCampaignId || null,
+            p_assigned_to: assignedTo,
+          }),
+          "create lead (manual)",
         );
         if (newLead?.id) createdIds.push({ table: "anew_leads", id: newLead.id });
-
-        // --- Role upsert = COMMIT POINT ---
-        if (activeCompanyId && newLead) {
-          await assertNoSupabaseError(
-            (supabase.from("anew_entity_roles") as any).upsert({
-              organization_id: activeCompanyId, entity_id: entityId, role: 'lead',
-              status: 'active', source_type: 'lead', source_id: newLead.id, created_by: createdByResolved,
-            }, { onConflict: 'organization_id,entity_id,role' }),
-            "upsert role",
-          );
-        }
         dbCommitted = true;
 
         // Capture for post-commit
@@ -3289,14 +3285,16 @@ export default function AnewLeads() {
         newLeadIdForPostCommit = newLead?.id || null;
         cleanFieldValuesForPostCommit = cleanFieldValues;
         assignedToForPostCommit = assignedTo;
-        selectedLeadSourceNameForPostCommit = (createLeadSourceId && createLeadSourceId !== "none")
-          ? (leadSources.find((s) => s.id === createLeadSourceId)?.name || "manual")
-          : "manual";
+        selectedLeadSourceNameForPostCommit = resolvedSourceName;
         coherenceWarningForPostCommit = coherenceWarning;
         entityReusedForPostCommit = entityWasResolved;
 
-        if (entityWasResolved) {
-          // Build rename payload — only for reused entity (post-commit best-effort).
+        if (entityWasResolved && entityFullMatch) {
+          // Build rename payload — only for a FULLY-matched reused entity
+          // (post-commit best-effort). A partial match must never trigger a
+          // rename: it may be a different real-world person who happens to
+          // share one identifier (email/phone/VAT), and silently overwriting
+          // their existing name would corrupt shared entity data.
           const nameUpdate: Record<string, any> = { display_name: displayName.trim() };
           for (const fd of allFieldDefs) {
             const m = (fd as any).contact_field_mapping;
@@ -3305,7 +3303,7 @@ export default function AnewLeads() {
           }
           entityRenamePayloadForPostCommit = nameUpdate;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Lead creation error:', err);
         if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
@@ -3330,20 +3328,49 @@ export default function AnewLeads() {
         if (addr.decision === "error") {
           console.warn("[post-commit] address sync failed", addr.reason);
           toast({
-            title: "Lead criado, mas a morada não foi sincronizada",
+            title: t('leads.toast.addressSyncFailed'),
             description: addr.reason ?? undefined,
           });
         }
       } catch (e) {
         console.warn("[post-commit] address sync threw", e);
+        const description = await getFriendlyErrorMessage(e);
+        toast({
+          title: t('leads.toast.addressSyncFailed'),
+          description,
+        });
       }
 
       if (entityRenamePayloadForPostCommit && entityReusedForPostCommit) {
         try {
-          const { error } = await (supabase.from("anew_entities") as any)
-            .update(entityRenamePayloadForPostCommit)
-            .eq("id", entityIdForPostCommit);
-          if (error) console.warn("[post-commit] entity rename failed", error.message);
+          // Fill-in-missing-only, same convention as syncEntityPrimaryAddressFromLead's
+          // allowOverwriteValid:false above — never overwrite a name field the
+          // reused entity already has, even on a full identity match.
+          const { data: currentEntity, error: fetchErr } = await (supabase
+            .from("anew_entities") as any)
+            .select("first_name, last_name, display_name")
+            .eq("id", entityIdForPostCommit)
+            .maybeSingle();
+          if (fetchErr) {
+            console.warn("[post-commit] entity rename: fetch current name failed", fetchErr.message);
+          } else {
+            const safeUpdate: Record<string, any> = {};
+            if (!currentEntity?.first_name && entityRenamePayloadForPostCommit.first_name) {
+              safeUpdate.first_name = entityRenamePayloadForPostCommit.first_name;
+            }
+            if (!currentEntity?.last_name && entityRenamePayloadForPostCommit.last_name) {
+              safeUpdate.last_name = entityRenamePayloadForPostCommit.last_name;
+            }
+            if (!currentEntity?.display_name && entityRenamePayloadForPostCommit.display_name) {
+              safeUpdate.display_name = entityRenamePayloadForPostCommit.display_name;
+            }
+            if (Object.keys(safeUpdate).length > 0) {
+              const { error } = await (supabase.from("anew_entities") as any)
+                .update(safeUpdate)
+                .eq("id", entityIdForPostCommit);
+              if (error) console.warn("[post-commit] entity rename failed", error.message);
+            }
+          }
         } catch (e) {
           console.warn("[post-commit] entity rename threw", e);
         }
@@ -3393,6 +3420,10 @@ export default function AnewLeads() {
   // declined.
   const handleDuplicateCreateAnyway = async (reuseEntityIdArg?: string) => {
     if (!pendingLeadData) return;
+    if (!activeCompanyId) {
+      toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
+      return;
+    }
     // Guard: when wired directly to an onClick handler, React passes the
     // MouseEvent as the first argument. Only accept plain string ids; anything
     // else (event objects, etc.) is treated as "no reuse" to avoid sending a
@@ -3450,8 +3481,8 @@ export default function AnewLeads() {
         try {
           const { error } = await supabase.from(rec.table).delete().eq("id", rec.id);
           if (error) failures.push({ what: `${rec.table}:${rec.id}`, reason: error.message });
-        } catch (e: any) {
-          failures.push({ what: `${rec.table}:${rec.id}`, reason: e?.message ?? String(e) });
+        } catch (e: unknown) {
+          failures.push({ what: `${rec.table}:${rec.id}`, reason: e instanceof Error ? e.message : String(e) });
         }
       }
       if (failures.length > 0) {
@@ -3517,89 +3548,36 @@ export default function AnewLeads() {
           }
         }
 
-        // Sequential email — only for reused entity do we snapshot the existing primary.
-        if (emailValue) {
-          const existing = await assertNoSupabaseError<{ id: string } | null>(
-            supabase
-              .from("anew_entity_emails")
-              .select("id")
-              .eq("entity_id", entityId)
-              .ilike("email", emailValue)
-              .maybeSingle(),
-            "lookup existing email (create-anyway)",
-          );
-          if (!existing) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_emails") as any).insert({
-                entity_id: entityId, email: emailValue, email_type: 'personal',
-                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
-              }).select("id").single(),
-              "insert email (create-anyway)",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_emails", id: inserted.id });
-          }
-        }
-
-        if (phoneValue) {
-          const digits = String(phoneValue).replace(/\D/g, "");
-          const suffix = digits.length >= 7 ? digits.slice(-7) : digits;
-          let exists = false;
-          if (suffix.length >= 7) {
-            const rows = await assertNoSupabaseError<Array<{ id: string; phone_number: string | null }>>(
-              supabase.from("anew_entity_phones").select("id, phone_number").eq("entity_id", entityId),
-              "lookup existing phone (create-anyway)",
-            );
-            exists = (rows || []).some((r: any) => {
-              const d = String(r.phone_number || "").replace(/\D/g, "");
-              return d.length >= 7 && d.slice(-7) === suffix;
-            });
-          }
-          if (!exists) {
-            const inserted = await assertNoSupabaseError<{ id: string }>(
-              (supabase.from("anew_entity_phones") as any).insert({
-                entity_id: entityId, phone_number: phoneValue, phone_type: 'mobile',
-                is_primary: identityContactIsPrimary(entityCreatedHere), created_by: createdBy,
-              }).select("id").single(),
-              "insert phone (create-anyway)",
-            );
-            if (inserted?.id) createdIds.push({ table: "anew_entity_phones", id: inserted.id });
-          }
-        }
-
+        // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
         const { _assigned_to, ...cleanFieldValues } = fieldValues;
-        const newLead = await assertNoSupabaseError<{ id: string }>(
-          (supabase.from("anew_leads") as any).insert({
-            campaign_id: createLeadCampaignId || null,
-            organization_id: activeCompanyId,
-            root_organization_id: resolvedRootOrgId,
-            field_values: cleanFieldValues,
-            status: "new",
-            source: (createLeadSourceId && createLeadSourceId !== "none") ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual") : "manual",
-            source_id: (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null,
-            created_by: createdBy,
-            entity_id: entityId,
-            assigned_to: assignedTo,
-          }).select("id").single(),
-          "insert lead (create-anyway)",
+        const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
+          ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
+          : "manual";
+        const resolvedSourceId = (createLeadSourceId && createLeadSourceId !== "none") ? createLeadSourceId : null;
+
+        const newLead = await assertNoSupabaseError(
+          supabase.rpc("rpc_create_lead_duplicate_override", {
+            p_organization_id: activeCompanyId,
+            p_root_organization_id: resolvedRootOrgId,
+            p_entity_id: entityId,
+            p_entity_created_here: entityCreatedHere,
+            p_field_values: cleanFieldValues,
+            p_email: emailValue || null,
+            p_phone: phoneValue || null,
+            p_source: resolvedSourceName,
+            p_source_id: resolvedSourceId,
+            p_campaign_id: createLeadCampaignId || null,
+            p_assigned_to: assignedTo,
+          }),
+          "create lead (create-anyway)",
         );
         if (newLead?.id) createdIds.push({ table: "anew_leads", id: newLead.id });
-
-        // Role upsert = commit point
-        if (activeCompanyId && newLead) {
-          await assertNoSupabaseError(
-            (supabase.from("anew_entity_roles") as any).upsert({
-              organization_id: activeCompanyId, entity_id: entityId, role: 'lead',
-              status: 'active', source_type: 'lead', source_id: newLead.id, created_by: createdBy,
-            }, { onConflict: 'organization_id,entity_id,role' }),
-            "upsert role (create-anyway)",
-          );
-        }
         dbCommitted = true;
 
         entityIdForPostCommit = entityId;
         newLeadIdForPostCommit = newLead?.id || null;
         cleanFieldValuesForPostCommit = cleanFieldValues;
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('[create-anyway] failed:', err);
         if (createdIds.length === 0) {
           const description = await getFriendlyErrorMessage(err);
@@ -3619,10 +3597,12 @@ export default function AnewLeads() {
         });
         if (addr.decision === "error") {
           console.warn("[post-commit/create-anyway] address sync failed", addr.reason);
-          toast({ title: "Lead criado, mas a morada não foi sincronizada", description: addr.reason ?? undefined });
+          toast({ title: t('leads.toast.addressSyncFailed'), description: addr.reason ?? undefined });
         }
       } catch (e) {
         console.warn("[post-commit/create-anyway] address sync threw", e);
+        const description = await getFriendlyErrorMessage(e);
+        toast({ title: t('leads.toast.addressSyncFailed'), description });
       }
 
       toast({ title: t('leads.toast.createSuccess') });
@@ -3656,8 +3636,9 @@ export default function AnewLeads() {
       await linkEntityToOrg(match.entityId, activeCompanyId);
       // Reuse the (now-shared) entity instead of creating a new one.
       await handleDuplicateCreateAnyway(match.entityId);
-    } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('leads.toast.shareEntityError'), description, variant: "destructive" });
       setCreatingLead(false);
     }
   };
@@ -3671,7 +3652,7 @@ export default function AnewLeads() {
     setPendingLeadData(null);
     setDuplicateMatches([]);
     if (match.type === "contact") {
-      navigate(`/contacts?open=${match.id}`);
+      navigate(`/leads?open=${match.id}`);
       return;
     }
     if (match.type === "client") {
@@ -3686,12 +3667,15 @@ export default function AnewLeads() {
     } else {
       // Fetch and open even if not in current page
       (async () => {
-        const { data } = await (supabase as any).from("anew_leads").select("*").eq("id", match.id).single();
+        const { data } = await (supabase as any).from("anew_leads").select("*").eq("id", match.id).eq("organization_id", activeCompanyId).single();
         if (data) {
           setSelectedLead(data);
           setShowDetails(true);
         } else {
-          toast({ title: "Lead encontrada", description: `A lead "${match.displayName}" já existe. Pesquise por ela na lista.` });
+          toast({
+            title: t('leads.toast.leadAlreadyExists'),
+            description: t('leads.toast.leadAlreadyExistsDesc', { name: match.displayName }),
+          });
         }
       })();
     }
@@ -3705,11 +3689,14 @@ export default function AnewLeads() {
       const { fieldValues } = pendingLeadData;
       const { _assigned_to, ...cleanFieldValues } = fieldValues;
       // Merge field_values — existing lead gets new data overlaid, and status becomes "new" if it was lost/rejected
-      const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).single();
+      const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).eq("organization_id", activeCompanyId).single();
       const mergedValues = { ...(existingLead?.field_values || {}), ...cleanFieldValues };
       const newStatus = ["lost", "rejected"].includes(existingLead?.status) ? "new" : existingLead?.status;
-      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id);
-      toast({ title: "Lead atualizada", description: `Os dados da lead "${match.displayName}" foram atualizados.` });
+      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId);
+      toast({
+        title: t('leads.toast.leadUpdated'),
+        description: t('leads.toast.leadUpdatedDesc', { name: match.displayName }),
+      });
       setDuplicateDialogOpen(false);
       setShowCreateLead(false);
       setPendingLeadData(null);
@@ -3717,16 +3704,19 @@ export default function AnewLeads() {
       setNewLeadValues({});
       setLeads([]); setHasMore(true); loadLeads();
       loadStatusCounts();
-    } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('leads.toast.updateError'), description, variant: "destructive" });
     } finally {
       setCreatingLead(false);
     }
   };
 
-  const BASE_FIELD_KEYS = ['first_name', 'last_name', 'email', 'phone', 'company_name', 'address', 'postal_code', 'city', 'notes'];
+  // address, postal_code e city removidos por RGPD (minimização de dados):
+  // morada/NIF só devem aparecer no fluxo de cliente/faturação, não na ficha de lead.
+  const BASE_FIELD_KEYS = ['first_name', 'last_name', 'email', 'phone', 'company_name', 'notes'];
   const BASE_FIELD_KEY_SET = new Set(BASE_FIELD_KEYS.map((key) => key.toLowerCase()));
-  const BASE_CONTACT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'mobile', 'address', 'postal_code', 'city', 'notes']);
+  const BASE_CONTACT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'mobile', 'notes']);
   const BASE_CLIENT_MAPPINGS = new Set(['first_name', 'last_name', 'email', 'phone', 'company_name', 'name', 'notes']);
 
   const isMappedToBaseLeadField = (field: {
@@ -3753,10 +3743,8 @@ export default function AnewLeads() {
       { id: 'base_email', campaign_id: null, organization_id: null, field_key: 'email', field_label: t('leads.fields.email'), field_type: 'email', is_required: false, sort_order: 3, contact_field_mapping: 'email' },
       { id: 'base_phone', campaign_id: null, organization_id: null, field_key: 'phone', field_label: t('leads.fields.phone'), field_type: 'phone', is_required: false, sort_order: 4, contact_field_mapping: 'phone' },
       { id: 'base_company', campaign_id: null, organization_id: null, field_key: 'company_name', field_label: t('leads.fields.companyName'), field_type: 'text', is_required: false, sort_order: 5, client_field_mapping: 'name' },
-      { id: 'base_address', campaign_id: null, organization_id: null, field_key: 'address', field_label: t('leads.fields.address') || 'Morada', field_type: 'text', is_required: false, sort_order: 6 },
-      { id: 'base_postal_code', campaign_id: null, organization_id: null, field_key: 'postal_code', field_label: t('leads.fields.postalCode') || 'Código Postal', field_type: 'text', is_required: false, sort_order: 7 },
-      { id: 'base_city', campaign_id: null, organization_id: null, field_key: 'city', field_label: t('leads.fields.city') || 'Cidade', field_type: 'text', is_required: false, sort_order: 8 },
-      { id: 'base_notes', campaign_id: null, organization_id: null, field_key: 'notes', field_label: t('leads.fields.notes'), field_type: 'textarea', is_required: false, sort_order: 9 },
+      // address, postal_code e city removidos por RGPD: morada só no fluxo de cliente/faturação.
+      { id: 'base_notes', campaign_id: null, organization_id: null, field_key: 'notes', field_label: t('leads.fields.notes'), field_type: 'textarea', is_required: false, sort_order: 6 },
     ];
     setCreateLeadFieldDefs(baseFields as any);
   }, []);
@@ -3777,7 +3765,7 @@ export default function AnewLeads() {
         .eq("id", createLeadCampaignId)
         .single();
 
-      let formIdToUse = campaign?.form_id || "";
+      const formIdToUse = campaign?.form_id || "";
       if (formIdToUse) {
         setCreateLeadFormId(formIdToUse);
       }
@@ -3833,16 +3821,25 @@ export default function AnewLeads() {
   }, [createLeadCampaignId, availableForms]);
 
   const handleDeleteLead = useCallback(async (id: string) => {
-    const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    let rpcError: any = null;
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+        rpcError = error;
+      });
+    } catch (error: any) {
+      rpcError = error;
+    }
 
-    if (error) {
-      toast({ title: t('leads.toast.deleteError'), description: error.message, variant: "destructive" });
+    if (rpcError) {
+      toast({ title: t('leads.toast.deleteError'), description: rpcError.message, variant: "destructive" });
     } else {
       toast({ title: t('leads.toast.deleteSuccess') });
       setLeads(prev => prev.filter(l => l.id !== id));
       loadStatusCounts();
     }
-  }, [toast, t, loadStatusCounts]);
+  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId]);
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
@@ -3864,16 +3861,24 @@ export default function AnewLeads() {
     if (selectedLeadIds.length === 0) return;
 
     setIsBulkDeleting(true);
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     let firstError: any = null;
-    for (const id of selectedLeadIds) {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
-      if (error && !firstError) firstError = error;
+    try {
+      await withAuditContext(supabase, auditUserId, async () => {
+        for (const id of selectedLeadIds) {
+          const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "lead", p_id: id });
+          if (error && !firstError) firstError = error;
+        }
+      });
+    } catch (error: any) {
+      firstError = error;
     }
 
     if (firstError) {
-      toast({ title: "Erro ao eliminar", description: firstError.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(firstError);
+      toast({ title: t('leads.toast.deleteError'), description, variant: "destructive" });
     } else {
-      toast({ title: `${selectedLeadIds.length} lead(s) movida(s) para o lixo` });
+      toast({ title: t('leads.toast.bulkDeletedCount', { count: selectedLeadIds.length }) });
       setSelectedLeadIds([]);
       loadLeads();
       loadStatusCounts();
@@ -3883,104 +3888,127 @@ export default function AnewLeads() {
 
   const handleBulkStatusChange = async (newStatus: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     // Find matching workflow stage
     const matchingStage = workflowStages.find(s => s.name === newStatus);
     const updatePayload: any = { status: newStatus };
     if (matchingStage?.id) {
       updatePayload.workflow_stage_id = matchingStage.id;
     }
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updatePayload)
-      .in("id", selectedLeadIds);
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updatePayload).in("id", selectedLeadIds)
+      );
 
-    if (error) {
-      toast({ title: "Erro ao atualizar status", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Status atualizado para ${selectedLeadIds.length} lead(s)` });
-      // Execute workflow for each lead BEFORE reloading
-      if (matchingStage?.id && activeCompanyId) {
-        const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
-          const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-              body: {
-                source_entity: 'lead',
-                entity_id: leadId,
-                new_stage_id: matchingStage.id,
-                organization_id: activeCompanyId,
-                triggered_by: scopeAuthUserId,
-              }
-            });
-          if (workflowError) {
-            throw workflowError;
-          }
-          return leadId;
-        });
-        const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
-        if (failedWorkflows.length > 0) {
-          console.error("Bulk workflow execution failures:", failedWorkflows);
-          toast({
-            title: "Status atualizado com automações incompletas",
-            description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos.`,
-            variant: "destructive",
+      if (error) {
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
+      } else {
+        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: selectedLeadIds.length }) });
+        // Execute workflow for each lead BEFORE reloading
+        if (matchingStage?.id && activeCompanyId) {
+          const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
+            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+                body: {
+                  source_entity: 'lead',
+                  entity_id: leadId,
+                  new_stage_id: matchingStage.id,
+                  organization_id: activeCompanyId,
+                  triggered_by: scopeAuthUserId,
+                }
+              });
+            if (workflowError) {
+              throw workflowError;
+            }
+            return leadId;
           });
+          const failedWorkflows = workflowResults.filter((result) => result.status === "rejected");
+          if (failedWorkflows.length > 0) {
+            console.error("Bulk workflow execution failures:", failedWorkflows);
+            const firstReason = (failedWorkflows[0] as PromiseRejectedResult).reason;
+            const workflowDescription = await getFriendlyErrorMessage(firstReason);
+            toast({
+              title: "Status atualizado com automações incompletas",
+              description: `${failedWorkflows.length} workflow(s) falharam e devem ser revistos. ${workflowDescription}`,
+              variant: "destructive",
+            });
+          }
         }
+        setSelectedLeadIds([]);
+        // Reload AFTER workflow completes
+        loadLeads();
+        loadStatusCounts();
       }
-      setSelectedLeadIds([]);
-      // Reload AFTER workflow completes
-      loadLeads();
-      loadStatusCounts();
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const handleBulkContactResultChange = async (resultId: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
-    const updateData = resultId === "clear" 
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updateData = resultId === "clear"
       ? { last_contact_result: null }
       : { last_contact_result: resultId, last_contact_at: new Date().toISOString() };
-    
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updateData)
-      .in("id", selectedLeadIds);
 
-    if (error) {
-      toast({ title: "Erro ao atualizar resultado", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Resultado atualizado para ${selectedLeadIds.length} lead(s)` });
-      setSelectedLeadIds([]);
-      loadLeads();
-      loadStatusCounts();
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      );
+
+      if (error) {
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.resultUpdateError'), description, variant: "destructive" });
+      } else {
+        toast({ title: t('leads.toast.bulkResultUpdatedCount', { count: selectedLeadIds.length }) });
+        setSelectedLeadIds([]);
+        loadLeads();
+        loadStatusCounts();
+      }
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.resultUpdateError'), description, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const handleBulkAssigneeChange = async (userId: string) => {
     if (selectedLeadIds.length === 0) return;
-    
+
     setIsBulkUpdating(true);
-    const updateData = userId === "clear" 
+    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
+    const updateData = userId === "clear"
       ? { assigned_to: null }
       : { assigned_to: userId };
-    
-    const { error } = await supabase
-      .from("anew_leads")
-      .update(updateData)
-      .in("id", selectedLeadIds);
 
-    if (error) {
-      toast({ title: "Erro ao atualizar atribuído", description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: `Atribuição atualizada para ${selectedLeadIds.length} lead(s)` });
-      setSelectedLeadIds([]);
-      loadLeads();
-      loadStatusCounts();
+    try {
+      const { error } = await withAuditContext(supabase, auditUserId, async () =>
+        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      );
+
+      if (error) {
+        const description = await getFriendlyErrorMessage(error);
+        toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
+      } else {
+        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: selectedLeadIds.length }) });
+        setSelectedLeadIds([]);
+        loadLeads();
+        loadStatusCounts();
+      }
+    } catch (error: unknown) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
+    } finally {
+      setIsBulkUpdating(false);
     }
-    setIsBulkUpdating(false);
   };
 
   const toggleLeadSelection = useCallback((leadId: string, e?: React.MouseEvent) => {
@@ -4002,7 +4030,6 @@ export default function AnewLeads() {
         const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
         const { data, error } = await (supabase as any).rpc("get_lead_source_options", {
           p_org_id: activeCompanyId,
-          p_is_root: isRootOrg,
           p_scope: requestedScope,
         });
         if (error || cancelled) return;
@@ -4016,7 +4043,7 @@ export default function AnewLeads() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeCompanyId, getPermissionScope, isRootOrg, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, onlyMine]);
 
   // Filter (by source) + sort leads — memoized to stabilize reference
   const filteredLeads = useMemo(() => {
@@ -4267,7 +4294,9 @@ export default function AnewLeads() {
         if (ent) {
           nameStr = ent.display_name || `${ent.first_name || ""} ${ent.last_name || ""}`.trim();
         }
-      } catch (e) { /* noop */ }
+      } catch (e) {
+        console.error("[AnewLeads] Failed to load entity email/name for row email action:", e);
+      }
     }
     // Fallback to lead field_values aliases (po_email, nome, etc.)
     if (!emailAddr) emailAddr = info.email || "";
@@ -4291,16 +4320,24 @@ export default function AnewLeads() {
     setShowWhatsAppDialog(true);
   }, [extractSmartField]);
 
-  const handleRowConvertToContact = useCallback((lead: any) => {
-    openConversionDialog(lead, 'contact');
-  }, [openConversionDialog]);
-
   const handleRowConvertToClient = useCallback((lead: any) => {
     openConversionDialog(lead, 'client');
   }, [openConversionDialog]);
 
   const handleRowDuplicate = useCallback((lead: any) => {
-    const newValues = { ...(lead.field_values || {}) };
+    // Source field_values often store contact info under aliased keys
+    // (e.g. "nome"/"po_email"/"telefone" from public forms/campaigns/imports)
+    // rather than the canonical first_name/last_name/email/phone the create
+    // dialog's baseFields read directly — normalize onto the canonical keys
+    // so the dialog isn't left blank, same alias resolution already used by
+    // handleRowEmail/handleRowWhatsApp.
+    const info = extractLeadContactInfo(lead.field_values || {});
+    const newValues: Record<string, any> = { ...(lead.field_values || {}) };
+    delete newValues._meta;
+    newValues.first_name = info.firstName || newValues.first_name || "";
+    newValues.last_name = info.lastName || newValues.last_name || "";
+    newValues.email = info.email || newValues.email || "";
+    newValues.phone = info.phone || newValues.phone || "";
     setNewLeadValues(newValues);
     setCreateLeadCampaignId(lead.campaign_id || "");
     setShowCreateLead(true);
@@ -4463,9 +4500,9 @@ export default function AnewLeads() {
         )}
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list")} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list" | "kanban")} className="space-y-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <TabsList className="grid w-full max-w-xs grid-cols-2">
+            <TabsList className="grid w-full max-w-sm grid-cols-3">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" />
                 {t('leads.tabs.dashboard')}
@@ -4473,6 +4510,10 @@ export default function AnewLeads() {
               <TabsTrigger value="list" className="flex items-center gap-2">
                 <List className="h-4 w-4" />
                 {t('leads.tabs.list')}
+              </TabsTrigger>
+              <TabsTrigger value="kanban" className="flex items-center gap-2">
+                <Columns3 className="h-4 w-4" />
+                {t('leads.tabs.kanban')}
               </TabsTrigger>
             </TabsList>
             
@@ -4488,6 +4529,7 @@ export default function AnewLeads() {
                   setAssignedToFilter("all");
                   setContactResultFilter("all");
                   setSourceFilter("all");
+                  setQualificationFilter("all");
                   setOnlyMine(false);
                   setDateFrom(undefined);
                   setDateTo(undefined);
@@ -4571,7 +4613,68 @@ export default function AnewLeads() {
               campaigns={campaigns}
               companyId={activeCompanyId}
               query={dashboardQuery}
+              teamMemberIds={teamMemberIds}
             />
+          </TabsContent>
+
+          {/* Kanban Tab */}
+          <TabsContent value="kanban" className="space-y-4 mt-6">
+            {kanbanTruncated && (
+              <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md px-3 py-2">
+                A mostrar as {KANBAN_LEADS_LIMIT} leads mais recentes que correspondem aos filtros atuais. Refina os filtros para ver leads mais antigas.
+              </div>
+            )}
+            {kanbanLoading ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                A carregar kanban...
+              </div>
+            ) : workflowStages.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-muted-foreground">
+                Configura as fases do workflow de leads para usar o kanban.
+              </div>
+            ) : (
+              <LeadsKanbanView
+                leads={kanbanLeads.map(lead => {
+                  const phone = extractPhoneFromLead(lead.field_values);
+                  const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+                  const name = identity?.first_name && identity?.last_name
+                    ? `${identity.first_name} ${identity.last_name}`
+                    : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+                  const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                  return {
+                    id: lead.id,
+                    created_at: lead.created_at,
+                    campaigns: lead.campaigns,
+                    assigned_user: lead.assigned_user,
+                    name,
+                    phone,
+                    email: email || null,
+                  };
+                })}
+                stages={workflowStages.filter(s => s.is_active !== false)}
+                getStageIdForLead={(leadId) => {
+                  const lead = kanbanLeads.find(l => l.id === leadId);
+                  if (!lead) return undefined;
+                  // Prefer workflow_stage_id (kept in sync with the configurable rule
+                  // engine by recompute_leads_v2_buckets / auto_advance - see
+                  // migrations 20261110540000/20261110570000) so the Kanban obeys
+                  // whatever reached_when rules the org has configured, not just the
+                  // raw literal status. Falls back to a literal-status match only for
+                  // leads that were never resolved (workflow_stage_id still null).
+                  const stageId = (lead as any).workflow_stage_id as string | null | undefined;
+                  if (stageId && workflowStages.some(s => s.id === stageId)) {
+                    return stageId;
+                  }
+                  const effectiveStatus = getEffectiveStatus(lead);
+                  return workflowStages.find(s => s.name === effectiveStatus)?.id;
+                }}
+                onStageDrop={handleKanbanStageDrop}
+                onViewDetails={(leadId) => {
+                  const lead = kanbanLeads.find(l => l.id === leadId);
+                  if (lead) handleRowViewDetails(lead);
+                }}
+              />
+            )}
           </TabsContent>
 
           {/* List Tab */}
@@ -4600,7 +4703,9 @@ export default function AnewLeads() {
             {/* Quick Status Cards */}
             <div className="flex gap-3 overflow-x-auto pb-2">
               {workflowStages.length > 0 ? (
-                workflowStages.filter(stage => stage.name !== 'converted').map(stage => (
+                workflowStages
+                  .filter(stage => !['converted', 'callback_scheduled', 'proposal'].includes(stage.name))
+                  .map(stage => (
                   <Card 
                     key={stage.id} 
                     className={`cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0 ${
@@ -4675,7 +4780,7 @@ export default function AnewLeads() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {(searchTerm || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || dateFrom || dateTo) && (
+                    {(searchTerm || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || qualificationFilter !== "all" || dateFrom || dateTo) && (
                       <Badge variant="secondary" className="gap-1">
                         <span className="text-xs">
                           {[
@@ -4683,6 +4788,7 @@ export default function AnewLeads() {
                             campaignFilter !== "all" && "Campanha",
                             statusFilter !== "all" && "Status",
                             contactResultFilter !== "all" && "Resultado",
+                            qualificationFilter !== "all" && t('leads.qualificationType.label'),
                             (dateFrom || dateTo) && "Data"
                           ].filter(Boolean).length} filtros ativos
                         </span>
@@ -4698,6 +4804,7 @@ export default function AnewLeads() {
                         setStatusFilter("all");
                         setContactResultFilter("all");
                         setSourceFilter("all");
+                        setQualificationFilter("all");
                         setDateFrom(undefined);
                         setDateTo(undefined);
                       }}
@@ -4828,7 +4935,7 @@ export default function AnewLeads() {
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
                         <SelectItem value="unassigned">Não Atribuído</SelectItem>
-                        {companyUsers.map(u => (
+                        {assignableCompanyUsers.map(u => (
                           <SelectItem key={u.id} value={u.id}>
                             <div className="flex items-center gap-2">
                               <User className="w-3 h-3" />
@@ -4853,6 +4960,23 @@ export default function AnewLeads() {
                         {sourceOptions.map((s) => (
                           <SelectItem key={s} value={s}>{s}</SelectItem>
                         ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Qualification Type Filter (SQL/MQL) — orthogonal to Status,
+                      applied additionally (AND'ed) via applyLeadsServerFilters. */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">{t('leads.qualificationType.label')}</Label>
+                    <Select value={qualificationFilter} onValueChange={setQualificationFilter}>
+                      <SelectTrigger className="h-9 bg-background">
+                        <SelectValue placeholder="Todos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="sql">{t('leads.qualificationType.sql')}</SelectItem>
+                        <SelectItem value="mql">{t('leads.qualificationType.mql')}</SelectItem>
+                        <SelectItem value="unclassified">{t('leads.qualificationType.unclassified')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -4915,7 +5039,7 @@ export default function AnewLeads() {
                 </div>
 
                 {/* Active Filters Pills */}
-                {(searchTerm || onlyMine || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || dateFrom || dateTo) && (
+                {(searchTerm || onlyMine || campaignFilter !== "all" || statusFilter !== "all" || contactResultFilter !== "all" || qualificationFilter !== "all" || dateFrom || dateTo) && (
                   <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t">
                     {onlyMine && (
                       <Badge variant="secondary" className="gap-1 pr-1">
@@ -4957,6 +5081,14 @@ export default function AnewLeads() {
                         </Button>
                       </Badge>
                     )}
+                    {qualificationFilter !== "all" && (
+                      <Badge variant="secondary" className="gap-1 pr-1">
+                        <span>{t('leads.qualificationType.label')}: {t(`leads.qualificationType.${qualificationFilter}`)}</span>
+                        <Button variant="ghost" size="icon" className="h-4 w-4 hover:bg-transparent" onClick={() => setQualificationFilter("all")}>
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </Badge>
+                    )}
                     {dateFrom && (
                       <Badge variant="secondary" className="gap-1 pr-1">
                         <span>De: {format(dateFrom, "dd/MM/yy")}</span>
@@ -4990,7 +5122,7 @@ export default function AnewLeads() {
               onBulkDelete={handleBulkDelete}
               workflowStages={workflowStages}
               contactResults={contactResults}
-              companyUsers={companyUsers}
+              companyUsers={assignableCompanyUsers}
               isDeleting={isBulkDeleting}
               isUpdating={isBulkUpdating}
             />
@@ -5003,7 +5135,7 @@ export default function AnewLeads() {
                 </div>
                 <LeadsTableColumns
                   campaignId={campaignFilter !== "all" ? campaignFilter : undefined}
-                  fieldDefinitions={fieldDefs.map(f => ({ field_key: f.field_key, field_label: f.field_label }))}
+                  fieldDefinitions={columnFieldDefinitions}
                   onColumnsChange={setVisibleColumns}
                 />
               </div>
@@ -5033,96 +5165,155 @@ export default function AnewLeads() {
                             aria-label="Selecionar todos"
                           />
                         </TableHead>
-                        {/* Last Contact At */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none w-28"
-                          onClick={() => handleSort("last_contact_at")}
-                        >
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span className="text-xs">Últ. Contacto</span>
-                            {renderSortIcon("last_contact_at")}
-                          </div>
-                        </TableHead>
-                        {/* Name */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("nome")}
-                        >
-                          <div className="flex items-center">Nome{renderSortIcon("nome")}</div>
-                        </TableHead>
-                        {/* Phone */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("telefone")}
-                        >
-                          <div className="flex items-center">Telefone{renderSortIcon("telefone")}</div>
-                        </TableHead>
-                        {/* WhatsApp Column */}
-                        <TableHead className="w-10 text-center">
-                          <MessageCircle className="h-4 w-4 mx-auto text-green-600" />
-                        </TableHead>
-                        {/* Email */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("email")}
-                        >
-                          <div className="flex items-center">Email{renderSortIcon("email")}</div>
-                        </TableHead>
-                        {/* Status */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("status")}
-                        >
-                          <div className="flex items-center">Status{renderSortIcon("status")}</div>
-                        </TableHead>
-                        {/* Campaign - only if filter is "all" */}
-                        {campaignFilter === "all" && (
-                          <TableHead 
-                            className="cursor-pointer hover:bg-muted/50 select-none"
-                            onClick={() => handleSort("campaign")}
-                          >
-                            <div className="flex items-center">Campanha{renderSortIcon("campaign")}</div>
-                          </TableHead>
-                        )}
-                        {/* Dynamic columns from campaign fields - only when filtered */}
-                        {campaignFilter !== "all" && displayColumns.slice(3).map(col => (
-                          <TableHead 
-                            key={col.field_key}
-                            className="cursor-pointer hover:bg-muted/50 select-none"
-                            onClick={() => handleSort(col.field_key)}
-                          >
-                            <div className="flex items-center">
-                              {col.field_label}
-                              {renderSortIcon(col.field_key)}
-                            </div>
-                          </TableHead>
-                        ))}
-                        {/* Created */}
-                        <TableHead 
-                          className="cursor-pointer hover:bg-muted/50 select-none w-28"
-                          onClick={() => handleSort("created_at")}
-                        >
-                          <div className="flex items-center">Criado{renderSortIcon("created_at")}</div>
-                        </TableHead>
-                        {/* Created by / Source */}
-                        <TableHead
-                          className="w-32 cursor-pointer hover:bg-muted/50 select-none"
-                          onClick={() => handleSort("source")}
-                        >
-                          <div className="flex items-center">Origem{renderSortIcon("source")}</div>
-                        </TableHead>
-                        {/* Assigned To */}
-                        <TableHead className="w-36">
-                          <div className="flex items-center">{t('leads.assignedTo')}</div>
-                        </TableHead>
-                        {/* Dias sem contacto */}
-                        <TableHead className="w-32">
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5" />
-                            <span className="text-xs">Dias s/ contacto</span>
-                          </div>
-                        </TableHead>
+                        {/* Configurable headers — mirrors the cell switch in
+                            LeadTableRow.tsx, driven by the same visibleColumns
+                            (order + visibility from "Personalizar Colunas"). */}
+                        {visibleColumns.map(column => {
+                          switch (column.key) {
+                            case "phone_icon":
+                              return (
+                                <TableHead key={column.id} className="w-10 text-center">
+                                  <MessageCircle className="h-4 w-4 mx-auto text-green-600" />
+                                </TableHead>
+                              );
+                            case "last_contact_at":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none w-28"
+                                  onClick={() => handleSort("last_contact_at")}
+                                >
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    <span className="text-xs">Últ. Contacto</span>
+                                    {renderSortIcon("last_contact_at")}
+                                  </div>
+                                </TableHead>
+                              );
+                            case "campaign":
+                              if (campaignFilter !== "all") {
+                                return (
+                                  <Fragment key={column.id}>
+                                    {displayColumns.slice(3).map(col => (
+                                      <TableHead
+                                        key={col.field_key}
+                                        className="cursor-pointer hover:bg-muted/50 select-none"
+                                        onClick={() => handleSort(col.field_key)}
+                                      >
+                                        <div className="flex items-center">
+                                          {col.field_label}
+                                          {renderSortIcon(col.field_key)}
+                                        </div>
+                                      </TableHead>
+                                    ))}
+                                  </Fragment>
+                                );
+                              }
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("campaign")}
+                                >
+                                  <div className="flex items-center">Campanha{renderSortIcon("campaign")}</div>
+                                </TableHead>
+                              );
+                            case "name":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("nome")}
+                                >
+                                  <div className="flex items-center">Nome{renderSortIcon("nome")}</div>
+                                </TableHead>
+                              );
+                            case "phone":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("telefone")}
+                                >
+                                  <div className="flex items-center">Telefone{renderSortIcon("telefone")}</div>
+                                </TableHead>
+                              );
+                            case "pipeline":
+                              return (
+                                <TableHead key={column.id}>
+                                  <div className="flex items-center">Pipeline</div>
+                                </TableHead>
+                              );
+                            case "email":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("email")}
+                                >
+                                  <div className="flex items-center">Email{renderSortIcon("email")}</div>
+                                </TableHead>
+                              );
+                            case "status":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("status")}
+                                >
+                                  <div className="flex items-center">Status{renderSortIcon("status")}</div>
+                                </TableHead>
+                              );
+                            case "created_at":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none w-28"
+                                  onClick={() => handleSort("created_at")}
+                                >
+                                  <div className="flex items-center">Criado{renderSortIcon("created_at")}</div>
+                                </TableHead>
+                              );
+                            case "source":
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="w-32 cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort("source")}
+                                >
+                                  <div className="flex items-center">Origem{renderSortIcon("source")}</div>
+                                </TableHead>
+                              );
+                            case "assigned_to":
+                              return (
+                                <TableHead key={column.id} className="w-36">
+                                  <div className="flex items-center">{t('leads.assignedTo')}</div>
+                                </TableHead>
+                              );
+                            case "days_without_contact":
+                              return (
+                                <TableHead key={column.id} className="w-32">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3.5 w-3.5" />
+                                    <span className="text-xs">Dias s/ contacto</span>
+                                  </div>
+                                </TableHead>
+                              );
+                            default:
+                              return (
+                                <TableHead
+                                  key={column.id}
+                                  className="cursor-pointer hover:bg-muted/50 select-none"
+                                  onClick={() => handleSort(column.key)}
+                                >
+                                  <div className="flex items-center">
+                                    {column.label}
+                                    {renderSortIcon(column.key)}
+                                  </div>
+                                </TableHead>
+                              );
+                          }
+                        })}
                         {/* Actions Column - Last */}
                         <TableHead className="text-right sticky right-0 bg-muted/30 z-10 min-w-[180px]">Ações</TableHead>
                       </TableRow>
@@ -5130,13 +5321,13 @@ export default function AnewLeads() {
                     <TableBody>
                       {loading ? (
                         <TableRow>
-                          <TableCell colSpan={13} className="text-center py-8">
+                          <TableCell colSpan={2 + visibleColumns.length} className="text-center py-8">
                             <OlyviaLoader size={28} text="A carregar..." />
                           </TableCell>
                         </TableRow>
                       ) : filteredLeads.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={13} className="text-center py-8 text-muted-foreground">
+                          <TableCell colSpan={2 + visibleColumns.length} className="text-center py-8 text-muted-foreground">
                             {campaigns.length === 0 && globalTotal === 0 ? (
                               <div className="space-y-2">
                                 <p>Nenhuma campanha configurada. Crie uma campanha primeiro.</p>
@@ -5166,6 +5357,8 @@ export default function AnewLeads() {
                               email={email}
                               campaignFilter={campaignFilter}
                               displayColumns={displayColumns}
+                              visibleColumns={visibleColumns}
+                              pipelineData={lead.entity_id ? leadPipelineData[lead.entity_id] : undefined}
                               getStatusColor={getStatusColor}
                               getStatusLabel={getStatusLabel}
                               getEffectiveStatus={getEffectiveStatus}
@@ -5176,7 +5369,6 @@ export default function AnewLeads() {
                               onContact={handleRowContact}
                               onEdit={handleRowEdit}
                               onCreateDeal={handleCreateDealFromLead}
-                              onConvertToContact={handleRowConvertToContact}
                               onConvertToClient={handleRowConvertToClient}
                               onDuplicate={handleRowDuplicate}
                               onDelete={handleDeleteLead}
@@ -5298,6 +5490,7 @@ export default function AnewLeads() {
                     tags={selectedLead.tags}
                     healthScore={healthScore}
                     campaignName={selectedLead.campaigns?.name || null}
+                    qualificationType={selectedLead.qualification_type || null}
                     getStatusLabel={getStatusLabel}
                     getStatusColor={getStatusColorLocal}
                     onClose={() => setShowDetails(false)}
@@ -5352,7 +5545,9 @@ export default function AnewLeads() {
                         <TabsTrigger value="info">Info</TabsTrigger>
                         <TabsTrigger value="edit">Editar</TabsTrigger>
                         <TabsTrigger value="deals">Negócios</TabsTrigger>
+                        <TabsTrigger value="quotes">Orçamentos</TabsTrigger>
                         <TabsTrigger value="proposals">Propostas</TabsTrigger>
+                        <TabsTrigger value="contracts">Contratos</TabsTrigger>
                         <TabsTrigger value="emails">Emails</TabsTrigger>
                         <TabsTrigger value="notes">📝 Notas</TabsTrigger>
                         <TabsTrigger value="timeline">📜 Timeline</TabsTrigger>
@@ -5375,7 +5570,7 @@ export default function AnewLeads() {
                         source={selectedLead.source}
                         assignedUserName={assignedUserName}
                         resolveFieldValue={resolveFieldValue}
-                        deals={[]}
+                        deals={leadDetailDeals}
                         nextAction={nextAction}
                         contactAssociation={selectedLead.contacts}
                         clientAssociation={selectedLead.clients}
@@ -5398,11 +5593,8 @@ export default function AnewLeads() {
                           setShowDetails(false);
                           openContactDialogForLead(selectedLead);
                         }}
-                        contactOptions={contactOptions}
                         clientOptions={clientOptions}
-                        searchingContacts={searchingContacts}
                         searchingClients={searchingClients}
-                        onSearchContacts={searchContacts}
                         onSearchClients={searchClients}
                         onAssociateContact={handleAssociateContact}
                         onAssociateClient={handleAssociateClient}
@@ -5429,8 +5621,33 @@ export default function AnewLeads() {
                     {/* TAB: DEALS */}
                     <TabsContent value="deals" className="mt-4">
                       <div className="space-y-4">
-                        <p className="text-sm text-muted-foreground text-center py-4">Pedidos de proposta associados a esta lead</p>
-                        <button 
+                        {leadDetailFinanceLoading ? (
+                          <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                        ) : leadDetailDeals.length === 0 ? (
+                          <p className="text-sm text-muted-foreground text-center py-4">Sem pedidos de proposta associados a esta lead</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {leadDetailDeals.map((deal: any) => (
+                              <Card key={deal.id} className="border-l-4" style={{ borderLeftColor: deal.stages?.color || "hsl(var(--primary))" }}>
+                                <CardContent className="py-3 px-4 flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium">{deal.title}</p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      {deal.stages && (
+                                        <Badge variant="outline" className="text-[10px]" style={{ borderColor: deal.stages.color, color: deal.stages.color }}>
+                                          {deal.stages.name}
+                                        </Badge>
+                                      )}
+                                      {deal.probability != null && <span className="text-[10px] text-amber-600">{deal.probability}%</span>}
+                                    </div>
+                                  </div>
+                                  <p className="text-sm font-bold text-green-600">€{Number(deal.value || 0).toLocaleString("pt-PT")}</p>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        )}
+                        <button
                           onClick={async () => {
                             if (!selectedLead || !activeCompanyId) return;
                             const result = await createDealFromLead({
@@ -5454,7 +5671,70 @@ export default function AnewLeads() {
 
                     {/* TAB: PROPOSALS */}
                     <TabsContent value="proposals" className="mt-4">
-                      <p className="text-sm text-muted-foreground text-center py-8">Propostas associadas a esta lead</p>
+                      {leadDetailFinanceLoading ? (
+                        <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                      ) : leadDetailProposals.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem propostas associadas a esta lead</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {leadDetailProposals.map((p: any) => (
+                            <Card key={p.id}>
+                              <CardContent className="py-3 px-4 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium">{p.title}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {p.status === "sent" ? "Enviada" : p.status === "accepted" ? "Aceite" : p.status === "draft" ? "Rascunho" : p.status}
+                                    </Badge>
+                                    {p.created_at && <span className="text-[10px] text-muted-foreground">{new Date(p.created_at).toLocaleDateString("pt-PT")}</span>}
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold">€{Number(p.value || 0).toLocaleString("pt-PT")}</p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    {/* TAB: QUOTES */}
+                    <TabsContent value="quotes" className="mt-4">
+                      {leadDetailFinanceLoading ? (
+                        <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                      ) : leadDetailQuotes.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem orçamentos associados a esta lead</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {leadDetailQuotes.map((q: any) => (
+                            <Card key={q.id}>
+                              <CardContent className="py-3 px-4 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium">{q.title || q.quote_number || "Orçamento"}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    {q.quote_number && <span className="text-[10px] text-muted-foreground">{q.quote_number}</span>}
+                                    {q.estado && <Badge variant="outline" className="text-[10px]">{q.estado}</Badge>}
+                                    {q.created_at && <span className="text-[10px] text-muted-foreground">{new Date(q.created_at).toLocaleDateString("pt-PT")}</span>}
+                                  </div>
+                                </div>
+                                <p className="text-sm font-bold">€{Number(q.total || 0).toLocaleString("pt-PT")}</p>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    {/* TAB: CONTRACTS */}
+                    <TabsContent value="contracts" className="mt-4">
+                      {selectedLead.entity_id && selectedLead.organization_id ? (
+                        <ClientContractsTab
+                          entityId={selectedLead.entity_id}
+                          clientId=""
+                          organizationId={selectedLead.organization_id}
+                        />
+                      ) : (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem contratos associados a esta lead</p>
+                      )}
                     </TabsContent>
 
                     {/* TAB: EMAILS */}
@@ -5511,9 +5791,7 @@ export default function AnewLeads() {
                     <TabsContent value="journey" className="mt-4">
                       <LeadJourneyTab
                         lead={selectedLead}
-                        hasContact={!!selectedLead.contacts}
                         hasClient={!!selectedLead.clients}
-                        contactCreatedAt={null}
                         clientCreatedAt={null}
                         interactionCount={leadInteractionCounts[selectedEntityId] || 0}
                         dealCount={0}
@@ -5591,11 +5869,8 @@ export default function AnewLeads() {
                     {selectedLead.status !== "converted" && (
                       <div className="flex items-center gap-2">
                         <PermissionGate permission="leads.convert">
-                          <Button size="sm" variant="outline" onClick={() => openConversionDialog(selectedLead, 'client')}>
+                          <Button size="sm" onClick={() => openConversionDialog(selectedLead, 'client')} className="bg-primary">
                             <Building2 className="w-3.5 h-3.5 mr-1" /> Converter para Cliente
-                          </Button>
-                          <Button size="sm" onClick={() => openConversionDialog(selectedLead, 'contact')} className="bg-primary">
-                            <UserPlus className="w-3.5 h-3.5 mr-1" /> Converter para Contacto
                           </Button>
                         </PermissionGate>
                       </div>
@@ -5617,9 +5892,7 @@ export default function AnewLeads() {
         }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>
-                {conversionType === 'contact' ? 'Converter para Contacto' : 'Converter para Cliente'}
-              </DialogTitle>
+              <DialogTitle>Converter para Cliente</DialogTitle>
             </DialogHeader>
             
             <div className="space-y-4 py-4">
@@ -5726,7 +5999,7 @@ export default function AnewLeads() {
                   </>
                 ) : (
                   <>
-                    {conversionType === 'contact' ? <UserPlus className="w-4 h-4 mr-2" /> : <Building2 className="w-4 h-4 mr-2" />}
+                    <Building2 className="w-4 h-4 mr-2" />
                     Confirmar
                   </>
                 )}
@@ -5818,7 +6091,6 @@ export default function AnewLeads() {
                         <SelectItem value="url">URL</SelectItem>
                         <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
                         <SelectItem value="ref_company">Company</SelectItem>
-                        <SelectItem value="ref_contact">Contact</SelectItem>
                         <SelectItem value="ref_client">Client</SelectItem>
                         <SelectItem value="ref_employee">Employee</SelectItem>
                         <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
@@ -5919,7 +6191,6 @@ export default function AnewLeads() {
                               <SelectItem value="url">URL</SelectItem>
                               <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
                               <SelectItem value="ref_company">Company</SelectItem>
-                              <SelectItem value="ref_contact">Contact</SelectItem>
                               <SelectItem value="ref_client">Client</SelectItem>
                               <SelectItem value="ref_employee">Employee</SelectItem>
                               <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
@@ -6048,7 +6319,23 @@ export default function AnewLeads() {
                   variant="outline"
                   size="sm"
                   className="gap-1.5 text-xs"
-                  onClick={() => navigate('/forms')}
+                  onClick={() => {
+                    // Navigating away abandons this dialog and any data already
+                    // typed into the lead form — this button lives inside the
+                    // "New Lead" dialog and is easy to hit by mistake while
+                    // reaching for the real submit button below, so guard
+                    // against silent data loss when fields are already filled.
+                    const hasUnsavedInput = Object.values(newLeadValues).some(
+                      (v) => v !== undefined && v !== null && v !== ""
+                    );
+                    if (hasUnsavedInput && !window.confirm(
+                      t('leads.confirmLeaveCreateForm') ||
+                      'Vai saltar para a criação de formulários e perder os dados já preenchidos nesta lead. Continuar?'
+                    )) {
+                      return;
+                    }
+                    navigate('/forms');
+                  }}
                 >
                   <Plus className="h-3.5 w-3.5" />
                   {t('leads.createNewForm') || 'Criar Formulário'}
@@ -6210,9 +6497,9 @@ export default function AnewLeads() {
               {(() => {
                 const leadDistrict = newLeadValues.distrito || newLeadValues.district || '';
                 const leadDistrictLower = typeof leadDistrict === 'string' ? leadDistrict.toLowerCase() : '';
-                const orgFilteredUsers = assignOrgFilter === "all" 
-                  ? comercialUsers 
-                  : comercialUsers.filter(u => u.org_ids.includes(assignOrgFilter));
+                const orgFilteredUsers = assignOrgFilter === "all"
+                  ? assignableComercialUsers
+                  : assignableComercialUsers.filter(u => u.org_ids.includes(assignOrgFilter));
                 const filteredUsers = leadDistrictLower
                   ? orgFilteredUsers.filter(u => 
                       u.districts.length > 0 &&
@@ -6264,7 +6551,7 @@ export default function AnewLeads() {
               })()}
             </div>
 
-            <DialogFooter className="mt-4">
+            <DialogFooter className="sticky bottom-0 -mx-6 -mb-6 mt-4 px-6 py-4 bg-background border-t z-10">
               <Button variant="outline" onClick={() => {
                 setShowCreateLead(false);
                 setNewLeadValues({});
@@ -6273,8 +6560,9 @@ export default function AnewLeads() {
               }}>
                 {t('common.cancel') || 'Cancelar'}
               </Button>
-              <Button 
-                onClick={handleCreateLead} 
+              <Button
+                data-testid="create-lead-submit"
+                onClick={handleCreateLead}
                 disabled={creatingLead}
               >
                 {creatingLead ? (t('common.creating') || 'A criar...') : (t('leads.createLead') || 'Criar Lead')}
@@ -6324,7 +6612,7 @@ export default function AnewLeads() {
           open={showWorkflowConfig}
           onOpenChange={setShowWorkflowConfig}
           companyId={activeCompanyId || null}
-          onStagesUpdated={loadWorkflowStages}
+          onStagesUpdated={refetchWorkflowStages}
         />
 
         {/* Contact Dialog */}
@@ -6356,8 +6644,9 @@ export default function AnewLeads() {
           onOpenChange={setShowEditDialog}
           lead={selectedLead as any}
           companyId={activeCompanyId || ""}
-          companyUsers={companyUsers}
+          companyUsers={assignableCompanyUsers}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          userId={scopeAnewUserId || scopeAuthUserId || ""}
         />
 
         {/* Visit Reassign Dialog */}

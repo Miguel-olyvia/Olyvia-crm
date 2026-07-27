@@ -15,7 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/hooks/useTranslation";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface CustomField {
   id: string;
@@ -215,7 +215,8 @@ const Settings = () => {
       // For now, childOrgs = all visible orgs (same list)
       setChildOrgs(orgsResult.data || []);
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -260,24 +261,31 @@ const Settings = () => {
       return;
     }
 
-    // If editing and password is empty, don't update it
-    const updateData = smtpForm.smtp_password
-      ? { ...smtpForm, organization_id: userCompanyId }
-      : { ...smtpForm, smtp_password: undefined, organization_id: userCompanyId };
-
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
+
+      const encryption = smtpForm.smtp_secure ? "tls" : "none";
 
       if (smtpSettings) {
-        // Update existing
-        const { error } = await supabase
-          .from("organization_smtp_settings")
-          .update(updateData)
-          .eq("id", smtpSettings.id);
+        // Update existing. Blank password means "keep the existing vaulted
+        // password" — the RPC only rotates the vault secret when non-empty.
+        const { error } = await supabase.rpc("rpc_upsert_org_smtp_settings" as any, {
+          p_id: smtpSettings.id,
+          p_organization_id: userCompanyId,
+          p_name: "SMTP",
+          p_smtp_host: smtpForm.smtp_host,
+          p_smtp_port: smtpForm.smtp_port,
+          p_smtp_username: smtpForm.smtp_username,
+          p_smtp_password: smtpForm.smtp_password || null,
+          p_smtp_secure: smtpForm.smtp_secure,
+          p_encryption: encryption,
+          p_from_email: smtpForm.from_email,
+          p_from_name: smtpForm.from_name,
+          p_daily_limit: 500,
+          p_is_default: true,
+        });
 
         if (error) throw error;
         toast.success(t('settingsPage.smtp.success'));
@@ -288,13 +296,21 @@ const Settings = () => {
           return;
         }
 
-        const { error } = await supabase
-          .from("organization_smtp_settings")
-          .insert({
-            ...smtpForm,
-            organization_id: userCompanyId,
-            created_by: businessUserId,
-          });
+        const { error } = await supabase.rpc("rpc_upsert_org_smtp_settings" as any, {
+          p_id: null,
+          p_organization_id: userCompanyId,
+          p_name: "SMTP",
+          p_smtp_host: smtpForm.smtp_host,
+          p_smtp_port: smtpForm.smtp_port,
+          p_smtp_username: smtpForm.smtp_username,
+          p_smtp_password: smtpForm.smtp_password,
+          p_smtp_secure: smtpForm.smtp_secure,
+          p_encryption: encryption,
+          p_from_email: smtpForm.from_email,
+          p_from_name: smtpForm.from_name,
+          p_daily_limit: 500,
+          p_is_default: true,
+        });
 
         if (error) throw error;
         toast.success(t('settingsPage.smtp.created'));
@@ -303,7 +319,8 @@ const Settings = () => {
       setSmtpDialogOpen(false);
       loadSmtpSettings(userCompanyId);
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -339,7 +356,10 @@ const Settings = () => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        const friendlyMessage = await getFriendlyErrorMessage(error);
+        throw new Error(friendlyMessage);
+      }
 
       toast.success(t('settingsPage.smtp.testSuccess'));
     } catch (error: any) {
@@ -378,7 +398,8 @@ const Settings = () => {
       resetForm();
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -395,7 +416,8 @@ const Settings = () => {
       toast.success(t('settingsPage.customFields.deleted'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -423,7 +445,8 @@ const Settings = () => {
       toast.success(t('settingsPage.calendar.success'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -451,7 +474,8 @@ const Settings = () => {
 
       toast.success(t('settingsPage.contactUniqueKeys.success'));
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -541,7 +565,8 @@ const Settings = () => {
       });
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -573,7 +598,8 @@ const Settings = () => {
       toast.success(t('settingsPage.channelTypes.deleted'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }
@@ -592,7 +618,8 @@ const Settings = () => {
       toast.success(!currentStatus ? t('settingsPage.channelTypes.activated') : t('settingsPage.channelTypes.deactivated'));
       loadData();
     } catch (error: any) {
-      toast.error(`${t('common.error')}: ${error.message}`);
+      const friendlyMessage = await getFriendlyErrorMessage(error);
+      toast.error(`${t('common.error')}: ${friendlyMessage}`);
     } finally {
       setLoading(false);
     }

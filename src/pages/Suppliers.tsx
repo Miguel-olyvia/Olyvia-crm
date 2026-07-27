@@ -1,7 +1,9 @@
 import { useEffect, useState, useRef, useCallback } from "react";
+import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
@@ -35,6 +37,21 @@ interface FilterOrganization {
   name: string;
 }
 
+const supplierSchema = z.object({
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  contact_person: z.string().trim().max(200, "O contacto deve ter menos de 200 caracteres.").optional().or(z.literal("")),
+  email: z.string().trim().email("Formato de email inválido.").max(255, "O email deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  phone: z.string().trim().max(20, "O telefone deve ter menos de 20 caracteres.").optional().or(z.literal("")),
+  address: z.string().trim().max(255, "A morada deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  city: z.string().trim().max(100, "A cidade deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  postal_code: z.string().trim().max(20, "O código postal deve ter menos de 20 caracteres.").optional().or(z.literal("")),
+  country: z.string().trim().max(100, "O país deve ter menos de 100 caracteres.").optional().or(z.literal("")),
+  tax_id: z.string().trim().max(50, "O NIF deve ter menos de 50 caracteres.").optional().or(z.literal("")),
+  website: z.string().trim().url("URL do website inválido.").max(255, "O website deve ter menos de 255 caracteres.").optional().or(z.literal("")),
+  notes: z.string().trim().max(2000, "As notas devem ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  is_active: z.boolean(),
+});
+
 const Suppliers = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -57,6 +74,7 @@ const Suppliers = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState<string | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   // Filter data
   const [filterOrganizations, setFilterOrganizations] = useState<FilterOrganization[]>([]);
@@ -88,6 +106,7 @@ const Suppliers = () => {
     notes: "",
     is_active: true,
   });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [organizationSelection, setOrganizationSelection] = useState<OrganizationSelection>({
     tenantId: "",
@@ -150,6 +169,11 @@ const Suppliers = () => {
         countQuery = countQuery.eq("organization_id", activeCompany.id);
       }
 
+      // Soft-deleted suppliers are hidden from the normal list by default.
+      countQuery = showDeleted
+        ? countQuery.not("deleted_at", "is", null)
+        : countQuery.is("deleted_at", null);
+
       // Apply status filter
       if (statusFilter !== "all") {
         countQuery = countQuery.eq("is_active", statusFilter === "active");
@@ -176,6 +200,11 @@ const Suppliers = () => {
       } else if (userType !== "system_admin" && activeCompany?.id) {
         dataQuery = dataQuery.eq("organization_id", activeCompany.id);
       }
+
+      // Soft-deleted suppliers are hidden from the normal list by default.
+      dataQuery = showDeleted
+        ? dataQuery.not("deleted_at", "is", null)
+        : dataQuery.is("deleted_at", null);
 
       // Apply status filter
       if (statusFilter !== "all") {
@@ -208,12 +237,12 @@ const Suppliers = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [companyFilter, statusFilter, searchQuery, userType, t, toast]);
+  }, [companyFilter, statusFilter, searchQuery, showDeleted, userType, t, toast]);
 
   // Debounce search
   useEffect(() => {
     if (!activeCompany?.id && userType !== 'system_admin') return;
-    
+
     const timer = setTimeout(() => {
       setSuppliers([]);
       setHasMore(true);
@@ -221,7 +250,7 @@ const Suppliers = () => {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, statusFilter, companyFilter]);
+  }, [searchQuery, statusFilter, companyFilter, showDeleted]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -291,7 +320,7 @@ const Suppliers = () => {
     if (!supplierToDelete) return;
 
     try {
-      const { error } = await supabase.from("suppliers").delete().eq("id", supplierToDelete.id);
+      const { error } = await supabase.rpc("rpc_delete_supplier", { p_id: supplierToDelete.id });
 
       if (error) throw error;
 
@@ -313,12 +342,51 @@ const Suppliers = () => {
     }
   };
 
+  const handleRestore = async (supplier: Supplier) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_supplier", { p_id: supplier.id });
+
+      if (error) throw error;
+
+      toast({ title: t("suppliers.toast.restoreSuccess") || "Fornecedor restaurado" });
+
+      setSuppliers([]);
+      setHasMore(true);
+      loadSuppliers(0, true);
+    } catch (error: any) {
+      toast({
+        title: t("suppliers.toast.restoreError") || "Erro ao restaurar",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = supplierSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
+      toast({ title: t("common.error") || "Erro", description: firstError.message, variant: "destructive" });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
+
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
 
       const supplierData: any = {
         name: formData.name,
@@ -337,10 +405,12 @@ const Suppliers = () => {
       };
 
       if (editingId) {
-        const { error } = await supabase
-          .from("suppliers")
-          .update(supplierData)
-          .eq("id", editingId);
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase
+            .from("suppliers")
+            .update(supplierData)
+            .eq("id", editingId)
+        );
 
         if (error) throw error;
 
@@ -348,15 +418,12 @@ const Suppliers = () => {
           title: t("suppliers.toast.updateSuccess"),
         });
       } else {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) {
-          toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
-          return;
-        }
-        const { error } = await supabase.from("suppliers").insert({
-          ...supplierData,
-          created_by: businessUserId,
-        });
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.from("suppliers").insert({
+            ...supplierData,
+            created_by: businessUserId,
+          })
+        );
 
         if (error) throw error;
 
@@ -395,6 +462,7 @@ const Suppliers = () => {
       notes: "",
       is_active: true,
     });
+    setFieldErrors({});
     setOrganizationSelection({
       tenantId: "",
       companyId: activeCompany?.id || "",
@@ -427,10 +495,18 @@ const Suppliers = () => {
     if (selectedIds.size === 0) return;
 
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .update({ is_active: bulkNewStatus })
-        .in("id", Array.from(selectedIds));
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("suppliers")
+          .update({ is_active: bulkNewStatus })
+          .in("id", Array.from(selectedIds))
+      );
 
       if (error) throw error;
 
@@ -456,10 +532,9 @@ const Suppliers = () => {
     if (selectedIds.size === 0) return;
 
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .delete()
-        .in("id", Array.from(selectedIds));
+      const { error } = await supabase.rpc("rpc_bulk_delete_supplier", {
+        p_ids: Array.from(selectedIds),
+      });
 
       if (error) throw error;
 
@@ -485,10 +560,18 @@ const Suppliers = () => {
   const handleBulkCompanyUpdate = async () => {
     if (!bulkCompanyId || selectedIds.size === 0) return;
     try {
-      const { error } = await supabase
-        .from("suppliers")
-        .update({ organization_id: bulkCompanyId })
-        .in("id", Array.from(selectedIds));
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        toast({ title: "Erro", description: "Perfil de utilizador não encontrado.", variant: "destructive" });
+        return;
+      }
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase
+          .from("suppliers")
+          .update({ organization_id: bulkCompanyId })
+          .in("id", Array.from(selectedIds))
+      );
 
       if (error) throw error;
 
@@ -576,47 +659,98 @@ const Suppliers = () => {
 
       const dataLines = lines.slice(1);
       const suppliersToInsert = [];
+      const rowErrors: string[] = [];
 
-      for (const line of dataLines) {
+      dataLines.forEach((line, index) => {
         const values = line.split(';').map(v => v.trim().replace(/^"|"$/g, '').replace(/""/g, '"'));
-        
-        if (values.length < 1 || !values[0]) continue;
 
-        suppliersToInsert.push({
+        if (values.length < 1 || !values[0]) return;
+
+        const lineNumber = index + 2; // +2 for header row and 0-index
+
+        // Build the candidate row in the SAME shape as the manual form's formData
+        // (empty-string fallbacks, not null) so it can be validated through the
+        // exact same Zod schema the manual form already enforces.
+        const candidate = {
           name: values[0],
-          contact_person: values[1] || null,
-          email: values[2] || null,
-          phone: values[3] || null,
-          address: values[4] || null,
-          city: values[5] || null,
-          postal_code: values[6] || null,
-          country: values[7] || null,
-          tax_id: values[8] || null,
-          website: values[9] || null,
-          notes: values[10] || null,
+          contact_person: values[1] || "",
+          email: values[2] || "",
+          phone: values[3] || "",
+          address: values[4] || "",
+          city: values[5] || "",
+          postal_code: values[6] || "",
+          country: values[7] || "",
+          tax_id: values[8] || "",
+          website: values[9] || "",
+          notes: values[10] || "",
           is_active: values[11]?.toLowerCase() === 'yes' || values[11]?.toLowerCase() === 'sim' || values[11]?.toLowerCase() === 'sí' || values[11]?.toLowerCase() === 'oui' || values[11]?.toLowerCase() === 'ja',
+        };
+
+        const validation = supplierSchema.safeParse(candidate);
+        if (!validation.success) {
+          const firstError = validation.error.errors[0];
+          rowErrors.push(`Linha ${lineNumber} (${candidate.name || 's/nome'}): ${firstError.message}`);
+          return;
+        }
+
+        const validated = validation.data;
+        suppliersToInsert.push({
+          name: validated.name,
+          contact_person: validated.contact_person || null,
+          email: validated.email || null,
+          phone: validated.phone || null,
+          address: validated.address || null,
+          city: validated.city || null,
+          postal_code: validated.postal_code || null,
+          country: validated.country || null,
+          tax_id: validated.tax_id || null,
+          website: validated.website || null,
+          notes: validated.notes || null,
+          is_active: validated.is_active,
           created_by: businessUserId,
           organization_id: activeCompany?.id,
         });
-      }
-
-      if (suppliersToInsert.length === 0) {
-        throw new Error(t("suppliers.toast.noValidSuppliers"));
-      }
-
-      const { error } = await supabase.from("suppliers").insert(suppliersToInsert);
-      
-      if (error) throw error;
-
-      toast({
-        title: t("suppliers.toast.importSuccess"),
-        description: t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length)),
       });
 
-      setImportDialogOpen(false);
-      setSuppliers([]);
-      setHasMore(true);
-      loadSuppliers(0, true);
+      if (suppliersToInsert.length === 0) {
+        throw new Error(
+          rowErrors.length > 0
+            ? `${t("suppliers.toast.noValidSuppliers")} ${rowErrors.slice(0, 5).join(" | ")}`
+            : t("suppliers.toast.noValidSuppliers")
+        );
+      }
+
+      // Set audit context once for all writes in this import.
+      // source='csv_import' must be set manually — withAuditContext hardcodes 'web_app'.
+      const { error: setCtxError } = await supabase.rpc('set_audit_context', {
+        p_user_id: businessUserId,
+        p_source: 'csv_import',
+      });
+      if (setCtxError) throw setCtxError;
+
+      try {
+        const { error } = await supabase.from("suppliers").insert(suppliersToInsert);
+
+        if (error) throw error;
+
+        const skippedSuffix = rowErrors.length > 0
+          ? ` ${rowErrors.length} linha(s) inválida(s) foram ignoradas: ${rowErrors.slice(0, 5).join(" | ")}${rowErrors.length > 5 ? ` (+${rowErrors.length - 5} mais)` : ""}`
+          : "";
+
+        toast({
+          title: t("suppliers.toast.importSuccess"),
+          description: `${t("suppliers.toast.importSuccessDesc").replace("{count}", String(suppliersToInsert.length))}${skippedSuffix}`,
+          variant: rowErrors.length > 0 ? "default" : undefined,
+        });
+
+        setImportDialogOpen(false);
+        setSuppliers([]);
+        setHasMore(true);
+        loadSuppliers(0, true);
+      } finally {
+        // Clear audit context — swallow errors so they never mask the original failure.
+        try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
+      }
     } catch (error: any) {
       toast({
         title: t("suppliers.toast.importError"),
@@ -624,7 +758,7 @@ const Suppliers = () => {
         variant: "destructive",
       });
     }
-    
+
     e.target.value = '';
   };
 
@@ -779,6 +913,18 @@ const Suppliers = () => {
                   </SelectContent>
                 </Select>
 
+                {/* Deleted toggle */}
+                <Button
+                  variant={showDeleted ? "default" : "outline"}
+                  onClick={() => {
+                    setSelectedIds(new Set());
+                    setShowDeleted((prev) => !prev);
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  {showDeleted ? (t('suppliers.hideDeleted') || 'Ocultar eliminados') : (t('suppliers.showDeleted') || 'Ver eliminados')}
+                </Button>
+
                 {/* Clear Filters */}
                 {hasActiveFilters && (
                   <Button variant="outline" onClick={clearFilters}>
@@ -801,17 +947,19 @@ const Suppliers = () => {
         {/* Table Card */}
         <Card>
           <CardContent className="p-6">
-            {/* Bulk Actions Bar */}
-            <BulkActionsBar
-              selectedCount={selectedIds.size}
-              onStatusClick={() => setBulkStatusDialogOpen(true)}
-              onDeleteClick={() => setBulkDeleteDialogOpen(true)}
-              onOrgClick={() => setBulkCompanyDialogOpen(true)}
-              onClearSelection={() => setSelectedIds(new Set())}
-              showOrgAction={true}
-              statusPermission="suppliers.edit"
-              deletePermission="suppliers.delete"
-            />
+            {/* Bulk Actions Bar — not shown while viewing the deleted list */}
+            {!showDeleted && (
+              <BulkActionsBar
+                selectedCount={selectedIds.size}
+                onStatusClick={() => setBulkStatusDialogOpen(true)}
+                onDeleteClick={() => setBulkDeleteDialogOpen(true)}
+                onOrgClick={() => setBulkCompanyDialogOpen(true)}
+                onClearSelection={() => setSelectedIds(new Set())}
+                showOrgAction={true}
+                statusPermission="suppliers.edit"
+                deletePermission="suppliers.delete"
+              />
+            )}
 
             {loading ? (
               <div className="text-center py-8">{t('common.loading')}</div>
@@ -886,34 +1034,48 @@ const Suppliers = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {supplier.website && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => window.open(supplier.website!, '_blank')}
-                              title={t('suppliers.form.website')}
-                            >
-                              <Globe className="h-4 w-4" />
-                            </Button>
+                          {showDeleted ? (
+                            <PermissionGate permission="suppliers.delete">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleRestore(supplier)}
+                              >
+                                {t('suppliers.restore') || 'Restaurar'}
+                              </Button>
+                            </PermissionGate>
+                          ) : (
+                            <>
+                              {supplier.website && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => window.open(supplier.website!, '_blank')}
+                                  title={t('suppliers.form.website')}
+                                >
+                                  <Globe className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <PermissionGate permission="suppliers.edit">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleEdit(supplier)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </PermissionGate>
+                              <PermissionGate permission="suppliers.delete">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={(e) => handleDeleteClick(supplier, e)}
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                </Button>
+                              </PermissionGate>
+                            </>
                           )}
-                          <PermissionGate permission="suppliers.edit">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(supplier)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          </PermissionGate>
-                          <PermissionGate permission="suppliers.delete">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => handleDeleteClick(supplier, e)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </PermissionGate>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -970,7 +1132,9 @@ const Suppliers = () => {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contact_person">{t("suppliers.form.contactPerson")}</Label>
@@ -978,7 +1142,9 @@ const Suppliers = () => {
                     id="contact_person"
                     value={formData.contact_person}
                     onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                    className={fieldErrors.contact_person ? "border-destructive" : ""}
                   />
+                  {fieldErrors.contact_person && <p className="text-sm text-destructive">{fieldErrors.contact_person}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">{t("suppliers.form.email")}</Label>
@@ -987,7 +1153,9 @@ const Suppliers = () => {
                     type="email"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className={fieldErrors.email ? "border-destructive" : ""}
                   />
+                  {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="phone">{t("suppliers.form.phone")}</Label>
@@ -995,7 +1163,9 @@ const Suppliers = () => {
                     id="phone"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    className={fieldErrors.phone ? "border-destructive" : ""}
                   />
+                  {fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="tax_id">{t("suppliers.form.taxId")}</Label>
@@ -1003,7 +1173,9 @@ const Suppliers = () => {
                     id="tax_id"
                     value={formData.tax_id}
                     onChange={(e) => setFormData({ ...formData, tax_id: e.target.value })}
+                    className={fieldErrors.tax_id ? "border-destructive" : ""}
                   />
+                  {fieldErrors.tax_id && <p className="text-sm text-destructive">{fieldErrors.tax_id}</p>}
                 </div>
                 <div className="col-span-2 space-y-2">
                   <Label htmlFor="address">{t("suppliers.form.address")}</Label>
@@ -1011,7 +1183,9 @@ const Suppliers = () => {
                     id="address"
                     value={formData.address}
                     onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    className={fieldErrors.address ? "border-destructive" : ""}
                   />
+                  {fieldErrors.address && <p className="text-sm text-destructive">{fieldErrors.address}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="city">{t("suppliers.form.city")}</Label>
@@ -1019,7 +1193,9 @@ const Suppliers = () => {
                     id="city"
                     value={formData.city}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    className={fieldErrors.city ? "border-destructive" : ""}
                   />
+                  {fieldErrors.city && <p className="text-sm text-destructive">{fieldErrors.city}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="postal_code">{t("suppliers.form.postalCode")}</Label>
@@ -1027,7 +1203,9 @@ const Suppliers = () => {
                     id="postal_code"
                     value={formData.postal_code}
                     onChange={(e) => setFormData({ ...formData, postal_code: e.target.value })}
+                    className={fieldErrors.postal_code ? "border-destructive" : ""}
                   />
+                  {fieldErrors.postal_code && <p className="text-sm text-destructive">{fieldErrors.postal_code}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="country">{t("suppliers.form.country")}</Label>
@@ -1035,7 +1213,9 @@ const Suppliers = () => {
                     id="country"
                     value={formData.country}
                     onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+                    className={fieldErrors.country ? "border-destructive" : ""}
                   />
+                  {fieldErrors.country && <p className="text-sm text-destructive">{fieldErrors.country}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="website">{t("suppliers.form.website")}</Label>
@@ -1044,7 +1224,9 @@ const Suppliers = () => {
                     type="url"
                     value={formData.website}
                     onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                    className={fieldErrors.website ? "border-destructive" : ""}
                   />
+                  {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
                 </div>
                 <div className="col-span-2 space-y-2">
                   <Label htmlFor="notes">{t("suppliers.form.notes")}</Label>
@@ -1053,7 +1235,9 @@ const Suppliers = () => {
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                     rows={3}
+                    className={fieldErrors.notes ? "border-destructive" : ""}
                   />
+                  {fieldErrors.notes && <p className="text-sm text-destructive">{fieldErrors.notes}</p>}
                 </div>
                 <div className="col-span-2 flex items-center gap-2">
                   <Checkbox

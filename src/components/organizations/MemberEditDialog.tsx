@@ -37,14 +37,18 @@ import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PhoneInput } from "@/components/PhoneInput";
+import { memberEditSchema } from "@/lib/validations";
+import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 interface MemberEditDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   memberId: string;
   userId: string;
+  organizationId: string;
   membershipType: string;
-  membershipRole: string;
+  membershipRoleId: string | null;
   organizationName: string;
   onSaved?: () => void;
 }
@@ -76,14 +80,15 @@ export function MemberEditDialog({
   onOpenChange,
   memberId,
   userId,
+  organizationId,
   membershipType,
-  membershipRole,
+  membershipRoleId,
   organizationName,
   onSaved,
 }: MemberEditDialogProps) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
-  const canManage = hasPermission("organizations.manage");
+  const canManage = hasPermission("organizations.edit");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
@@ -100,7 +105,8 @@ export function MemberEditDialog({
 
   // Membership data
   const [relationshipType, setRelationshipType] = useState(membershipType);
-  const [role, setRole] = useState(membershipRole);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>(membershipRoleId || "");
+  const [availableRoles, setAvailableRoles] = useState<{ id: string; name: string; code: string }[]>([]);
 
   // Fiscal data
   const [fiscalData, setFiscalData] = useState<FiscalData>({
@@ -112,13 +118,29 @@ export function MemberEditDialog({
   // Addresses
   const [addresses, setAddresses] = useState<AddressData[]>([]);
 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (open && userId) {
       fetchUserData();
+      fetchRoles();
       setRelationshipType(membershipType);
-      setRole(membershipRole);
+      setSelectedRoleId(membershipRoleId || "");
     }
-  }, [open, userId, membershipType, membershipRole]);
+  }, [open, userId, membershipType, membershipRoleId]);
+
+  const fetchRoles = async () => {
+    if (!organizationId) {
+      setAvailableRoles([]);
+      return;
+    }
+    const { data } = await (supabase as any)
+      .from("anew_roles")
+      .select("id, name, code")
+      .eq("organization_id", organizationId)
+      .order("name");
+    setAvailableRoles((data || []) as { id: string; name: string; code: string }[]);
+  };
 
   const fetchUserData = async () => {
     setLoading(true);
@@ -148,16 +170,17 @@ export function MemberEditDialog({
         .from("anew_entity_fiscal_entities")
         .select(`
           id,
-          fiscal_entity:fiscal_entities(id, nif, commercial_name, country_code)
+          fiscal_entity:fiscal_entities(id, commercial_name, country_code)
         `)
         .eq("entity_id", entityId)
         .eq("is_primary", true)
         .maybeSingle() : { data: null };
 
       if (fiscalLink?.fiscal_entity) {
+        const nif = await callNifRevealSingle(fiscalLink.fiscal_entity.id);
         setFiscalData({
           id: fiscalLink.fiscal_entity.id,
-          nif: fiscalLink.fiscal_entity.nif || "",
+          nif: nif || "",
           commercial_name: fiscalLink.fiscal_entity.commercial_name || "",
           country_code: fiscalLink.fiscal_entity.country_code || "PT",
         });
@@ -203,11 +226,51 @@ export function MemberEditDialog({
     }
   };
 
-  const handleSave = async () => {
-    if (!formData.name || !formData.email) {
-      toast.error(t("common.required"));
-      return;
+  // memberEditSchema (src/lib/validations.ts) has no t()-based error map — like
+  // every other Zod schema in this codebase, its messages are hardcoded raw
+  // strings. Translate them here at the display boundary instead, mapping each
+  // known raw message to a translation key rather than showing raw PT text
+  // regardless of the active app language.
+  const ZOD_MESSAGE_TRANSLATION_KEYS: Record<string, string> = {
+    "O nome é obrigatório": "organizations.memberEdit.nameRequired",
+    "O nome deve ter menos de 200 caracteres": "organizations.memberEdit.nameTooLong",
+    "Formato de email inválido": "organizations.memberEdit.emailInvalid",
+    "O email deve ter menos de 255 caracteres": "organizations.memberEdit.emailTooLong",
+    "O telefone deve ter menos de 20 caracteres": "organizations.memberEdit.phoneTooLong",
+    "A password deve ter pelo menos 8 caracteres": "organizations.memberEdit.passwordTooShort",
+    "A password deve ter menos de 72 caracteres": "organizations.memberEdit.passwordTooLong",
+  };
+  const translateZodMessage = (rawMessage: string): string => {
+    const translationKey = ZOD_MESSAGE_TRANSLATION_KEYS[rawMessage];
+    return translationKey ? t(translationKey) : rawMessage;
+  };
+
+  const validateForm = (): boolean => {
+    const result = memberEditSchema.safeParse({
+      name: formData.name,
+      email: formData.email,
+      phone: formData.phone,
+      password: formData.password,
+    });
+
+    if (!result.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = translateZodMessage(issue.message);
+      }
+      setFieldErrors(nextErrors);
+      const firstMessage = Object.values(nextErrors)[0];
+      toast.error(firstMessage);
+      return false;
     }
+
+    setFieldErrors({});
+    return true;
+  };
+
+  const handleSave = async () => {
+    if (!validateForm()) return;
 
     setSaving(true);
     try {
@@ -230,6 +293,7 @@ export function MemberEditDialog({
         .from("anew_memberships")
         .update({
           relationship_type: relationshipType,
+          role_id: selectedRoleId || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", memberId);
@@ -251,36 +315,26 @@ export function MemberEditDialog({
           });
           if (pwError) {
             console.error("Password update error:", pwError);
-            toast.error(t("users.passwordUpdateError"));
+            toast.error(t("profile.passwordUpdateError"));
           }
         }
       }
 
-      // Handle fiscal data
+      // Handle fiscal data — resolved server-side via fiscal-entity-resolve
+      // (the browser must never compute or receive nif_hash/nif_encrypted;
+      // see NIF encryption audit). This replaces the previous direct
+      // insert()/update()/select().eq("nif", ...) against fiscal_entities.
       if (fiscalData.nif) {
-        const { data: existingFiscal } = await (supabase as any)
-          .from("fiscal_entities")
-          .select("id")
-          .eq("nif", fiscalData.nif)
-          .maybeSingle();
+        const { data: resolved, error: resolveError } = await callFiscalEntityResolve({
+          nif: fiscalData.nif,
+          countryCode: fiscalData.country_code,
+          commercialName: fiscalData.commercial_name || null,
+          entityType: "individual",
+        });
+        if (resolveError) throw resolveError;
+        if (!resolved) throw new Error("Failed to resolve fiscal entity");
 
-        let fiscalEntityId = existingFiscal?.id;
-
-        if (!fiscalEntityId) {
-          // Create new fiscal entity
-          const { data: newFiscal, error: fiscalError } = await (supabase as any)
-            .from("fiscal_entities")
-            .insert({
-              nif: fiscalData.nif,
-              commercial_name: fiscalData.commercial_name || null,
-              country_code: fiscalData.country_code,
-            })
-            .select()
-            .single();
-
-          if (fiscalError) throw fiscalError;
-          fiscalEntityId = newFiscal.id;
-        }
+        const fiscalEntityId = resolved.fiscalEntityId;
 
         // Link to entity via unified table
         const { data: userForEntity } = await (supabase as any)
@@ -412,7 +466,9 @@ export function MemberEditDialog({
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder={t("users.namePlaceholder")}
+                      aria-invalid={!!fieldErrors.name}
                     />
+                    {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label className="flex items-center gap-2">
@@ -446,7 +502,9 @@ export function MemberEditDialog({
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       placeholder={t("users.emailPlaceholder")}
+                      aria-invalid={!!fieldErrors.email}
                     />
+                    {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
                   </div>
                   <div className="space-y-2">
                     <PhoneInput
@@ -478,6 +536,7 @@ export function MemberEditDialog({
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       placeholder={t("users.leaveEmptyToKeep")}
                       className="pr-10"
+                      aria-invalid={!!fieldErrors.password}
                     />
                     <Button
                       type="button"
@@ -489,6 +548,7 @@ export function MemberEditDialog({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
                   </div>
+                  {fieldErrors.password && <p className="text-xs text-destructive">{fieldErrors.password}</p>}
                   <p className="text-xs text-muted-foreground">{t("users.passwordChangeHint")}</p>
                 </div>
 
@@ -675,11 +735,16 @@ export function MemberEditDialog({
                     </div>
                     <div className="space-y-2">
                       <Label>{t("organizations.role")}</Label>
-                      <Input
-                        value={role}
-                        onChange={(e) => setRole(e.target.value)}
-                        placeholder={t("organizations.rolePlaceholder")}
-                      />
+                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={t("users.selectRole")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableRoles.map((r) => (
+                            <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 </div>

@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Tags, Pencil, Trash2, Shield } from "lucide-react";
+import { Plus, Search, Tags, Pencil, Trash2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -45,6 +46,7 @@ import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { brandFormSchema } from "@/lib/validations";
 
 interface Brand {
   id: string;
@@ -67,8 +69,12 @@ export default function Brands() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [deleteBrandId, setDeleteBrandId] = useState<string | null>(null);
   const [editingBrand, setEditingBrand] = useState<Brand | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -83,6 +89,7 @@ export default function Brands() {
     businessUnitId: "",
     departmentId: "",
     secondaryCompanyIds: [],
+    selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
     levelSelections: [],
   });
 
@@ -93,28 +100,28 @@ export default function Brands() {
 
   const isAdmin = userType === 'system_admin' || userType === 'tenant_admin';
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
-      
+
       // Get brand IDs associated with the active company via junction table
       let brandIdsToFilter: string[] = [];
-      
+
       if (filterCompanyId && filterCompanyId !== "all") {
         const { data: brandOrgs } = await supabase
           .from("brand_organizations")
           .select("brand_id")
           .eq("organization_id", filterCompanyId);
-        brandIdsToFilter = brandOrgs?.map((bc: any) => bc.brand_id) || [];
+        brandIdsToFilter = brandOrgs?.map((bc) => bc.brand_id) || [];
       } else if (activeCompany?.id) {
         // ALWAYS filter by activeCompany for all users including admins
         const { data: brandOrgs } = await supabase
           .from("brand_organizations")
           .select("brand_id")
           .eq("organization_id", activeCompany.id);
-        brandIdsToFilter = brandOrgs?.map((bc: any) => bc.brand_id) || [];
+        brandIdsToFilter = brandOrgs?.map((bc) => bc.brand_id) || [];
       }
-      
+
       if (brandIdsToFilter.length === 0) {
         setBrands([]);
         setLoading(false);
@@ -125,6 +132,7 @@ export default function Brands() {
         .from("brands")
         .select("id, name, slug, description, logo_url, website, organization_id, is_active")
         .in("id", brandIdsToFilter)
+        .is("deleted_at", null)
         .order("name");
 
       if (filterStatus !== "all") {
@@ -135,27 +143,32 @@ export default function Brands() {
 
       if (error) throw error;
       setBrands(data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('brands.toast.loadError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeCompany?.id, filterCompanyId, filterStatus, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
     tableName: "brands",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_brand",
+    bulkDeleteRpc: "rpc_bulk_delete_brand",
+    bulkOrgRpc: "rpc_bulk_org_brand",
+    bulkOrgRpcNewOrgParam: "p_new_org_id",
   });
 
   useEffect(() => {
     loadData();
-  }, [activeCompany?.id, userType, filterCompanyId, filterStatus]);
+  }, [loadData]);
 
   const generateSlug = (name: string) => {
     return name
@@ -167,6 +180,28 @@ export default function Brands() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
+
+    const validation = brandFormSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
+
+    setSubmitting(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('brands.toast.notAuthenticated'));
@@ -176,10 +211,10 @@ export default function Brands() {
       const slug = formData.slug || generateSlug(formData.name);
 
       // Validate company selection - system_admin and tenant_admin can proceed without selection
-      const allCompanyIds = organizationSelection.companyId 
+      const allCompanyIds = organizationSelection.companyId
         ? [organizationSelection.companyId, ...organizationSelection.secondaryCompanyIds]
         : organizationSelection.secondaryCompanyIds;
-        
+
       if (allCompanyIds.length === 0 && !isAdmin) {
         toast({
           title: t('common.error'),
@@ -189,86 +224,66 @@ export default function Brands() {
         return;
       }
 
-      const brandData: any = {
-        name: formData.name,
-        slug,
-        is_active: true,
-        organization_id: activeCompany?.id || null,
-      };
-
-      if (formData.description) brandData.description = formData.description;
-      if (formData.website) brandData.website = formData.website;
-      if (formData.logo_url) brandData.logo_url = formData.logo_url;
-
-      let brandId: string;
-
       if (editingBrand) {
-        const { error } = await supabase
-          .from("brands")
-          .update(brandData)
-          .eq("id", editingBrand.id);
-
+        const { error } = await supabase.rpc("rpc_update_brand", {
+          p_id: editingBrand.id,
+          p_organization_id: activeCompany.id,
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description,
+          p_website: formData.website,
+          p_logo_url: formData.logo_url,
+          p_org_ids: allCompanyIds,
+        });
         if (error) throw error;
-        brandId = editingBrand.id;
-
-        // Update company associations
-        await supabase
-          .from("brand_organizations")
-          .delete()
-          .eq("brand_id", editingBrand.id);
 
         toast({
           title: t('brands.toast.updateSuccess'),
         });
       } else {
-        brandData.created_by = businessUserId;
-        const { data: newBrand, error } = await supabase
-          .from("brands")
-          .insert(brandData)
-          .select("id")
-          .single();
-
+        const { error } = await supabase.rpc("rpc_create_brand", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_description: formData.description,
+          p_website: formData.website,
+          p_logo_url: formData.logo_url,
+          p_organization_id: activeCompany?.id ?? null,
+          p_org_ids: allCompanyIds,
+        });
         if (error) throw error;
-        brandId = newBrand.id;
 
         toast({
           title: t('brands.toast.createSuccess'),
         });
       }
 
-      // Insert company associations
-      if (allCompanyIds.length > 0) {
-        const companyAssociations = allCompanyIds.map((companyId) => ({
-          brand_id: brandId,
-          organization_id: companyId,
-          created_by: businessUserId,
-        }));
-
-        await supabase
-          .from("brand_organizations")
-          .insert(companyAssociations);
-      }
-
       handleCloseDialog(false);
       loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: editingBrand ? t('brands.toast.updateError') : t('brands.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleDelete = async () => {
     if (!deleteBrandId) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      setDeleteBrandId(null);
+      return;
+    }
 
+    setDeleting(true);
     try {
-      const { error } = await supabase
-        .from("brands")
-        .delete()
-        .eq("id", deleteBrandId);
-
+      const { error } = await supabase.rpc("rpc_delete_brand", {
+        p_id: deleteBrandId,
+        p_organization_id: activeCompany.id,
+      });
       if (error) throw error;
 
       toast({
@@ -277,13 +292,14 @@ export default function Brands() {
       });
 
       loadData();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('brands.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : String(error),
         variant: "destructive",
       });
     } finally {
+      setDeleting(false);
       setDeleteBrandId(null);
     }
   };
@@ -295,7 +311,7 @@ export default function Brands() {
       .select("organization_id")
       .eq("brand_id", brand.id);
 
-    const companyIds = companyAssocs?.map((a: any) => a.organization_id) || [];
+    const companyIds = companyAssocs?.map((a) => a.organization_id) || [];
 
     setEditingBrand(brand);
     setFormData({
@@ -314,6 +330,7 @@ export default function Brands() {
       businessUnitId: "",
       departmentId: "",
       secondaryCompanyIds: secondaryIds,
+      selectedCompanyIds: companyIds,
       levelSelections: [],
     });
     
@@ -322,6 +339,7 @@ export default function Brands() {
 
   const resetForm = () => {
     setEditingBrand(null);
+    setFieldErrors({});
     setFormData({
       name: "",
       slug: "",
@@ -335,6 +353,7 @@ export default function Brands() {
       businessUnitId: "",
       departmentId: "",
       secondaryCompanyIds: [],
+      selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
   };
@@ -392,12 +411,19 @@ export default function Brands() {
             <Tags className="w-8 h-8 text-primary" />
             <h1 className="text-3xl font-bold">{t('brands.title')}</h1>
           </div>
-          <PermissionGate permission="brands.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('brands.addBrand')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="brands.edit">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminadas
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="brands.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('brands.addBrand')}
+              </Button>
+            </PermissionGate>
+          </div>
         </div>
 
         <Dialog open={open} onOpenChange={handleCloseDialog}>
@@ -414,7 +440,9 @@ export default function Brands() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -425,10 +453,12 @@ export default function Brands() {
                     onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                     placeholder={t('brands.form.slugPlaceholder')}
                     disabled={!!editingBrand}
+                    className={fieldErrors.slug ? "border-destructive" : ""}
                   />
                   <p className="text-xs text-muted-foreground">
                     {t('brands.form.slugHint')}
                   </p>
+                  {fieldErrors.slug && <p className="text-sm text-destructive">{fieldErrors.slug}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -438,7 +468,9 @@ export default function Brands() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     rows={3}
+                    className={fieldErrors.description ? "border-destructive" : ""}
                   />
+                  {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -449,7 +481,9 @@ export default function Brands() {
                     value={formData.website}
                     onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                     placeholder={t('brands.form.websitePlaceholder')}
+                    className={fieldErrors.website ? "border-destructive" : ""}
                   />
+                  {fieldErrors.website && <p className="text-sm text-destructive">{fieldErrors.website}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -460,7 +494,9 @@ export default function Brands() {
                     value={formData.logo_url}
                     onChange={(e) => setFormData({ ...formData, logo_url: e.target.value })}
                     placeholder={t('brands.form.logoUrlPlaceholder')}
+                    className={fieldErrors.logo_url ? "border-destructive" : ""}
                   />
+                  {fieldErrors.logo_url && <p className="text-sm text-destructive">{fieldErrors.logo_url}</p>}
                 </div>
 
                 <OrganizationFormSection
@@ -472,10 +508,10 @@ export default function Brands() {
                 />
 
                 <div className="flex justify-end gap-2 pt-4">
-                  <Button type="button" variant="outline" onClick={handleCancel}>
+                  <Button type="button" variant="outline" onClick={handleCancel} disabled={submitting}>
                     {t('brands.form.cancel')}
                   </Button>
-                  <Button type="submit">{editingBrand ? t('brands.form.update') : t('brands.form.create')}</Button>
+                  <Button type="submit" disabled={submitting}>{editingBrand ? t('brands.form.update') : t('brands.form.create')}</Button>
                 </div>
               </form>
             </ScrollArea>
@@ -511,26 +547,8 @@ export default function Brands() {
           deletePermission="brands.delete"
         />
 
-        {loading || permissionsLoading ? (
-          <div className="text-center py-8">{t('brands.loading')}</div>
-        ) : !canView ? (
-          <div className="flex items-center justify-center min-h-[40vh]">
-            <Card className="w-full max-w-md">
-              <CardHeader className="text-center">
-                <div className="mx-auto w-12 h-12 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
-                  <Shield className="w-6 h-6 text-destructive" />
-                </div>
-                <CardTitle>{t('brands.accessDenied')}</CardTitle>
-              </CardHeader>
-              <CardContent className="text-center">
-                <p className="text-muted-foreground">
-                  {t('brands.noPermissionFull')}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <div className="border rounded-lg">
+        {/* Access and loading checks are handled before this JSX via early returns above */}
+        <div className="border rounded-lg">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -538,6 +556,7 @@ export default function Brands() {
                     <Checkbox
                       checked={bulkActions.selectedIds.size === allIds.length && allIds.length > 0}
                       onCheckedChange={() => bulkActions.toggleSelectAll(allIds)}
+                      aria-label={t('common.selectAll')}
                     />
                   </TableHead>
                   <TableHead>{t('brands.table.name')}</TableHead>
@@ -624,7 +643,6 @@ export default function Brands() {
               </TableBody>
             </Table>
           </div>
-        )}
       </div>
 
       <BulkStatusDialog
@@ -669,11 +687,21 @@ export default function Brands() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel') || 'Cancelar'}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>{t('common.delete') || 'Eliminar'}</AlertDialogAction>
+            <AlertDialogCancel disabled={deleting}>{t('common.cancel') || 'Cancelar'}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting}>{t('common.delete') || 'Eliminar'}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="brands"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_brand"
+        labelColumns={["name"]}
+        onRestored={loadData}
+      />
     </>
   );
 }

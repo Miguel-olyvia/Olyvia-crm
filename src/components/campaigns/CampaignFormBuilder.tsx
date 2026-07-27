@@ -518,6 +518,7 @@ export function CampaignFormBuilder({
 
     if (error) {
       console.error("Error loading steps:", error);
+      toast({ title: t('campaigns.formBuilder.toast.loadStepsError'), description: error.message, variant: "destructive" });
     } else if (data && data.length > 0) {
       setSteps(data);
     } else {
@@ -549,6 +550,7 @@ export function CampaignFormBuilder({
 
     if (error) {
       console.error("Error loading fields:", error);
+      toast({ title: t('campaigns.formBuilder.toast.loadFieldsError'), description: error.message, variant: "destructive" });
     } else {
       setFields(data || []);
     }

@@ -1,7 +1,17 @@
 import { supabase } from "@/integrations/supabase/client";
 
 const MAX_MATCHED_IDS = 1000;
-const FISCAL_BATCH = 200;
+const NAME_MATCH_LIMIT = 200;
+// Must stay <= the search-entities Edge Function's own MAX_LIMIT (100,
+// supabase/functions/search-entities/handler.ts) — sending more trips its
+// zod validation ("Too big: expected number to be <=100") on every call.
+const NIF_SEARCH_LIMIT = 100;
+
+interface SearchEntitiesResponse {
+  success: boolean;
+  data?: { fiscal_entity_ids: string[] };
+  error?: string;
+}
 
 function escapeIlike(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
@@ -14,29 +24,82 @@ function sanitizeWord(raw: string): string {
     .trim();
 }
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
+/**
+ * Resolves `entity_id`s whose NIF matches `term`, via the `search-entities`
+ * Edge Function (tokenized/encrypted NIF search — never exposes plaintext
+ * NIF/hash to the client, unlike the legacy `fe.nif ILIKE` path it replaces).
+ *
+ * The Edge Function already restricts its `fiscal_entity_ids` response to
+ * entities visible to the caller (see search-entities/handler.ts), so mapping
+ * fiscal_entity_id -> entity_id via `anew_entity_fiscal_entities` here is a
+ * pure join: RLS on that table (`is_entity_in_user_scope`) re-enforces the
+ * same visibility rule, it does not relax it.
+ */
+export async function searchEntityIdsByNif(term: string, limit = NIF_SEARCH_LIMIT): Promise<string[]> {
+  try {
+    const { data, error } = await supabase.functions.invoke<SearchEntitiesResponse>("search-entities", {
+      body: { term, limit },
+    });
+
+    if (error || !data?.success) {
+      if (error) console.error("[clientSearch] search-entities error:", error);
+      return [];
+    }
+
+    const fiscalEntityIds = data.data?.fiscal_entity_ids ?? [];
+    if (fiscalEntityIds.length === 0) return [];
+
+    const { data: links, error: linkError } = await supabase
+      .from("anew_entity_fiscal_entities")
+      .select("entity_id")
+      .in("fiscal_entity_id", fiscalEntityIds);
+
+    if (linkError) {
+      console.error("[clientSearch] anew_entity_fiscal_entities lookup error:", linkError);
+      return [];
+    }
+
+    return Array.from(
+      new Set((links || []).map((row: { entity_id: string | null }) => row.entity_id).filter(Boolean) as string[]),
+    );
+  } catch (err) {
+    console.error("[clientSearch] search-entities invocation failed:", err);
+    return [];
+  }
 }
 
-async function entityIdsForWord(word: string): Promise<Set<string>> {
+async function entityIdsByNameEmailPhone(word: string): Promise<Set<string>> {
   const ids = new Set<string>();
-  const { data, error } = await (supabase as any).rpc("search_visible_entity_ids", {
-    p_search: word,
-    p_limit: 200,
+  const like = `%${word}%`;
+
+  const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
+    supabase
+      .from("anew_entities")
+      .select("id")
+      .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
+      .limit(NAME_MATCH_LIMIT),
+    supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(NAME_MATCH_LIMIT),
+    supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(NAME_MATCH_LIMIT),
+  ]);
+
+  (nameMatches.data || []).forEach((r: { id: string }) => ids.add(r.id));
+  (emailMatches.data || []).forEach((r: { entity_id: string | null }) => {
+    if (r.entity_id) ids.add(r.entity_id);
   });
-  if (error) {
-    console.error("[clientSearch] search_visible_entity_ids error:", error);
-    return ids;
-  }
-  (data || []).forEach((r: any) => {
-    const id = r?.entity_id ?? r?.id ?? r;
-    if (id) ids.add(id);
+  (phoneMatches.data || []).forEach((r: { entity_id: string | null }) => {
+    if (r.entity_id) ids.add(r.entity_id);
   });
+
   return ids;
 }
 
+async function entityIdsForWord(word: string): Promise<Set<string>> {
+  const [nameEmailPhoneIds, nifEntityIds] = await Promise.all([
+    entityIdsByNameEmailPhone(word),
+    searchEntityIdsByNif(word),
+  ]);
+  return new Set<string>([...nameEmailPhoneIds, ...nifEntityIds]);
+}
 
 export interface SearchEntityIdsResult {
   ids: string[];

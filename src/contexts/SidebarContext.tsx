@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 
 const STORAGE_KEY = 'sidebar-submenu-closed';
 
@@ -16,30 +16,38 @@ export function SidebarExpandProvider({ children }: { children: ReactNode }) {
   const [openSectionId, setOpenSectionIdState] = useState<string | null>(null);
   const isManuallyClosedRef = React.useRef<boolean>(false);
 
-  const setOpenSectionId = (id: string | null) => {
+  const setOpenSectionId = useCallback((id: string | null) => {
     if (id === null) {
       isManuallyClosedRef.current = true;
     } else {
       isManuallyClosedRef.current = false;
     }
     setOpenSectionIdState(id);
-  };
+  }, []);
 
-  const closeSubmenu = () => {
+  const closeSubmenu = useCallback(() => {
     isManuallyClosedRef.current = true;
     setOpenSectionIdState(null);
-  };
+  }, []);
 
   const isSubmenuOpen = openSectionId !== null;
 
-  return (
-    <SidebarContext.Provider value={{ 
-      isSubmenuOpen, 
-      openSectionId, 
-      setOpenSectionId, 
+  // Memoized so consumers of useSidebarExpand() only see a new context value
+  // when one of these actually changes, instead of on every
+  // SidebarExpandProvider render.
+  const value = useMemo(
+    () => ({
+      isSubmenuOpen,
+      openSectionId,
+      setOpenSectionId,
       closeSubmenu,
-      isManuallyClosedRef 
-    }}>
+      isManuallyClosedRef,
+    }),
+    [isSubmenuOpen, openSectionId, setOpenSectionId, closeSubmenu],
+  );
+
+  return (
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   );

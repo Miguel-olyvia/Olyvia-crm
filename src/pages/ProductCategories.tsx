@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, FolderTree, Pencil, Trash2, Tag } from "lucide-react";
+import { Plus, Search, FolderTree, Pencil, Trash2, Tag, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import CategoryAttributePricesDialog from "@/components/CategoryAttributePricesDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,6 +36,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { productCategorySchema } from "@/lib/validations";
 
 interface ProductCategory {
   id: string;
@@ -64,7 +66,9 @@ export default function ProductCategories() {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [catPricesOpen, setCatPricesOpen] = useState(false);
   const [catPricesCategory, setCatPricesCategory] = useState<{ id: string; name: string } | null>(null);
   const [formData, setFormData] = useState({
@@ -116,7 +120,7 @@ export default function ProductCategories() {
     loadTenantCompanies();
   }, [filterTenantId]);
 
-  const loadData = async (reset = true) => {
+  const loadData = useCallback(async (reset = true) => {
     try {
       if (reset) {
         setLoading(true);
@@ -133,37 +137,68 @@ export default function ProductCategories() {
         .from("product_categories")
         .select("*")
         .is("parent_id", null)
+        .is("deleted_at", null)
         .order("path")
         .range(from, to);
 
 
-      // Filter by company using product_category_companies junction table
-      // ALWAYS filter by activeCompany first, then apply additional filters
+      // Filter by company using both the direct organization_id column on
+      // product_categories (source of truth, matches RLS) and the
+      // product_category_organizations junction table (multi-org visibility).
+      // The junction can fall out of sync with organization_id after a bulk
+      // org change, so both are combined here to avoid the list going empty.
       let categoryIdsToFilter: string[] = [];
 
       if (filterCompanyId && filterCompanyId !== "all") {
         // Specific company filter selected
-        const { data: companyCats } = await supabase
-          .from("product_category_organizations")
-          .select("category_id")
-          .eq("organization_id", filterCompanyId);
-        categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+        const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+          supabase
+            .from("product_category_organizations")
+            .select("category_id")
+            .eq("organization_id", filterCompanyId),
+          supabase
+            .from("product_categories")
+            .select("id")
+            .eq("organization_id", filterCompanyId),
+        ]);
+        categoryIdsToFilter = Array.from(new Set([
+          ...(companyCats?.map((c) => c.category_id) || []),
+          ...(directCats?.map((c) => c.id) || []),
+        ]));
       } else if (filterTenantId && filterTenantId !== "all") {
         // Organization selected - filter by all companies in that org
         if (tenantCompanyIds.length > 0) {
-          const { data: companyCats } = await supabase
-            .from("product_category_organizations")
-            .select("category_id")
-            .in("organization_id", tenantCompanyIds);
-          categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+          const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+            supabase
+              .from("product_category_organizations")
+              .select("category_id")
+              .in("organization_id", tenantCompanyIds),
+            supabase
+              .from("product_categories")
+              .select("id")
+              .in("organization_id", tenantCompanyIds),
+          ]);
+          categoryIdsToFilter = Array.from(new Set([
+            ...(companyCats?.map((c) => c.category_id) || []),
+            ...(directCats?.map((c) => c.id) || []),
+          ]));
         }
       } else if (activeCompany?.id) {
         // ALWAYS filter by activeCompany - this applies to ALL users including admins
-        const { data: companyCats } = await supabase
-          .from("product_category_organizations")
-          .select("category_id")
-          .eq("organization_id", activeCompany.id);
-        categoryIdsToFilter = companyCats?.map((c: any) => c.category_id) || [];
+        const [{ data: companyCats }, { data: directCats }] = await Promise.all([
+          supabase
+            .from("product_category_organizations")
+            .select("category_id")
+            .eq("organization_id", activeCompany.id),
+          supabase
+            .from("product_categories")
+            .select("id")
+            .eq("organization_id", activeCompany.id),
+        ]);
+        categoryIdsToFilter = Array.from(new Set([
+          ...(companyCats?.map((c) => c.category_id) || []),
+          ...(directCats?.map((c) => c.id) || []),
+        ]));
       }
 
       // Apply category ID filter
@@ -187,33 +222,38 @@ export default function ProductCategories() {
       const { data, error } = await query;
 
       if (error) throw error;
-      
+
       const newData = (data || []) as unknown as ProductCategory[];
-      
+
       if (reset) {
         setCategories(newData);
       } else {
         setCategories(prev => [...prev, ...newData]);
       }
-      
+
       setHasMore(newData.length === PAGE_SIZE);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t('productCategories.toast.loadError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     } finally {
       setLoading(false);
       setLoadingMore(false);
     }
-  };
+  }, [activeCompany?.id, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm, page, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
     tableName: "product_categories",
     onSuccess: () => loadData(true),
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkStatusRpc: "rpc_bulk_status_product_category",
+    bulkDeleteRpc: "rpc_bulk_delete_product_category",
+    bulkOrgRpc: "rpc_bulk_org_product_category",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   // Debounce search term
@@ -230,14 +270,16 @@ export default function ProductCategories() {
     if (businessAreaId) {
       loadBusinessAreaName();
     }
-  }, [businessAreaId, activeCompany?.id, userType, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm]);
+    // userType intentionally excluded: it is not read inside loadData and
+    // does not affect the query. Adding it would cause spurious reloads.
+  }, [loadData, businessAreaId]);
 
   // Load more on page change
   useEffect(() => {
     if (page > 0) {
       loadData(false);
     }
-  }, [page]);
+  }, [page, loadData]);
 
   // Infinite scroll observer
   const loadMore = useCallback(() => {
@@ -271,22 +313,22 @@ export default function ProductCategories() {
     };
   }, [hasMore, loadingMore, loading, loadMore]);
 
-  const loadBusinessAreaName = async () => {
+  const loadBusinessAreaName = useCallback(async () => {
     if (!businessAreaId) return;
-    
+
     try {
       const { data, error } = await supabase
         .from("anew_organizations")
         .select("name")
         .eq("id", businessAreaId)
         .single();
-      
+
       if (error) throw error;
       setBusinessAreaName(data?.name || "");
-    } catch (error: any) {
-      console.error("Error loading business area:", error);
+    } catch {
+      // Non-critical: business area name display only. Failure is silent.
     }
-  };
+  }, [businessAreaId]);
 
   const generateSlug = (name: string) => {
     return name
@@ -297,6 +339,22 @@ export default function ProductCategories() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = productCategorySchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -323,94 +381,42 @@ export default function ProductCategories() {
         return;
       }
 
-      let categoryId: string;
-
-      const primaryOrgId = uniqueCompanyIds[0] || null;
-
       if (editingCategory) {
-        const { error } = await supabase
-          .from("product_categories")
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            sort_order: formData.sort_order,
-            organization_id: primaryOrgId,
-          } as any)
-          .eq("id", editingCategory.id);
-
+        const { error } = await supabase.rpc("rpc_update_product_category", {
+          p_id: editingCategory.id,
+          p_name: formData.name,
+          p_description: formData.description || null,
+          p_sort_order: formData.sort_order,
+          p_org_ids: uniqueCompanyIds,
+        });
         if (error) throw error;
-        categoryId = editingCategory.id;
-
-        // Update company associations
-        await supabase
-          .from("product_category_organizations")
-          .delete()
-          .eq("category_id", editingCategory.id);
 
         toast({
           title: t('productCategories.toast.updateSuccess'),
         });
       } else {
-        const { data: newCategory, error } = await supabase
-          .from("product_categories")
-          .insert({
-            name: formData.name,
-            slug,
-            path,
-            description: formData.description || null,
-            parent_id: formData.parent_id || null,
-            
-            sort_order: formData.sort_order,
-            is_active: true,
-            created_by: businessUserId,
-            organization_id: primaryOrgId,
-          } as any)
-          .select("id")
-          .single();
-
+        const { error } = await supabase.rpc("rpc_create_product_category", {
+          p_name: formData.name,
+          p_slug: slug,
+          p_path: path,
+          p_description: formData.description || null,
+          p_parent_id: formData.parent_id || null,
+          p_sort_order: formData.sort_order,
+          p_org_ids: uniqueCompanyIds,
+        });
         if (error) throw error;
-        categoryId = newCategory.id;
 
         toast({
           title: t('productCategories.toast.createSuccess'),
         });
       }
 
-      // Insert company associations
-      const companyAssociations = uniqueCompanyIds.map((companyId) => ({
-        category_id: categoryId,
-        organization_id: companyId,
-        created_by: businessUserId,
-      }));
-
-      const { error: assocError } = await supabase
-        .from("product_category_organizations")
-        .insert(companyAssociations);
-
-      if (assocError) {
-        console.error("Error inserting company associations:", assocError);
-
-        // If this was a new category, rollback the created category so it doesn't become orphaned/invisible
-        if (!editingCategory) {
-          const { error: rollbackError } = await supabase
-            .from("product_categories")
-            .delete()
-            .eq("id", categoryId);
-
-          if (rollbackError) {
-            console.error("Rollback failed for product_categories:", rollbackError);
-          }
-        }
-
-        throw assocError;
-      }
-
       handleCloseDialog(false);
-      loadData();
-    } catch (error: any) {
+      await loadData();
+    } catch (error: unknown) {
       toast({
         title: editingCategory ? t('productCategories.toast.updateError') : t('productCategories.toast.createError'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -420,11 +426,18 @@ export default function ProductCategories() {
     if (!confirm(t('productCategories.toast.deleteConfirm'))) return;
 
     try {
-      const { error } = await supabase
-        .from("product_categories")
-        .delete()
-        .eq("id", id);
+      const category = categories.find(c => c.id === id);
+      if (!category || !activeCompany?.id) {
+        throw new Error('Category not found or no active company');
+      }
 
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await supabase.rpc("rpc_delete_product_category", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
+      });
       if (error) throw error;
 
       toast({
@@ -432,11 +445,11 @@ export default function ProductCategories() {
         description: t('productCategories.toast.deleteSuccess'),
       });
 
-      loadData();
-    } catch (error: any) {
+      await loadData();
+    } catch (error: unknown) {
       toast({
         title: t('productCategories.toast.error'),
-        description: error.message,
+        description: error instanceof Error ? error.message : 'Erro desconhecido',
         variant: "destructive",
       });
     }
@@ -449,7 +462,7 @@ export default function ProductCategories() {
       .select("organization_id")
       .eq("category_id", category.id);
 
-    const companyIds = companyAssocs?.map((a: any) => a.organization_id) || [];
+    const companyIds = companyAssocs?.map((a) => a.organization_id) || [];
 
     setEditingCategory(category);
     setFormData({
@@ -482,7 +495,7 @@ export default function ProductCategories() {
       slug: "",
       description: "",
       parent_id: "",
-      
+
       sort_order: 0,
     });
     setOrganizationSelection({
@@ -494,6 +507,7 @@ export default function ProductCategories() {
       selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -524,14 +538,21 @@ export default function ProductCategories() {
               )}
             </div>
           </div>
-          <PermissionGate permission="product_categories.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('productCategories.addCategory')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="product_categories.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminados
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="product_categories.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('productCategories.addCategory')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingCategory ? t('productCategories.dialog.editTitle') : t('productCategories.dialog.newTitle')}</DialogTitle>
               </DialogHeader>
@@ -543,7 +564,9 @@ export default function ProductCategories() {
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
+                    className={fieldErrors.name ? "border-destructive" : ""}
                   />
+                  {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                 </div>
 
                 <div className="space-y-2">
@@ -554,7 +577,9 @@ export default function ProductCategories() {
                     onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
                     placeholder={t('productCategories.form.slugPlaceholder')}
                     disabled={!!editingCategory}
+                    className={fieldErrors.slug ? "border-destructive" : ""}
                   />
+                  {fieldErrors.slug && <p className="text-xs text-destructive">{fieldErrors.slug}</p>}
                   <p className="text-xs text-muted-foreground">
                     {t('productCategories.form.slugHint')}
                   </p>
@@ -687,6 +712,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.edit')}
                             onClick={() => openEditDialog(category)}
                           >
                             <Pencil className="w-4 h-4" />
@@ -694,7 +720,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            title="Preços de Opções"
+                            aria-label={t('productCategories.actions.attributePrices')}
                             onClick={() => { setCatPricesCategory({ id: category.id, name: category.name }); setCatPricesOpen(true); }}
                           >
                             <Tag className="w-4 h-4" />
@@ -704,6 +730,7 @@ export default function ProductCategories() {
                           <Button
                             variant="ghost"
                             size="icon"
+                            aria-label={t('common.delete')}
                             onClick={() => handleDelete(category.id)}
                           >
                             <Trash2 className="w-4 h-4" />
@@ -768,8 +795,19 @@ export default function ProductCategories() {
           onOpenChange={setCatPricesOpen}
           categoryId={catPricesCategory.id}
           categoryName={catPricesCategory.name}
+          companyId={activeCompany?.id || ''}
         />
       )}
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="product_categories"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product_category"
+        labelColumns={["name", "path"]}
+        onRestored={() => loadData(true)}
+      />
     </>
   );
 }

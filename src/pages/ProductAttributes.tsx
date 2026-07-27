@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Settings2, Pencil, Trash2, Shield, Copy } from "lucide-react";
+import { Plus, Search, Settings2, Pencil, Trash2, Shield, Copy, RotateCcw } from "lucide-react";
 import AttributeOptionPalettesDialog from "@/components/AttributeOptionPalettesDialog";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -17,6 +18,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +54,8 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkDeleteDialog, BulkOrgDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
+import { productAttributeSchema, productAttributeEditSchema } from "@/lib/validations";
 
 interface ProductAttribute {
   id: string;
@@ -78,6 +91,7 @@ export default function ProductAttributes() {
   const [searchTerm, setSearchTerm] = useState("");
   const [open, setOpen] = useState(false);
   const [editingAttribute, setEditingAttribute] = useState<ProductAttribute | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     code: "",
     label: "",
@@ -111,6 +125,17 @@ export default function ProductAttributes() {
   const [palettesDialogOpen, setPalettesDialogOpen] = useState(false);
   const [palettesAttribute, setPalettesAttribute] = useState<ProductAttribute | null>(null);
 
+  // Delete confirmation dialog state (replaces window.confirm)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // "Eliminados" (soft-deleted) restore dialog state
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+
+  // Valorization-type change confirmation dialog state (replaces window.confirm)
+  const [valorizationConfirm, setValorizationConfirm] = useState<{ count: number } | null>(null);
+  // Ref to store the submit continuation — resolved when user confirms/cancels
+  const valorizationResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+
   // Filter states
   const [filterTenantId, setFilterTenantId] = useState("");
   const [filterCompanyId, setFilterCompanyId] = useState("all");
@@ -139,6 +164,7 @@ export default function ProductAttributes() {
         .from("product_attributes")
         .select("*")
         .eq("organization_id", companyIdToFilter)
+        .is("deleted_at", null)
         .order("sort_order");
 
       if (error) throw error;
@@ -162,20 +188,48 @@ export default function ProductAttributes() {
     tableName: "product_attributes",
     onSuccess: loadData,
     softDelete: false,
+    organizationId: activeCompany?.id,
+    bulkDeleteRpc: "rpc_bulk_delete_product_attribute",
+    bulkOrgRpc: "rpc_bulk_org_product_attribute",
+    bulkOrgRpcNewOrgParam: "p_new_organization_id",
   });
 
   const { clearSelection } = bulkActions;
 
-  // Clear and reload when activeCompany changes
+  // Clear immediately on company change, then reload.
+  // loadData is a useCallback whose dep array already includes activeCompany?.id,
+  // so including it here is correct and ensures the effect reruns whenever the
+  // callback identity changes (i.e. when activeCompany changes).
   useEffect(() => {
-    setAttributes([]); // Clear immediately to prevent stale data
+    setAttributes([]);
     bulkActions.clearSelection();
     void loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id]);
+  }, [loadData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
+
+    const schema = editingAttribute ? productAttributeEditSchema : productAttributeSchema;
+    const validation = schema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t('common.error'),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -187,7 +241,7 @@ export default function ProductAttributes() {
       if (editingAttribute) {
         const oldValorizationType = editingAttribute.valorization_type || 'none';
         const newValorizationType = (formData.value_type === 'list' || formData.value_type === 'number') ? formData.pricing_type : 'none';
-        
+
         if (oldValorizationType !== newValorizationType) {
           const { count } = await supabase
             .from('product_attribute_values')
@@ -195,9 +249,11 @@ export default function ProductAttributes() {
             .eq('attribute_id', editingAttribute.id);
 
           if (count && count > 0) {
-            const confirmed = window.confirm(
-              `Este atributo está atribuído a ${count} produto(s). A alteração do tipo de valorização irá invalidar os preços calculados. Confirmar e recalcular automaticamente?`
-            );
+            // Show accessible confirmation dialog instead of window.confirm
+            const confirmed = await new Promise<boolean>((resolve) => {
+              valorizationResolveRef.current = resolve;
+              setValorizationConfirm({ count });
+            });
             if (!confirmed) return;
           }
         }
@@ -241,23 +297,27 @@ export default function ProductAttributes() {
       let attributeId = editingAttribute?.id;
 
       if (editingAttribute) {
-        const { error } = await supabase
-          .from("product_attributes")
-          .update(attributeData)
-          .eq("id", editingAttribute.id);
-
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("product_attributes")
+            .update(attributeData)
+            .eq("id", editingAttribute.id)
+            .eq("organization_id", activeCompany.id);
+          if (error) throw error;
+        });
       } else {
         attributeData.code = formData.code;
         attributeData.created_by = businessUserId;
-        
-        const { data: inserted, error } = await supabase
-          .from("product_attributes")
-          .insert(attributeData)
-          .select('id')
-          .single();
 
-        if (error) throw error;
+        const inserted = await withAuditContext(supabase, businessUserId, async () => {
+          const { data, error } = await supabase
+            .from("product_attributes")
+            .insert(attributeData)
+            .select('id')
+            .single();
+          if (error) throw error;
+          return data;
+        });
         attributeId = inserted.id;
       }
 
@@ -280,14 +340,19 @@ export default function ProductAttributes() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(t('productAttributes.toast.deleteConfirm'))) return;
+    // Delegate confirmation to AlertDialog — called after user confirms
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
-      const { error } = await supabase
-        .from("product_attributes")
-        .delete()
-        .eq("id", id);
-
+      // Soft delete via a single-transaction RPC (rpc_delete_product_attribute)
+      // instead of a raw hard DELETE — nothing in the app may be irreversible.
+      const { error } = await supabase.rpc("rpc_delete_product_attribute", {
+        p_id: id,
+        p_organization_id: activeCompany.id,
+      });
       if (error) throw error;
 
       toast({
@@ -302,6 +367,8 @@ export default function ProductAttributes() {
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setDeleteConfirmId(null);
     }
   };
 
@@ -369,6 +436,7 @@ export default function ProductAttributes() {
       selectedCompanyIds: activeCompany?.id ? [activeCompany.id] : [],
       levelSelections: [],
     });
+    setFieldErrors({});
   };
 
   const handleCloseDialog = (isOpen: boolean) => {
@@ -441,178 +509,28 @@ export default function ProductAttributes() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error(t('productAttributes.toast.notAuthenticated'));
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
 
-      // Find a unique code by appending _copy / _copy_2 / ...
-      let newCode = `${attr.code}_copy`;
-      let suffix = 1;
-      while (true) {
-        const { data: existing } = await supabase
-          .from("product_attributes")
-          .select("id")
-          .eq("code", newCode)
-          .maybeSingle();
-        if (!existing) break;
-        suffix += 1;
-        newCode = `${attr.code}_copy_${suffix}`;
+      if (!attr.organization_id) {
+        throw new Error(t('productAttributes.toast.noOrganization'));
       }
 
-      const { id, ...rest } = attr as any;
-      const newAttribute = {
-        ...rest,
-        code: newCode,
-        label: `${attr.label} (cópia)`,
-        created_by: businessUserId,
-      };
-
-      const { data: inserted, error } = await supabase
-        .from("product_attributes")
-        .insert(newAttribute)
-        .select("id")
-        .single();
-
+      // Single RPC does the full deep clone (attribute + option groups/values +
+      // value prices + price ranges + org links + category palette config) inside
+      // one transaction, with audit_bypass + exactly one fn_manual_audit_log call.
+      // Replaces 7 separate raw inserts that previously had no rollback on
+      // partial failure and produced up to 7 audit rows for one user action.
+      const { data: newAttribute, error } = await supabase.rpc(
+        "rpc_duplicate_product_attribute",
+        {
+          p_id: attr.id,
+          p_organization_id: attr.organization_id,
+        },
+      );
       if (error) throw error;
-
-      // Duplicate all related details (best-effort, in parallel)
-      const newAttrId = inserted.id;
-
-      // 1) Option groups + their values
-      const cloneOptionGroups = async () => {
-        const { data: groups, error: groupsErr } = await (supabase as any)
-          .from("attribute_option_groups")
-          .select("id, organization_id, name, description, is_active, sort_order")
-          .eq("attribute_id", attr.id);
-
-        if (groupsErr) {
-          console.error("[duplicate] read groups failed", groupsErr);
-          return;
-        }
-        if (!groups || groups.length === 0) return;
-
-        for (const g of groups) {
-          const { data: newGroup, error: gErr } = await (supabase as any)
-            .from("attribute_option_groups")
-            .insert({
-              attribute_id: newAttrId,
-              organization_id: g.organization_id,
-              name: g.name,
-              description: g.description,
-              is_active: g.is_active,
-              sort_order: g.sort_order,
-              created_by: businessUserId,
-            })
-            .select("id")
-            .single();
-          if (gErr || !newGroup) {
-            console.error("[duplicate] insert group failed", gErr);
-            continue;
-          }
-
-          const { data: values, error: valuesReadErr } = await (supabase as any)
-            .from("attribute_option_group_values")
-            .select("value_text, display_name, hex_color, sort_order, is_active")
-            .eq("group_id", g.id)
-            .order("sort_order", { ascending: true });
-
-          if (valuesReadErr) {
-            console.error("[duplicate] read values failed", valuesReadErr);
-            continue;
-          }
-          if (!values || values.length === 0) continue;
-
-          // Insert in chunks of 100 to avoid payload limits / silent failures
-          const rows = values.map((v: any) => ({
-            group_id: newGroup.id,
-            value_text: v.value_text,
-            display_name: v.display_name,
-            hex_color: v.hex_color,
-            sort_order: v.sort_order ?? 0,
-            is_active: v.is_active ?? true,
-          }));
-          const chunkSize = 100;
-          for (let i = 0; i < rows.length; i += chunkSize) {
-            const chunk = rows.slice(i, i + chunkSize);
-            const { error: insErr } = await (supabase as any)
-              .from("attribute_option_group_values")
-              .insert(chunk);
-            if (insErr) {
-              console.error("[duplicate] insert values chunk failed", insErr, chunk[0]);
-            }
-          }
-        }
-      };
-
-      // 2) Category-level value prices (no product_id)
-      const cloneValuePrices = async () => {
-        const { data: prices } = await supabase
-          .from("product_attribute_value_prices")
-          .select("organization_id, category_id, value_option, price, cost_impact, is_available, sort_order, price_context_id")
-          .eq("attribute_id", attr.id)
-          .is("product_id", null);
-        if (prices && prices.length > 0) {
-          await supabase.from("product_attribute_value_prices").insert(
-            prices.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-          );
-        }
-      };
-
-      // 3) Category-level price ranges (no product_id)
-      const clonePriceRanges = async () => {
-        const { data: ranges } = await supabase
-          .from("product_attribute_price_ranges")
-          .select("organization_id, category_id, range_type, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, cost_impact, price_context_id")
-          .eq("attribute_id", attr.id)
-          .is("product_id", null);
-        if (ranges && ranges.length > 0) {
-          await supabase.from("product_attribute_price_ranges").insert(
-            ranges.map((r: any) => ({ ...r, attribute_id: newAttrId })),
-          );
-        }
-      };
-
-      // 4) Organization links
-      const cloneOrgLinks = async () => {
-        const { data: orgs } = await supabase
-          .from("product_attribute_organizations")
-          .select("organization_id")
-          .eq("attribute_id", attr.id);
-        if (orgs && orgs.length > 0) {
-          await supabase.from("product_attribute_organizations").insert(
-            orgs.map((o: any) => ({
-              attribute_id: newAttrId,
-              organization_id: o.organization_id,
-              created_by: businessUserId,
-            })),
-          );
-        }
-      };
-
-      // 5) Category attribute palette configuration
-      const clonePaletteCfg = async () => {
-        const { data: paletteCfgs } = await (supabase as any)
-          .from("category_attribute_palettes")
-          .select("category_id, base_group_id, additional_values, excluded_values")
-          .eq("attribute_id", attr.id);
-        if (paletteCfgs && paletteCfgs.length > 0) {
-          await (supabase as any).from("category_attribute_palettes").insert(
-            paletteCfgs.map((p: any) => ({ ...p, attribute_id: newAttrId })),
-          );
-        }
-      };
-
-      await Promise.allSettled([
-        cloneOptionGroups(),
-        cloneValuePrices(),
-        clonePriceRanges(),
-        cloneOrgLinks(),
-        clonePaletteCfg(),
-      ]);
-
 
       toast({
         title: t('productAttributes.toast.success'),
-        description: `Atributo duplicado como "${newCode}"`,
+        description: t('productAttributes.toast.duplicateSuccessDesc', { code: newAttribute?.code ?? attr.code + '_copy' }),
       });
 
       loadData();
@@ -661,12 +579,19 @@ export default function ProductAttributes() {
             <Settings2 className="w-8 h-8 text-primary" />
             <h1 className="text-3xl font-bold">{t('productAttributes.title')}</h1>
           </div>
-          <PermissionGate permission="product_attributes.create">
-            <Button onClick={() => { resetForm(); setOpen(true); }}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('productAttributes.addAttribute')}
-            </Button>
-          </PermissionGate>
+          <div className="flex gap-2">
+            <PermissionGate permission="product_attributes.delete">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="w-4 h-4 mr-2" /> Eliminados
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="product_attributes.create">
+              <Button onClick={() => { resetForm(); setOpen(true); }}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('productAttributes.addAttribute')}
+              </Button>
+            </PermissionGate>
+          </div>
           <Dialog open={open} onOpenChange={handleCloseDialog}>
             <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
               <DialogHeader>
@@ -685,7 +610,9 @@ export default function ProductAttributes() {
                       placeholder={t('productAttributes.form.codePlaceholder')}
                       required
                       disabled={!!editingAttribute}
+                      className={fieldErrors.code ? "border-destructive" : ""}
                     />
+                    {fieldErrors.code && <p className="text-xs text-destructive">{fieldErrors.code}</p>}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="label">{t('productAttributes.form.label')}</Label>
@@ -695,7 +622,9 @@ export default function ProductAttributes() {
                       onChange={(e) => setFormData({ ...formData, label: e.target.value })}
                       placeholder={t('productAttributes.form.labelPlaceholder')}
                       required
+                      className={fieldErrors.label ? "border-destructive" : ""}
                     />
+                    {fieldErrors.label && <p className="text-xs text-destructive">{fieldErrors.label}</p>}
                   </div>
                 </div>
 
@@ -727,7 +656,9 @@ export default function ProductAttributes() {
                         value={formData.unit}
                         onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
                         placeholder={t('productAttributes.form.unitPlaceholder')}
+                        className={fieldErrors.unit ? "border-destructive" : ""}
                       />
+                      {fieldErrors.unit && <p className="text-xs text-destructive">{fieldErrors.unit}</p>}
                     </div>
                   )}
                 </div>
@@ -987,6 +918,7 @@ export default function ProductAttributes() {
                     <Checkbox
                       checked={bulkActions.selectedIds.size === allIds.length && allIds.length > 0}
                       onCheckedChange={() => bulkActions.toggleSelectAll(allIds)}
+                      aria-label={t('common.selectAll')}
                     />
                   </TableHead>
                   <TableHead>{t('productAttributes.table.code')}</TableHead>
@@ -1087,7 +1019,7 @@ export default function ProductAttributes() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => handleDelete(attr.id)}
+                              onClick={() => setDeleteConfirmId(attr.id)}
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -1121,6 +1053,16 @@ export default function ProductAttributes() {
         companies={[]}
       />
 
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="product_attributes"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_product_attribute"
+        labelColumns={["label", "code"]}
+        onRestored={() => loadData()}
+      />
+
       {palettesAttribute && (
         <AttributeOptionPalettesDialog
           open={palettesDialogOpen}
@@ -1133,6 +1075,65 @@ export default function ProductAttributes() {
           valueType={palettesAttribute.value_type}
         />
       )}
+
+      {/* Delete confirmation AlertDialog — replaces window.confirm */}
+      <AlertDialog open={deleteConfirmId !== null} onOpenChange={(open) => { if (!open) setDeleteConfirmId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('productAttributes.toast.deleteConfirm') || "Eliminar atributo?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('productAttributes.deleteConfirmDesc') || "Esta ação não pode ser desfeita. Os valores deste atributo em produtos existentes serão removidos."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (deleteConfirmId) handleDelete(deleteConfirmId); }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {t('common.delete') || "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Valorization-type change confirmation AlertDialog — replaces window.confirm in handleSubmit */}
+      <AlertDialog
+        open={valorizationConfirm !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            valorizationResolveRef.current?.(false);
+            valorizationResolveRef.current = null;
+            setValorizationConfirm(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('productAttributes.valorizationChangeTitle') || "Alterar tipo de valorização?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('productAttributes.valorizationChangeDesc', { count: valorizationConfirm?.count ?? 0 }) ||
+                `Este atributo está atribuído a ${valorizationConfirm?.count ?? 0} produto(s). A alteração do tipo de valorização irá invalidar os preços calculados. Confirmar e recalcular automaticamente?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              valorizationResolveRef.current?.(false);
+              valorizationResolveRef.current = null;
+              setValorizationConfirm(null);
+            }}>
+              {t('common.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              valorizationResolveRef.current?.(true);
+              valorizationResolveRef.current = null;
+              setValorizationConfirm(null);
+            }}>
+              {t('common.confirm') || "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

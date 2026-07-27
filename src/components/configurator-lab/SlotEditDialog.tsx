@@ -21,6 +21,8 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { slotEditDialogSchema } from "@/lib/validations";
 import type { CSlot } from "./hooks/useConfigTemplate";
 
 const SLOT_TYPE_OPTIONS: { value: CSlot["slot_type"]; label: string; description: string }[] = [
@@ -53,12 +55,14 @@ interface Props {
 }
 
 export function SlotEditDialog({ open, onOpenChange, slot, optionsCount, organizationId, onSave }: Props) {
+  const { toast } = useToast();
   const [label, setLabel] = useState("");
   const [required, setRequired] = useState(false);
   const [slotType, setSlotType] = useState<CSlot["slot_type"]>("attribute_value");
   const [attributeId, setAttributeId] = useState<string>("");
   const [attributes, setAttributes] = useState<AttributeRow[]>([]);
   const [saving, setSaving] = useState(false);
+  const [labelError, setLabelError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open && slot) {
@@ -109,11 +113,24 @@ export function SlotEditDialog({ open, onOpenChange, slot, optionsCount, organiz
       (needsAttribute && (attributeId || null) !== (slot.attribute_id ?? null)));
 
   const handleSave = async () => {
+    const result = slotEditDialogSchema.safeParse({ label, required });
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      setLabelError(issue?.message ?? null);
+      toast({
+        title: "Dados inválidos",
+        description: issue?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setLabelError(null);
+
     setSaving(true);
     try {
       await onSave(slot.id, {
-        label: label.trim(),
-        required,
+        label: result.data.label,
+        required: result.data.required,
         slot_type: slotType,
         attribute_id: needsAttribute ? attributeId || null : null,
         wipeOptions: willWipeOptions,
@@ -135,7 +152,15 @@ export function SlotEditDialog({ open, onOpenChange, slot, optionsCount, organiz
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label className="text-xs">Nome visível para o cliente</Label>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} />
+            <Input
+              value={label}
+              onChange={(e) => {
+                setLabel(e.target.value);
+                if (labelError) setLabelError(null);
+              }}
+              aria-invalid={!!labelError}
+            />
+            {labelError && <p className="text-xs text-destructive">{labelError}</p>}
           </div>
 
           <div className="flex items-center justify-between gap-3 rounded-md border p-3">

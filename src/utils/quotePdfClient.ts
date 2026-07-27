@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 type QuotePdfClientInput = {
   entityId?: string | null;
@@ -83,12 +84,7 @@ async function buildEntityClientForPdf(entityId: string) {
   let vat = "";
   const fiscalLink = firstValue<any>(fiscalRes.data);
   if (fiscalLink?.fiscal_entity_id) {
-    const { data: fiscalEntity } = await (supabase as any)
-      .from("fiscal_entities")
-      .select("nif")
-      .eq("id", fiscalLink.fiscal_entity_id)
-      .maybeSingle();
-    vat = fiscalEntity?.nif || "";
+    vat = (await callNifRevealSingle(fiscalLink.fiscal_entity_id)) || "";
   }
 
   const displayName = entity.display_name || [entity.first_name, entity.last_name].filter(Boolean).join(" ");

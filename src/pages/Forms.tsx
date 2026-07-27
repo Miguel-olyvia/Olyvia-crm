@@ -93,6 +93,7 @@ import {
   DEFAULT_FORM_LOCALE,
   type FormI18nConfig,
 } from "@/lib/formI18n";
+import { formMetadataSchema } from "@/lib/validations";
 
 interface Form {
   id: string;
@@ -145,6 +146,7 @@ export default function Forms() {
   const [selectedForm, setSelectedForm] = useState<Form | null>(null);
   const [formToDelete, setFormToDelete] = useState<Form | null>(null);
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   // Form data
   const [formData, setFormData] = useState({
@@ -235,10 +237,29 @@ export default function Forms() {
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) {
-      toast({ title: "Nome é obrigatório", variant: "destructive" });
+    const validation = formMetadataSchema.safeParse({
+      name: formData.name,
+      slug: formData.slug || generateSlug(formData.name),
+      description: formData.description,
+      organization_id: formData.organization_id || activeCompany?.id || "",
+      form_type: formData.form_type,
+    });
+
+    if (!validation.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of validation.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      toast({
+        title: "Dados inválidos",
+        description: Object.values(nextErrors)[0],
+        variant: "destructive",
+      });
       return;
     }
+    setFieldErrors({});
 
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -586,6 +607,7 @@ export default function Forms() {
       default_locale: i18n.default_locale || DEFAULT_FORM_LOCALE,
       enabled_locales: i18n.enabled_locales || [],
     });
+    setFieldErrors({});
     setDialogOpen(true);
   };
 
@@ -632,6 +654,7 @@ export default function Forms() {
       default_locale: DEFAULT_FORM_LOCALE,
       enabled_locales: [],
     });
+    setFieldErrors({});
   };
 
   // Filter forms
@@ -974,13 +997,16 @@ export default function Forms() {
                 placeholder={t("forms.dialog.namePlaceholder")}
                 value={formData.name}
                 onChange={(e) => {
-                  setFormData({ 
-                    ...formData, 
+                  setFormData({
+                    ...formData,
                     name: e.target.value,
                     slug: !selectedForm ? generateSlug(e.target.value) : formData.slug
                   });
+                  if (fieldErrors.name) setFieldErrors(prev => { const next = { ...prev }; delete next.name; return next; });
                 }}
+                aria-invalid={!!fieldErrors.name}
               />
+              {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
@@ -988,9 +1014,14 @@ export default function Forms() {
               <Input
                 placeholder="formulario-leads"
                 value={formData.slug}
-                onChange={(e) => setFormData({ ...formData, slug: generateSlug(e.target.value) })}
+                onChange={(e) => {
+                  setFormData({ ...formData, slug: generateSlug(e.target.value) });
+                  if (fieldErrors.slug) setFieldErrors(prev => { const next = { ...prev }; delete next.slug; return next; });
+                }}
+                aria-invalid={!!fieldErrors.slug}
               />
               <p className="text-xs text-muted-foreground">{t("forms.dialog.slugHint")}</p>
+              {fieldErrors.slug && <p className="text-xs text-destructive">{fieldErrors.slug}</p>}
             </div>
 
             <div className="space-y-2">
@@ -998,9 +1029,14 @@ export default function Forms() {
               <Textarea
                 placeholder={t("forms.dialog.descriptionPlaceholder")}
                 value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, description: e.target.value });
+                  if (fieldErrors.description) setFieldErrors(prev => { const next = { ...prev }; delete next.description; return next; });
+                }}
                 rows={2}
+                aria-invalid={!!fieldErrors.description}
               />
+              {fieldErrors.description && <p className="text-xs text-destructive">{fieldErrors.description}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1008,9 +1044,12 @@ export default function Forms() {
                 <Label>{t("forms.dialog.company")}</Label>
                 <Select
                   value={formData.organization_id}
-                  onValueChange={(v) => setFormData({ ...formData, organization_id: v })}
+                  onValueChange={(v) => {
+                    setFormData({ ...formData, organization_id: v });
+                    if (fieldErrors.organization_id) setFieldErrors(prev => { const next = { ...prev }; delete next.organization_id; return next; });
+                  }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger aria-invalid={!!fieldErrors.organization_id}>
                     <SelectValue placeholder={t("forms.dialog.selectCompany")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1019,6 +1058,7 @@ export default function Forms() {
                     ))}
                   </SelectContent>
                 </Select>
+                {fieldErrors.organization_id && <p className="text-xs text-destructive">{fieldErrors.organization_id}</p>}
               </div>
 
               <div className="space-y-2">

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -27,6 +28,7 @@ import { Package, Settings, ListPlus } from "lucide-react";
 import BundleComponentsEditor from "./BundleComponentsEditor";
 import BundleChoiceGroupsEditor from "./BundleChoiceGroupsEditor";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 
 interface Bundle {
   id: string;
@@ -43,6 +45,22 @@ interface Bundle {
   valid_to: string | null;
 }
 
+const bundleSchema = z.object({
+  sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
+  name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  description: z.string().trim().max(2000, "A descrição deve ter menos de 2000 caracteres.").optional().or(z.literal("")),
+  pricing_type: z.enum(["custom", "fixed_discount", "fixed_price", "percentage_discount"]),
+  status: z.enum(["draft", "active", "discontinued"]),
+  fixed_price: z.number().min(0, "O preço fixo deve ser positivo.").optional().nullable(),
+  discount_percent: z.number().min(0, "O desconto deve ser pelo menos 0.").max(100, "O desconto deve ser no máximo 100.").optional().nullable(),
+  discount_fixed: z.number().min(0, "O desconto fixo deve ser positivo.").optional().nullable(),
+  valid_from: z.string().optional().or(z.literal("")),
+  valid_to: z.string().optional().or(z.literal("")),
+}).refine((data) => !data.valid_from || !data.valid_to || data.valid_to >= data.valid_from, {
+  message: "A data de fim de validade deve ser posterior à data de início.",
+  path: ["valid_to"],
+});
+
 interface BundleFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -58,6 +76,7 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
   const [bundleId, setBundleId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   const [formData, setFormData] = useState({
     sku: "",
@@ -103,19 +122,40 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
       setBundleId(null);
     }
     setActiveTab("details");
+    setFieldErrors({});
   }, [bundle, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.sku || !formData.name) {
+
+    const validation = bundleSchema.safeParse({
+      sku: formData.sku,
+      name: formData.name,
+      description: formData.description,
+      pricing_type: formData.pricing_type,
+      status: formData.status,
+      fixed_price: formData.pricing_type === 'fixed_price' ? (parseFloat(formData.fixed_price) || null) : null,
+      discount_percent: formData.pricing_type === 'percentage_discount' ? (parseFloat(formData.discount_percent) || null) : null,
+      discount_fixed: formData.pricing_type === 'fixed_discount' ? (parseFloat(formData.discount_fixed) || null) : null,
+      valid_from: formData.valid_from,
+      valid_to: formData.valid_to,
+    });
+
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((error) => {
+        if (error.path[0]) errors[error.path[0].toString()] = error.message;
+      });
+      setFieldErrors(errors);
+      const firstError = validation.error.errors[0];
       toast({
         title: t('common.error'),
-        description: t('bundles.form.requiredFields'),
+        description: firstError.message,
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     if (!activeCompany?.id) {
       toast({
@@ -135,46 +175,61 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
       if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
 
       const pricingType = formData.pricing_type as "custom" | "fixed_discount" | "fixed_price" | "percentage_discount";
-      
-      const bundleData = {
-        organization_id: activeCompany.id,
-        sku: formData.sku.trim(),
-        name: formData.name.trim(),
-        description: formData.description.trim() || null,
-        pricing_type: pricingType,
-        fixed_price: formData.pricing_type === 'fixed_price' ? parseFloat(formData.fixed_price) || null : null,
-        discount_percent: formData.pricing_type === 'percentage_discount' ? parseFloat(formData.discount_percent) || null : null,
-        discount_fixed: formData.pricing_type === 'fixed_discount' ? parseFloat(formData.discount_fixed) || null : null,
-        status: formData.status,
-        valid_from: formData.valid_from || null,
-        valid_to: formData.valid_to || null,
-        is_active: formData.status === 'active',
-      };
+
+      const fixedPrice = formData.pricing_type === 'fixed_price' ? parseFloat(formData.fixed_price) || null : null;
+      const discountPercent = formData.pricing_type === 'percentage_discount' ? parseFloat(formData.discount_percent) || null : null;
+      const discountFixed = formData.pricing_type === 'fixed_discount' ? parseFloat(formData.discount_fixed) || null : null;
+      const description = formData.description.trim() || null;
+      const validFrom = formData.valid_from || null;
+      const validTo = formData.valid_to || null;
 
       if (bundleId) {
-        const { error } = await supabase
-          .from("bundles")
-          .update(bundleData)
-          .eq("id", bundleId);
-        
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.rpc("rpc_update_bundle", {
+            p_id: bundleId,
+            p_organization_id: activeCompany.id,
+            p_sku: formData.sku.trim(),
+            p_name: formData.name.trim(),
+            p_description: description,
+            p_pricing_type: pricingType,
+            p_fixed_price: fixedPrice,
+            p_discount_percent: discountPercent,
+            p_discount_fixed: discountFixed,
+            p_status: formData.status,
+            p_valid_from: validFrom,
+            p_valid_to: validTo,
+          })
+        );
+
         if (error) throw error;
-        
+
         toast({
           title: t('bundles.toast.updated'),
           description: t('bundles.toast.updatedDescription'),
         });
       } else {
-        const { data, error } = await supabase
-          .from("bundles")
-          .insert([{ ...bundleData, created_by: businessUserId }])
-          .select()
-          .single();
-        
+        const { data, error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.rpc("rpc_create_bundle", {
+            p_organization_id: activeCompany.id,
+            p_sku: formData.sku.trim(),
+            p_name: formData.name.trim(),
+            p_description: description,
+            p_pricing_type: pricingType,
+            p_fixed_price: fixedPrice,
+            p_discount_percent: discountPercent,
+            p_discount_fixed: discountFixed,
+            p_status: formData.status,
+            p_valid_from: validFrom,
+            p_valid_to: validTo,
+          })
+        );
+
         if (error) throw error;
-        
+        if (!data) throw new Error("Falha ao criar bundle: resposta vazia");
+
         setBundleId(data.id);
         setActiveTab("components");
-        
+
         toast({
           title: t('bundles.toast.created'),
           description: t('bundles.toast.createdDescription'),
@@ -208,7 +263,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.fixed_price}
               onChange={(e) => setFormData({ ...formData, fixed_price: e.target.value })}
               placeholder="0.00"
+              className={fieldErrors.fixed_price ? "border-destructive" : ""}
             />
+            {fieldErrors.fixed_price && <p className="text-sm text-destructive">{fieldErrors.fixed_price}</p>}
           </div>
         );
       case 'percentage_discount':
@@ -224,7 +281,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.discount_percent}
               onChange={(e) => setFormData({ ...formData, discount_percent: e.target.value })}
               placeholder="10"
+              className={fieldErrors.discount_percent ? "border-destructive" : ""}
             />
+            {fieldErrors.discount_percent && <p className="text-sm text-destructive">{fieldErrors.discount_percent}</p>}
           </div>
         );
       case 'fixed_discount':
@@ -239,7 +298,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
               value={formData.discount_fixed}
               onChange={(e) => setFormData({ ...formData, discount_fixed: e.target.value })}
               placeholder="5.00"
+              className={fieldErrors.discount_fixed ? "border-destructive" : ""}
             />
+            {fieldErrors.discount_fixed && <p className="text-sm text-destructive">{fieldErrors.discount_fixed}</p>}
           </div>
         );
       default:
@@ -292,7 +353,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                         onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                         placeholder="BUNDLE-001"
                         required
+                        className={fieldErrors.sku ? "border-destructive" : ""}
                       />
+                      {fieldErrors.sku && <p className="text-sm text-destructive">{fieldErrors.sku}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="status">{t('bundles.form.status')}</Label>
@@ -320,7 +383,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder={t('bundles.form.namePlaceholder')}
                       required
+                      className={fieldErrors.name ? "border-destructive" : ""}
                     />
+                    {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
                   </div>
 
                   <div className="space-y-2">
@@ -331,7 +396,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                       onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                       placeholder={t('bundles.form.descriptionPlaceholder')}
                       rows={3}
+                      className={fieldErrors.description ? "border-destructive" : ""}
                     />
+                    {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                   </div>
 
                   <div className="border-t pt-4">
@@ -370,7 +437,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                           type="date"
                           value={formData.valid_from}
                           onChange={(e) => setFormData({ ...formData, valid_from: e.target.value })}
+                          className={fieldErrors.valid_from ? "border-destructive" : ""}
                         />
+                        {fieldErrors.valid_from && <p className="text-sm text-destructive">{fieldErrors.valid_from}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="valid_to">{t('bundles.form.validTo')}</Label>
@@ -379,7 +448,9 @@ export default function BundleFormDialog({ open, onOpenChange, bundle, onSuccess
                           type="date"
                           value={formData.valid_to}
                           onChange={(e) => setFormData({ ...formData, valid_to: e.target.value })}
+                          className={fieldErrors.valid_to ? "border-destructive" : ""}
                         />
+                        {fieldErrors.valid_to && <p className="text-sm text-destructive">{fieldErrors.valid_to}</p>}
                       </div>
                     </div>
                   </div>

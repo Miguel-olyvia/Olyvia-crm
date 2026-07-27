@@ -3,10 +3,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+
+initSentry();
+
+// Authenticated internal AI-parsing tool — persistent (DB-backed) rate limit
+// per user, to bound AI-gateway cost/abuse.
+const RATE_LIMIT_BUCKET = "import-contract-pdf";
+const RATE_LIMIT_MAX_ATTEMPTS = 20;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const stripMarkdownCodeFences = (value: string) => value.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
@@ -16,25 +24,49 @@ const requestSchema = z.object({
 });
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+  // Scoped client — carries the caller's own JWT, so identity resolution runs
+  // under the caller's real RLS (anew_users.auth_user_id = auth.uid()).
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+  });
+  // Residual service-role client — ONLY for the persistent rate-limit table,
+  // which has RLS enabled with zero policies for "authenticated" (by design;
+  // only the rate-limit helper is meant to touch it).
+  const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
   try {
+    let caller;
     try {
-      await resolveCallerIdentity(req, supabase);
+      caller = await resolveCallerIdentity(req, supabase);
     } catch (e) {
       return authErrorResponse(e, corsHeaders);
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    // Rate limiting — persistent, DB-backed; scoped per authenticated user.
+    const rateLimit = await checkRateLimit(supabaseAdmin, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: caller.anewUserId,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
     }
+    await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, caller.anewUserId);
+
+    getAiGatewayKey();
 
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
@@ -61,14 +93,8 @@ serve(async (req) => {
       ? pdfBase64
       : `data:application/pdf;base64,${pdfBase64}`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+    const response = await callAiGateway({
+        model: "gemini-2.5-flash",
         temperature: 0.1,
         messages: [
           {
@@ -92,7 +118,6 @@ serve(async (req) => {
             ]
           }
         ]
-      }),
     });
 
     if (!response.ok) {
@@ -128,6 +153,7 @@ serve(async (req) => {
     );
   } catch (error: any) {
     console.error("import-contract-pdf error:", error);
+    await captureError(error, { function: "import-contract-pdf" });
 
     const fallbackMessage = error?.message?.includes("AI gateway")
       ? "Não foi possível processar este PDF automaticamente neste momento."

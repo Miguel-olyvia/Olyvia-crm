@@ -25,8 +25,6 @@ import {
   Package,
   Receipt,
   Link2,
-  ExternalLink,
-  Copy,
   Send,
   History,
   Percent,
@@ -160,6 +158,7 @@ interface ProposalDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   proposal: {
     id: string;
+    proposal_number?: string | null;
     title: string;
     description: string | null;
     value: number;
@@ -182,6 +181,7 @@ interface ProposalDetailsDialogProps {
   onViewHistory?: () => void;
   onAccept?: () => void;
   onReject?: () => void;
+  isAccepting?: boolean;
 }
 
 export function ProposalDetailsDialog({
@@ -192,6 +192,7 @@ export function ProposalDetailsDialog({
   onViewHistory,
   onAccept,
   onReject,
+  isAccepting = false,
 }: ProposalDetailsDialogProps) {
   const [items, setItems] = useState<ProposalItem[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
@@ -244,7 +245,7 @@ export function ProposalDetailsDialog({
           .limit(5),
       ]);
 
-      let loadedItems: ProposalItem[] = itemsRes.data || [];
+      const loadedItems: ProposalItem[] = itemsRes.data || [];
       
       // Fallback: populate items from quote lines if proposal_items is empty
       setItems(loadedItems);
@@ -397,24 +398,6 @@ export function ProposalDetailsDialog({
     }
   };
 
-  const copyPublicLink = () => {
-    if (extendedData?.public_token) {
-      const link = `${window.location.origin}/proposal/${extendedData.public_token}`;
-      navigator.clipboard.writeText(link);
-      toast({
-        title: "Link copiado",
-        description: "O link público foi copiado para a área de transferência.",
-      });
-    }
-  };
-
-  const openPublicLink = () => {
-    if (extendedData?.public_token) {
-      const link = `${window.location.origin}/proposal/${extendedData.public_token}`;
-      window.open(link, "_blank");
-    }
-  };
-
   const getStageBadge = () => {
     const stage = proposal?.proposal_workflow_stages;
     if (stage) {
@@ -458,7 +441,11 @@ export function ProposalDetailsDialog({
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-xl">
               <FileText className="w-5 h-5 text-primary" />
-              {proposal.title}
+              {proposal.proposal_number && (
+                <span className="font-mono text-primary">{proposal.proposal_number}</span>
+              )}
+              {proposal.proposal_number && <span className="text-muted-foreground">·</span>}
+              <span>{proposal.title}</span>
             </DialogTitle>
             <Button variant="outline" size="sm" className="gap-1 mr-6" onClick={() => setPortalPreviewOpen(true)}>
               <Eye className="h-4 w-4" /> Preview Portal
@@ -486,18 +473,6 @@ export function ProposalDetailsDialog({
 
             {/* Quick Actions */}
             <div className="flex flex-wrap gap-2">
-              {extendedData?.public_token && extendedData?.public_link_enabled && (
-                <>
-                  <Button variant="outline" size="sm" onClick={copyPublicLink}>
-                    <Copy className="w-4 h-4 mr-2" />
-                    Copiar Link
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={openPublicLink}>
-                    <ExternalLink className="w-4 h-4 mr-2" />
-                    Ver Proposta
-                  </Button>
-                </>
-              )}
               {onSendProposal && (
                 <Button variant="outline" size="sm" onClick={onSendProposal}>
                   <Send className="w-4 h-4 mr-2" />
@@ -532,6 +507,7 @@ export function ProposalDetailsDialog({
                       variant="outline"
                       className="border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-all duration-200 font-semibold px-6 rounded-full"
                       onClick={onReject}
+                      disabled={isAccepting}
                     >
                       <XCircle className="w-5 h-5 mr-2" />
                       Recusar
@@ -542,9 +518,10 @@ export function ProposalDetailsDialog({
                       size="lg"
                       className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg shadow-green-500/25 hover:shadow-green-500/40 transition-all duration-200 font-semibold px-6 rounded-full"
                       onClick={onAccept}
+                      disabled={isAccepting}
                     >
                       <CheckCircle2 className="w-5 h-5 mr-2" />
-                      Aceitar Proposta
+                      {isAccepting ? "A aceitar..." : "Aceitar Proposta"}
                     </Button>
                   )}
                 </div>
@@ -1056,9 +1033,6 @@ export function ProposalDetailsDialog({
         recipientPhone: client.phone,
         proposalTitle: proposal?.title,
         proposalValue: proposal?.value,
-        proposalLink: extendedData?.public_token && extendedData?.public_link_enabled 
-          ? `${window.location.origin}/proposal/${extendedData.public_token}` 
-          : undefined,
         dealId: proposal?.deal_id || undefined,
       } : null}
     />

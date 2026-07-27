@@ -1,26 +1,30 @@
 import { useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 export function usePipelineAutomation() {
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const callPipelineAction = useCallback(async (action: string, payload: Record<string, any>) => {
     try {
       const { data, error } = await supabase.functions.invoke("pipeline-automation", {
         body: { action, payload },
       });
-      
+
       if (error) throw error;
       if (!data?.success) throw new Error(data?.message || "Erro na automação");
 
       toast({ title: data.message || "Sucesso" });
       return data;
-    } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      const message = await getFriendlyErrorMessage(err);
+      toast({ title: t('common.error'), description: message, variant: "destructive" });
       return null;
     }
-  }, [toast]);
+  }, [toast, t]);
 
   const createDealFromLead = useCallback((payload: {
     lead_id: string;

@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
+import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   entity_id: z.string(),
@@ -14,17 +16,34 @@ const requestSchema = z.object({
 });
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
+    getAiGatewayKey();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+    // Scoped client — carries the caller's own JWT, so identity resolution,
+    // org-scope validation and every business-data read below run under the
+    // caller's real RLS/permissions (has_anew_permission, get_user_visible_org_ids,
+    // is_entity_in_user_scope), exactly as if the frontend had called them directly.
+    // No rate-limit table use in this function, so no residual service-role
+    // client is needed.
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+
+    let caller;
+    try {
+      caller = await resolveCallerIdentity(req, supabase);
+    } catch (e) {
+      return authErrorResponse(e, corsHeaders);
+    }
 
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
@@ -35,6 +54,14 @@ serve(async (req) => {
       );
     }
     const { entity_id, organization_id, extra_context } = parsed.data;
+
+    const hasAccess = await validateOrgScope(supabase, caller, organization_id);
+    if (!hasAccess) {
+      return new Response(
+        JSON.stringify({ error: "Sem permissão para aceder a esta organização" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Get entity info
     const { data: entity } = await supabase
@@ -134,20 +161,13 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
       ? `Gera uma proposta personalizada. Contexto: ${extra_context}`
       : "Gera uma proposta personalizada com base no histórico completo.";
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.7,
-      }),
+    const response = await callAiGateway({
+      model: "gemini-3-flash-preview",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
     });
 
     if (!response.ok) {
@@ -172,6 +192,7 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
     );
   } catch (error: any) {
     console.error("Generate Proposal AI error:", error);
+    await captureError(error, { function: "generate-proposal-ai" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

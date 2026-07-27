@@ -44,7 +44,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Search, Package, Edit, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload, Loader2 } from "lucide-react";
+import { Plus, Search, Package, Edit, Trash2, ArrowUpDown, ArrowUp, ArrowDown, Download, Upload, Loader2, RotateCcw } from "lucide-react";
+import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialogs";
 import BundleFormDialog from "@/components/bundles/BundleFormDialog";
@@ -52,6 +53,9 @@ import { formatCurrency } from "@/lib/utils";
 import { exportBundlesToCSV, parseBundlesCSV, downloadBundlesTemplate } from "@/utils/bundlesExportImport";
 import { PermissionGate } from "@/components/PermissionGate";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
+
+const MAX_BUNDLES = 2000;
 
 interface Bundle {
   id: string;
@@ -96,6 +100,7 @@ const Bundles = () => {
   
   // Import/Export state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [importLoading, setImportLoading] = useState(false);
   const importAbortRef = useRef<AbortController | null>(null);
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
@@ -138,8 +143,15 @@ const Bundles = () => {
         query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,description.ilike.%${searchLower}%`);
       }
 
-      const { data, error } = await query.order("created_at", { ascending: false });
+      const { data, error } = await query.order("created_at", { ascending: false }).limit(MAX_BUNDLES);
       if (error) throw error;
+
+      if ((data?.length ?? 0) >= MAX_BUNDLES) {
+        toast({
+          title: t('bundles.toast.warning'),
+          description: t('bundles.toast.listIncomplete', { limit: MAX_BUNDLES }),
+        });
+      }
 
       const bundlesRaw = data || [];
       const bundleIds = bundlesRaw.map((b: any) => b.id);
@@ -195,14 +207,39 @@ const Bundles = () => {
         return unit * (Number(c.quantity) || 1);
       };
 
+      // Choice-group-aware total: components that belong to a required "choose N of M"
+      // group must only contribute their minimum-priced selection(s), not every option
+      // in the group — each option is individually is_optional: false, so a naive sum
+      // over all non-optional components would inflate the price.
+      const computeChoiceAwareTotal = (components: any[], choiceGroups: any[]): number => {
+        const nonOptional = components.filter((c) => !c.is_optional);
+        const requiredGroups = choiceGroups.filter((g) => g.is_required && (g.min_selections || 0) > 0);
+        const requiredGroupIds = new Set(requiredGroups.map((g) => g.id));
+
+        // Components not part of a required choice group are summed as-is.
+        const baseComponents = nonOptional.filter(
+          (c) => !c.choice_group_id || !requiredGroupIds.has(c.choice_group_id)
+        );
+        let total = baseComponents.reduce((sum, c) => sum + getComponentLinePrice(c), 0);
+
+        // Each required choice group only contributes its minimum-priced selection(s).
+        for (const group of requiredGroups) {
+          const groupComponents = nonOptional.filter((c) => c.choice_group_id === group.id);
+          if (groupComponents.length === 0) continue;
+          const prices = groupComponents.map(getComponentLinePrice);
+          total += Math.min(...prices) * (group.min_selections || 1);
+        }
+
+        return total;
+      };
+
       const bundlesWithPrices = bundlesRaw.map((bundle: any) => {
         const components = (bundle.bundle_components || []) as any[];
         const componentsCount = components.length;
+        const choiceGroupsForBundle = choiceGroupsByBundle.get(bundle.id) || [];
 
-        // Original price: sum of all (non-optional) component line prices
-        const originalPrice = components
-          .filter((c) => !c.is_optional)
-          .reduce((sum, c) => sum + getComponentLinePrice(c), 0);
+        // Original price: choice-group-aware sum of (non-optional) component line prices.
+        const originalPrice = computeChoiceAwareTotal(components, choiceGroupsForBundle);
 
         let finalPrice = originalPrice;
         if (bundle.pricing_type === 'fixed_price' && bundle.fixed_price) {
@@ -212,18 +249,7 @@ const Bundles = () => {
         } else if (bundle.pricing_type === 'fixed_discount' && bundle.discount_fixed) {
           finalPrice = originalPrice - Number(bundle.discount_fixed);
         } else if (bundle.pricing_type === 'custom') {
-          const requiredGroups = (choiceGroupsByBundle.get(bundle.id) || []).filter((g) => g.is_required && (g.min_selections || 0) > 0);
-          const baseComponents = components.filter((c) => !c.is_optional && !c.choice_group_id);
-          let customTotal = baseComponents.reduce((sum, c) => sum + getComponentLinePrice(c), 0);
-
-          for (const group of requiredGroups) {
-            const groupComponents = components.filter((c) => !c.is_optional && c.choice_group_id === group.id);
-            if (groupComponents.length === 0) continue;
-            const prices = groupComponents.map(getComponentLinePrice);
-            customTotal += Math.min(...prices) * (group.min_selections || 1);
-          }
-
-          finalPrice = customTotal;
+          finalPrice = originalPrice;
         }
 
         return {
@@ -251,6 +277,7 @@ const Bundles = () => {
     tableName: "bundles",
     onSuccess: loadBundles,
     softDelete: false,
+    organizationId: activeCompany?.id,
   });
 
   useEffect(() => {
@@ -259,14 +286,21 @@ const Bundles = () => {
     }
   }, [permissionsLoading, hasPermission, hasFullAccess, navigate, activeCompany]);
 
-  // Load companies for import
+  // Load companies for import (scoped to active org)
   useEffect(() => {
     const loadCompanies = async () => {
-      const { data } = await supabase.from("anew_organizations").select("id, name");
+      if (!activeCompany?.id) {
+        setCompanies([]);
+        return;
+      }
+      const { data } = await supabase
+        .from("anew_organizations")
+        .select("id, name")
+        .eq("id", activeCompany.id);
       setCompanies(data || []);
     };
     loadCompanies();
-  }, []);
+  }, [activeCompany?.id]);
 
   useEffect(() => {
     if (companyLoading) return;
@@ -329,12 +363,22 @@ const Bundles = () => {
 
   const handleDelete = async () => {
     if (!deleteId) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      setDeleteId(null);
+      return;
+    }
 
     try {
-      const { error } = await supabase
-        .from("bundles")
-        .update({ deleted_at: new Date().toISOString() })
-        .eq("id", deleteId);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase.rpc("rpc_delete_bundle", {
+          p_id: deleteId,
+          p_organization_id: activeCompany.id,
+        })
+      );
 
       if (error) throw error;
 
@@ -358,19 +402,27 @@ const Bundles = () => {
   const handleBulkStatusChange = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
     if (selectedIds.length === 0) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       bulkActions.setProcessing(true);
-      
+
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
       const isActive = bulkActions.bulkNewStatus === "active";
-      
-      const { error } = await supabase
-        .from("bundles")
-        .update({ 
-          status: bulkActions.bulkNewStatus,
-          is_active: isActive
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase.rpc("rpc_bulk_status_bundle", {
+          p_ids: selectedIds,
+          p_organization_id: activeCompany.id,
+          p_status: bulkActions.bulkNewStatus,
+          p_is_active: isActive,
         })
-        .in("id", selectedIds);
+      );
 
       if (error) throw error;
 
@@ -396,14 +448,23 @@ const Bundles = () => {
   const handleBulkDelete = async () => {
     const selectedIds = Array.from(bulkActions.selectedIds);
     if (selectedIds.length === 0) return;
+    if (!activeCompany?.id) {
+      toast({ title: t('common.error'), description: t('common.noActiveCompany') || "Nenhuma empresa ativa selecionada.", variant: "destructive" });
+      return;
+    }
 
     try {
       bulkActions.setProcessing(true);
-      
-      const { error } = await supabase
-        .from("bundles")
-        .update({ deleted_at: new Date().toISOString() })
-        .in("id", selectedIds);
+
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await withAuditContext(supabase, businessUserId, () =>
+        supabase.rpc("rpc_bulk_delete_bundle", {
+          p_ids: selectedIds,
+          p_organization_id: activeCompany.id,
+        })
+      );
 
       if (error) throw error;
 
@@ -505,19 +566,56 @@ const Bundles = () => {
 
       checkCancelled();
 
-      // Insert new bundles
-      if (result.bundlesToInsert.length > 0) {
-        const { error } = await supabase.from("bundles").insert(result.bundlesToInsert);
+      if (!activeCompany?.id) {
+        throw new Error(t('bundles.form.noCompany') || "Empresa ativa não encontrada");
+      }
+
+      // Merge insert/update rows into one ordered batch for the atomic RPC
+      // (rpc_bulk_import_bundles): one transaction, one audit row per bundle.
+      const bundleRows = [
+        ...result.bundlesToInsert.map((bundle) => ({
+          mode: 'insert' as const,
+          id: null,
+          sku: bundle.sku,
+          name: bundle.name,
+          description: bundle.description,
+          status: bundle.status,
+          pricing_type: bundle.pricing_type,
+          fixed_price: bundle.fixed_price,
+          discount_percent: bundle.discount_percent,
+          discount_fixed: bundle.discount_fixed,
+          valid_from: bundle.valid_from,
+          valid_to: bundle.valid_to,
+          organization_id: bundle.organization_id,
+        })),
+        ...result.bundlesToUpdate.map((bundle) => ({
+          mode: 'update' as const,
+          id: bundle.id,
+          sku: bundle.sku,
+          name: bundle.name,
+          description: bundle.description,
+          status: bundle.status,
+          pricing_type: bundle.pricing_type,
+          fixed_price: bundle.fixed_price,
+          discount_percent: bundle.discount_percent,
+          discount_fixed: bundle.discount_fixed,
+          valid_from: bundle.valid_from,
+          valid_to: bundle.valid_to,
+          organization_id: bundle.organization_id,
+        })),
+      ];
+
+      if (bundleRows.length > 0) {
+        const { error } = await withAuditContext(supabase, businessUserId, () =>
+          supabase.rpc('rpc_bulk_import_bundles', {
+            p_org_id: activeCompany.id,
+            p_bundles: bundleRows,
+          }),
+          'csv_import'
+        );
         if (error) throw error;
       }
       checkCancelled();
-
-      // Update existing bundles
-      for (const bundle of result.bundlesToUpdate) {
-        const { id, ...updateData } = bundle;
-        const { error } = await supabase.from("bundles").update(updateData).eq("id", id);
-        if (error) throw error;
-      }
 
       toast({
         title: t('bundles.toast.importSuccess') || "Importação concluída",
@@ -529,8 +627,8 @@ const Bundles = () => {
     } catch (error: any) {
       if (error.message === CANCELLED_MESSAGE) {
         toast({
-          title: "Importação cancelada",
-          description: "A importação foi interrompida.",
+          title: t('bundles.toast.importCancelled'),
+          description: t('bundles.toast.importCancelledDesc'),
         });
       } else {
         toast({
@@ -619,6 +717,11 @@ const Bundles = () => {
           </div>
           
           <div className="flex gap-2">
+            <PermissionGate permission="products.manage">
+              <Button variant="outline" onClick={() => setRestoreDialogOpen(true)}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Eliminados
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="products.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="mr-2 h-4 w-4" /> {t('common.export') || 'Exportar'}
@@ -939,6 +1042,16 @@ const Bundles = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RestoreItemsDialog
+        open={restoreDialogOpen}
+        onOpenChange={setRestoreDialogOpen}
+        tableName="bundles"
+        organizationId={activeCompany?.id}
+        restoreRpc="rpc_restore_bundle"
+        labelColumns={["sku", "name"]}
+        onRestored={loadBundles}
+      />
     </>
   );
 };

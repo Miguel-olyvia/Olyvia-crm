@@ -5,13 +5,28 @@ import { supabase } from '@/integrations/supabase/client';
 import { fetchDefaultQuotePdfTemplate, fetchQuotePdfTemplateById } from '@/utils/quotePdfTemplate';
 import { buildQuoteRenderContext } from '@/utils/buildQuoteRenderContext';
 
+const fetchBlobWithTimeout = async (url: string, timeoutMs = 5000): Promise<Blob> => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`Falha ao carregar imagem (${response.status})`);
+    return await response.blob();
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
+
 /**
  * Generate a PDF blob for a given quote ID.
  * Returns { blob, fileName } or throws on error.
  */
 export async function generateQuotePdfBlob(
   quoteId: string,
-  options: { templateOverride?: any | null } = {},
+  options: {
+    templateOverride?: any | null;
+    documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
+  } = {},
 ): Promise<{ blob: Blob; fileName: string }> {
   const { data: quoteData, error: quoteError } = await (supabase as any)
     .from('quotes').select('*').eq('id', quoteId).single();
@@ -26,8 +41,7 @@ export async function generateQuotePdfBlob(
     const { data: org } = await (supabase as any).from('anew_organizations').select('logo_url').eq('id', quoteData.organization_id).maybeSingle();
     if (org?.logo_url) {
       try {
-        const response = await fetch(org.logo_url);
-        const logoBlob = await response.blob();
+        const logoBlob = await fetchBlobWithTimeout(org.logo_url);
         logoBase64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
           reader.onloadend = () => resolve(reader.result as string);
@@ -49,13 +63,32 @@ export async function generateQuotePdfBlob(
     ?? (quoteData?.template_id ? await fetchQuotePdfTemplateById(quoteData.template_id) : null)
     ?? await fetchDefaultQuotePdfTemplate(quoteData.organization_id || null);
 
+  let resolvedProposalTemplate = proposalTemplate;
+  if (proposalTemplate?.logo_url) {
+    try {
+      const templateLogoBlob = await fetchBlobWithTimeout(proposalTemplate.logo_url);
+      const templateLogoBase64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(templateLogoBlob);
+      });
+      resolvedProposalTemplate = { ...proposalTemplate, logo_url: templateLogoBase64 };
+    } catch (error) {
+      console.error('Error converting template logo to base64:', error);
+      resolvedProposalTemplate = { ...proposalTemplate, logo_url: null };
+    }
+  }
+
   const pdfElement = React.createElement(QuotePDFDocument as any, {
     quote: quoteData, company: raw.company, client: raw.client,
     lines: linesData || [], fees: feesData || [], user: raw.user,
     descontoPercent: quoteData?.desconto_global_percent || 0,
-    proposalTemplate,
+    proposalTemplate: resolvedProposalTemplate,
     renderContext: ctx,
-    strictVariables: true,
+    // In proposal context, the layout may reference variables that don't exist on the
+    // underlying quote — keep rendering instead of throwing the whole PDF away.
+    strictVariables: options.documentContext?.kind === 'proposal' ? false : true,
+    documentContext: options.documentContext ?? { kind: 'quote' },
   });
   const blob = await (pdf as any)(pdfElement).toBlob();
 

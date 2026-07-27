@@ -137,7 +137,7 @@ export function AnewEntityHistoryDialog({
         ...changelogData.map((d: any) => d.changed_by),
       ].filter(Boolean);
       const changerIds = [...new Set(allChangerIds)];
-      let changerMap: Record<string, { name: string; avatar: string | null }> = {};
+      const changerMap: Record<string, { name: string; avatar: string | null }> = {};
       if (changerIds.length > 0) {
         const { data: users } = await (supabase as any)
           .from("anew_users")

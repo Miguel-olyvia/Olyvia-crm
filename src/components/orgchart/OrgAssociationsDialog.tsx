@@ -16,6 +16,26 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link2, Unlink } from "lucide-react";
 import { getOrgTypeLabel, OrgType } from "./OrgChartCard";
+import { z } from "zod";
+import { withAuditContext } from "@/utils/auditContext";
+import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+
+// Association selections must reference orgs that are actually associable
+// (loaded per dialog session); built dynamically since valid IDs change.
+const buildAssociationsSchema = (validIds: Set<string>) =>
+  z.object({
+    selectedIds: z.array(z.string().trim().min(1, "Associação inválida")),
+  }).superRefine((data, ctx) => {
+    data.selectedIds.forEach((id, idx) => {
+      if (!validIds.has(id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["selectedIds", idx],
+          message: "Associação inválida ou desatualizada. Recarregue e tente novamente.",
+        });
+      }
+    });
+  });
 
 interface OrgAssociationsDialogProps {
   open: boolean;
@@ -133,26 +153,39 @@ export function OrgAssociationsDialog({
   };
 
   const handleSave = async () => {
+    const validIds = new Set(orgs.map(o => o.id));
+    const schema = buildAssociationsSchema(validIds);
+    const validation = schema.safeParse({ selectedIds: Array.from(selected) });
+    if (!validation.success) {
+      toast({ title: t('common.error'), description: validation.error.issues[0].message, variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
-      // Delete all existing associations for this org
-      await (supabase as any)
-        .from("anew_org_associations")
-        .delete()
-        .or(`org_id.eq.${orgId},associated_org_id.eq.${orgId}`);
+      const { data: userData } = await supabase.auth.getUser();
+      const businessUserId = await resolveBusinessUserId(userData.user?.id);
 
-      // Insert new ones
-      if (selected.size > 0) {
-        const rows = Array.from(selected).map(assocId => ({
-          org_id: orgId,
-          associated_org_id: assocId,
-          association_type: 'cross_functional',
-        }));
-        const { error } = await (supabase as any)
+      await withAuditContext(supabase, businessUserId, async () => {
+        // Delete all existing associations for this org
+        const { error: deleteError } = await (supabase as any)
           .from("anew_org_associations")
-          .insert(rows);
-        if (error) throw error;
-      }
+          .delete()
+          .or(`org_id.eq.${orgId},associated_org_id.eq.${orgId}`);
+        if (deleteError) throw deleteError;
+
+        // Insert new ones
+        if (selected.size > 0) {
+          const rows = Array.from(selected).map(assocId => ({
+            org_id: orgId,
+            associated_org_id: assocId,
+            association_type: 'cross_functional',
+          }));
+          const { error: insertError } = await (supabase as any)
+            .from("anew_org_associations")
+            .insert(rows);
+          if (insertError) throw insertError;
+        }
+      });
 
       toast({ title: t('common.success'), description: t('orgChart.associationsSaved') });
       onSuccess();

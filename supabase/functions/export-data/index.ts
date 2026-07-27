@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
 
 import { resolveCallerIdentity } from "../_shared/auth.ts";
+import { getCorsHeaders } from "../_shared/cors.ts";
 import {
   getEffectiveColumns,
   getExportDefinition,
@@ -9,6 +10,13 @@ import {
   type ExportDefinition,
   type ExportModule,
 } from "./exportConfig.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { decryptNif, deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
+
+initSentry();
+
+/** Raw key (Uint8Array from deriveKeyFromEnv) or an already imported CryptoKey. */
+type NifKey = Uint8Array | CryptoKey;
 
 const exportRequestSchema = z.object({
   module: z.string().min(1),
@@ -18,14 +26,11 @@ const exportRequestSchema = z.object({
     status: z.string().max(40).optional(),
     dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    search: z.string().max(200).optional(),
+    assignedTo: z.string().max(80).optional(),
+    onlyMine: z.boolean().optional(),
   }).optional().default({}),
 });
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
 
 const MAX_EXPORT_ROWS = 10_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,6 +44,9 @@ interface ExportRequest {
     status?: string;
     dateFrom?: string;
     dateTo?: string;
+    search?: string;
+    assignedTo?: string;
+    onlyMine?: boolean;
   };
 }
 
@@ -47,13 +55,6 @@ interface AuthorizationContext {
   exportOrgIds: string[];
   scopedUserIds: string[];
   canIncludeSensitive: boolean;
-}
-
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
-  });
 }
 
 function parseRequest(input: unknown): ExportRequest {
@@ -80,6 +81,15 @@ function parseRequest(input: unknown): ExportRequest {
     if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
       filters[key] = value;
     }
+  }
+  if (typeof filtersInput.search === "string" && filtersInput.search.trim().length > 0) {
+    filters.search = filtersInput.search.trim().slice(0, 200);
+  }
+  if (typeof filtersInput.assignedTo === "string" && filtersInput.assignedTo.length <= 80) {
+    filters.assignedTo = filtersInput.assignedTo;
+  }
+  if (filtersInput.onlyMine === true) {
+    filters.onlyMine = true;
   }
 
   return {
@@ -241,7 +251,12 @@ function applyOwnerScope(query: any, auth: AuthorizationContext): any {
   return query.or(`created_by.in.(${ids.join(",")}),assigned_to.in.(${ids.join(",")})`);
 }
 
-async function resolveIdentityMaps(admin: any, entityIds: string[], includeSensitive: boolean) {
+async function resolveIdentityMaps(
+  admin: any,
+  entityIds: string[],
+  includeSensitive: boolean,
+  decKey: NifKey | null,
+) {
   const uniqueIds = Array.from(new Set(entityIds.filter(Boolean)));
   const identity = new Map<string, any>();
   const email = new Map<string, string>();
@@ -295,16 +310,27 @@ async function resolveIdentityMaps(admin: any, entityIds: string[], includeSensi
   const fiscalIds = Array.from(
     new Set(fiscalLinks.map((link: any) => link.fiscal_entity_id).filter(Boolean)),
   );
-  if (fiscalIds.length > 0) {
+  if (fiscalIds.length > 0 && decKey) {
     const { data: fiscalEntities, error: fiscalError } = await admin
       .from("fiscal_entities")
-      .select("id, nif")
+      .select("id, nif_encrypted")
       .in("id", fiscalIds);
     if (fiscalError) throw fiscalError;
-    const nifById = new Map((fiscalEntities || []).map((item: any) => [item.id, item.nif]));
+    const nifById = new Map<string, string>();
+    for (const item of fiscalEntities || []) {
+      if (!item.nif_encrypted) continue;
+      try {
+        nifById.set(item.id, await decryptNif(item.nif_encrypted, decKey));
+      } catch (decryptError) {
+        console.error(
+          `export-data: failed to decrypt nif for fiscal_entity ${item.id}`,
+          decryptError instanceof Error ? decryptError.message : decryptError,
+        );
+      }
+    }
     for (const link of fiscalLinks) {
       if (!vat.has(link.entity_id) && nifById.has(link.fiscal_entity_id)) {
-        vat.set(link.entity_id, nifById.get(link.fiscal_entity_id));
+        vat.set(link.entity_id, nifById.get(link.fiscal_entity_id)!);
       }
     }
   }
@@ -317,6 +343,7 @@ async function exportClients(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_clients")
@@ -333,6 +360,7 @@ async function exportClients(
     admin,
     records.map((record: any) => record.entity_id),
     includeSensitive,
+    decKey,
   );
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
@@ -350,6 +378,7 @@ async function exportContacts(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_contacts")
@@ -367,6 +396,7 @@ async function exportContacts(
     admin,
     records.map((record: any) => record.entity_id),
     includeSensitive,
+    decKey,
   );
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
@@ -385,6 +415,7 @@ async function exportLeads(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
 ) {
   let query = admin
     .from("anew_leads")
@@ -409,6 +440,7 @@ async function exportLeads(
       admin,
       records.map((r: any) => r.entity_id),
       includeSensitive,
+      decKey,
     ),
     sourceIds.length > 0
       ? admin.from("lead_sources").select("id, name").in("id", sourceIds)
@@ -444,6 +476,8 @@ async function exportQuotes(
   request: ExportRequest,
   auth: AuthorizationContext,
   includeSensitive: boolean,
+  decKey: NifKey | null,
+  caller: { anewUserId: string },
 ) {
   let query = admin
     .from("quotes")
@@ -455,7 +489,19 @@ async function exportQuotes(
   if (request.filters.status) query = query.eq("estado", request.filters.status);
   if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
   if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
-  query = applyOwnerScope(query, auth);
+  if (request.filters.assignedTo === "none") {
+    query = query.is("assigned_to", null);
+  } else if (request.filters.assignedTo) {
+    query = query.eq("assigned_to", request.filters.assignedTo);
+  }
+  // "onlyMine" always narrows to the caller's own records — this can never
+  // widen access beyond whatever applyOwnerScope would already allow, since a
+  // caller's own anewUserId is always within their own permitted scope.
+  if (request.filters.onlyMine) {
+    query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
+  } else {
+    query = applyOwnerScope(query, auth);
+  }
   const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
   if (error) throw error;
 
@@ -465,6 +511,7 @@ async function exportQuotes(
       admin,
       records.map((record: any) => record.entity_id),
       includeSensitive,
+      decKey,
     ),
     admin
       .from("anew_organizations")
@@ -482,17 +529,31 @@ async function exportQuotes(
     ]),
   );
 
-  return records.map((record: any) => ({
-    quoteNumber: record.quote_number || "",
-    organization: organizations.get(record.organization_id) || "",
-    client: maps.identity.get(record.entity_id)?.display_name || "",
-    status: record.estado || "",
-    createdAt: record.created_at,
-    total: record.total || 0,
-    currency: record.moeda || "EUR",
-    baseModel: record.modelo_base || "",
-    siteAddress: includeSensitive ? record.obra_endereco || "" : "",
-  }));
+  const searchTerm = request.filters.search?.toLowerCase();
+
+  return records
+    .filter((record: any) => {
+      if (!searchTerm) return true;
+      const quoteNumber = (record.quote_number || "").toLowerCase();
+      const clientName = (maps.identity.get(record.entity_id)?.display_name || "").toLowerCase();
+      const address = (record.obra_endereco || "").toLowerCase();
+      return (
+        quoteNumber.includes(searchTerm) ||
+        clientName.includes(searchTerm) ||
+        address.includes(searchTerm)
+      );
+    })
+    .map((record: any) => ({
+      quoteNumber: record.quote_number || "",
+      organization: organizations.get(record.organization_id) || "",
+      client: maps.identity.get(record.entity_id)?.display_name || "",
+      status: record.estado || "",
+      createdAt: record.created_at,
+      total: record.total || 0,
+      currency: record.moeda || "EUR",
+      baseModel: record.modelo_base || "",
+      siteAddress: includeSensitive ? record.obra_endereco || "" : "",
+    }));
 }
 
 async function updateAudit(admin: any, auditId: string | null, values: Record<string, unknown>) {
@@ -502,6 +563,13 @@ async function updateAudit(admin: any, auditId: string | null, values: Record<st
 }
 
 Deno.serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
+    });
+
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
@@ -570,6 +638,23 @@ Deno.serve(async (req: Request) => {
     }
 
     const includeSensitive = request.includeSensitive && auth.canIncludeSensitive;
+
+    // Only derive the NIF decryption key when it will actually be used —
+    // avoids a hard dependency on NIF_ENC_KEY for exports that never touch
+    // sensitive columns.
+    let decKey: NifKey | null = null;
+    if (includeSensitive) {
+      try {
+        decKey = deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM");
+      } catch (keyError) {
+        console.error(
+          "export-data: failed to derive NIF decryption key:",
+          keyError instanceof Error ? keyError.message : keyError,
+        );
+        await captureError(keyError, { function: "export-data", stage: "derive-nif-key" });
+      }
+    }
+
     const columns = getEffectiveColumns(definition, includeSensitive);
     const { data: audit, error: auditError } = await admin
       .from("data_export_audit")
@@ -594,12 +679,12 @@ Deno.serve(async (req: Request) => {
 
     const rows =
       request.module === "clients"
-        ? await exportClients(admin, request, auth, includeSensitive)
+        ? await exportClients(admin, request, auth, includeSensitive, decKey)
         : request.module === "contacts"
-          ? await exportContacts(admin, request, auth, includeSensitive)
+          ? await exportContacts(admin, request, auth, includeSensitive, decKey)
           : request.module === "leads"
-            ? await exportLeads(admin, request, auth, includeSensitive)
-            : await exportQuotes(admin, request, auth, includeSensitive);
+            ? await exportLeads(admin, request, auth, includeSensitive, decKey)
+            : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
@@ -627,6 +712,7 @@ Deno.serve(async (req: Request) => {
     });
   } catch (error) {
     console.error("Controlled export failed", error instanceof Error ? error.message : error);
+    await captureError(error, { function: "export-data" });
     await updateAudit(admin, auditId, {
       status: "failed",
       error_code: "INTERNAL_ERROR",

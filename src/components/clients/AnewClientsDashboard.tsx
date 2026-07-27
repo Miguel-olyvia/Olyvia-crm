@@ -1,20 +1,29 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Eye, UserCheck, UserX, TrendingUp, FileText, AlertTriangle, ShieldCheck, HeartPulse, DollarSign, Clock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCompany } from "@/contexts/CompanyContext";
-import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { formatCurrency } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 
+interface ScopedClientRecord {
+  id: string;
+  entity_id: string;
+  status: string;
+  created_by: string | null;
+  assigned_to: string | null;
+  created_at: string;
+}
+
 interface AnewClientsDashboardProps {
-  companyId?: string;
+  /** Already org+permission+search+filter scoped clients — the single source of truth for KPI computation. */
+  scopedClients: ScopedClientRecord[];
   activeFilter?: string;
   onFilterChange?: (filter: string) => void;
-  scopeOrgIds?: string[];
   activeView?: string;
-  salesRepFilter?: string;
   /** Per-client health scores (entity_id -> { score }). When provided, avgHealthScore = arithmetic mean. */
   healthScoresMap?: Map<string, { score: number } | any>;
 }
@@ -99,47 +108,62 @@ const StatCard = ({
   return card;
 };
 
-export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, scopeOrgIds = [], activeView = "list", salesRepFilter = "all", healthScoresMap }: AnewClientsDashboardProps) {
-  const [loading, setLoading] = useState(true);
-  const [initialLoaded, setInitialLoaded] = useState(false);
-  const [stats, setStats] = useState<DashboardStats>({
-    totalClients: 0, activeClients: 0, inactiveClients: 0, newLast30Days: 0,
-    totalContractValue: 0, avgValuePerClient: 0, activeContracts: 0,
-    noContact30d: 0, noContact30dValue: 0, contractsExpiring30d: 0,
-    contractsExpiring30dValue: 0, retentionRate: 0,
-    retentionCohortSize: 0, retentionStillActive: 0,
-    avgHealthScore: 0, activeEntityIds: [],
-  });
-  // Track current entity_ids to filter realtime channels for contracts/interactions
-  const entityIdsRef = useRef<string[]>([]);
+const DEFAULT_STATS: DashboardStats = {
+  totalClients: 0, activeClients: 0, inactiveClients: 0, newLast30Days: 0,
+  totalContractValue: 0, avgValuePerClient: 0, activeContracts: 0,
+  noContact30d: 0, noContact30dValue: 0, contractsExpiring30d: 0,
+  contractsExpiring30dValue: 0, retentionRate: 0,
+  retentionCohortSize: 0, retentionStillActive: 0,
+  avgHealthScore: 0, activeEntityIds: [],
+};
+
+const DASHBOARD_STALE_TIME_MS = 5 * 60 * 1000;
+const DASHBOARD_POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChange, activeView = "list", healthScoresMap }: AnewClientsDashboardProps) {
   const { activeCompany } = useCompany();
-  const { getPermissionScope, anewUserId, loading: scopeLoading } = usePermissionScope();
+  // KPIs feed on client_contracts directly (below), which has its own permission scope —
+  // distinct from (and potentially narrower than) the clients.view scope already applied to
+  // scopedClients by the parent. Both scopes must be respected (see security note below).
+  const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: contractScopeLoading } = usePermissionScope();
 
-  useEffect(() => {
-    if (!scopeLoading) loadDashboardData(true);
-  }, [companyId, activeCompany?.id, scopeLoading, anewUserId, scopeOrgIds, salesRepFilter]);
+  // entity_ids are derived directly from the already-scoped clients prop — no need to wait
+  // for the async KPI fetch to resolve before we know which entities to filter realtime
+  // channels for contracts/interactions.
+  const entityIds = useMemo(
+    () => scopedClients.map((c) => c.entity_id).filter(Boolean),
+    [scopedClients]
+  );
 
-  // Safety-net polling every 5 min (realtime channel below is the primary mechanism)
-  useEffect(() => {
-    if (!initialLoaded || scopeLoading || activeView === "list") return;
-    const interval = setInterval(() => loadDashboardData(false), 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [initialLoaded, scopeLoading, companyId, activeCompany?.id, anewUserId, scopeOrgIds, activeView]);
+  // scopedClients is already a stable useMemo reference from the parent, so depending on
+  // it directly (rather than a hand-rolled id-only signature) refetches whenever any field
+  // the stats depend on (status, assigned_to, created_at, ...) actually changes — not just
+  // when the set of ids changes. Cached across remounts within staleTime, so revisiting this
+  // dashboard tab reuses the previous fetch instead of discarding it and starting over.
+  const { data: stats = DEFAULT_STATS, isLoading: loading, refetch } = useQuery({
+    queryKey: ["clients-dashboard", activeCompany?.id, scopedClients, contractScopeLoading],
+    queryFn: () => loadDashboardData(),
+    staleTime: DASHBOARD_STALE_TIME_MS,
+    // Safety-net polling every 5 min while this view is visible (realtime channel below is
+    // the primary mechanism). Matches the previous manual setInterval behavior, except that
+    // react-query pauses this refetch while the tab is backgrounded/hidden by default
+    // (refetchIntervalInBackground defaults to false) — the old setInterval kept firing
+    // in the background regardless of tab visibility, so this is a (desirable) minor change.
+    refetchInterval: activeView === "list" ? false : DASHBOARD_POLL_INTERVAL_MS,
+    // The previous implementation never refetched on window focus; keep that behavior.
+    refetchOnWindowFocus: false,
+  });
 
   // Realtime: refresh dashboard on any change to clients/contracts/interactions in scope
   useEffect(() => {
-    if (!initialLoaded || scopeLoading) return;
-    const orgIds = companyId
-      ? [companyId]
-      : scopeOrgIds.length > 0
-        ? scopeOrgIds
-        : (activeCompany?.id ? [activeCompany.id] : []);
+    if (loading) return;
+    const orgIds = activeCompany?.id ? [activeCompany.id] : [];
     if (orgIds.length === 0) return;
     const orgSet = new Set(orgIds);
     let timer: number | null = null;
     const trigger = () => {
       if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => loadDashboardData(false), 1500);
+      timer = window.setTimeout(() => { void refetch(); }, 1500);
     };
 
     const channel = supabase.channel('anew-clients-dashboard-realtime');
@@ -150,7 +174,6 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
     });
 
     // For contracts/interactions: filter by current entity_ids when ≤100; otherwise accept all
-    const entityIds = entityIdsRef.current;
     const useEntityFilter = entityIds.length > 0 && entityIds.length <= 100;
     const filterStr = useEntityFilter ? `entity_id=in.(${entityIds.join(',')})` : undefined;
     const entitySet = useEntityFilter ? new Set(entityIds) : null;
@@ -178,49 +201,11 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
       if (timer) window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [initialLoaded, scopeLoading, companyId, activeCompany?.id, scopeOrgIds, stats.activeEntityIds.length]);
+  }, [loading, activeCompany?.id, entityIds, refetch]);
 
-  const loadDashboardData = async (isInitial = true) => {
-    if (isInitial) setLoading(true);
+  const loadDashboardData = async (): Promise<DashboardStats> => {
     try {
-      const viewScope = getPermissionScope("clients.view");
-      if (viewScope === "NONE") {
-        setStats({
-          totalClients: 0, activeClients: 0, inactiveClients: 0, newLast30Days: 0,
-          totalContractValue: 0, avgValuePerClient: 0, activeContracts: 0,
-          noContact30d: 0, noContact30dValue: 0, contractsExpiring30d: 0,
-          contractsExpiring30dValue: 0, retentionRate: 0,
-          retentionCohortSize: 0, retentionStillActive: 0,
-          avgHealthScore: 0, activeEntityIds: [],
-        });
-        setLoading(false); return;
-      }
-
-      let internalUserId: string | null = anewUserId || null;
-      let authUserId: string | null = null;
-      if (viewScope === "OWNED") {
-        const { data: authUser } = await supabase.auth.getUser();
-        authUserId = authUser?.user?.id || null;
-        if (!internalUserId && authUserId) {
-          const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", authUserId).maybeSingle();
-          internalUserId = anewUser?.id || null;
-        }
-      }
-
-      let clientQuery = (supabase as any).from("anew_clients").select("id, entity_id, status, created_by, assigned_to, created_at").is("deleted_at", null);
-      if (companyId) clientQuery = clientQuery.eq("organization_id", companyId);
-      else if (scopeOrgIds.length > 0) clientQuery = clientQuery.in("organization_id", scopeOrgIds);
-      else if (activeCompany?.id) clientQuery = clientQuery.eq("organization_id", activeCompany.id);
-      if (viewScope === "OWNED" && internalUserId) {
-        clientQuery = clientQuery.or(`assigned_to.eq.${internalUserId},created_by.eq.${internalUserId}`);
-      }
-
-      const { data: clientsList, error } = await clientQuery;
-      if (error) throw error;
-      // Apply salesRep filter client-side
-      const list = salesRepFilter !== "all" 
-        ? (clientsList || []).filter((c: any) => c.assigned_to === salesRepFilter)
-        : (clientsList || []);
+      const list = scopedClients;
 
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -237,7 +222,7 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
       const activeEntityIdSet = new Set<string>(
         activeClientsList.map((c: any) => c.entity_id).filter(Boolean)
       );
-      const entityIds = list.map((c: any) => c.entity_id).filter(Boolean);
+      // entityIds mirrors the component-level `entityIds` memo (both derived from scopedClients).
       let totalContractValue = 0;
       let activeContracts = 0;
       let contractsExpiring30d = 0;
@@ -258,15 +243,47 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
         return results;
       };
 
-      if (entityIds.length > 0) {
+      // client_contracts.view scope: NONE → skip entirely; OWNED/TEAM → restrict to allowed
+      // creators (fail closed to an empty set when unresolved, never fall back to "all").
+      const contractViewScope: ScopeLevel = getPermissionScope("client_contracts.view");
+      let contractCreatorFilter: string[] | null = null; // null = ORG (no creator restriction)
+      if (contractViewScope === "OWNED") {
+        contractCreatorFilter = scopeAnewUserId ? [scopeAnewUserId] : [];
+      } else if (contractViewScope === "TEAM") {
+        const allowed = new Set<string>();
+        if (scopeAnewUserId) allowed.add(scopeAnewUserId);
+        teamMemberIds.forEach((id) => allowed.add(id));
+        contractCreatorFilter = Array.from(allowed);
+      } else if (contractViewScope === "NONE") {
+        contractCreatorFilter = [];
+      }
+      const contractScopeBlocked =
+        contractScopeLoading ||
+        contractViewScope === "NONE" ||
+        ((contractViewScope === "OWNED" || contractViewScope === "TEAM") && contractCreatorFilter?.length === 0);
+
+      // organization scope: activeCompany not resolved yet → fail closed, skip the contract
+      // query entirely rather than silently omitting the organization filter (never leak
+      // cross-tenant data). Same guard as ClientsValueView.tsx / ClientsRetentionView.tsx.
+      const orgScopeBlocked = !activeCompany?.id;
+      if (entityIds.length > 0 && !contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
+        const organizationId = activeCompany.id;
         const contractBatches: string[][] = [];
         for (let i = 0; i < entityIds.length; i += 100) {
           contractBatches.push(entityIds.slice(i, i + 100));
         }
         const contractTasks = contractBatches.map((batch) => async () => {
-          const { data } = await supabase.from("client_contracts")
+          const q = supabase.from("client_contracts")
             .select("id, entity_id, status, total_value, end_date")
-            .in("entity_id", batch);
+            .in("entity_id", batch)
+            .is("deleted_at", null)
+            .eq("organization_id", organizationId);
+          const scopedQuery = contractCreatorFilter ? q.in("created_by", contractCreatorFilter) : q;
+          const { data, error } = await scopedQuery;
+          if (error) {
+            console.error("Error loading contracts batch for clients dashboard:", error);
+            return [];
+          }
           return data || [];
         });
         const contractResults = await runWithLimit(contractTasks, 4);
@@ -353,9 +370,8 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
       }
 
       const activeEntityIdsArr = Array.from(activeEntityIdSet);
-      entityIdsRef.current = entityIds;
 
-      setStats({
+      return {
         totalClients, activeClients, inactiveClients, newLast30Days,
         totalContractValue, avgValuePerClient, activeContracts,
         noContact30d, noContact30dValue,
@@ -365,11 +381,10 @@ export function AnewClientsDashboard({ companyId, activeFilter, onFilterChange, 
         retentionStillActive: stillActiveCohort.length,
         avgHealthScore,
         activeEntityIds: activeEntityIdsArr,
-      });
+      };
     } catch (error) {
       console.error("Error loading clients dashboard:", error);
-    } finally {
-      if (isInitial) { setLoading(false); setInitialLoaded(true); }
+      throw error;
     }
   };
 

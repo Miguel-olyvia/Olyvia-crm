@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { withAuditContext } from "@/utils/auditContext";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -21,8 +23,38 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
-import { calculateHealthScore } from "@/hooks/useContactHealthScore";
+import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
+
+/**
+ * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
+ * ["rpc_update_client"]["Args"]`) has not yet been regenerated to include the
+ * 4 additive trailing address params added in
+ * supabase/migrations/20260902010000_contacts_clients_atomic_create_and_fixes.sql
+ * (p_address_street/p_address_city/p_address_postal_code/p_address_number,
+ * all optional). This local type reflects the current SQL function signature;
+ * it does not change what the compiler enforces.
+ */
+type RpcUpdateClientArgs = {
+  p_assigned_to: string | null;
+  p_client_id: string;
+  p_display_name: string;
+  p_email: string | null;
+  p_entity_id: string | null;
+  p_norm_first: string;
+  p_norm_last: string;
+  p_notes: string | null;
+  p_phone: string | null;
+  p_phone_country: string | null;
+  p_status: string;
+  p_vat: string | null;
+  p_address_street?: string | null;
+  p_address_city?: string | null;
+  p_address_postal_code?: string | null;
+  p_address_number?: string | null;
+};
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
 import { ClientSummaryBar } from "@/components/clients/detail/ClientSummaryBar";
@@ -49,6 +81,38 @@ interface ClientDetailsDialogProps {
   onOpenChange: (open: boolean) => void;
   onClientUpdated?: () => void;
 }
+
+interface TimelineExtraEvent {
+  id: string;
+  type: string;
+  title: string;
+  description: string | null;
+  date: string;
+  actor: string | null;
+}
+
+// PT labels for audited field names surfaced in the unified timeline.
+const CLIENT_FIELD_LABELS: Record<string, string> = {
+  display_name: "nome",
+  first_name: "nome próprio",
+  last_name: "apelido",
+  status: "estado",
+  email: "email",
+  phone: "telefone",
+  phone_number: "telefone",
+  notes: "notas",
+  assigned_to: "responsável",
+  vat: "NIF",
+  type: "tipo",
+};
+
+const clientFieldLabel = (field: string): string =>
+  CLIENT_FIELD_LABELS[field] || field.replace(/_/g, " ");
+
+const CLIENT_AUDIT_IGNORED_FIELDS = new Set([
+  "id", "entity_id", "organization_id", "root_organization_id",
+  "created_at", "updated_at", "created_by", "search_text",
+]);
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
@@ -85,6 +149,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const { t } = useTranslation();
 
   const [interactions, setInteractions] = useState<any[]>([]);
+  const [historyEvents, setHistoryEvents] = useState<TimelineExtraEvent[]>([]);
   const [portalSends, setPortalSends] = useState<any[]>([]);
   const [tags, setTags] = useState<{ id: string; tag: string; color: string | null }[]>([]);
   const [sourceLead, setSourceLead] = useState<any>(null);
@@ -109,6 +174,22 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     assigned_to: "" as string | null,
   });
   const [orgUsers, setOrgUsers] = useState<{ id: string; name: string }[]>([]);
+  const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
+
+  // SECURITY: scope the assignable-users list to the viewer's clients.edit
+  // scope. Never let ORG-scoped teamMemberIds leak into an OWNED/NONE view —
+  // see SECURITY comment in src/lib/contacts/scope.ts.
+  const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds } = usePermissionScope();
+  const scopedOrgUsers = useMemo(() => {
+    const scope = getPermissionScope("clients.edit");
+    if (scope === "ORG") return orgUsers;
+    if (scope === "TEAM") {
+      const allowedIds = new Set<string>([scopeAnewUserId, ...teamMemberIds].filter(Boolean) as string[]);
+      return orgUsers.filter(u => allowedIds.has(u.id));
+    }
+    // OWNED or NONE: only the viewer themselves
+    return orgUsers.filter(u => u.id === scopeAnewUserId);
+  }, [orgUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const [dealFormData, setDealFormData] = useState({ title: "", description: "", value: "", stage_id: "", expected_close_date: "" });
   const [dealLineItems, setDealLineItems] = useState<CatalogLineItem[]>([]);
@@ -177,6 +258,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
     setSelectedNewListIds(new Set());
     setShowAddListForm(false);
+    setEditFormErrors({});
 
     return () => { isCancelled = true; };
   }, [open, client]);
@@ -254,6 +336,83 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         setPortalSends([]);
       }
 
+      // Lifecycle history + field-diff audit log for the unified timeline.
+      const [lifecycleRes, auditRes] = await Promise.all([
+        (supabase as any)
+          .from("anew_entity_history")
+          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at")
+          .eq("entity_id", entityId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+        (supabase as any)
+          .from("entity_audit_log")
+          .select("id, table_name, operation, changed_fields, changed_by, created_at")
+          .eq("entity_id", entityId)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+
+      // Resolve history/audit actors not already in the map.
+      const historyActorIds = [
+        ...(lifecycleRes.data || []).map((d: any) => d.changed_by),
+        ...(auditRes.data || []).map((d: any) => d.changed_by),
+      ].filter((id: string | null): id is string => !!id && !userMapLocal[id]);
+      const uniqueHistoryActorIds = [...new Set(historyActorIds)];
+      if (uniqueHistoryActorIds.length > 0) {
+        const { data: histUsers } = await supabase.from("anew_users").select("id, name").in("id", uniqueHistoryActorIds);
+        (histUsers || []).forEach((u: any) => { if (u.name) userMapLocal[u.id] = u.name; });
+      }
+
+      const lifecycleEvents: TimelineExtraEvent[] = (lifecycleRes.data || []).map((d: any) => {
+        const isCreated = d.change_type === "created";
+        const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
+        const type = isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
+
+        let title: string;
+        let description: string | null = null;
+        if (isCreated) {
+          title = "Entidade criada";
+        } else if (isRoleStatus) {
+          title = "Estado do ciclo de vida alterado";
+          description = d.old_value && d.new_value ? `${d.old_value} → ${d.new_value}` : (d.new_value || null);
+        } else {
+          title = `Editou ${d.field_name ? clientFieldLabel(d.field_name) : "campo"}`;
+          description = d.old_value || d.new_value ? `${d.old_value ?? "—"} → ${d.new_value ?? "—"}` : null;
+        }
+
+        return {
+          id: `lifecycle-${d.id}`,
+          type,
+          title,
+          description,
+          date: d.created_at,
+          actor: d.changed_by ? (userMapLocal[d.changed_by] || null) : null,
+        };
+      });
+
+      const auditEvents: TimelineExtraEvent[] = [];
+      for (const row of (auditRes.data || []) as any[]) {
+        const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
+        if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
+          Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
+            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))
+            .forEach(([field, diff], idx) => {
+              const oldVal = diff?.old == null ? "—" : String(diff.old);
+              const newVal = diff?.new == null ? "—" : String(diff.new);
+              auditEvents.push({
+                id: `audit-${row.id}-${idx}`,
+                type: "field_change",
+                title: `Editou ${clientFieldLabel(field)}`,
+                description: `${oldVal} → ${newVal}`,
+                date: row.created_at,
+                actor,
+              });
+            });
+        }
+      }
+
+      setHistoryEvents([...lifecycleEvents, ...auditEvents]);
+
       setUserMap(userMapLocal);
     } catch (e) {
       console.error("Error loading enriched data:", e);
@@ -261,21 +420,51 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   };
 
   // Computed values
+  //
+  // Uses the same calculateClientHealth shared utility as the Clients list
+  // (AnewClients.tsx via useClientEnrichedData) so this detail dialog can
+  // never again show a different score/level for the same client than the
+  // list row does. hasCompany defaults to false: this dialog doesn't load
+  // entity-type data, so that single minor data-completeness signal (worth
+  // up to 5 of 100 points) is conservatively omitted rather than guessed.
   const healthScore = useMemo(() => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const count30d = interactions.filter(i => new Date(i.interaction_at) >= thirtyDaysAgo).length;
     const lastInteraction = interactions[0]?.interaction_at || client?.last_interaction_at || null;
-    return calculateHealthScore({
-      lastInteractionAt: lastInteraction,
-      hasActiveDeal: deals.length > 0,
-      hasActiveProposal: proposals.length > 0,
-      hasEmail: !!client?.email,
-      hasPhone: !!client?.phone,
-      hasVat: !!client?.vat,
-      interactionCount30d: count30d,
-    });
-  }, [interactions, deals, proposals, client]);
+    const lastSentimentInteraction = interactions.find(i => i.sentiment);
+
+    const interactionInfo: ClientInteractionInfo | undefined = lastInteraction
+      ? {
+          lastInteractionAt: lastInteraction,
+          interactionCount30d: count30d,
+          lastSentiment: (lastSentimentInteraction?.sentiment as ClientInteractionInfo["lastSentiment"]) ?? null,
+        }
+      : undefined;
+
+    const activeContracts = contracts.filter(c => c.status === "active" || c.status === "signed");
+    const contractInfo: ClientContractInfo = {
+      activeCount: activeContracts.length,
+      totalValue: activeContracts.reduce((sum, c) => sum + (c.total_value || 0), 0),
+      expiringContracts: activeContracts
+        .filter((c): c is typeof c & { end_date: string } => !!c.end_date)
+        .filter(c => {
+          const days = differenceInDays(new Date(c.end_date), new Date());
+          return days >= 0 && days <= 30;
+        })
+        .map(c => ({ id: c.id, end_date: c.end_date, total_value: c.total_value || 0 })),
+    };
+
+    return calculateClientHealth(
+      interactionInfo,
+      contractInfo,
+      !!client?.email,
+      !!client?.phone,
+      !!client?.vat,
+      false,
+      client?.status,
+    );
+  }, [interactions, contracts, client]);
 
   const totalValue = useMemo(() => {
     const contractVal = contracts.filter(c => c.status === "active" || c.status === "signed").reduce((s, c) => s + (c.total_value || 0), 0);
@@ -348,7 +537,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         actor: s.actorId ? (userMap[s.actorId] || null) : null,
       });
     });
-    if (client?.created_at) {
+    // Lifecycle + field-diff history from anew_entity_history / entity_audit_log.
+    historyEvents.forEach(h => events.push({ ...h, sentiment: null }));
+    // Synthetic "converted to client" event — only when the entity history has no
+    // creation/lifecycle row already, to avoid duplicate creation entries.
+    const hasLifecycleCreation = historyEvents.some(h => h.id.startsWith("lifecycle-") && h.type === "conversion");
+    if (client?.created_at && !hasLifecycleCreation) {
       events.push({
         id: "client-created", type: "conversion",
         title: "Convertido para Cliente",
@@ -356,9 +550,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         date: client.client_since || client.created_at, actor: null,
       });
     }
-    events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    return events;
-  }, [interactions, sendEvents, client, sourceLead, userMap]);
+    // Dedupe field-diff events recorded by both anew_entity_history and entity_audit_log.
+    const seenFieldChanges = new Set<string>();
+    const deduped = events.filter((e) => {
+      if (e.type !== "field_change") return true;
+      const minute = new Date(e.date).toISOString().slice(0, 16);
+      const key = `${e.title}|${e.description ?? ""}|${minute}`;
+      if (seenFieldChanges.has(key)) return false;
+      seenFieldChanges.add(key);
+      return true;
+    });
+    deduped.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return deduped;
+  }, [interactions, sendEvents, client, sourceLead, userMap, historyEvents]);
 
   const interactionCount30d = useMemo(() => {
     const d = new Date(); d.setDate(d.getDate() - 30);
@@ -470,9 +674,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
     const validation = schema.safeParse(editFormData);
     if (!validation.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of validation.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setEditFormErrors(nextErrors);
       toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    setEditFormErrors({});
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -481,49 +692,36 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const entityId = client.entity_id;
 
       if (entityId) {
-        const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
-        const displayName = composeDisplayName(normalized.first, normalized.last);
-        await (supabase as any).from("anew_entities").update({ display_name: displayName, first_name: normalized.first, last_name: normalized.last, updated_at: new Date().toISOString() }).eq("id", entityId);
-        if (editFormData.email) {
-          const { data: existingEmail } = await (supabase as any).from("anew_entity_emails").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingEmail) await (supabase as any).from("anew_entity_emails").update({ email: editFormData.email }).eq("id", existingEmail.id);
-          else await (supabase as any).from("anew_entity_emails").insert({ entity_id: entityId, email: editFormData.email, is_primary: true, email_type: "personal", created_by: businessUserId });
-        }
-        if (editFormData.phone) {
-          const { data: existingPhone } = await (supabase as any).from("anew_entity_phones").select("id").eq("entity_id", entityId).eq("is_primary", true).maybeSingle();
-          if (existingPhone) await (supabase as any).from("anew_entity_phones").update({ phone_number: editFormData.phone, country_code: editFormData.phone_country_code }).eq("id", existingPhone.id);
-          else await (supabase as any).from("anew_entity_phones").insert({ entity_id: entityId, phone_number: editFormData.phone, country_code: editFormData.phone_country_code, is_primary: true, phone_type: "mobile", created_by: businessUserId });
-        }
-        await (supabase as any).from("anew_clients").update({ status: editFormData.status, notes: editFormData.notes || null, assigned_to: editFormData.assigned_to || null, updated_at: new Date().toISOString() }).eq("id", client.id);
-
-        // Save VAT/NIF via fiscal_entities + anew_entity_fiscal_entities
-        if (editFormData.vat) {
-          const { data: existingFiscalLink } = await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .select("id, fiscal_entity_id")
-            .eq("entity_id", entityId)
-            .eq("is_primary", true)
-            .maybeSingle();
-
-          if (existingFiscalLink) {
-            // Update existing fiscal entity NIF
-            await (supabase as any).from("fiscal_entities").update({ nif: editFormData.vat, updated_at: new Date().toISOString() }).eq("id", existingFiscalLink.fiscal_entity_id);
-          } else {
-            // Create new fiscal entity and link
-            const { data: newFiscal } = await (supabase as any).from("fiscal_entities").insert({ nif: editFormData.vat, country_code: "PT", created_by: businessUserId }).select("id").single();
-            if (newFiscal) {
-              await (supabase as any).from("anew_entity_fiscal_entities").insert({ entity_id: entityId, fiscal_entity_id: newFiscal.id, is_primary: true, created_by: businessUserId });
-            }
-          }
-        } else {
-          // If VAT was cleared, close the fiscal link
-          await (supabase as any)
-            .from("anew_entity_fiscal_entities")
-            .update({ valid_to: new Date().toISOString() })
-            .eq("entity_id", entityId)
-            .eq("is_primary", true)
-            .is("valid_to", null);
-        }
+        await withAuditContext(supabase, businessUserId, async () => {
+          const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
+          const displayName = composeDisplayName(normalized.first, normalized.last);
+          const nif = editFormData.vat || null;
+          const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
+            p_client_id: client.id,
+            p_entity_id: entityId,
+            p_display_name: displayName,
+            p_norm_first: normalized.first,
+            p_norm_last: normalized.last,
+            p_email: editFormData.email || null,
+            p_phone: editFormData.phone || null,
+            p_phone_country: editFormData.phone_country_code || null,
+            p_vat: editFormData.vat || null,
+            p_status: editFormData.status,
+            p_notes: editFormData.notes || null,
+            p_assigned_to: editFormData.assigned_to || null,
+            // Address fields were captured in editFormData (populated from the
+            // client's primary anew_addresses row) but were previously never sent
+            // to the RPC, silently dropping any address edit. The edit form only
+            // exposes a single combined "address" text input (no separate
+            // street/number split), so — matching rpc_update_contact's own
+            // single p_address convention — it is sent as street with no number.
+            p_address_street: editFormData.address || null,
+            p_address_city: editFormData.city || null,
+            p_address_postal_code: editFormData.postal_code || null,
+            p_address_number: null,
+          } satisfies RpcUpdateClientArgs, nif);
+          if (rpcError) throw rpcError;
+        });
       }
 
       toast({ title: "Cliente actualizado" });
@@ -644,6 +842,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
 
       // Trigger workflow automation (e.g., auto-create quote)
+      let workflowFailed = false;
       if (newDeal?.id && selectedStageId) {
         try {
           await supabase.functions.invoke('execute-workflow', {
@@ -657,10 +856,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           });
         } catch (wfErr) {
           console.error("Workflow execution error:", wfErr);
+          workflowFailed = true;
         }
       }
 
-      toast({ title: "Deal criado com sucesso" });
+      if (workflowFailed) {
+        toast({
+          title: "Deal criado, mas a automação falhou",
+          description: "O deal foi criado com sucesso, mas não foi possível executar a automação associada.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Deal criado com sucesso" });
+      }
       setShowDealForm(false);
       setDealFormData({ title: "", description: "", value: "", stage_id: dealStages[0]?.id || "", expected_close_date: "" });
       setDealLineItems([]);
@@ -832,7 +1040,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 <TabsList className="inline-flex w-auto min-w-full">
                   <TabsTrigger value="summary">📊 Resumo</TabsTrigger>
                   <TabsTrigger value="timeline">
-                    📜 Timeline {interactions.length > 0 && <Badge className="ml-1" variant="secondary">{interactions.length}</Badge>}
+                    📜 Timeline {timelineEvents.length > 0 && <Badge className="ml-1" variant="secondary">{timelineEvents.length}</Badge>}
                   </TabsTrigger>
                   <TabsTrigger value="contracts">
                     📑 Contratos {activeContractCount > 0 && <Badge className="ml-1" variant="secondary">{activeContractCount}</Badge>}
@@ -848,7 +1056,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                   </TabsTrigger>
                   <TabsTrigger value="notes">📝 Notas</TabsTrigger>
                   <TabsTrigger value="journey">🗺 Percurso</TabsTrigger>
-                  <TabsTrigger value="edit">✏️ Editar</TabsTrigger>
+                  <PermissionGate permission="clients.edit">
+                    <TabsTrigger value="edit">✏️ Editar</TabsTrigger>
+                  </PermissionGate>
                 </TabsList>
               </div>
 
@@ -865,12 +1075,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* TIMELINE */}
               <TabsContent value="timeline">
-                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} />
+                <ContactTimelineTab events={timelineEvents} onRegisterCall={() => setShowCallDialog(true)} entityId={client?.entity_id} />
               </TabsContent>
 
               {/* CONTRACTS */}
               <TabsContent value="contracts">
-                {client.entity_id && client.organization_id && <ClientContractsTab entityId={client.entity_id} organizationId={client.organization_id} />}
+                {client.entity_id && client.organization_id && <ClientContractsTab entityId={client.entity_id} clientId={client.id} organizationId={client.organization_id} />}
               </TabsContent>
 
               {/* DEALS */}
@@ -924,7 +1134,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <TabsContent value="proposals" className="space-y-4 mt-4">
                 {!showProposalForm ? (
                   <>
-                    <Button onClick={() => setShowProposalForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Nova Proposta</Button>
+                    <PermissionGate permission="proposals.create">
+                      <Button onClick={() => setShowProposalForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Nova Proposta</Button>
+                    </PermissionGate>
                     {proposals.length === 0 ? (
                       <div className="text-center py-8"><FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" /><p className="text-muted-foreground">Sem propostas</p></div>
                     ) : (
@@ -988,13 +1200,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* EDIT */}
               <TabsContent value="edit" className="space-y-4 mt-4">
+              <PermissionGate
+                permission="clients.edit"
+                fallback={<p className="text-sm text-muted-foreground py-8 text-center">Sem permissão para editar clientes.</p>}
+              >
                 <form onSubmit={handleUpdateClient} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required /></div>
-                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} /></div>
-                    <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} /></div>
-                    <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} /></div>
-                    <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" /></div>
+                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
+                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
+                    <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>
+                    <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />{editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}</div>
                     <div className="space-y-2">
                       <Label>Estado</Label>
                       <Select value={editFormData.status} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>
@@ -1016,7 +1232,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                         <SelectTrigger><SelectValue placeholder="Selecionar comercial..." /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="unassigned">Não atribuído</SelectItem>
-                          {orgUsers.map(user => (
+                          {scopedOrgUsers.map(user => (
                             <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -1039,6 +1255,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                     <Button type="submit">Guardar Alterações</Button>
                   </div>
                 </form>
+              </PermissionGate>
               </TabsContent>
             </Tabs>
           </div>
@@ -1105,10 +1322,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                 <Undo2 className="h-4 w-4 text-primary" />
               </div>
-              Reverter para Contacto
+              Reverter para Lead
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acção vai reverter este cliente para contacto. O registo de cliente será desactivado e o contacto original será restaurado.
+              Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

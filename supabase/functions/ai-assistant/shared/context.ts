@@ -58,9 +58,10 @@ export async function buildExecCtx(args: {
   const uctx = userContext as any;
   const memberships: Membership[] = Array.isArray(uctx.memberships) ? uctx.memberships : [];
   const permissions: string[] = uctx.permissions;
-  const isSystemAdmin: boolean =
-    uctx.is_system_admin === true ||
-    memberships.some((m) => m.role_code === "system_admin" || m.role_code === "super_admin");
+  // is_system_admin from get_user_context() is already the canonical, correctly
+  // scoped global-admin flag (system_admin only) — do not re-widen it to include
+  // super_admin, which is a tenant-scoped role and must not bypass permission checks.
+  const isSystemAdmin: boolean = uctx.is_system_admin === true;
   const businessUserId: string = uctx.business_user_id || caller.anewUserId;
 
   const ctx: ExecCtx = {

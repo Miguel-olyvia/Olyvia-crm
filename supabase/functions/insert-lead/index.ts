@@ -1,6 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   first_name: z.string(),
@@ -30,6 +34,7 @@ import {
   cleanupCreatedEntityArtifacts,
   resolveRootOrganizationId,
   validateInsertLeadCampaign,
+  validateLocationDistrict,
 } from '../_shared/leadsValidation.ts';
 
 const corsHeaders = {
@@ -89,33 +94,10 @@ interface AutoScheduleResult {
   error?: string;
 }
 
-// --- Rate limiting by API key (10 req/min) ---
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT = 10;
-const RATE_WINDOW = 60_000;
-
-function checkRateLimit(key: string): Response | null {
-  const now = Date.now();
-  const entry = rateLimitMap.get(key);
-  if (entry && now < entry.resetAt) {
-    entry.count++;
-    if (entry.count > RATE_LIMIT) {
-      return new Response(
-        JSON.stringify({ error: 'Too many requests' }),
-        { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Retry-After': '60' } }
-      );
-    }
-  } else {
-    rateLimitMap.set(key, { count: 1, resetAt: now + RATE_WINDOW });
-  }
-  // Cleanup old entries
-  if (rateLimitMap.size > 10000) {
-    for (const [k, v] of rateLimitMap) {
-      if (now > v.resetAt) rateLimitMap.delete(k);
-    }
-  }
-  return null;
-}
+// --- Rate limiting by API key (10 req/min), persistent (DB-backed) ---
+const RATE_LIMIT_BUCKET = 'insert-lead';
+const RATE_LIMIT_MAX_ATTEMPTS = 10;
+const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 // --- Input validation ---
 function validateFieldValues(fields: Record<string, any>): string | null {
@@ -142,13 +124,21 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Rate limit by API key
-    const rateLimitResponse = checkRateLimit(apiKey);
-    if (rateLimitResponse) return rateLimitResponse;
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Rate limit by API key — persistent, DB-backed
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: apiKey,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, apiKey);
 
     // Validate API token against scoped_api_tokens using organization_id
     const { data: scopedToken, error: scopedError } = await supabase
@@ -211,10 +201,12 @@ Deno.serve(async (req) => {
       }
     }
 
+    let campaignLocationRequired = false;
+    let campaignFormId: string | null = null;
     if (leadData.campaign_id) {
       const { data: campaign, error: campaignError } = await supabase
         .from('campaigns')
-        .select('id, organization_id, status')
+        .select('id, organization_id, status, form_id, location_required')
         .eq('id', leadData.campaign_id)
         .maybeSingle();
 
@@ -235,21 +227,46 @@ Deno.serve(async (req) => {
           { status: campaignValidation.status || 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
+
+      campaignLocationRequired = !!campaign?.location_required;
+      campaignFormId = campaign?.form_id ?? null;
     }
 
     const rootOrganizationId = await resolveRootOrganizationId(supabase, organizationId) || organizationId;
 
-    // Find an admin user for created_by via anew_memberships
-    const { data: adminMembership } = await supabase
-      .from('anew_memberships')
-      .select('user_id, anew_roles!inner(code)')
-      .eq('organization_id', rootOrganizationId)
-      .eq('status', 'active')
-      .in('anew_roles.code', ['super_admin', 'admin', 'org_admin'])
-      .limit(1)
-      .maybeSingle();
+    // Find an admin user for created_by via anew_memberships.
+    // anew_memberships has no FK constraints, so PostgREST cannot resolve an
+    // embedded `anew_roles!inner(code)` select/filter (PGRST200). Resolve the
+    // admin role ids first, then match memberships against them.
+    const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
+    const { data: adminRoleRows, error: adminRoleError } = await supabase
+      .from('anew_roles')
+      .select('id')
+      .in('code', adminRoleCodes);
 
-    const createdBy = adminMembership?.user_id || null;
+    if (adminRoleError) {
+      console.error('insert-lead: error fetching admin role ids:', adminRoleError);
+    }
+
+    const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
+
+    let createdBy: string | null = null;
+    if (adminRoleIds.length > 0) {
+      const { data: adminMembership, error: adminMembershipError } = await supabase
+        .from('anew_memberships')
+        .select('user_id')
+        .eq('organization_id', rootOrganizationId)
+        .eq('status', 'active')
+        .in('role_id', adminRoleIds)
+        .limit(1)
+        .maybeSingle();
+
+      if (adminMembershipError) {
+        console.error('insert-lead: error fetching admin membership:', adminMembershipError);
+      }
+
+      createdBy = adminMembership?.user_id || null;
+    }
 
     // Build field_values JSONB from lead data
     // Normalize first/last name to defend against integrations that send the
@@ -281,6 +298,53 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: mergedValidation }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // CRITICAL: server-side enforcement of location_required/allowed_districts.
+    // insert-lead is a scoped-API-key public-ish endpoint (no interactive form),
+    // but a caller can still pass a district value in custom_fields — validate
+    // it the same way create-lead/update-lead do, mirroring get-form-data.
+    if (leadData.campaign_id && (campaignLocationRequired || campaignFormId)) {
+      let locationDefs: Array<{ field_key?: string | null; field_type?: string | null; field_label?: string | null }> = [];
+      let insertFormLocationRequired = false;
+      if (campaignFormId) {
+        const { data: formLocationData } = await supabase
+          .from('forms')
+          .select('location_required')
+          .eq('id', campaignFormId)
+          .maybeSingle();
+        insertFormLocationRequired = !!formLocationData?.location_required;
+
+        const { data: formFieldDefs } = await supabase
+          .from('form_fields')
+          .select('field_key, field_type, field_label')
+          .eq('form_id', campaignFormId)
+          .eq('is_active', true);
+        locationDefs = formFieldDefs || [];
+      } else {
+        const { data: fieldDefs } = await supabase
+          .from('lead_field_definitions')
+          .select('field_key, field_type, field_label')
+          .eq('campaign_id', leadData.campaign_id)
+          .eq('is_active', true);
+        locationDefs = fieldDefs || [];
+      }
+
+      const locationValidation = await validateLocationDistrict({
+        supabase,
+        campaignId: leadData.campaign_id,
+        campaignLocationRequired,
+        formId: campaignFormId,
+        formLocationRequired: insertFormLocationRequired,
+        definitions: locationDefs,
+        fieldValues,
+      });
+      if (!locationValidation.ok) {
+        return new Response(
+          JSON.stringify({ error: locationValidation.error }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     // --- Defensive sanitization. Rejects corrupted emails/phones, dedupes
@@ -428,6 +492,7 @@ Deno.serve(async (req) => {
         .from('anew_entity_roles')
         .select('role, status')
         .eq('entity_id', entityId)
+        .eq('organization_id', organizationId)
         .in('role', ['contact', 'client'])
         .eq('status', 'active');
       existingRoles = (roles || []).map((r: any) => r.role);
@@ -572,6 +637,7 @@ Deno.serve(async (req) => {
 
   } catch (error: any) {
     console.error('Error in insert-lead function:', error);
+    await captureError(error, { function: "insert-lead" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -1,5 +1,10 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { orderByLeastBusy } from "../_shared/leastBusy.ts";
+
+initSentry();
 
 const requestSchema = z.object({
   form_id: z.string(),
@@ -7,6 +12,7 @@ const requestSchema = z.object({
   slot_start: z.string().refine(val => !isNaN(Date.parse(val)), { message: "Invalid datetime" }),
   slot_end: z.string().refine(val => !isNaN(Date.parse(val)), { message: "Invalid datetime" }),
   postal_code: z.string().optional(),
+  district_id: z.string().uuid().optional(),
   field_values: z.record(z.unknown()),
   campaign_id: z.string().optional(),
   source_id: z.string().optional(),
@@ -17,6 +23,10 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
+
+const RATE_LIMIT_BUCKET = 'book-slot';
+const RATE_LIMIT_MAX_ATTEMPTS = 5;
+const RATE_LIMIT_WINDOW_MINUTES = 5;
 
 /**
  * Book Slot API
@@ -43,6 +53,23 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Rate limiting check — persistent, DB-backed; must come before any other DB work
+    const clientIp = getClientIp(req);
+    const rateLimit = await checkRateLimit(supabase, {
+      bucket: RATE_LIMIT_BUCKET,
+      identifier: clientIp,
+      maxAttempts: RATE_LIMIT_MAX_ATTEMPTS,
+      windowMinutes: RATE_LIMIT_WINDOW_MINUTES,
+    });
+    if (!rateLimit.allowed) {
+      return rateLimitResponse(rateLimit, corsHeaders);
+    }
+    await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
+
     const body = await req.json();
     const parsed = requestSchema.safeParse(body);
     if (!parsed.success) {
@@ -57,15 +84,12 @@ Deno.serve(async (req: Request) => {
       slot_start,
       slot_end,
       postal_code,
+      district_id,
       field_values,
       campaign_id,
       source_id,
       lead_id,
     } = parsed.data;
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // 1. Get form info
     const { data: form, error: formError } = await supabase
@@ -125,57 +149,49 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 3. Find a resource with availability at the requested slot
+    // 3. Find a resource with availability at the requested slot.
+    // find_nearest_resources already applies the district-coverage-with-
+    // fallback rule and excludes resources at max_daily_capacity for this
+    // date (get_resource_available_slots enforces that). Among the
+    // resources that actually have the exact requested slot, assignment
+    // uses the same least_busy strategy as the internal auto-schedule flow
+    // (supabase/functions/_shared/leastBusy.ts) — not a second, parallel
+    // "fewest bookings" implementation.
     let assignedResourceId: string | null = null;
 
-    if (postal_code) {
-      // Use proximity-based search
-      const { data: resources } = await supabase.rpc('find_nearest_resources', {
-        p_target_postal_code: postal_code,
-        p_board_id: boardId,
-        p_target_date: slot_start.split('T')[0],
-        p_duration_minutes: durationMinutes,
-        p_limit: 10,
+    const { data: resources } = await supabase.rpc('find_nearest_resources', {
+      p_target_postal_code: postal_code || null,
+      p_board_id: boardId,
+      p_target_date: slot_start.split('T')[0],
+      p_duration_minutes: durationMinutes,
+      p_limit: 50,
+      p_district_id: district_id || null,
+    });
+
+    const candidatesWithSlot = (resources || []).filter((res: any) => {
+      const slots = res.available_slots || [];
+      return slots.some((s: any) =>
+        new Date(s.start).getTime() === new Date(slot_start).getTime() &&
+        new Date(s.end).getTime() === new Date(slot_end).getTime()
+      );
+    });
+
+    const orderedCandidates = await orderByLeastBusy(
+      supabase,
+      candidatesWithSlot.map((res: any) => ({ id: res.resource_id }))
+    );
+
+    for (const candidate of orderedCandidates) {
+      // Re-verify at confirmation time — availability may have been computed
+      // moments earlier and another booking could have taken the slot since.
+      const { data: conflict } = await supabase.rpc('check_schedule_conflict', {
+        p_resource_id: candidate.id,
+        p_start: slot_start,
+        p_end: slot_end,
       });
-
-      // Find a resource that has the exact requested slot
-      for (const res of (resources || [])) {
-        const slots = res.available_slots || [];
-        const hasSlot = slots.some((s: any) =>
-          new Date(s.start).getTime() === new Date(slot_start).getTime() &&
-          new Date(s.end).getTime() === new Date(slot_end).getTime()
-        );
-        if (hasSlot) {
-          // Double-check no conflict
-          const { data: conflict } = await supabase.rpc('check_schedule_conflict', {
-            p_resource_id: res.resource_id,
-            p_start: slot_start,
-            p_end: slot_end,
-          });
-          if (!conflict) {
-            assignedResourceId = res.resource_id;
-            break;
-          }
-        }
-      }
-    } else {
-      // Without postal code, find any resource in this organization
-      const { data: boardResources } = await supabase
-        .from('schedule_resources')
-        .select('id')
-        .eq('organization_id', organizationId)
-        .eq('is_active', true);
-
-      for (const res of (boardResources || [])) {
-        const { data: conflict } = await supabase.rpc('check_schedule_conflict', {
-          p_resource_id: res.id,
-          p_start: slot_start,
-          p_end: slot_end,
-        });
-        if (!conflict) {
-          assignedResourceId = res.id;
-          break;
-        }
+      if (!conflict) {
+        assignedResourceId = candidate.id;
+        break;
       }
     }
 
@@ -380,6 +396,7 @@ Deno.serve(async (req: Request) => {
           created_by: assignedToAnewId || null,
           assigned_to: assignedToAnewId || null,
           callback_scheduled_at: slot_start,
+          lead_district_id: district_id || null,
         })
         .select('id')
         .single();
@@ -450,6 +467,9 @@ Deno.serve(async (req: Request) => {
       callback_scheduled_at: slot_start,
       status: 'scheduled',
     };
+    if (district_id) {
+      leadUpdate.lead_district_id = district_id;
+    }
     if (assignedToAnewId) {
       leadUpdate.assigned_to = assignedToAnewId;
     }
@@ -564,6 +584,7 @@ Deno.serve(async (req: Request) => {
 
   } catch (error: any) {
     console.error('Error in book-slot:', error);
+    await captureError(error, { function: "book-slot" });
     return new Response(
       JSON.stringify({ error: 'Internal server error', details: error.message }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

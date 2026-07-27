@@ -13,6 +13,7 @@ import { resolveEntityVariables } from "@/utils/emailTemplateVariables";
 import { MultiEmailInput } from "@/components/email/MultiEmailInput";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { sendDocumentEmailSchema } from "@/lib/validations";
 
 interface SendQuoteDialogProps {
   open: boolean;
@@ -42,6 +43,7 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
   const [message, setMessage] = useState("");
   const [resolvedVars, setResolvedVars] = useState<Record<string, string>>({});
   const [attachments, setAttachments] = useState<Array<{ file: File; id: string }>>([]);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const ALLOWED_EXT = ["pdf","png","jpg","jpeg","webp","gif","doc","docx","xls","xlsx","csv","txt"];
@@ -187,8 +189,33 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
     setMessage(templateBody);
   };
 
+  const validateForm = (finalRecipients: string[]): boolean => {
+    const result = sendDocumentEmailSchema.safeParse({
+      recipientName,
+      recipientEmail,
+      recipients: finalRecipients,
+    });
+
+    if (!result.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFieldErrors(nextErrors);
+      const firstMessage = Object.values(nextErrors)[0];
+      toast({ title: "Dados inválidos", description: firstMessage, variant: "destructive" });
+      return false;
+    }
+
+    setFieldErrors({});
+    return true;
+  };
+
   const handleSend = async () => {
     if (!quote || !recipientEmail) return;
+    const finalRecipients = recipients.length ? recipients : (recipientEmail ? [recipientEmail] : []);
+    if (!validateForm(finalRecipients)) return;
     setSending(true);
     try {
       let extraAttachments: Array<{ filename: string; content: string; contentType: string }> | undefined;
@@ -201,7 +228,6 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
           }))
         );
       }
-      const finalRecipients = recipients.length ? recipients : (recipientEmail ? [recipientEmail] : []);
       const { data, error } = await supabase.functions.invoke("send-quote-email", {
         body: {
           quote_id: quote.id,
@@ -248,7 +274,8 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
 
           <div className="space-y-2">
             <Label htmlFor="recipientName"><User className="h-3 w-3 inline mr-1" />Nome do Destinatário</Label>
-            <Input id="recipientName" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Nome do cliente" />
+            <Input id="recipientName" value={recipientName} onChange={(e) => setRecipientName(e.target.value)} placeholder="Nome do cliente" aria-invalid={!!fieldErrors.recipientName} />
+            {fieldErrors.recipientName && <p className="text-xs text-destructive">{fieldErrors.recipientName}</p>}
           </div>
           <div className="space-y-2">
             <Label className="flex items-center justify-between">
@@ -273,6 +300,9 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
               allowRemovePrimary
               placeholder="cliente@email.com"
             />
+            {(fieldErrors.recipientEmail || fieldErrors.recipients) && (
+              <p className="text-xs text-destructive">{fieldErrors.recipientEmail || fieldErrors.recipients}</p>
+            )}
           </div>
           {showCc && (
             <div className="space-y-2">

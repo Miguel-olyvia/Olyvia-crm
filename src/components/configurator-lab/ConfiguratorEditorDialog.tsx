@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { z } from "zod";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
 import { useConfigTemplate } from "./hooks/useConfigTemplate";
 import { TemplateVersionsPanel } from "./TemplateVersionsPanel";
 import { BlocksEditor } from "./BlocksEditor";
@@ -26,6 +28,23 @@ interface Props {
   organizationId: string | null;
 }
 
+// Validates a new configurator block before it is persisted.
+const blockSchema = z.object({
+  label: z.string().trim().min(1, "O nome do bloco é obrigatório").max(150, "O nome deve ter menos de 150 caracteres"),
+});
+
+// Validates a new configurator slot before it is persisted.
+const slotSchema = z.object({
+  slot_key: z.string().trim().min(1, "A chave do slot é obrigatória").max(100, "A chave deve ter menos de 100 caracteres").regex(/^[a-zA-Z0-9_]+$/, "A chave só pode conter letras, números e underscore"),
+  label: z.string().trim().min(1, "O nome do slot é obrigatório").max(150, "O nome deve ter menos de 150 caracteres"),
+  slot_type: z.string().trim().min(1, "O tipo de slot é obrigatório"),
+});
+
+// Validates a new configurator slot option before it is persisted.
+const optionSchema = z.object({
+  label: z.string().trim().min(1, "O nome da opção é obrigatório").max(150, "O nome deve ter menos de 150 caracteres"),
+});
+
 export function ConfiguratorEditorDialog({
   open,
   onOpenChange,
@@ -35,9 +54,39 @@ export function ConfiguratorEditorDialog({
   organizationId,
 }: Props) {
   const cfg = useConfigTemplate(open ? productId : null, open ? organizationId : null);
+  const { toast } = useToast();
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [tab, setTab] = useState("versions");
+
+  // Validated wrappers around the raw mutation callbacks — block the mutation
+  // and surface a toast instead of persisting invalid block/slot/option data.
+  const handleAddBlock = async (label: string) => {
+    const validation = blockSchema.safeParse({ label });
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+    await cfg.addBlock(label);
+  };
+
+  const handleAddSlot: typeof cfg.addSlot = async (blockId, payload) => {
+    const validation = slotSchema.safeParse({ slot_key: payload.slot_key, label: payload.label, slot_type: payload.slot_type });
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+    await cfg.addSlot(blockId, payload);
+  };
+
+  const handleAddOption: typeof cfg.addOption = async (slotId, payload) => {
+    const validation = optionSchema.safeParse({ label: payload.label });
+    if (!validation.success) {
+      toast({ title: "Erro de validação", description: validation.error.errors[0].message, variant: "destructive" });
+      return;
+    }
+    await cfg.addOption(slotId, payload);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -91,7 +140,7 @@ export function ConfiguratorEditorDialog({
                       setSelectedBlockId(id);
                       setSelectedSlotId(null);
                     }}
-                    onAdd={cfg.addBlock}
+                    onAdd={handleAddBlock}
                     onUpdate={cfg.updateBlock}
                     onDelete={cfg.deleteBlock}
                   />
@@ -101,7 +150,7 @@ export function ConfiguratorEditorDialog({
                     options={cfg.options}
                     selectedSlotId={selectedSlotId}
                     onSelect={setSelectedSlotId}
-                    onAdd={cfg.addSlot}
+                    onAdd={handleAddSlot}
                     onUpdate={cfg.updateSlot}
                     onDelete={cfg.deleteSlot}
                     organizationId={organizationId}
@@ -111,7 +160,7 @@ export function ConfiguratorEditorDialog({
                     options={cfg.options}
                     organizationId={organizationId}
                     productId={cfg.selectedTemplate?.product_id ?? null}
-                    onAdd={cfg.addOption}
+                    onAdd={handleAddOption}
                     onUpdate={cfg.updateOption}
                     onDelete={cfg.deleteOption}
                   />

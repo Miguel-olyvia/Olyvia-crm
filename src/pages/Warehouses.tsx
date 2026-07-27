@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { supabase } from "@/integrations/supabase/client";
+import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -33,6 +34,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExportImport";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { warehouseSchema } from "@/lib/validations";
 
 type WarehouseData = Database["public"]["Tables"]["warehouses"]["Row"];
 
@@ -47,6 +49,8 @@ const Warehouses = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingWarehouse, setEditingWarehouse] = useState<WarehouseData | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [showDeleted, setShowDeleted] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     code: "",
@@ -65,17 +69,22 @@ const Warehouses = () => {
     if (activeCompany?.id) {
       fetchWarehouses();
     }
-  }, [activeCompany?.id]);
+  }, [activeCompany?.id, showDeleted]);
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("warehouses")
         .select("*")
         .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false });
+
+      // Soft-deleted warehouses are hidden from the normal list by default.
+      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setWarehouses(data as WarehouseData[] || []);
@@ -93,6 +102,22 @@ const Warehouses = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const validation = warehouseSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
+      toast({
+        title: t("warehouses.toast.error"),
+        description: validation.error.errors[0]?.message,
+        variant: "destructive",
+      });
+      return;
+    }
+    setFieldErrors({});
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -105,31 +130,35 @@ const Warehouses = () => {
       };
 
       if (editingWarehouse) {
-        const { error } = await supabase
-          .from("warehouses")
-          .update({
-            ...warehouseData,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", editingWarehouse.id);
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("warehouses")
+            .update({
+              ...warehouseData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", editingWarehouse.id);
 
-        if (error) throw error;
+          if (error) throw error;
+        });
 
         toast({
           title: t("warehouses.toast.updateSuccess"),
         });
       } else {
         if (!activeCompany?.id) throw new Error("No active company selected");
-        
-        const { error } = await supabase.from("warehouses").insert([
-          {
-            ...warehouseData,
-            organization_id: activeCompany.id,
-            created_by: businessUserId,
-          },
-        ]);
 
-        if (error) throw error;
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("warehouses").insert([
+            {
+              ...warehouseData,
+              organization_id: activeCompany.id,
+              created_by: businessUserId,
+            },
+          ]);
+
+          if (error) throw error;
+        });
 
         toast({
           title: t("warehouses.toast.createSuccess"),
@@ -152,13 +181,29 @@ const Warehouses = () => {
     if (!confirm(t("warehouses.delete.confirm"))) return;
 
     try {
-      const { error } = await supabase.from("warehouses").delete().eq("id", id);
-
+      const { error } = await supabase.rpc("rpc_delete_warehouse", { p_id: id });
       if (error) throw error;
 
       toast({
         title: t("warehouses.toast.deleteSuccess"),
       });
+
+      fetchWarehouses();
+    } catch (error: any) {
+      toast({
+        title: t("warehouses.toast.error"),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_restore_warehouse", { p_id: id });
+      if (error) throw error;
+
+      toast({ title: t("warehouses.toast.restoreSuccess") || "Armazém restaurado" });
 
       fetchWarehouses();
     } catch (error: any) {
@@ -185,6 +230,7 @@ const Warehouses = () => {
       is_active: true,
     });
     setEditingWarehouse(null);
+    setFieldErrors({});
   };
 
   const handleExport = () => {
@@ -220,9 +266,15 @@ const Warehouses = () => {
         throw new Error(t("warehouses.toast.noValidWarehouses"));
       }
 
-      const { error } = await supabase.from("warehouses").insert(warehousesToInsert);
-
-      if (error) throw error;
+      await withAuditContext(
+        supabase,
+        businessUserId,
+        async () => {
+          const { error } = await supabase.from("warehouses").insert(warehousesToInsert);
+          if (error) throw error;
+        },
+        "csv_import"
+      );
 
       toast({
         title: t("warehouses.toast.importSuccess").replace("{count}", String(warehousesToInsert.length)),
@@ -329,6 +381,13 @@ const Warehouses = () => {
             </p>
           </div>
           <div className="flex gap-2">
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {showDeleted ? (t("warehouses.hideDeleted") || "Ocultar eliminados") : (t("warehouses.showDeleted") || "Ver eliminados")}
+            </Button>
             <PermissionGate permission="warehouses.export">
               <Button variant="outline" onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
@@ -392,7 +451,9 @@ const Warehouses = () => {
                         setFormData({ ...formData, name: e.target.value })
                       }
                       required
+                      className={fieldErrors.name ? "border-destructive" : ""}
                     />
+                    {fieldErrors.name && <p className="text-xs text-destructive">{fieldErrors.name}</p>}
                   </div>
                   <div>
                     <Label htmlFor="code">{t("warehouses.form.code")} *</Label>
@@ -403,7 +464,9 @@ const Warehouses = () => {
                         setFormData({ ...formData, code: e.target.value })
                       }
                       required
+                      className={fieldErrors.code ? "border-destructive" : ""}
                     />
+                    {fieldErrors.code && <p className="text-xs text-destructive">{fieldErrors.code}</p>}
                   </div>
                 </div>
                 <div>
@@ -468,7 +531,9 @@ const Warehouses = () => {
                       onChange={(e) =>
                         setFormData({ ...formData, capacity: e.target.value })
                       }
+                      className={fieldErrors.capacity ? "border-destructive" : ""}
                     />
+                    {fieldErrors.capacity && <p className="text-xs text-destructive">{fieldErrors.capacity}</p>}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -492,7 +557,9 @@ const Warehouses = () => {
                       onChange={(e) =>
                         setFormData({ ...formData, email: e.target.value })
                       }
+                      className={fieldErrors.email ? "border-destructive" : ""}
                     />
+                    {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -591,24 +658,38 @@ const Warehouses = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="warehouses.edit">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openEditDialog(warehouse)}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
-                        <PermissionGate permission="warehouses.delete">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleDelete(warehouse.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </PermissionGate>
+                        {showDeleted ? (
+                          <PermissionGate permission="warehouses.delete">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRestore(warehouse.id)}
+                            >
+                              {t("warehouses.restore") || "Restaurar"}
+                            </Button>
+                          </PermissionGate>
+                        ) : (
+                          <>
+                            <PermissionGate permission="warehouses.edit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditDialog(warehouse)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="warehouses.delete">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(warehouse.id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                          </>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

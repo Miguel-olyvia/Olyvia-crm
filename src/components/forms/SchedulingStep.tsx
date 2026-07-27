@@ -13,6 +13,7 @@ interface SchedulingStepProps {
   boardId: string | null;
   durationMinutes: number;
   postalCode?: string;
+  districtId?: string;
   primaryColor: string;
   textColor?: string;
   buttonTextColor?: string;
@@ -52,6 +53,7 @@ export function SchedulingStep({
   boardId,
   durationMinutes,
   postalCode,
+  districtId,
   primaryColor,
   textColor,
   buttonTextColor,
@@ -84,7 +86,7 @@ export function SchedulingStep({
   // Prefetch which days have availability for the visible month (P3: single range call)
   useEffect(() => {
     prefetchMonth(currentMonth);
-  }, [currentMonth, formId, boardId, postalCode]);
+  }, [currentMonth, formId, boardId, postalCode, districtId]);
 
   const prefetchMonth = async (month: Date) => {
     setLoadingDays(true);
@@ -113,6 +115,7 @@ export function SchedulingStep({
           start_date: startStr,
           end_date: endStr,
           postal_code: postalCode || undefined,
+          district_id: districtId || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
@@ -156,6 +159,7 @@ export function SchedulingStep({
           step_number: stepNumber,
           date: format(date, "yyyy-MM-dd"),
           postal_code: postalCode || undefined,
+          district_id: districtId || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),

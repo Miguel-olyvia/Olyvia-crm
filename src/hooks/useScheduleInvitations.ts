@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useTranslation } from '@/hooks/useTranslation';
+import { getFriendlyErrorMessage } from '@/utils/friendlyError';
 
 export interface ScheduleInvitation {
   id: string;
@@ -122,8 +123,9 @@ export function useScheduleInvitations(companyId?: string) {
       const successCount = data.results?.filter((r: any) => r.status === 'success').length || 0;
       toast.success(t('scheduling.invitations.sentSuccess', { count: successCount }));
       return true;
-    } catch (error: any) {
-      toast.error(t('scheduling.invitations.sendError') + ': ' + error.message);
+    } catch (error: unknown) {
+      const message = await getFriendlyErrorMessage(error);
+      toast.error(t('scheduling.invitations.sendError') + ': ' + message);
       return false;
     } finally {
       setLoading(false);

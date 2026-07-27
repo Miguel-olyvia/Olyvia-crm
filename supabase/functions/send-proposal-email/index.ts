@@ -3,10 +3,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface EmailRequest {
   proposal_id: string;
@@ -48,6 +48,15 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
   return out;
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Generate proposal email HTML
 function generateProposalEmailHtml(
   proposal: any,
@@ -86,7 +95,7 @@ function generateProposalEmailHtml(
             <td style="padding: 40px;">
               ${customMessage ? `
                 <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-                  ${customMessage}
+                  ${escapeHtml(customMessage)}
                 </p>
               ` : `
                 <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
@@ -96,7 +105,7 @@ function generateProposalEmailHtml(
               
               ${proposal.description ? `
                 <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
-                  ${proposal.description.substring(0, 200)}${proposal.description.length > 200 ? '...' : ''}
+                  ${escapeHtml(proposal.description?.substring(0, 200) ?? '')}${proposal.description.length > 200 ? '...' : ''}
                 </p>
               ` : ''}
               
@@ -154,14 +163,34 @@ function generateProposalEmailHtml(
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    // ── Auth: mandatory JWT — reject immediately without Authorization header ──
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
+    // Scoped client — carries the caller's own JWT, so every business-data
+    // read/write below (proposals, anew_users, anew_memberships,
+    // anew_hierarchy, proposal_sends, email_logs, proposals update) runs
+    // under the caller's real RLS instead of bypassing it via service_role.
+    // proposal_sends/email_logs INSERT policies were added specifically for
+    // this (20261107010000_add_insert_policies_email_logs_proposal_sends.sql).
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        auth: { autoRefreshToken: false, persistSession: false },
+        global: { headers: { Authorization: authHeader } },
+      }
     );
 
     const rawBody = await req.json();
@@ -172,23 +201,22 @@ const handler = async (req: Request): Promise<Response> => {
         { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
       );
     }
-    const { proposal_id, sender_user_id, recipient_email, recipient_name, recipients, cc, subject, message } = parsed.data;
+    const { proposal_id, recipient_email, recipient_name, recipients, cc, subject, message } = parsed.data;
     const toListInput = sanitizeEmailList(recipients, 10);
     if (recipient_email && !toListInput.some((e) => e.toLowerCase() === recipient_email.toLowerCase())) {
       toListInput.unshift(recipient_email);
     }
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
-    // ── Auth: resolve caller from JWT, ignore sender_user_id from body ──
-    let userId: string | undefined;
-    const authHeader = req.headers.get("authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const { data: { user } } = await supabaseClient.auth.getUser(token);
-      userId = user?.id;
+    const token = authHeader.replace("Bearer ", "");
+    const { data: { user: callerUser }, error: authError } = await supabaseClient.auth.getUser(token);
+    if (authError || !callerUser) {
+      return new Response(JSON.stringify({ error: "Authentication required" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
     }
-    // Only fallback to sender_user_id if no auth (should not happen with verify_jwt=true)
-    if (!userId) userId = sender_user_id;
+    const userId: string = callerUser.id;
 
     // Get proposal with all related data
     const { data: proposal, error: proposalError } = await supabaseClient
@@ -213,23 +241,24 @@ const handler = async (req: Request): Promise<Response> => {
     let senderAnewUserId: string | null = null;
     if (userId && proposal.organization_id) {
       const { data: anewUser } = await supabaseClient.from("anew_users").select("id").eq("auth_user_id", userId).maybeSingle();
-      senderAnewUserId = anewUser?.id ?? null;
-      if (anewUser) {
-        const { data: membership } = await supabaseClient
-          .from("anew_memberships")
-          .select("id")
-          .eq("user_id", anewUser.id)
-          .eq("status", "active")
-          .or(`organization_id.eq.${proposal.organization_id}`)
-          .maybeSingle();
-        
-        if (!membership) {
-          const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
-          const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
-          const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", proposal.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
-          if (!hierarchyMatch) {
-            throw new Error("Sem permissão para enviar esta proposta");
-          }
+      if (!anewUser) {
+        throw new Error("Utilizador não encontrado no sistema");
+      }
+      senderAnewUserId = anewUser.id;
+      const { data: membership } = await supabaseClient
+        .from("anew_memberships")
+        .select("id")
+        .eq("user_id", anewUser.id)
+        .eq("status", "active")
+        .or(`organization_id.eq.${proposal.organization_id}`)
+        .maybeSingle();
+
+      if (!membership) {
+        const { data: userMemberships } = await supabaseClient.from("anew_memberships").select("organization_id").eq("user_id", anewUser.id).eq("status", "active");
+        const userOrgIds = (userMemberships || []).map((m: any) => m.organization_id);
+        const { data: hierarchyMatch } = await supabaseClient.from("anew_hierarchy").select("id").eq("child_org_id", proposal.organization_id).in("parent_org_id", userOrgIds).maybeSingle();
+        if (!hierarchyMatch) {
+          throw new Error("Sem permissão para enviar esta proposta");
         }
       }
     }
@@ -253,7 +282,16 @@ const handler = async (req: Request): Promise<Response> => {
       senderName = sender?.display_name || null;
     }
 
-    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseClient, {
+    // SMTP resolution needs a service-role client: passwords are stored in
+    // Supabase Vault (organization_smtp_settings/user_smtp_settings only
+    // carry a smtp_password_secret_id), and vault.decrypted_secrets is only
+    // readable by service_role — the caller's own RLS-scoped supabaseClient
+    // above would resolve the row but never see the decrypted password.
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL") ?? "",
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+    );
+    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
       authUserId: userId,
       organizationId: proposal.organization_id,
     });
@@ -263,10 +301,18 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const smtpConfig = resolvedSmtp.smtp;
 
-    // Generate public URL with tracking token
+    // Link to the authenticated client portal proposal view (see src/App.tsx,
+    // route "/client-portal/proposals/:id" rendered by
+    // ClientPortalProposalDetail.tsx, guarded by ClientRouteGuard). The
+    // legacy unauthenticated "/proposta/:public_token" link has been removed
+    // (see 20261029020000_remove_legacy_proposal_public_link_access.sql) and
+    // no longer resolves to anything. This email assumes the recipient
+    // already has, or will separately receive, their client-portal
+    // credentials (provisioned via the create-client-portal-access Edge
+    // Function) — this function does not create or verify portal access.
     const baseUrl = Deno.env.get("SITE_URL") || "https://olyvia.lovable.app";
-    const publicUrl = `${baseUrl}/proposta/${proposal.public_token}`;
-    
+    const publicUrl = `${baseUrl}/client-portal/proposals/${proposal.id}`;
+
     // Build tracking pixel URL
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const trackingPixelUrl = `${supabaseUrl}/functions/v1/track-proposal-view?t=${proposal.tracking_token}`;
@@ -283,6 +329,7 @@ const handler = async (req: Request): Promise<Response> => {
 
     let trackingOk = true;
     try {
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient.from("proposal_sends").insert({
         proposal_id,
         organization_id: proposal.organization_id,
@@ -295,11 +342,13 @@ const handler = async (req: Request): Promise<Response> => {
         channel: "email",
       });
 
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient
         .from("proposals")
         .update({ status: "sent", sent_at: new Date().toISOString() })
         .eq("id", proposal_id);
 
+      await supabaseClient.rpc('set_audit_context', { p_user_id: senderAnewUserId, p_source: 'email' });
       await supabaseClient.from("email_logs").insert({
         organization_id: proposal.organization_id,
         entity_id: proposal.entity_id ?? null,
@@ -330,6 +379,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending proposal email:", safeError);
+    await captureError(error, { function: "send-proposal-email" });
     return new Response(
       JSON.stringify({ error: safeError }),
       {

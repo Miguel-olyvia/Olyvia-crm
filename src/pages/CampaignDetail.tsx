@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -26,9 +26,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChannelUtmMappings } from "@/components/campaigns/ChannelUtmMappings";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PermissionGate } from "@/components/PermissionGate";
+import { useCompany } from "@/contexts/CompanyContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, Legend, AreaChart, Area } from "recharts";
+import { campaignDetailChannelSchema, campaignDetailMarketingListsSchema } from "@/lib/validations";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Campaign {
   id: string;
@@ -126,6 +129,9 @@ const CampaignDetail = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "overview";
   const { toast } = useToast();
+  const { t } = useTranslation();
+
+  const { activeCompany } = useCompany();
 
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -216,21 +222,24 @@ const CampaignDetail = () => {
     target_audience: "",
     source_id: null as string | null,
   });
+  const [channelFieldErrors, setChannelFieldErrors] = useState<Record<string, string>>({});
+  const [listsFieldError, setListsFieldError] = useState<string | null>(null);
 
   const [leadSources, setLeadSources] = useState<Array<{ id: string; name: string; color: string | null; icon: string | null }>>([]);
 
   useEffect(() => {
-    if (id) {
-      loadCampaignData();
-    }
-  }, [id]);
+    void loadCampaignData();
+  }, [loadCampaignData]);
 
   // Re-aggregate dashboard metrics from per-channel RPC when filters change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadDashboardMetrics is intentionally excluded: it is
+  // defined below this effect and references channels/fRange/fBucket/fChannelId which are already listed as deps.
+  // Including it would require useCallback with those same deps, creating an equivalent but more complex dependency
+  // chain. The current pattern is safe because all reactive values the function closes over are explicit deps here.
   useEffect(() => {
     if (!id || channels.length === 0) return;
     loadDashboardMetrics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, channels, fRange.from, fRange.to, fBucket, fChannelId]);
+  }, [id, channels, fRange.from, fRange.to, fBucket, fChannelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadDashboardMetrics = async () => {
     if (!id) return;
@@ -258,7 +267,7 @@ const CampaignDetail = () => {
       );
 
       const cm: ChannelMetrics[] = [];
-      let totals = { impressions: 0, clicks: 0, conversions: 0, leads: 0, spend: 0, revenue: 0 };
+      const totals = { impressions: 0, clicks: 0, conversions: 0, leads: 0, spend: 0, revenue: 0 };
       const bucketMap: Record<string, any> = {};
 
       for (const { channel, dash } of results) {
@@ -330,15 +339,19 @@ const CampaignDetail = () => {
       setChannelMetrics(cm);
       setTotalMetrics(totals);
       setDailyMetrics(Object.values(bucketMap).sort((a: any, b: any) => a.date.localeCompare(b.date)));
-    } catch (err) {
-      console.error("[CampaignDetail] dashboard metrics", err);
+    } catch (err: any) {
+      toast({
+        title: t('campaignDetail.toast.dashboardError'),
+        description: err?.message,
+        variant: "destructive",
+      });
     } finally {
       setDashboardLoading(false);
     }
   };
 
 
-  const loadCampaignData = async () => {
+  const loadCampaignData = useCallback(async () => {
     if (!id) return;
 
     try {
@@ -359,7 +372,13 @@ const CampaignDetail = () => {
         supabase.from("campaign_organizations").select("organization_id, anew_organizations(id, name, type)").eq("campaign_id", id),
         supabase.from("campaign_goals").select("id, campaign_id, goal_type, target_value, current_value").eq("campaign_id", id),
         supabase.from("campaign_leads").select("id, campaign_id, channel_id, anew_lead_id, status, source, medium, conversion_value, created_at, notes, channels(name)").eq("campaign_id", id).order("created_at", { ascending: false }).limit(50),
-        supabase.from("lead_sources").select("id, name, color, icon").eq("is_active", true).order("name"),
+        (() => {
+          let q = supabase.from("lead_sources").select("id, name, color, icon").eq("is_active", true);
+          if (activeCompany?.id) {
+            q = q.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
+          }
+          return q.order("name");
+        })(),
       ]);
 
       if (campaignRes.error) throw campaignRes.error;
@@ -368,13 +387,28 @@ const CampaignDetail = () => {
       const channelsData = channelsRes.data || [];
       setChannels(channelsData as any);
 
-      if (leadSourcesRes.error) console.error("Failed to load lead sources", leadSourcesRes.error);
+      if (leadSourcesRes.error) {
+        toast({
+          title: t('campaignDetail.toast.sourcesError'),
+          description: leadSourcesRes.error.message,
+          variant: "destructive",
+        });
+      }
       setLeadSources((leadSourcesRes.data || []) as any);
       setChannelTypes(channelTypesRes.data || []);
-      // Lists are scoped via RLS (get_user_visible_org_ids), which includes parent/holding orgs.
-      const listsRes = await supabase.from("marketing_lists").select("id, name").order("name");
-      if (listsRes.error) throw listsRes.error;
-      setAvailableLists(listsRes.data || []);
+      // Lists are filtered by organization_id so only the active org's lists are available.
+      // Guard against undefined activeCompany: without an active org there are no lists to show.
+      if (!activeCompany?.id) {
+        setAvailableLists([]);
+      } else {
+        const listsRes = await supabase
+          .from("marketing_lists")
+          .select("id, name")
+          .eq("organization_id", activeCompany.id)
+          .order("name");
+        if (listsRes.error) throw listsRes.error;
+        setAvailableLists(listsRes.data || []);
+      }
       
       const linkedLists = (campaignListsRes.data || []).map((l: any) => l.marketing_lists).filter(Boolean);
       setMarketingLists(linkedLists);
@@ -432,7 +466,7 @@ const CampaignDetail = () => {
       
       // Aggregate metrics by channel
       const channelMetricsMap: Record<string, ChannelMetrics> = {};
-      let totals = { impressions: 0, clicks: 0, conversions: 0, leads: 0, spend: 0, revenue: 0 };
+      const totals = { impressions: 0, clicks: 0, conversions: 0, leads: 0, spend: 0, revenue: 0 };
       
       metricsData.forEach((m: any) => {
         if (!channelMetricsMap[m.channel_id]) {
@@ -604,7 +638,7 @@ const CampaignDetail = () => {
 
     } catch (error: any) {
       toast({
-        title: "Error loading campaign",
+        title: t('campaignDetail.toast.loadError'),
         description: error.message,
         variant: "destructive",
       });
@@ -613,11 +647,11 @@ const CampaignDetail = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [id, activeCompany, toast, navigate]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadCampaignData();
+    void loadCampaignData();
   };
 
   const getChannelIcon = (type: string) => {
@@ -693,10 +727,20 @@ const CampaignDetail = () => {
     e.preventDefault();
     if (!id) return;
 
-    if (!channelFormData.name) {
-      toast({ title: "Validation Error", description: "Channel name is required", variant: "destructive" });
+    const validation = campaignDetailChannelSchema.safeParse({
+      name: channelFormData.name,
+      type: channelFormData.type,
+    });
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setChannelFieldErrors(errors);
+      toast({ title: t('campaignDetail.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
       return;
     }
+    setChannelFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -717,20 +761,20 @@ const CampaignDetail = () => {
       if (editingChannel) {
         const { error } = await (supabase.from("channels") as any).update(channelData).eq("id", editingChannel.id);
         if (error) throw error;
-        toast({ title: "Channel updated successfully!" });
+        toast({ title: t('campaignDetail.toast.channelUpdateSuccess') });
       } else {
         const businessUserId = await resolveCurrentBusinessUserId();
         if (!businessUserId) throw new Error("Business user not found for current auth user");
         const { error } = await (supabase.from("channels") as any).insert({ ...channelData, created_by: businessUserId });
         if (error) throw error;
-        toast({ title: "Channel created successfully!" });
+        toast({ title: t('campaignDetail.toast.channelCreateSuccess') });
       }
 
       setChannelDialogOpen(false);
       resetChannelForm();
-      loadCampaignData();
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error saving channel", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.channelError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -739,10 +783,10 @@ const CampaignDetail = () => {
     try {
       const { error } = await supabase.from("channels").delete().eq("id", channelToDelete.id);
       if (error) throw error;
-      toast({ title: "Channel deleted successfully!" });
-      loadCampaignData();
+      toast({ title: t('campaignDetail.toast.channelDeleteSuccess') });
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error deleting channel", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.channelDeleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteDialogOpen(false);
       setChannelToDelete(null);
@@ -756,6 +800,13 @@ const CampaignDetail = () => {
 
   const handleSaveLists = async () => {
     if (!id) return;
+    const validation = campaignDetailMarketingListsSchema.safeParse({ selectedListIds });
+    if (!validation.success) {
+      setListsFieldError(validation.error.errors[0]?.message || null);
+      toast({ title: t('campaignDetail.toast.validationError'), description: validation.error.errors[0]?.message, variant: "destructive" });
+      return;
+    }
+    setListsFieldError(null);
     try {
       await supabase.from("campaign_marketing_lists").delete().eq("campaign_id", id);
       if (selectedListIds.length > 0) {
@@ -764,11 +815,11 @@ const CampaignDetail = () => {
         );
         if (error) throw error;
       }
-      toast({ title: "Marketing lists updated successfully!" });
+      toast({ title: t('campaignDetail.toast.listsUpdateSuccess') });
       setListsDialogOpen(false);
-      loadCampaignData();
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error updating lists", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.listsError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -783,12 +834,12 @@ const CampaignDetail = () => {
         target_value: parseFloat(goalFormData.target_value),
       });
       if (error) throw error;
-      toast({ title: "Goal added successfully!" });
+      toast({ title: t('campaignDetail.toast.goalAddSuccess') });
       setGoalDialogOpen(false);
       setGoalFormData({ goal_type: "leads", target_value: "" });
-      loadCampaignData();
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error adding goal", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.goalError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -828,16 +879,16 @@ const CampaignDetail = () => {
         .upsert(payload, { onConflict: 'channel_id,metric_date' });
 
       if (error) throw error;
-      toast({ title: "Metrics saved successfully!" });
+      toast({ title: t('campaignDetail.toast.metricsSuccess') });
       setMetricsDialogOpen(false);
       setSelectedChannelForMetrics(null);
       setMetricsFormData({
         metric_date: new Date().toISOString().split('T')[0],
         impressions: "", clicks: "", conversions: "", leads: "", spend: "", revenue: "", opens: "", bounces: "",
       });
-      loadCampaignData();
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error saving metrics", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.metricsError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -855,12 +906,12 @@ const CampaignDetail = () => {
         notes: leadFormData.notes || null,
       });
       if (error) throw error;
-      toast({ title: "Lead added successfully!" });
+      toast({ title: t('campaignDetail.toast.leadSuccess') });
       setLeadDialogOpen(false);
       setLeadFormData({ channel_id: "none", source: "", medium: "", status: "new", notes: "" });
-      loadCampaignData();
+      void loadCampaignData();
     } catch (error: any) {
-      toast({ title: "Error adding lead", description: error.message, variant: "destructive" });
+      toast({ title: t('campaignDetail.toast.leadError'), description: error.message, variant: "destructive" });
     }
   };
 
@@ -930,7 +981,10 @@ const CampaignDetail = () => {
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
           </Button>
           <PermissionGate permission="campaigns.edit">
-            <Button variant="outline" onClick={() => navigate(`/campaigns`)}>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/campaigns", { state: { editCampaignId: campaign.id } })}
+            >
               <Pencil className="w-4 h-4 mr-2" />
               Edit
             </Button>
@@ -1252,7 +1306,7 @@ const CampaignDetail = () => {
           <TabsContent value="channels" className="space-y-4">
             <div className="flex justify-between items-center">
               <p className="text-muted-foreground">Manage channels and record metrics</p>
-              <PermissionGate permission="channels.create">
+              <PermissionGate permission="campaigns.create">
                 <Button onClick={() => { resetChannelForm(); setChannelDialogOpen(true); }}>
                   <Plus className="w-4 h-4 mr-2" />
                   Add Channel
@@ -1324,12 +1378,12 @@ const CampaignDetail = () => {
                             >
                               <Upload className="w-4 h-4" />
                             </Button>
-                            <PermissionGate permission="channels.edit">
+                            <PermissionGate permission="campaigns.edit">
                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); openEditChannel(channel); }}>
                                 <Pencil className="w-4 h-4" />
                               </Button>
                             </PermissionGate>
-                            <PermissionGate permission="channels.delete">
+                            <PermissionGate permission="campaigns.delete">
                               <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); setChannelToDelete(channel); setDeleteDialogOpen(true); }}>
                                 <Trash2 className="w-4 h-4 text-destructive" />
                               </Button>
@@ -1489,7 +1543,8 @@ const CampaignDetail = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Channel Name *</Label>
-                <Input value={channelFormData.name} onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })} required />
+                <Input value={channelFormData.name} onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })} required className={channelFieldErrors.name ? "border-destructive" : ""} />
+                {channelFieldErrors.name && <p className="text-sm text-destructive">{channelFieldErrors.name}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Channel Type</Label>
@@ -1501,6 +1556,7 @@ const CampaignDetail = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                {channelFieldErrors.type && <p className="text-sm text-destructive">{channelFieldErrors.type}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Origem (Source)</Label>
@@ -1711,6 +1767,7 @@ const CampaignDetail = () => {
                 ))
               )}
             </div>
+            {listsFieldError && <p className="text-sm text-destructive">{listsFieldError}</p>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setListsDialogOpen(false)}>Cancel</Button>
               <Button onClick={handleSaveLists}>Save</Button>

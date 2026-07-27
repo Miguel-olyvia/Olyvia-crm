@@ -1,0 +1,44 @@
+-- COMPLIANCE DOCUMENTATION — no schema or data changes.
+-- Forward-only. Do not fold into the baseline.
+--
+-- Gap de auditoria de exportação de leads — junho 2026
+--
+-- JANELA: 2026-06-23 ~11:26 +0100 até ~13:34 +0100 (~2h08min estimados)
+--   commit 63e984a5: leads adicionado ao export-data Edge Function
+--   commit e38c0153: migration 20260623160000 corrige o CHECK constraint
+--
+-- CAUSA:
+--   A migration 20260622180000 criou data_export_audit com
+--     CHECK (module IN ('clients', 'contacts', 'quotes'))
+--   sem incluir 'leads'. O módulo leads foi adicionado ao Edge Function
+--   num commit anterior à migration de correcção.
+--
+-- COMPORTAMENTO DURANTE O GAP:
+--   Qualquer pedido POST /export-data com module='leads' falhava assim:
+--   1. authorizeExport() corria normalmente.
+--   2. INSERT em data_export_audit com module='leads' devolvia erro de
+--      violação do CHECK constraint.
+--   3. index.ts linha 587: "if (auditError) throw auditError" — throw
+--      incondicional antes de exportLeads() ser chamada.
+--   4. Resposta HTTP 500 devolvida ao cliente. Nenhum dado exportado.
+--
+-- CONCLUSÃO:
+--   Nenhum export de leads foi concluído com sucesso nesta janela.
+--   Nenhum dado foi devolvido sem registo de auditoria.
+--   Pedidos negados (status='denied') podem não ter sido persistidos —
+--   esses inserts falhavam silenciosamente — mas como o acesso era negado
+--   não houve exposição de dados.
+--   Não é possível determinar retrospectivamente quantas tentativas
+--   ocorreram nesta janela a partir da BD; logs do Supabase Edge Runtime
+--   seriam a única fonte alternativa.
+--
+-- CORRECÇÃO APLICADA:
+--   migration 20260623160000_fix_data_export_audit_leads_constraint.sql
+--   Após essa migration, exports de leads são registados correctamente.
+--
+-- ESTADO ACTUAL: sistema operacional e correcto. Nenhuma acção adicional.
+
+DO $$ BEGIN
+  -- Intentionally empty: documentation only.
+  NULL;
+END $$;

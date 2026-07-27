@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import Layout from "@/components/Layout";
+import { withAuditContext } from "@/utils/auditContext";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Plus, Pencil, Trash2, Search } from "lucide-react";
@@ -32,16 +33,30 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
+import { useCompany } from "@/contexts/CompanyContext";
 
 interface UnitOfMeasure {
   id: string;
   code: string;
   description: string | null;
+  organization_id: string | null;
+}
+
+// Supabase's PostgrestError (e.g. an RLS 403) is a plain object, not an
+// Error instance, so `error instanceof Error` misses it and falls through
+// to `String(error)` -> "[object Object]".
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error);
 }
 
 export default function UnitsOfMeasure() {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { activeCompany } = useCompany();
   const [units, setUnits] = useState<UnitOfMeasure[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -55,23 +70,32 @@ export default function UnitsOfMeasure() {
   const loadUnits = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // uom is a hybrid table: global records (organization_id IS NULL) are shared;
+      // org-specific records are scoped by organization_id.
+      // Show both the org's own records and the global ones.
+      let uomQuery = supabase
         .from("uom")
-        .select("*")
+        .select("id, code, description, organization_id")
         .order("code");
+      if (activeCompany?.id) {
+        uomQuery = uomQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
+      } else {
+        uomQuery = uomQuery.is("organization_id", null);
+      }
+      const { data, error } = await uomQuery;
 
       if (error) throw error;
       setUnits(data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
       setLoading(false);
     }
-  }, [t, toast]);
+  }, [t, toast, activeCompany?.id]);
 
   useEffect(() => {
     loadUnits();
@@ -106,33 +130,49 @@ export default function UnitsOfMeasure() {
 
     setSaving(true);
     try {
-      if (editingUnit) {
-        const { error } = await supabase
-          .from("uom")
-          .update({
-            code: formData.code.trim(),
-            description: formData.description.trim() || null,
-          })
-          .eq("id", editingUnit.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        throw new Error('Perfil de utilizador não encontrado.');
+      }
 
-        if (error) throw error;
+      if (editingUnit) {
+        // Only allow editing org-owned records; global records (organization_id IS NULL) are read-only
+        if (!editingUnit.organization_id || !activeCompany?.id) {
+          throw new Error('Cannot edit a global UOM record or missing active company');
+        }
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase
+            .from("uom")
+            .update({
+              code: formData.code.trim(),
+              description: formData.description.trim() || null,
+            })
+            .eq("id", editingUnit.id)
+            .eq("organization_id", activeCompany.id);
+          if (error) throw error;
+        });
         toast({ title: t("uom.updatedSuccess") });
       } else {
-        const { error } = await supabase.from("uom").insert({
-          code: formData.code.trim(),
-          description: formData.description.trim() || null,
+        if (!activeCompany?.id) {
+          throw new Error('No active company — cannot create UOM without an organization scope');
+        }
+        await withAuditContext(supabase, businessUserId, async () => {
+          const { error } = await supabase.from("uom").insert({
+            code: formData.code.trim(),
+            description: formData.description.trim() || null,
+            organization_id: activeCompany.id,
+          });
+          if (error) throw error;
         });
-
-        if (error) throw error;
         toast({ title: t("uom.addedSuccess") });
       }
 
       setDialogOpen(false);
       loadUnits();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -144,20 +184,30 @@ export default function UnitsOfMeasure() {
     if (!unitToDelete) return;
 
     try {
-      const { error } = await supabase
-        .from("uom")
-        .delete()
-        .eq("id", unitToDelete.id);
-
-      if (error) throw error;
+      // Only allow deleting org-owned records; global records (organization_id IS NULL) are protected
+      if (!unitToDelete.organization_id || !activeCompany?.id) {
+        throw new Error('Cannot delete a global UOM record or missing active company');
+      }
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) {
+        throw new Error('Perfil de utilizador não encontrado.');
+      }
+      await withAuditContext(supabase, businessUserId, async () => {
+        const { error } = await supabase
+          .from("uom")
+          .delete()
+          .eq("id", unitToDelete.id)
+          .eq("organization_id", activeCompany.id);
+        if (error) throw error;
+      });
       toast({ title: t("uom.deletedSuccess") });
       setDeleteDialogOpen(false);
       setUnitToDelete(null);
       loadUnits();
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: error.message,
+        description: getErrorMessage(error),
         variant: "destructive",
       });
     }
@@ -216,6 +266,7 @@ export default function UnitsOfMeasure() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={t('common.edit')}
                           onClick={() => handleOpenDialog(unit)}
                         >
                           <Pencil className="h-4 w-4" />
@@ -223,6 +274,7 @@ export default function UnitsOfMeasure() {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={t('common.delete')}
                           onClick={() => {
                             setUnitToDelete(unit);
                             setDeleteDialogOpen(true);

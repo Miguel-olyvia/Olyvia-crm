@@ -1,12 +1,13 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { requireServiceRole } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { getCorsHeadersExtended } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 interface EmailAttachment {
   filename: string;
@@ -79,6 +80,7 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
 }
 
 const handler = async (req: Request): Promise<Response> => {
+  const corsHeaders = getCorsHeadersExtended(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -89,27 +91,40 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // ── Auth: resolve caller from JWT (verify_jwt=true ensures valid token) ──
+    // ── Auth: mandatory — either SERVICE_ROLE (internal/cron) or valid user JWT ──
     let callerAuthUid: string | undefined;
     let callerAnewUserId: string | undefined;
-    let isServiceRole = false;
+    const isServiceRole = requireServiceRole(req);
     const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      if (token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
-        isServiceRole = true;
-      } else {
-        const { data: { user } } = await supabaseClient.auth.getUser(token);
-        if (user) {
-          callerAuthUid = user.id;
-          const { data: anewUser } = await supabaseClient
-            .from("anew_users")
-            .select("id")
-            .eq("auth_user_id", user.id)
-            .maybeSingle();
-          callerAnewUserId = anewUser?.id;
-        }
+
+    if (!isServiceRole) {
+      if (!authHeader) {
+        return new Response(
+          JSON.stringify({ error: "Authentication required" }),
+          { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
       }
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user }, error: userError } = await supabaseClient.auth.getUser(token);
+      if (userError || !user) {
+        return new Response(
+          JSON.stringify({ error: "Invalid or expired token" }),
+          { status: 401, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      callerAuthUid = user.id;
+      const { data: anewUser } = await supabaseClient
+        .from("anew_users")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .maybeSingle();
+      if (!anewUser) {
+        return new Response(
+          JSON.stringify({ error: "User profile not found" }),
+          { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+        );
+      }
+      callerAnewUserId = anewUser.id;
     }
 
     const rawBody = await req.json();
@@ -129,12 +144,17 @@ const handler = async (req: Request): Promise<Response> => {
     const ccList = sanitizeEmailList(cc, 10).filter((e) => !toListInput.some((t) => t.toLowerCase() === e.toLowerCase()));
 
     // ── Scope check: validate organization access (skip for service role & test mode) ──
-    if (!isServiceRole && !test && organization_id && callerAnewUserId) {
+    // Validates company_id too, not just organization_id: resolveSmtpForAuthenticatedUser
+    // below is called with `organization_id || company_id`, so leaving company_id
+    // unchecked would let a caller bypass this entire block by sending company_id
+    // instead of organization_id.
+    const effectiveOrgIdForScopeCheck = organization_id || company_id;
+    if (!isServiceRole && !test && effectiveOrgIdForScopeCheck) {
       const { data: membership } = await supabaseClient
         .from("anew_memberships")
         .select("id")
         .eq("user_id", callerAnewUserId)
-        .eq("organization_id", organization_id)
+        .eq("organization_id", effectiveOrgIdForScopeCheck)
         .eq("status", "active")
         .maybeSingle();
 
@@ -150,7 +170,7 @@ const handler = async (req: Request): Promise<Response> => {
         const { data: hierarchyMatch } = await supabaseClient
           .from("anew_hierarchy")
           .select("id")
-          .eq("child_org_id", organization_id)
+          .eq("child_org_id", effectiveOrgIdForScopeCheck)
           .in("parent_org_id", userOrgIds)
           .maybeSingle();
 
@@ -249,6 +269,7 @@ const handler = async (req: Request): Promise<Response> => {
   } catch (error: any) {
     const safeError = sanitizeSmtpError(error);
     console.error("Error sending email:", safeError);
+    await captureError(error, { function: "send-email" });
 
     try {
       const supabaseClient = createClient(

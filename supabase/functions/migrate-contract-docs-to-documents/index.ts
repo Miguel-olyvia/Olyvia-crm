@@ -2,23 +2,41 @@
 //                   -> documents       (+ documents bucket)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
+import { requireAdminRole, resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 
 // This function takes no input — schema is empty intentionally.
 // Body is not parsed; validation confirms no unexpected payload is required.
 const _noInputSchema = z.object({});
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+
+  // Admin-only: requires the global system_admin role (or service role key).
+  // super_admin is tenant-scoped and is intentionally excluded — this migrates
+  // data across all tenants.
+  try {
+    const caller = await resolveCallerIdentity(req, supabase);
+    const isAdmin = await requireAdminRole(supabase, caller);
+    if (!isAdmin) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden: admin role required" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+  } catch (authErr) {
+    return authErrorResponse(authErr, corsHeaders);
+  }
 
   const report: any[] = [];
   let migrated = 0, skipped = 0, failed = 0;
@@ -115,6 +133,8 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err: any) {
+    console.error("Error in migrate-contract-docs-to-documents:", err);
+    await captureError(err, { function: "migrate-contract-docs-to-documents" });
     return new Response(
       JSON.stringify({ error: err?.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

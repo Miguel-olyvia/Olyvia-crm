@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Search, Shield, ShieldCheck, Pencil, Trash2, Lock, AlertTriangle, Users, Copy } from "lucide-react";
+import { Plus, Search, Shield, ShieldCheck, Pencil, Trash2, Lock, AlertTriangle, Users, Copy, RotateCcw } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,6 +22,8 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { roleFormSchema } from "@/lib/validations";
 
 interface RoleTemplate {
   id: string;
@@ -42,6 +44,8 @@ interface Role {
   can_sign_contracts: boolean;
   created_at: string;
   created_by?: string | null;
+  status?: string | null;
+  deleted_at?: string | null;
 }
 
 interface Permission {
@@ -68,7 +72,9 @@ export default function Roles() {
   const canCreate = hasPermission("roles.create");
   const canEdit = hasPermission("roles.edit");
   const canDelete = hasPermission("roles.delete");
-  const canManagePermissions = hasPermission("roles.manage_permissions") || canEdit;
+  // Note: "roles.manage_permissions" is not a real permission code in anew_permissions
+  // (phantom permission, unreachable by any real role) — this always reduces to canEdit.
+  const canManagePermissions = canEdit;
   const editScope = getPermissionScope("roles.edit");
   const deleteScope = getPermissionScope("roles.delete");
 
@@ -80,10 +86,12 @@ export default function Roles() {
   const [formData, setFormData] = useState({ code: "", name: "", description: "", can_sign_contracts: false });
   const [selectedPermissions, setSelectedPermissions] = useState<Set<string>>(new Set());
   const [roleToDelete, setRoleToDelete] = useState<string | null>(null);
+  const [roleToRestore, setRoleToRestore] = useState<string | null>(null);
+  const [showDeletedRoles, setShowDeletedRoles] = useState(false);
   // Fetch roles - system roles + active organization roles + ancestor org roles (inherited)
   // Roles are organizational resources - having a membership = view access
   const { data: roles = [], isLoading: rolesLoading } = useQuery({
-    queryKey: ["anew_roles", activeCompany?.id, anewRoleCode],
+    queryKey: ["anew_roles", activeCompany?.id, anewRoleCode, showDeletedRoles],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
 
@@ -101,10 +109,12 @@ export default function Roles() {
         currentId = parentLink.parent_org_id;
       }
 
-      const { data, error } = await supabase
+      let rolesQuery = supabase
         .from("anew_roles")
         .select("*, created_by")
         .order("name");
+      rolesQuery = showDeletedRoles ? rolesQuery.not("deleted_at", "is", null) : rolesQuery.is("deleted_at", null);
+      const { data, error } = await rolesQuery;
 
       if (error) throw error;
 
@@ -399,30 +409,19 @@ export default function Roles() {
   const createMutation = useMutation({
     mutationFn: async (data: { code: string; name: string; description: string; can_sign_contracts: boolean; permissions: string[] }) => {
       // Canonical business user id for created_by (never auth_user_id).
-      const { resolveCurrentBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
       const createdBy = await resolveCurrentBusinessUserId();
+      if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
 
-      const { data: role, error: roleError } = await supabase
-        .from("anew_roles")
-        .insert({ 
-          code: data.code, 
-          name: data.name, 
-          description: data.description || null,
-          can_sign_contracts: data.can_sign_contracts,
-          organization_id: activeCompany?.id || null, // Associate with active company
-          created_by: createdBy,
-        } as any)
-        .select()
-        .single();
+      const { data: role, error: roleError } = await supabase.rpc("rpc_create_role", {
+        p_code: data.code,
+        p_name: data.name,
+        p_description: data.description || null,
+        p_can_sign_contracts: data.can_sign_contracts,
+        p_organization_id: activeCompany?.id || null,
+        p_permissions: data.permissions,
+      });
       if (roleError) throw roleError;
-
-      if (data.permissions.length > 0) {
-        const { error: permError } = await supabase
-          .from("anew_role_permissions")
-          .insert(data.permissions.map(p => ({ role_id: role.id, permission_code: p, created_by: createdBy })));
-        if (permError) throw permError;
-      }
-      return role;
+      return role as Role;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
@@ -447,25 +446,18 @@ export default function Roles() {
         throw new Error("Roles de sistema não são editáveis");
       }
 
-      const { error: roleError } = await supabase
-        .from("anew_roles")
-        .update({ code: data.code, name: data.name, description: data.description || null, can_sign_contracts: data.can_sign_contracts } as any)
-        .eq("id", data.id);
-      if (roleError) throw roleError;
-
-      const { resolveCurrentBusinessUserId } = await import("@/lib/identity/resolveBusinessUserId");
       const createdBy = await resolveCurrentBusinessUserId();
       if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
 
-      // Delete existing permissions and re-add
-      await supabase.from("anew_role_permissions").delete().eq("role_id", data.id);
-
-      if (data.permissions.length > 0) {
-        const { error: permError } = await supabase
-          .from("anew_role_permissions")
-          .insert(data.permissions.map(p => ({ role_id: data.id, permission_code: p, created_by: createdBy })));
-        if (permError) throw permError;
-      }
+      const { error: roleError } = await supabase.rpc("rpc_update_role", {
+        p_id: data.id,
+        p_code: data.code,
+        p_name: data.name,
+        p_description: data.description || null,
+        p_can_sign_contracts: data.can_sign_contracts,
+        p_permissions: data.permissions,
+      });
+      if (roleError) throw roleError;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
@@ -481,7 +473,10 @@ export default function Roles() {
   // Delete role mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("anew_roles").delete().eq("id", id);
+      const createdBy = await resolveCurrentBusinessUserId();
+      if (!createdBy) throw new Error("Perfil de utilizador não encontrado");
+
+      const { error } = await supabase.rpc("rpc_delete_role", { p_id: id });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -491,6 +486,22 @@ export default function Roles() {
     },
     onError: (error: Error) => {
       toast.error("Erro ao eliminar role: " + error.message);
+    },
+  });
+
+  // Restore role mutation
+  const restoreMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.rpc("rpc_restore_role", { p_id: id });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["anew_roles"] });
+      queryClient.invalidateQueries({ queryKey: ["anew_role_permissions"] });
+      toast.success("Role restaurada com sucesso");
+    },
+    onError: (error: Error) => {
+      toast.error("Erro ao restaurar role: " + error.message);
     },
   });
 
@@ -553,13 +564,8 @@ export default function Roles() {
   };
 
   const handleSubmit = () => {
-    if (!formData.name) {
-      toast.error("Preencha o nome da role");
-      return;
-    }
-
     const code = formData.code || generateCodeFromName(formData.name);
-    
+
     const data = {
       code,
       name: formData.name,
@@ -567,6 +573,12 @@ export default function Roles() {
       can_sign_contracts: formData.can_sign_contracts,
       permissions: Array.from(selectedPermissions),
     };
+
+    const validation = roleFormSchema.safeParse(data);
+    if (!validation.success) {
+      toast.error(validation.error.issues[0].message);
+      return;
+    }
 
     if (editingRole) {
       updateMutation.mutate({ id: editingRole.id, isSystem: editingRole.is_system, ...data });
@@ -658,14 +670,25 @@ export default function Roles() {
         </div>
 
         {/* Search */}
-        <div className="relative max-w-md">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Pesquisar roles..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10"
-          />
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="relative max-w-md flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar roles..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Button
+            variant={showDeletedRoles ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowDeletedRoles((v) => !v)}
+            className="gap-1 whitespace-nowrap"
+          >
+            <Trash2 className="h-4 w-4" />
+            {showDeletedRoles ? "Ver ativas" : "Ver eliminadas"}
+          </Button>
         </div>
 
         {/* Roles Table */}
@@ -723,7 +746,9 @@ export default function Roles() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {role.is_system ? (
+                        {role.deleted_at ? (
+                          <Badge variant="destructive">Eliminada</Badge>
+                        ) : role.is_system ? (
                           <Badge variant="outline" className="gap-1">
                             <Lock className="h-3 w-3" />
                             Sistema
@@ -734,25 +759,40 @@ export default function Roles() {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          {canEditRole(role) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEditDialog(role)}
-                              title="Editar permissões"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {canDeleteRole(role) && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setRoleToDelete(role.id)}
-                              title="Eliminar"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                          {role.deleted_at ? (
+                            (canDelete && !role.is_system) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setRoleToRestore(role.id)}
+                                title="Restaurar"
+                              >
+                                <RotateCcw className="h-4 w-4" />
+                              </Button>
+                            )
+                          ) : (
+                            <>
+                              {canEditRole(role) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openEditDialog(role)}
+                                  title="Editar permissões"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canDeleteRole(role) && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setRoleToDelete(role.id)}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </>
                           )}
                         </div>
                       </TableCell>
@@ -1058,7 +1098,7 @@ export default function Roles() {
             <AlertDialogHeader>
               <AlertDialogTitle>Eliminar Role</AlertDialogTitle>
               <AlertDialogDescription>
-                Tem a certeza que pretende eliminar esta role? Esta acção não pode ser desfeita.
+                Tem a certeza que pretende eliminar esta role? A role fica inativa e pode ser restaurada mais tarde, com as mesmas permissões.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -1073,6 +1113,31 @@ export default function Roles() {
                 }}
               >
                 Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Restore confirmation */}
+        <AlertDialog open={!!roleToRestore} onOpenChange={(open) => { if (!open) setRoleToRestore(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Restaurar Role</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem a certeza que pretende restaurar esta role? Volta a ficar ativa com as mesmas permissões que tinha antes de ser eliminada.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (roleToRestore) {
+                    restoreMutation.mutate(roleToRestore);
+                    setRoleToRestore(null);
+                  }
+                }}
+              >
+                Restaurar
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

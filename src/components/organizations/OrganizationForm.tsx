@@ -17,6 +17,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { MultiAddressForm, AddressFormData, emptyAddress } from "./MultiAddressForm";
+import { useToast } from "@/hooks/use-toast";
+import { organizationFormSchema, organizationFiscalAddressSchema } from "@/lib/validations";
 
 interface OrgTemplate {
   id: string;
@@ -120,6 +122,15 @@ export interface OrganizationFormProps {
   onFiscalDistrictChange?: (districtId: string | null) => void;
   selectedOrg: Organization | null;
   isEdit?: boolean;
+  /**
+   * When true, renders a "parent organization" selector on create and requires a
+   * selection (unless `allowNoParent` is also set). Callers that already wire the new
+   * org into the hierarchy through a different mechanism (e.g. a dedicated hierarchy
+   * RPC) should leave this false/unset so they are unaffected.
+   */
+  showParentSelector?: boolean;
+  /** When true, allows leaving the parent organization unset (creates a new top-level/root org). Only relevant when `showParentSelector` is true. */
+  allowNoParent?: boolean;
   t: (key: string) => string;
   getTypeLabel: (type: string) => string;
   onSave: () => void;
@@ -145,6 +156,8 @@ export function OrganizationForm({
   onFiscalDistrictChange,
   selectedOrg,
   isEdit = false,
+  showParentSelector = false,
+  allowNoParent = false,
   t,
   getTypeLabel,
   onSave,
@@ -157,6 +170,8 @@ export function OrganizationForm({
   title,
 }: OrganizationFormProps) {
   const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const { toast } = useToast();
 
   // Fetch templates based on selected sector
   const { data: templates = [] } = useQuery({
@@ -234,8 +249,8 @@ export function OrganizationForm({
   const handleCountryChange = (countryCode: string) => {
     setFormData(prev => ({
       ...prev,
-      address: { 
-        ...prev.address, 
+      address: {
+        ...prev.address,
         country: countryCode,
         district_id: "",
         district: "",
@@ -243,6 +258,54 @@ export function OrganizationForm({
         city: ""
       }
     }));
+  };
+
+  const handleSubmit = () => {
+    const validation = organizationFormSchema.safeParse({
+      name: formData.name,
+      type: formData.type === "other" ? formData.customType : formData.type,
+      phone: formData.phone,
+      isFiscal: formData.isFiscal,
+      nif: formData.nif,
+    });
+    if (!validation.success) {
+      const nextErrors: Record<string, string> = {};
+      for (const issue of validation.error.issues) {
+        const key = String(issue.path[0] ?? "");
+        if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+      }
+      setFormErrors(nextErrors);
+      toast({ title: t("common.error") || "Validation Error", description: validation.error.issues[0].message, variant: "destructive" });
+      return;
+    }
+
+    if (showParentSelector && !isEdit && !allowNoParent && !formData.parentId) {
+      const message = t("organizations.parentRequired");
+      setFormErrors(prev => ({ ...prev, parentId: message }));
+      toast({ title: t("common.error") || "Validation Error", description: message, variant: "destructive" });
+      return;
+    }
+
+    if (formData.isFiscal && formData.fiscalAddressOption === "new") {
+      const fiscalValidation = organizationFiscalAddressSchema.safeParse({
+        street: formData.fiscalAddress.street,
+        postal_code: formData.fiscalAddress.postal_code,
+        city: formData.fiscalAddress.city,
+      });
+      if (!fiscalValidation.success) {
+        const nextErrors: Record<string, string> = {};
+        for (const issue of fiscalValidation.error.issues) {
+          const key = String(issue.path[0] ?? "");
+          if (key && !nextErrors[key]) nextErrors[key] = issue.message;
+        }
+        setFormErrors(nextErrors);
+        toast({ title: t("common.error") || "Validation Error", description: fiscalValidation.error.issues[0].message, variant: "destructive" });
+        return;
+      }
+    }
+
+    setFormErrors({});
+    onSave();
   };
 
   return (
@@ -283,7 +346,9 @@ export function OrganizationForm({
                 value={formData.name}
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                 placeholder={t("organizations.namePlaceholder")}
+                aria-invalid={!!formErrors.name}
               />
+              {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
             </div>
 
             <div className="space-y-2">
@@ -315,6 +380,39 @@ export function OrganizationForm({
                   onChange={(e) => setFormData(prev => ({ ...prev, customType: e.target.value }))}
                   placeholder={t("organizations.customTypePlaceholder")}
                 />
+              </div>
+            )}
+
+            {showParentSelector && !isEdit && (
+              <div className="space-y-2">
+                <Label htmlFor="parentOrg">
+                  {t("organizations.parentOrg")}{!allowNoParent && " *"}
+                </Label>
+                <Select
+                  value={formData.parentId || "__none__"}
+                  onValueChange={(value) => {
+                    setFormData(prev => ({ ...prev, parentId: value === "__none__" ? "" : value }));
+                    setFormErrors(prev => { const next = { ...prev }; delete next.parentId; return next; });
+                  }}
+                >
+                  <SelectTrigger id="parentOrg" aria-invalid={!!formErrors.parentId}>
+                    <SelectValue placeholder={t("organizations.selectParent")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allowNoParent && (
+                      <SelectItem value="__none__">
+                        {t("organizations.noParent")}
+                      </SelectItem>
+                    )}
+                    {organizations.map((org) => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {formErrors.parentId && <p className="text-xs text-destructive">{formErrors.parentId}</p>}
+                <p className="text-xs text-muted-foreground">
+                  {t("organizations.parentOrgHint")}
+                </p>
               </div>
             )}
 
@@ -447,7 +545,9 @@ export function OrganizationForm({
                 value={formData.phone}
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                 placeholder="+351 912 345 678"
+                aria-invalid={!!formErrors.phone}
               />
+              {formErrors.phone && <p className="text-xs text-destructive">{formErrors.phone}</p>}
             </div>
 
             <div className="space-y-2">
@@ -509,7 +609,9 @@ export function OrganizationForm({
                         value={formData.nif}
                         onChange={(e) => setFormData(prev => ({ ...prev, nif: e.target.value }))}
                         placeholder={t("organizations.nifPlaceholder")}
+                        aria-invalid={!!formErrors.nif}
                       />
+                      {formErrors.nif && <p className="text-xs text-destructive">{formErrors.nif}</p>}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="commercialName">{t("organizations.commercialName")}</Label>
@@ -554,12 +656,14 @@ export function OrganizationForm({
                         <Label>{t("addresses.street")}</Label>
                         <Input
                           value={formData.fiscalAddress.street}
-                          onChange={(e) => setFormData(prev => ({ 
-                            ...prev, 
-                            fiscalAddress: { ...prev.fiscalAddress, street: e.target.value } 
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            fiscalAddress: { ...prev.fiscalAddress, street: e.target.value }
                           }))}
                           placeholder={t("addresses.streetPlaceholder")}
+                          aria-invalid={!!formErrors.street}
                         />
+                        {formErrors.street && <p className="text-xs text-destructive mt-1">{formErrors.street}</p>}
                       </div>
                       <div>
                         <Label>{t("addresses.number")}</Label>
@@ -719,17 +823,20 @@ export function OrganizationForm({
                             placeholder="Lisboa"
                           />
                         )}
+                        {formErrors.city && <p className="text-xs text-destructive mt-1">{formErrors.city}</p>}
                       </div>
                       <div>
                         <Label>{t("addresses.postalCode")}</Label>
                         <Input
                           value={formData.fiscalAddress.postal_code}
-                          onChange={(e) => setFormData(prev => ({ 
-                            ...prev, 
-                            fiscalAddress: { ...prev.fiscalAddress, postal_code: e.target.value } 
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            fiscalAddress: { ...prev.fiscalAddress, postal_code: e.target.value }
                           }))}
                           placeholder="1000-001"
+                          aria-invalid={!!formErrors.postal_code}
                         />
+                        {formErrors.postal_code && <p className="text-xs text-destructive mt-1">{formErrors.postal_code}</p>}
                       </div>
                     </div>
                   </div>
@@ -751,7 +858,7 @@ export function OrganizationForm({
         <Button variant="outline" onClick={onCancel} className="w-full sm:w-auto">
           {t("common.cancel")}
         </Button>
-        <Button onClick={onSave} disabled={isSaving} className="w-full sm:w-auto">
+        <Button onClick={handleSubmit} disabled={isSaving} className="w-full sm:w-auto">
           {isSaving ? "A criar..." : (isEdit ? t("common.save") : t("common.create"))}
         </Button>
       </div>

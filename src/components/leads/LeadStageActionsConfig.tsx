@@ -315,7 +315,13 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
                       <SelectValue placeholder="Selecionar acção..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.entries(ACTION_LABELS).map(([key, meta]) => (
+                      {Object.entries(ACTION_LABELS)
+                        // "Converter para Contacto" retirado das opções novas -- Contactos
+                        // foram fundidos no ciclo de vida de Leads (merge 2026-07-15). A
+                        // entrada fica em ACTION_LABELS só para continuar a rotular
+                        // corretamente ações já configuradas antigamente (agora desativadas).
+                        .filter(([key]) => key !== "convert_to_contact")
+                        .map(([key, meta]) => (
                         <SelectItem key={key} value={key}>
                           <div className="flex items-center gap-2">
                             {meta.icon}

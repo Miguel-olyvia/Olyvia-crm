@@ -76,6 +76,15 @@ export default function Scheduling() {
   fetchResourcesRef.current = fetchResources;
   const ensureTimeOffBoardRef = useRef(ensureTimeOffBoard);
   ensureTimeOffBoardRef.current = ensureTimeOffBoard;
+  // Auto-provisioning the "time-off" system board is an admin-level action
+  // gated by the same 'scheduling.boards.create' RLS policy on schedule_boards
+  // (see supabase/migrations/20260615130000, "Users can create schedule boards").
+  // Users without that permission (e.g. org-scope contract managers, regular
+  // team-scope sales reps) can view Scheduling fine but previously triggered
+  // a doomed INSERT attempt on every page load, logging a 42501 RLS error.
+  const canCreateBoards = hasPermission('scheduling.boards.create');
+  const canCreateBoardsRef = useRef(canCreateBoards);
+  canCreateBoardsRef.current = canCreateBoards;
   const fetchItemsRef = useRef(fetchItems);
   fetchItemsRef.current = fetchItems;
 
@@ -131,7 +140,9 @@ export default function Scheduling() {
       setSelectedBoardIds([]); setSelectedResourceIds([]);
       setSelectedItem(null); setSelectedBoard(null); setSelectedResource(null);
       setScheduleScope(canSeeAll ? 'all' : 'mine');
-      await ensureTimeOffBoardRef.current();
+      if (canCreateBoardsRef.current) {
+        await ensureTimeOffBoardRef.current();
+      }
       const [boardsData, resourcesData] = await Promise.all([fetchBoardsRef.current(), fetchResourcesRef.current()]);
       if (cancelled) return;
       setBoards(boardsData); setResources(resourcesData);
@@ -286,6 +297,18 @@ export default function Scheduling() {
   const toggleBoardFilter = (id: string) => setSelectedBoardIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleResourceFilter = (id: string) => setSelectedResourceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  // SECURITY: the assignee/user pickers must respect the viewer's own scheduling.items.view scope.
+  // ORG (or system admin) sees the full roster; TEAM sees only their own teammates + self; OWNED/NONE see only themselves.
+  // `users` here is the raw, unscoped org roster loaded for name resolution — never pass it directly to picker UI.
+  const assignableUsers = useMemo(() => {
+    if (canSeeAll) return users;
+    if (isTeamScope) {
+      const allowedIds = new Set([anewUserId, ...teamMemberIds].filter(Boolean));
+      return users.filter(u => allowedIds.has(u.id));
+    }
+    return users.filter(u => u.id === anewUserId);
+  }, [users, canSeeAll, isTeamScope, anewUserId, teamMemberIds]);
+
   if (loading && boards.length === 0) return <><div className="flex justify-center items-center h-64"><OlyviaLoader size={40} /></div></>;
 
   return (
@@ -302,7 +325,7 @@ export default function Scheduling() {
             </PermissionGate>
             <Button variant="ghost" size="icon" asChild><Link to="/docs/auto-scheduling"><HelpCircle className="h-5 w-5" /></Link></Button>
             <PageFAQSheet pageKey="operations.scheduling" />
-            <PermissionGate permission="scheduling.create">
+            <PermissionGate permission="scheduling.items.create">
               <Button variant="outline" onClick={() => handleAddClick()}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newSchedule')}</Button>
             </PermissionGate>
           </div>
@@ -442,7 +465,7 @@ export default function Scheduling() {
 
           <TabsContent value="resources" className="space-y-4">
             <div className="flex justify-end">
-              <PermissionGate permission="scheduling.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
+              <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {resources.map(resource => (
@@ -453,7 +476,7 @@ export default function Scheduling() {
                         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
                         <CardTitle className="text-lg">{resource.name}</CardTitle>
                       </div>
-                      {hasPermission('scheduling.delete') && (
+                      {hasPermission('scheduling.resources.delete') && (
                         <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
                       )}
                     </div>
@@ -489,7 +512,7 @@ export default function Scheduling() {
                   <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">{t('scheduling.noResources')}</h3>
                   <p className="text-muted-foreground mb-4">{t('scheduling.createResourcesPrompt')}</p>
-                  <PermissionGate permission="scheduling.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.createResource')}</Button></PermissionGate>
+                  <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.createResource')}</Button></PermissionGate>
                 </Card>
               )}
             </div>
@@ -502,10 +525,10 @@ export default function Scheduling() {
       </div>
 
       <ScheduleItemDialog open={itemDialogOpen} onOpenChange={setItemDialogOpen} item={selectedItem} boards={boards} resources={resources}
-        contacts={contacts} employees={employees} companyUsers={users} currentUserId={currentUserId} currentEmployeeId={undefined}
+        contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
         defaultDate={defaultDate} companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />
-      <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={users} onSave={handleSaveResource} />
+      <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={assignableUsers} allUsers={users} onSave={handleSaveResource} />
       <ScheduleSettingsDialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen} companyId={activeCompany?.id} />
 
       <AlertDialog open={!!boardToDelete} onOpenChange={(open) => !open && setBoardToDelete(null)}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { useCompany } from "@/contexts/CompanyContext";
 import DOMPurify from "dompurify";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "sonner";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
-import { extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
+import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
@@ -93,6 +94,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
 
   const saveMutation = useMutation({
     mutationFn: async (html: string) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
       const { error } = await (supabase as any)
         .from("client_contracts")
         .update({ contract_body_html: html })
@@ -110,7 +115,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const finalizeGeneration = async (html: string, templateId: string, templateName: string, promptValues: Record<string, string>) => {
     // Apply auto-resolved substitutions (empresa_nome, etc.) — html may be raw baseWithItems
     // from GenerateFromTemplateDialog which passes pre-substitution HTML to allow full token detection.
-    let base = variableData ? substituteVariables(html, variableData as any) : html;
+    const base = variableData ? substituteVariables(html, variableData as any) : html;
     // Bake prompt values filled by the user permanently into the body.
     let withPrompts = base;
     for (const [k, v] of Object.entries(promptValues)) {
@@ -129,11 +134,20 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       // Merge with existing prompt_values so previously filled keys persist.
       updatePayload.prompt_values = { ...(contract?.prompt_values || {}), ...promptValues };
     }
-    (supabase as any)
-      .from("client_contracts")
-      .update(updatePayload)
-      .eq("id", contract.id)
-      .then(() => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }));
+    resolveCurrentBusinessUserId().then((uid) => {
+      const doUpdate = () =>
+        (supabase as any)
+          .from("client_contracts")
+          .update(updatePayload)
+          .eq("id", contract.id)
+          .then(() => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }))
+          .catch((e: unknown) => console.error('[ContractBodyTab] finalizeGeneration update failed', e));
+      if (uid) {
+        supabase.rpc('set_audit_context', { p_user_id: uid, p_source: 'ui' }).then(doUpdate);
+      } else {
+        doUpdate();
+      }
+    });
   };
 
   const handleGenerated = async (html: string, templateId: string, templateName: string) => {
@@ -265,6 +279,9 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
 
       const signerName = anewUser?.name || user.email || "Representante";
 
+      if (anewUser?.id) {
+        await supabase.rpc('set_audit_context', { p_user_id: anewUser.id, p_source: 'ui' });
+      }
       await (supabase as any)
         .from("client_contracts")
         .update({

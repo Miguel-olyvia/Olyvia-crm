@@ -30,12 +30,31 @@ const ClientPortalContracts = () => {
 
       const { data: portalUsers } = await supabase
         .from("client_portal_users")
-        .select("contract_id")
-        .eq("auth_user_id", uid)
-        .not("contract_id", "is", null);
+        .select("id, contract_id")
+        .eq("auth_user_id", uid);
       if (cancelled) return;
 
-      const contractIds = portalUsers?.map(p => p.contract_id!) || [];
+      const legacyContractIds = (portalUsers || []).map(p => p.contract_id).filter(Boolean) as string[];
+
+      // The legacy `contract_id` column only stores the LAST contract sent to this
+      // portal user — a second contract sent afterwards overwrites it, even though
+      // the backend (create-client-portal-access) also recorded it in
+      // `client_portal_documents`. Union both sources so the client keeps seeing
+      // every contract they were sent, not just the most recent one.
+      const portalUserIds = (portalUsers || []).map(p => p.id).filter(Boolean);
+      let documentContractIds: string[] = [];
+      if (portalUserIds.length > 0) {
+        const { data: docs } = await supabase
+          .from("client_portal_documents")
+          .select("document_id")
+          .in("portal_user_id", portalUserIds)
+          .eq("document_type", "contract")
+          .eq("is_visible", true);
+        if (cancelled) return;
+        documentContractIds = (docs || []).map(d => d.document_id).filter(Boolean) as string[];
+      }
+
+      const contractIds = Array.from(new Set([...legacyContractIds, ...documentContractIds]));
       if (contractIds.length === 0) {
         if (!cancelled) { setContracts([]); setLoading(false); }
         return;

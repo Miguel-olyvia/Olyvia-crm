@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { Loader2, MapPin } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { formLocationConfigSchema } from "@/lib/validations";
 
 interface FormLocationConfigProps {
   open: boolean;
@@ -125,6 +126,16 @@ export function FormLocationConfig({
   };
 
   const handleSave = async () => {
+    const validation = formLocationConfigSchema.safeParse({
+      country_code: selectedCountry,
+      location_required: locationRequired,
+      district_ids: selectedDistricts,
+    });
+    if (!validation.success) {
+      toast.error(validation.error.issues[0]?.message ?? "Dados de localização inválidos");
+      return;
+    }
+
     setSaving(true);
     try {
       // Update form

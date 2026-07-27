@@ -190,10 +190,14 @@ export function ScheduleBoardsTab({
       setAllItemsRaw((allItems || []) as any[]);
     } catch (err) {
       console.error('Error loading board stats:', err);
+      toast({
+        title: t('scheduling.board.statsLoadError'),
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
-  }, [companyId, boards]);
+  }, [companyId, boards, t, toast]);
 
   useEffect(() => { loadBoardStats(); }, [loadBoardStats]);
 
@@ -330,8 +334,8 @@ export function ScheduleBoardsTab({
     const ids = actionablePendingToday.map(p => p.id);
     if (ids.length === 0) {
       toast({
-        title: 'Sem permissão',
-        description: 'Não tens agendamentos teus pendentes para confirmar.',
+        title: t('scheduling.toast.noPermissionTitle'),
+        description: t('scheduling.toast.noPermissionDesc'),
         variant: 'destructive',
       });
       return;
@@ -340,17 +344,17 @@ export function ScheduleBoardsTab({
     try {
       const ok = await onConfirmItems(ids);
       toast({
-        title: 'Agendamentos confirmados',
-        description: `${ok} de ${ids.length} confirmado${ids.length !== 1 ? 's' : ''}.`,
+        title: t('scheduling.toast.confirmedTitle'),
+        description: t('scheduling.toast.confirmedDesc', { confirmed: ok, total: ids.length }),
       });
       await loadBoardStats();
     } catch (err) {
       console.error(err);
-      toast({ title: 'Erro', description: 'Não foi possível confirmar.', variant: 'destructive' });
+      toast({ title: t('common.error'), description: t('scheduling.toast.confirmError'), variant: 'destructive' });
     } finally {
       setConfirming(false);
     }
-  }, [actionablePendingToday, onConfirmItems, loadBoardStats, toast]);
+  }, [actionablePendingToday, onConfirmItems, loadBoardStats, toast, t]);
 
   // Banner button label
   const totalPending = pendingTodayItems.length;
@@ -477,7 +481,7 @@ export function ScheduleBoardsTab({
           <Button size="icon" variant={viewMode === 'grid' ? 'default' : 'ghost'} className="h-8 w-8" onClick={() => setViewMode('grid')}><LayoutGrid className="h-4 w-4" /></Button>
           <Button size="icon" variant={viewMode === 'list' ? 'default' : 'ghost'} className="h-8 w-8" onClick={() => setViewMode('list')}><List className="h-4 w-4" /></Button>
         </div>
-        <PermissionGate permission="scheduling.create">
+        <PermissionGate permission="scheduling.boards.create">
           <Button onClick={onNewBoard}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newBoard')}</Button>
         </PermissionGate>
       </div>
@@ -494,11 +498,11 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}
-          <PermissionGate permission="scheduling.create">
+          <PermissionGate permission="scheduling.boards.create">
             <Card className="border-2 border-dashed border-muted-foreground/25 hover:border-primary/50 cursor-pointer transition-colors flex items-center justify-center min-h-[280px]" onClick={onNewBoard}>
               <div className="text-center space-y-2">
                 <Plus className="h-10 w-10 mx-auto text-muted-foreground/50" />
@@ -528,7 +532,7 @@ export function ScheduleBoardsTab({
               onEdit={() => onEditBoard(board)}
               onClick={() => onBoardClick?.(board)}
               onDelete={() => onDeleteBoard(board.id)}
-              canDelete={!board.is_system_board && hasPermission('scheduling.delete')}
+              canDelete={!board.is_system_board && hasPermission('scheduling.boards.delete')}
               t={t}
             />
           ))}

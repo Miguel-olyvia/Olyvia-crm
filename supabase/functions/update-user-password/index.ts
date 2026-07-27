@@ -10,10 +10,10 @@ const requestSchema = z.object({
   message: "newPassword or newEmail is required",
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 function handleUpdateError(error: any) {
   const msg = error.message.toLowerCase();
@@ -27,6 +27,7 @@ function handleUpdateError(error: any) {
 }
 
 serve(async (req: Request) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -201,8 +202,11 @@ serve(async (req: Request) => {
     });
   } catch (error: unknown) {
     console.error("Error in update-user-password:", error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return new Response(JSON.stringify({ error: message }), {
+    await captureError(error, { function: "update-user-password" });
+    // Unlike handleUpdateError's curated GoTrue messages above, an exception
+    // reaching this catch-all is unexpected (e.g. a raw network/Postgres
+    // failure) and must not be echoed back verbatim to the client.
+    return new Response(JSON.stringify({ error: "Unexpected error" }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }

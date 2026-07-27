@@ -21,7 +21,7 @@ import { format, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -41,8 +41,11 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
+import { exportClientContractsToXlsx } from "@/utils/contractsExportImport";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -119,7 +122,9 @@ const ClientContracts = () => {
   } = usePermissionScope();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [presetClientId, setPresetClientId] = useState<string | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [editingContract, setEditingContract] = useState<ClientContract | null>(null);
   const { finalizeContract } = usePipelineAutomation();
@@ -141,6 +146,9 @@ const ClientContracts = () => {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
   const [contractPortalStatuses, setContractPortalStatuses] = useState<Record<string, string>>({});
+  const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
+  const [reassigningContract, setReassigningContract] = useState<ClientContract | null>(null);
+  const [reassignOwnerId, setReassignOwnerId] = useState<string>("");
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
 
@@ -173,19 +181,45 @@ const ClientContracts = () => {
     }
   };
 
+  // Direct email/WhatsApp triggers for row-level dropdown items — unlike
+  // handleSendEmail/handleSendWhatsApp (which read the `sendingContract` state
+  // set earlier by handleOpenSendChannel), these build the context straight
+  // from the row's own `contract` argument to avoid a stale-closure read of
+  // `sendingContract` right after calling its setter.
+  const handleEmailClientDirect = (contract: any) => {
+    setSendingContract(contract);
+    setShowEmailDialog(true);
+  };
+
+  const handleWhatsAppClientDirect = (contract: any) => {
+    setSendingContract(contract);
+    setWhatsAppContext({
+      module: "contracts" as any,
+      recipientName: contract._clientName || "",
+      recipientPhone: contract._clientPhone || "",
+      recipientPhoneCountryCode: contract._clientPhoneCountryCode || undefined,
+      entityId: contract.entity_id || "",
+      organizationId: contract.organization_id || undefined,
+      contractId: contract.id,
+      contractNumber: contract.contract_number || undefined,
+      hasActiveDeal: false,
+    });
+    setShowWhatsAppDialog(true);
+  };
+
   const handleDownloadPdf = async (contract: any) => {
     if (!activeCompany?.id) {
-      toast.error("Sem organização ativa");
+      toast.error(t('clientContracts.toast.noActiveOrg'));
       return;
     }
 
-    const loadingToast = toast.loading("A gerar PDF do contrato...");
+    const loadingToast = toast.loading(t('clientContracts.toast.generatingPdf'));
     let iframe: HTMLIFrameElement | null = null;
 
     try {
       const resolved = await resolveContractDocument(contract, activeCompany.id, activeCompany.name);
       if (!resolved) {
-        toast.error("Este contrato não tem conteúdo para gerar PDF");
+        toast.error(t('clientContracts.toast.noPdfContent'));
         return;
       }
 
@@ -294,9 +328,10 @@ const ClientContracts = () => {
         .from(pageElement)
         .save();
 
-      toast.success("PDF descarregado com sucesso");
+      toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
-      toast.error("Erro ao gerar PDF: " + (error?.message || "erro desconhecido"));
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
     } finally {
       toast.dismiss(loadingToast);
       iframe?.remove();
@@ -452,37 +487,116 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id && canView && !scopeLoading,
   });
 
-  // Load portal statuses for contracts
+  // Load portal statuses for contracts.
+  // Uses a cancelled flag to prevent a stale async call (triggered by the previous
+  // activeCompany) from overwriting state that was already set by the new one.
   useEffect(() => {
+    if (!activeCompany?.id || !contracts || contracts.length === 0) return;
+    let cancelled = false;
     const loadPortalStatuses = async () => {
-      if (!activeCompany?.id || !contracts || contracts.length === 0) return;
       const contractIds = contracts.map((c: any) => c.id);
       const { data: portalUsers } = await (supabase as any)
         .from("client_portal_users")
-        .select("contract_id, portal_status")
+        .select("id, contract_id, portal_status")
         .eq("organization_id", activeCompany.id)
         .in("contract_id", contractIds);
+      if (cancelled) return;
       const statusMap: Record<string, string> = {};
       (portalUsers || []).forEach((pu: any) => {
         if (pu.contract_id) statusMap[pu.contract_id] = pu.portal_status;
       });
+
+      // The legacy `client_portal_users.contract_id` column only stores the LAST
+      // contract sent to that portal user — if a second contract is later sent,
+      // the first one silently disappears from portal-status tracking even though
+      // the backend (create-client-portal-access) also recorded it in
+      // `client_portal_documents`. Union both sources so every sent contract keeps
+      // showing a portal status, not just the most recent one.
+      const portalUserIds = (portalUsers || []).map((pu: any) => pu.id).filter(Boolean);
+      if (portalUserIds.length > 0) {
+        const { data: docs } = await (supabase as any)
+          .from("client_portal_documents")
+          .select("portal_user_id, document_id")
+          .in("portal_user_id", portalUserIds)
+          .eq("document_type", "contract")
+          .eq("is_visible", true);
+        if (cancelled) return;
+        const portalUserStatusById = new Map(
+          (portalUsers || []).map((pu: any) => [pu.id, pu.portal_status])
+        );
+        (docs || []).forEach((doc: any) => {
+          if (doc.document_id && !statusMap[doc.document_id]) {
+            const status = portalUserStatusById.get(doc.portal_user_id);
+            if (status) statusMap[doc.document_id] = status;
+          }
+        });
+      }
+
       setContractPortalStatuses(statusMap);
     };
-    loadPortalStatuses();
+    void loadPortalStatuses();
+    return () => { cancelled = true; };
   }, [contracts, activeCompany?.id]);
 
   const { data: proposals = [] } = useQuery({
-    queryKey: ["proposals-for-contracts", activeCompany?.id],
+    queryKey: [
+      "proposals-for-contracts",
+      activeCompany?.id,
+      isSystemAdmin,
+      getPermissionScope("proposals.view"),
+      scopeAnewUserId,
+      teamMemberIds.join(","),
+    ],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
-      const { data, error } = await (supabase as any)
+
+      // SECURITY: this picker must apply the exact same proposals.view scope
+      // (ORG/TEAM/OWNED) that Proposals.tsx uses for the main Propostas list
+      // — including the monetary values it surfaces — via the same
+      // getPermissionScope source of truth, or a scope-restricted viewer
+      // could discover proposals here that don't appear in their own list.
+      const viewScope = getPermissionScope("proposals.view");
+      if (viewScope === "NONE" && !isSystemAdmin) return [];
+
+      let proposalsQuery = (supabase as any)
         .from("proposals")
         .select(`id, title, entity_id, deal_id, quotes(total)`)
         .eq("organization_id", activeCompany.id)
         .in("status", ["approved", "accepted", "sent", "draft"])
         .order("created_at", { ascending: false });
+
+      if (viewScope !== "ORG" && !isSystemAdmin) {
+        const allowedUserIds = new Set<string>();
+        if (scopeAnewUserId) allowedUserIds.add(scopeAnewUserId);
+        if (viewScope === "TEAM") teamMemberIds.forEach((id) => allowedUserIds.add(id));
+
+        if (allowedUserIds.size === 0) return [];
+
+        const { data: userLeads } = await supabase
+          .from("anew_leads")
+          .select("id")
+          .eq("organization_id", activeCompany.id)
+          .in("assigned_to", Array.from(allowedUserIds));
+        const leadIds = (userLeads || []).map((l: any) => l.id);
+
+        let dealIds: string[] = [];
+        if (leadIds.length > 0) {
+          const { data: userDeals } = await supabase
+            .from("deals")
+            .select("id")
+            .eq("organization_id", activeCompany.id)
+            .in("lead_id", leadIds);
+          dealIds = (userDeals || []).map((d: any) => d.id);
+        }
+
+        const orClauses = [`created_by.in.(${Array.from(allowedUserIds).join(",")})`];
+        if (dealIds.length > 0) orClauses.push(`deal_id.in.(${dealIds.join(",")})`);
+        proposalsQuery = proposalsQuery.or(orClauses.join(","));
+      }
+
+      const { data, error } = await proposalsQuery;
       if (error) throw error;
-      
+
       const entityIds: string[] = [];
       const dealIds: string[] = [];
       (data || []).forEach((p: any) => {
@@ -490,7 +604,7 @@ const ClientContracts = () => {
         else if (p.deal_id) dealIds.push(p.deal_id);
       });
 
-      let dealEntityMap = new Map<string, string>();
+      const dealEntityMap = new Map<string, string>();
       if (dealIds.length > 0) {
         const { data: deals } = await (supabase as any).from("deals").select("id, entity_id").in("id", dealIds);
         (deals || []).forEach((d: any) => {
@@ -520,8 +634,27 @@ const ClientContracts = () => {
       
       return data as Proposal[];
     },
-    enabled: !!activeCompany?.id,
+    enabled: !!activeCompany?.id && !scopeLoading,
   });
+
+  // Handle "new contract preset to a client" URL params (Clients' "Criar contrato"
+  // kebab action): ?newContract=true&clientId=... Opens the existing create dialog
+  // and pre-restricts the proposal picker to that client's proposals via
+  // ContractDetailDialog's presetClientId prop.
+  useEffect(() => {
+    const newContractParam = searchParams.get("newContract");
+    const newContractClientId = searchParams.get("clientId");
+    if (newContractParam === "true" && newContractClientId) {
+      setPresetClientId(newContractClientId);
+      setEditingContract(null);
+      setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" });
+      setIsDialogOpen(true);
+
+      searchParams.delete("newContract");
+      searchParams.delete("clientId");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],
@@ -540,43 +673,16 @@ const ClientContracts = () => {
   });
 
   // Computed KPIs
+  // `now` is declared at the component body so that helper functions rendered
+  // during the same render pass (getRowColor, getSubtitle, etc.) share the same
+  // reference without being deps of a memo.  The memos below each capture their
+  // own snapshot so stale comparisons cannot occur when the page is open for long
+  // periods without a re-render.
   const now = new Date();
-  const kpis = useMemo(() => {
-    const total = contracts.length;
-    const totalValue = contracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const drafts = contracts.filter(c => c.status === "draft");
-    const sent = contracts.filter(c => c.status === "pending_signature");
-    const signed = contracts.filter(c => c.status === "signed" || c.status === "active");
-    const expired = contracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
-    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
-    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const avgValue = total > 0 ? totalValue / total : 0;
-    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
-    const expiring90 = contracts.filter(c => {
-      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
-      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      return d > 0 && d <= 90;
-    });
-    // Avg sign time
-    let avgSignDays = 0;
-    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
-    if (signedWithDates.length > 0) {
-      const totalDays = signedWithDates.reduce((s, c) => {
-        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
-      }, 0);
-      avgSignDays = Math.round(totalDays / signedWithDates.length);
-    }
-    return {
-      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
-      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-    };
-  }, [contracts]);
 
   // Filtered contracts
   const filteredContracts = useMemo(() => {
+    const now = new Date();
     let result = [...contracts];
     if (onlyMine && currentUserId) {
       result = result.filter(c => c.created_by === currentUserId);
@@ -588,6 +694,11 @@ const ClientContracts = () => {
           const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
           return d > 0 && d <= 90;
         });
+      } else if (statusFilter === "signed") {
+        // "Assinado" KPI/filter option represents both "signed" and "active"
+        // statuses (there is no separate "active" option in the Estado dropdown)
+        // — keep this in sync with the kpis.signed definition above.
+        result = result.filter(c => c.status === "signed" || c.status === "active");
       } else {
         result = result.filter(c => c.status === statusFilter);
       }
@@ -611,10 +722,45 @@ const ClientContracts = () => {
     return result;
   }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo]);
 
-  
+  // KPIs — computed over filteredContracts so cards reflect active filters
+  const kpis = useMemo(() => {
+    const now = new Date();
+    const total = filteredContracts.length;
+    const totalValue = filteredContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
+    const drafts = filteredContracts.filter(c => c.status === "draft");
+    const sent = filteredContracts.filter(c => c.status === "pending_signature");
+    const signed = filteredContracts.filter(c => c.status === "signed" || c.status === "active");
+    const expired = filteredContracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
+    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
+    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
+    const avgValue = total > 0 ? totalValue / total : 0;
+    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
+    const expiring90 = filteredContracts.filter(c => {
+      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
+      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      return d > 0 && d <= 90;
+    });
+    // Avg sign time
+    let avgSignDays = 0;
+    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
+    if (signedWithDates.length > 0) {
+      const totalDays = signedWithDates.reduce((s, c) => {
+        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
+      }, 0);
+      avgSignDays = Math.round(totalDays / signedWithDates.length);
+    }
+    return {
+      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
+      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
+    };
+  }, [filteredContracts, getEffectiveContractValue]);
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {
+    const now = new Date();
     const parts: string[] = [];
     const actions: { label: string; action: string; contract?: any }[] = [];
 
@@ -688,68 +834,214 @@ const ClientContracts = () => {
         }
       }
 
-      const { data: inserted, error } = await (supabase as any).from("client_contracts").insert({
-        client_id: clientId, entity_id: resolvedEntityId || null, organization_id: activeCompany.id,
-        root_organization_id: rootOrgId, proposal_id: data.proposal_id, contract_template_id: data.template_id || null,
-        total_value: totalValue, currency: "EUR", start_date: data.start_date || null, end_date: data.end_date || null,
-        notes: data.notes || null, payment_terms: data.payment_terms || null,
-        contract_body_html: contractBodyHtml,
-        prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
-        status: "draft", created_by: businessUserId,
-      }).select("*").single();
-      if (error) throw error;
-
       // Bake prompt answers + signatário no markup, mas DEIXA os tokens {{…}} intactos.
       // A substituição final (proposta_numero, cliente_nome, etc.) acontece em runtime
-      // (contractDocument.ts) para reflectir sempre o estado actual da BD.
-      if (contractBodyHtml && inserted) {
-        const variableData = await gatherContractData(inserted, activeCompany.id);
+      // (contractDocument.ts) para reflectir sempre o estado actual da BD. Este baking
+      // só depende de entity_id, client_id e contract_template_id (não de contract_number,
+      // que só existe após o INSERT), pelo que pode ser calculado antes da RPC exatamente
+      // como acontecia antes com o registo já inserido.
+      let finalBodyHtml: string | null = null;
+      if (contractBodyHtml) {
+        const variableData = await gatherContractData(
+          { entity_id: resolvedEntityId || null, client_id: clientId, contract_template_id: data.template_id || null },
+          activeCompany.id,
+        );
         const withPrompts = applyPromptValues(contractBodyHtml, data.prompt_values);
-        const finalHtml = injectSignatoryIntoSignatureBlock(
+        finalBodyHtml = injectSignatoryIntoSignatureBlock(
           withPrompts,
           (variableData as any).signatario_nome,
           (variableData as any).signatario_cargo,
         );
-        await (supabase as any).from("client_contracts").update({ contract_body_html: finalHtml }).eq("id", inserted.id);
       }
+
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+        p_client_id: clientId,
+        p_entity_id: resolvedEntityId || null,
+        p_organization_id: activeCompany.id,
+        p_root_organization_id: rootOrgId,
+        p_proposal_id: data.proposal_id,
+        p_contract_template_id: data.template_id || null,
+        p_total_value: totalValue,
+        p_currency: "EUR",
+        p_start_date: data.start_date || null,
+        p_end_date: data.end_date || null,
+        p_notes: data.notes || null,
+        p_payment_terms: data.payment_terms || null,
+        p_contract_body_html: contractBodyHtml,
+        p_final_body_html: finalBodyHtml,
+        p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
+      });
+      if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato criado com sucesso"); handleCloseDialog(); },
-    onError: (error) => { toast.error("Erro ao criar contrato: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.createSuccess')); handleCloseDialog(); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.createError'), { description });
+    },
   });
 
   const updateMutation = useMutation({
     mutationFn: async (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; id: string; prompt_values?: Record<string, string> }) => {
-      const currentContract = contracts.find(c => c.id === data.id) as any;
-      const existingPromptValues = currentContract?.prompt_values && typeof currentContract.prompt_values === "object"
-        ? currentContract.prompt_values
-        : {};
-      const mergedPromptValues = data.prompt_values && Object.keys(data.prompt_values).length > 0
-        ? { ...existingPromptValues, ...data.prompt_values }
-        : existingPromptValues;
-
-      let updatePayload: any = {
-        contract_template_id: data.template_id || null, start_date: data.start_date || null, end_date: data.end_date || null,
-        notes: data.notes || null, payment_terms: data.payment_terms || null,
-        prompt_values: Object.keys(mergedPromptValues).length > 0 ? mergedPromptValues : null,
-      };
-
-      const { error } = await supabase.from("client_contracts").update(updatePayload).eq("id", data.id);
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { error } = await supabase.rpc('rpc_update_client_contract' as any, {
+        p_id: data.id,
+        p_contract_template_id: data.template_id || null,
+        p_start_date: data.start_date || null,
+        p_end_date: data.end_date || null,
+        p_notes: data.notes || null,
+        p_payment_terms: data.payment_terms || null,
+        p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
+      });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato atualizado"); handleCloseDialog(); },
-    onError: (error) => { toast.error("Erro: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.updateSuccess')); handleCloseDialog(); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.updateError'), { description });
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "contract", p_id: id });
       if (error) throw error;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success("Contrato movido para o lixo"); setIsDeleteOpen(false); setDeleteId(null); },
-    onError: (error) => { toast.error("Erro: " + error.message); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.deleteSuccess')); setIsDeleteOpen(false); setDeleteId(null); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.deleteError'), { description });
+    },
   });
 
-  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
+  // Duplicar: cria um novo draft reutilizando rpc_create_client_contract com as
+  // colunas do contrato de origem (mesmo RPC já usado por createMutation — sem
+  // scope-bypass, permissão/organização é sempre re-validada server-side). As
+  // datas ficam em branco porque o duplicado é sempre um novo draft.
+  const duplicateMutation = useMutation({
+    mutationFn: async (contract: ClientContract) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Business user not resolved");
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      const { error } = await supabase.rpc('rpc_create_client_contract' as any, {
+        p_client_id: contract.client_id,
+        p_entity_id: contract.entity_id || null,
+        p_organization_id: contract.organization_id,
+        p_root_organization_id: contract.root_organization_id || contract.organization_id,
+        p_proposal_id: contract.proposal_id || null,
+        p_contract_template_id: contract.contract_template_id || null,
+        p_total_value: contract.total_value ?? 0,
+        p_currency: contract.currency || "EUR",
+        p_start_date: null,
+        p_end_date: null,
+        p_notes: contract.notes || null,
+        p_payment_terms: contract.payment_terms || null,
+        p_contract_body_html: contract.contract_body_html || null,
+        p_final_body_html: null,
+        p_prompt_values: contract.prompt_values && Object.keys(contract.prompt_values).length > 0 ? contract.prompt_values : null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["client-contracts"] }); toast.success(t('clientContracts.toast.duplicateSuccess')); },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.duplicateError'), { description });
+    },
+  });
+
+  // Reatribuir comercial: muda o "owner" (created_by) do contrato via RPC dedicada.
+  const reassignMutation = useMutation({
+    mutationFn: async ({ id, newOwnerId }: { id: string; newOwnerId: string }) => {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { error } = await supabase.rpc('rpc_reassign_client_contract' as any, {
+        p_id: id,
+        p_new_owner_id: newOwnerId,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(t('clientContracts.toast.reassignSuccess'));
+      setIsReassignDialogOpen(false);
+      setReassigningContract(null);
+      setReassignOwnerId("");
+    },
+    onError: async (error: any) => {
+      const description = await getFriendlyErrorMessage(error);
+      toast.error(t('clientContracts.toast.reassignError'), { description });
+    },
+  });
+
+  // Org roster for the "Reatribuir comercial" picker — mirrors AnewLeads.tsx's
+  // loadCompanyUsers (same descendant-subtree walk, same internal-role exclusion).
+  const { data: companyUsers = [] } = useQuery({
+    queryKey: ["client-contracts-company-users", activeCompany?.id],
+    queryFn: async () => {
+      if (!activeCompany?.id) return [];
+      const subtreeIds = [activeCompany.id];
+      try {
+        const { data: allHierarchy } = await supabase
+          .from("anew_hierarchy")
+          .select("parent_org_id, child_org_id")
+          .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
+        const childrenMap = new Map<string, string[]>();
+        (allHierarchy || []).forEach((h: any) => {
+          if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
+          childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
+        });
+        const queue = [activeCompany.id];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          const children = childrenMap.get(current) || [];
+          for (const child of children) {
+            if (!subtreeIds.includes(child)) { subtreeIds.push(child); queue.push(child); }
+          }
+        }
+      } catch { /* fallback to just activeCompany */ }
+
+      const { data: memberships } = await supabase
+        .from("anew_memberships")
+        .select("user_id, role_id")
+        .in("organization_id", subtreeIds)
+        .eq("status", "active");
+      if (!memberships || memberships.length === 0) return [] as { id: string; name: string }[];
+
+      const roleIds = [...new Set(memberships.map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+      const filteredMemberships = memberships.filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+      const userIds = [...new Set(filteredMemberships.map((m: any) => m.user_id))];
+      if (userIds.length === 0) return [] as { id: string; name: string }[];
+
+      const { data: usersData } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name")
+        .in("id", userIds);
+      return (usersData || []).map((u: any) => ({ id: u.id as string, name: u.name || "Utilizador" }));
+    },
+    enabled: !!activeCompany?.id,
+  });
+
+  const handleCloseDialog = () => { setIsDialogOpen(false); setEditingContract(null); setPresetClientId(null); setFormData({ proposal_id: "", template_id: "", start_date: "", end_date: "", notes: "", payment_terms: "" }); };
 
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
@@ -759,10 +1051,41 @@ const ClientContracts = () => {
   const canDeleteContract = (c: { created_by?: string | null }) =>
     isSystemAdmin || canActOnEntity(deleteScope, c, scopeAnewUserId, null, teamMemberIds);
 
+  // SECURITY: the "Reatribuir comercial" picker must respect the viewer's own
+  // client_contracts.edit scope. ORG sees the full roster; TEAM sees only their
+  // own teammates; OWNED/NONE see only themselves. Mirrors AnewLeads.tsx's
+  // assignableCompanyUsers idiom, applied against editScope instead of leads scope.
+  const assignableCompanyUsers = useMemo(() => {
+    if (isSystemAdmin || editScope === "ORG") return companyUsers;
+    if (editScope === "TEAM") {
+      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
+      return companyUsers.filter(u => allowedIds.has(u.id));
+    }
+    return companyUsers.filter(u => u.id === scopeAnewUserId);
+  }, [companyUsers, isSystemAdmin, editScope, scopeAnewUserId, teamMemberIds]);
+
+  const handleDuplicate = (contract: ClientContract) => {
+    if (!(isSystemAdmin || canCreate)) {
+      toast.error(t('clientContracts.accessDenied'));
+      return;
+    }
+    duplicateMutation.mutate(contract);
+  };
+
+  const handleOpenReassign = (contract: ClientContract) => {
+    if (!canEditContract(contract)) {
+      toast.error(t('clientContracts.accessDenied'));
+      return;
+    }
+    setReassigningContract(contract);
+    setReassignOwnerId(contract.created_by || "");
+    setIsReassignDialogOpen(true);
+  };
+
   const handleFinalize = async (contractId: string) => {
     const contract = contracts.find(c => c.id === contractId) as any;
     if (contract && !canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     const { data: { user } } = await supabase.auth.getUser();
@@ -782,7 +1105,7 @@ const ClientContracts = () => {
 
   const handleEdit = (contract: ClientContract) => {
     if (!canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
     setEditingContract(contract);
@@ -791,13 +1114,13 @@ const ClientContracts = () => {
 
   const handleDialogSave = (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string }) => {
     if (data.start_date && data.end_date && new Date(data.end_date) <= new Date(data.start_date)) {
-      toast.error("A data de fim deve ser posterior à data de início.");
+      toast.error(t('clientContracts.toast.endDateBeforeStart'));
       return;
     }
     if (data.id) {
       const target = contracts.find(c => c.id === data.id) as any;
       if (target && !canEditContract(target)) {
-        toast.error("Acesso negado");
+        toast.error(t('clientContracts.accessDenied'));
         return;
       }
       updateMutation.mutate(data as any);
@@ -809,18 +1132,20 @@ const ClientContracts = () => {
   const handleStatusChange = async (contractId: string, newStatus: string) => {
     const contract = contracts.find(c => c.id === contractId) as any;
     if (contract && !canEditContract(contract)) {
-      toast.error("Acesso negado");
+      toast.error(t('clientContracts.accessDenied'));
       return;
     }
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const { error } = await (supabase as any).from("client_contracts").update({
-      status: newStatus,
-      status_changed_by: authUser?.id || null,
-      status_changed_at: new Date().toISOString(),
-    }).eq("id", contractId);
-    if (error) { toast.error("Erro ao mudar estado"); return; }
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (businessUserId) {
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+    }
+    const { error } = await supabase.rpc('rpc_update_client_contract_status' as any, {
+      p_id: contractId,
+      p_status: newStatus,
+    });
+    if (error) { toast.error(t('clientContracts.toast.statusChangeError')); return; }
     queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
-    toast.success(`Estado alterado para ${getTranslatedStatus(newStatus)}`);
+    toast.success(t('clientContracts.toast.statusChanged', { status: getTranslatedStatus(newStatus) }));
   };
 
   const toggleSelection = (id: string) => {
@@ -925,13 +1250,21 @@ const ClientContracts = () => {
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
   };
 
+  // Redirect when user lacks view permission. Must be in an effect — calling
+  // navigate() during render is a side effect and causes undefined behaviour.
+  useEffect(() => {
+    if (!permissionsLoading && !canView && !isSystemAdmin && activeCompany) {
+      navigate("/dashboard");
+    }
+  }, [permissionsLoading, canView, isSystemAdmin, activeCompany, navigate]);
+
   if (permissionsLoading) {
     return <Layout><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></Layout>;
   }
 
+  // Show loader while the redirect effect is about to fire.
   if (!canView && !isSystemAdmin && activeCompany) {
-    navigate("/dashboard");
-    return null;
+    return <Layout><div className="flex items-center justify-center h-64"><OlyviaLoader size={40} /></div></Layout>;
   }
 
   if (companyLoading) {
@@ -984,7 +1317,7 @@ const ClientContracts = () => {
               <Button variant="outline" size="sm" onClick={() => navigate("/contract-templates")}>
                 <Settings className="h-4 w-4 mr-2" /> Templates
               </Button>
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={() => exportClientContractsToXlsx(filteredContracts)}>
                 <Download className="h-4 w-4 mr-2" /> Exportar
               </Button>
               <PermissionGate permission="client_contracts.create">
@@ -1014,7 +1347,7 @@ const ClientContracts = () => {
           onAction={(action, c) => {
             if (action === "send_signature" && c) handleOpenSendChannel(c);
             if (action === "view_client" && c) navigate("/clients");
-            if (action === "followup" && c) toast.info(`Follow-up ${c._clientName}`);
+            if (action === "followup" && c) toast.info(t('clientContracts.toast.followUpFor', { name: c._clientName || "" }));
           }}
         />
 
@@ -1239,7 +1572,7 @@ const ClientContracts = () => {
                   const first = contracts.find(c => selectedIds.has(c.id));
                   if (first) handleOpenSendChannel(first);
                 }}><Send className="h-3 w-3 mr-1" /> Enviar</Button>
-                <Button size="sm" variant="outline" onClick={() => toast.info("Exportar")}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
+                <Button size="sm" variant="outline" onClick={() => exportClientContractsToXlsx(filteredContracts.filter(c => selectedIds.has(c.id)))}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Limpar</Button>
               </div>
             )}
@@ -1253,20 +1586,20 @@ const ClientContracts = () => {
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
           </div>
         ) : viewMode === "dashboard" ? (
-          <ContractsDashboardView contracts={contracts} />
+          <ContractsDashboardView contracts={filteredContracts} />
         ) : viewMode === "renovacoes" ? (
-          <ContractsRenewalsView contracts={contracts} onAction={(action, c) => {
+          <ContractsRenewalsView contracts={filteredContracts} onAction={(action, c) => {
             if (action === "sign_first" && c) { setSigningContractId(c.id); setIsSignConfirmOpen(true); }
             else toast.info(`${action} - ${c?.contract_number}`);
           }} />
         ) : viewMode === "assinaturas" ? (
-          <ContractsSignaturesView contracts={contracts} onAction={(action, c) => {
+          <ContractsSignaturesView contracts={filteredContracts} onAction={(action, c) => {
             if (action === "mark_signed" && c) { setSigningContractId(c.id); setIsSignConfirmOpen(true); }
             else if ((action === "send_signature" || action === "resend") && c) handleOpenSendChannel(c);
             else toast.info(`${action} - ${c?.contract_number}`);
           }} />
         ) : viewMode === "documentos" ? (
-          <ContractsDocumentsView contracts={contracts} />
+          <ContractsDocumentsView contracts={filteredContracts} />
         ) : viewMode === "minutas" ? (
           <div className="text-center py-8">
             <Button onClick={() => navigate("/contract-templates")} className="gap-1.5">
@@ -1397,7 +1730,7 @@ const ClientContracts = () => {
                           )}
                           {contract.status === "pending_signature" && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info("Follow-up")}>
+                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
                                 <Phone className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" title="Reenviar" onClick={() => handleOpenSendChannel(contract)}>
@@ -1419,10 +1752,10 @@ const ClientContracts = () => {
                           )}
                           {contract.status === "expired" && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-red-600 animate-pulse" title="Contactar" onClick={() => toast.info("Contactar")}>
+                              <Button variant="ghost" size="icon" className="text-red-600 animate-pulse" title="Contactar" onClick={() => toast.info(t('clientContracts.toast.contact'))}>
                                 <Phone className="h-4 w-4" />
                               </Button>
-                              <Button variant="ghost" size="icon" title="Renovar" onClick={() => toast.info("Renovar")}>
+                              <Button variant="ghost" size="icon" title="Renovar" onClick={() => toast.info(t('clientContracts.toast.renew'))}>
                                 <RotateCcw className="h-4 w-4" />
                               </Button>
                             </>
@@ -1450,15 +1783,15 @@ const ClientContracts = () => {
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                   <DropdownMenuItem>📄 Duplicar contrato</DropdownMenuItem>
-                                   <DropdownMenuItem>👤 Reatribuir comercial</DropdownMenuItem>
+                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar contrato</DropdownMenuItem>
+                                   <DropdownMenuItem onClick={() => handleOpenReassign(contract)}>👤 Reatribuir comercial</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1474,22 +1807,22 @@ const ClientContracts = () => {
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">👤 Cliente</DropdownMenuLabel>
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
-                                  <DropdownMenuItem>📧 Enviar email ao cliente</DropdownMenuItem>
-                                  <DropdownMenuItem>📱 WhatsApp</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
-                                  <DropdownMenuItem>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1511,13 +1844,13 @@ const ClientContracts = () => {
                                    <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
                                      <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
                                    </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success("Link do portal copiado!"); }}>
+                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
                                      🔗 Copiar link do portal
                                    </DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1527,14 +1860,14 @@ const ClientContracts = () => {
                               {contract.status === "expired" && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
-                                  <DropdownMenuItem>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>
-                                  <DropdownMenuItem>📞 Contactar cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem>📄 Duplicar</DropdownMenuItem>
-                                  <DropdownMenuItem>📜 Ver histórico completo</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
+                                  <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
@@ -1581,7 +1914,7 @@ const ClientContracts = () => {
           open={isDialogOpen}
           onOpenChange={(open) => { if (!open) handleCloseDialog(); else setIsDialogOpen(true); }}
           contract={editingContract}
-          proposals={proposals}
+          proposals={presetClientId ? proposals.filter((p: any) => p._resolvedClientId === presetClientId) : proposals}
           templates={templates}
           onSave={handleDialogSave}
           saving={createMutation.isPending || updateMutation.isPending}
@@ -1608,6 +1941,44 @@ const ClientContracts = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* Reassign (Reatribuir comercial) Dialog */}
+        <Dialog
+          open={isReassignDialogOpen}
+          onOpenChange={(open) => {
+            setIsReassignDialogOpen(open);
+            if (!open) { setReassigningContract(null); setReassignOwnerId(""); }
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>👤 Reatribuir comercial</DialogTitle>
+              <DialogDescription>
+                Escolha o novo responsável pelo contrato{reassigningContract?.contract_number ? ` ${reassigningContract.contract_number}` : ""}.
+              </DialogDescription>
+            </DialogHeader>
+            <Select value={reassignOwnerId} onValueChange={setReassignOwnerId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecionar comercial" />
+              </SelectTrigger>
+              <SelectContent>
+                {assignableCompanyUsers.map(u => (
+                  <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsReassignDialogOpen(false)}>Cancelar</Button>
+              <Button
+                disabled={!reassignOwnerId || reassignMutation.isPending}
+                onClick={() => reassigningContract && reassignMutation.mutate({ id: reassigningContract.id, newOwnerId: reassignOwnerId })}
+              >
+                {reassignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Send Channel Dialog */}
         <SendChannelDialog

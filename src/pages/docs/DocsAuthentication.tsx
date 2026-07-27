@@ -102,8 +102,9 @@ if (error) {
                   <span className="font-medium">Auto-registo de empresa</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Utilizadores podem criar nova empresa via edge function <code>register-company</code>.
-                  Cria automaticamente: utilizador + empresa + company_admin entry.
+                  Utilizadores criam conta em <code>/auth</code> (Supabase Auth signUp) e, ao criar a
+                  primeira organização, a RPC <code>create_initial_organization</code> atribui-os
+                  automaticamente como <code>super_admin</code> e inicia um trial de 14 dias.
                 </p>
               </div>
 

@@ -1,16 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-// Notification engine — runs via cron (anon key → service_role internally)
+import { requireServiceRole } from "../_shared/auth.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
+// Notification engine — runs via cron (service_role required)
 // v2: Optimized — batch preloads replace N+1 queries
 
 const querySchema = z.object({
   mode: z.enum(["fast", "daily"]).optional().default("fast"),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
 
 // ─── Default thresholds ───
 const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> = {
@@ -83,25 +84,52 @@ interface AlertConfig {
 }
 
 // ─── Helper: batch fetch with pagination (handles >1000 rows) ───
-async function fetchAll<T>(supabase: any, table: string, query: (q: any) => any): Promise<T[]> {
+// Was previously unused, leaving every query below as a single unbounded
+// request across ALL organizations — the exact "50k rows blows up the
+// function" DoS shape. Reactivated here instead of introducing per-org
+// looping (a much larger rewrite of the shared dedup/resolution logic).
+const FETCH_ALL_MAX_PAGES = 500; // safety net: 500k rows per call, well above any current table
+
+async function fetchAll<T>(
+  supabase: any,
+  table: string,
+  query: (q: any) => any,
+  selectColumns = "*",
+): Promise<T[]> {
   const PAGE = 1000;
   let results: T[] = [];
   let offset = 0;
-  while (true) {
-    const q = query(supabase.from(table).select("*"));
+  for (let page = 0; page < FETCH_ALL_MAX_PAGES; page++) {
+    // .range() without a stable .order() has no guaranteed row order in
+    // Postgres, so repeated pages could skip or repeat rows across calls.
+    // Every table here has a uuid "id" primary key, so order by that. This
+    // also fixes PostgREST's default 1000-row response cap for .in(...)
+    // filters over large candidate-ID lists, not just unfiltered scans.
+    const q = query(supabase.from(table).select(selectColumns)).order("id", { ascending: true });
     const { data, error } = await q.range(offset, offset + PAGE - 1);
     if (error) throw error;
     if (!data || data.length === 0) break;
     results = results.concat(data);
     if (data.length < PAGE) break;
     offset += PAGE;
+    if (page === FETCH_ALL_MAX_PAGES - 1) {
+      console.error(`[notifications] fetchAll(${table}) hit the ${FETCH_ALL_MAX_PAGES}-page safety cap — results truncated. Table has grown beyond what this cron can process in one run; needs a per-organization/date-scoped rewrite.`);
+    }
   }
   return results;
 }
 
 Deno.serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
+  }
+
+  if (!requireServiceRole(req)) {
+    return new Response(
+      JSON.stringify({ error: "Service role required" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   }
 
   try {
@@ -132,9 +160,9 @@ Deno.serve(async (req) => {
     console.log(`[notifications] Mode: ${mode}, Time: ${now.toISOString()}`);
 
     // ─── Load alert_settings + legacy settings in parallel ───
-    const [{ data: allAlertSettings }, { data: allLegacySettings }] = await Promise.all([
-      supabase.from("alert_settings").select("*").eq("kind", "alert"),
-      supabase.from("notification_settings").select("*"),
+    const [allAlertSettings, allLegacySettings] = await Promise.all([
+      fetchAll<any>(supabase, "alert_settings", (q) => q.eq("kind", "alert")),
+      fetchAll<any>(supabase, "notification_settings", (q) => q),
     ]);
 
     const alertSettingsMap = new Map<string, Map<string, AlertConfig>>();
@@ -192,12 +220,12 @@ Deno.serve(async (req) => {
     // STEP 1: AUTO-RESOLVE existing notifications
     // ═══════════════════════════════════════════
     let resolvedCount = 0;
-    const { data: pendingNotifications } = await supabase
-      .from("notifications")
-      .select("id, type, entity_type, entity_id, user_id, organization_id, action_config, created_at")
-      .eq("is_resolved", false)
-      .eq("is_dismissed", false)
-      .eq("kind", "alert");
+    const pendingNotifications = await fetchAll<any>(
+      supabase,
+      "notifications",
+      (q) => q.eq("is_resolved", false).eq("is_dismissed", false).eq("kind", "alert"),
+      "id, type, entity_type, entity_id, user_id, organization_id, action_config, created_at",
+    );
 
     // ── Grouped resolver: one update per resolved_reason ──
     const toResolveByReason = new Map<string, string[]>();
@@ -257,20 +285,13 @@ Deno.serve(async (req) => {
       const contractIds = [...new Set(contractNotifs.map(n => n.entity_id))];
       const quoteIds = [...new Set(quoteNotifs.map(n => n.entity_id))];
 
-      const [
-        { data: leads },
-        { data: contacts },
-        { data: clients },
-        { data: proposals },
-        { data: contracts },
-        { data: quotesPre },
-      ] = await Promise.all([
-        leadIds.length > 0 ? supabase.from("anew_leads").select("id, last_contact_at, status").in("id", leadIds) : { data: [] },
-        contactIds.length > 0 ? supabase.from("anew_contacts").select("id, last_interaction_at, converted_to_client_id, status").in("id", contactIds) : { data: [] },
-        clientIds.length > 0 ? supabase.from("anew_clients").select("id, last_interaction_at, status, entity_id").in("id", clientIds) : { data: [] },
-        proposalIds.length > 0 ? supabase.from("proposals").select("id, status, sent_at, created_at, organization_id").in("id", proposalIds) : { data: [] },
-        contractIds.length > 0 ? supabase.from("client_contracts").select("id, status, end_date, client_id, created_at").in("id", contractIds) : { data: [] },
-        quoteIds.length > 0 ? supabase.from("quotes").select("id, estado, total, updated_at, created_at").in("id", quoteIds) : { data: [] },
+      const [leads, contacts, clients, proposals, contracts, quotesPre] = await Promise.all([
+        leadIds.length > 0 ? fetchAll<any>(supabase, "anew_leads", (q) => q.in("id", leadIds), "id, last_contact_at, status") : [],
+        contactIds.length > 0 ? fetchAll<any>(supabase, "anew_contacts", (q) => q.in("id", contactIds), "id, last_interaction_at, converted_to_client_id, status") : [],
+        clientIds.length > 0 ? fetchAll<any>(supabase, "anew_clients", (q) => q.in("id", clientIds), "id, last_interaction_at, status, entity_id") : [],
+        proposalIds.length > 0 ? fetchAll<any>(supabase, "proposals", (q) => q.in("id", proposalIds), "id, status, sent_at, created_at, organization_id") : [],
+        contractIds.length > 0 ? fetchAll<any>(supabase, "client_contracts", (q) => q.in("id", contractIds), "id, status, end_date, client_id, created_at") : [],
+        quoteIds.length > 0 ? fetchAll<any>(supabase, "quotes", (q) => q.in("id", quoteIds), "id, estado, total, updated_at, created_at") : [],
       ]);
 
       const leadMap = new Map((leads || []).map((l: any) => [l.id, l]));
@@ -307,7 +328,7 @@ Deno.serve(async (req) => {
       // ── Contacts: no deal (batch deals count) ──
       if (contactNoDealNotifs.length > 0) {
         const noDealContactIds = [...new Set(contactNoDealNotifs.map(n => n.entity_id))];
-        const { data: dealsForContacts } = await supabase.from("deals").select("contact_id").in("contact_id", noDealContactIds);
+        const dealsForContacts = await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", noDealContactIds), "contact_id");
         const contactsWithDeals = new Set((dealsForContacts || []).map((d: any) => d.contact_id));
 
         for (const n of contactNoDealNotifs) {
@@ -335,9 +356,9 @@ Deno.serve(async (req) => {
         const nifClientEntityIds = [...new Set(
           clientNifNotifs.map(n => clientMap.get(n.entity_id)?.entity_id).filter(Boolean)
         )] as string[];
-        const { data: fiscalEntities } = nifClientEntityIds.length > 0
-          ? await supabase.from("anew_entity_fiscal_entities").select("entity_id").in("entity_id", nifClientEntityIds)
-          : { data: [] };
+        const fiscalEntities = nifClientEntityIds.length > 0
+          ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", nifClientEntityIds), "entity_id")
+          : [];
         const entitiesWithFiscal = new Set((fiscalEntities || []).map((f: any) => f.entity_id));
 
         for (const n of clientNifNotifs) {
@@ -476,12 +497,12 @@ Deno.serve(async (req) => {
 
     // ★ OPTIMIZATION: Batch preload ALL active notifications for dedup
     // Instead of N individual queries, one single query loads all active notification keys
-    const { data: activeNotifs } = await supabase
-      .from("notifications")
-      .select("entity_id, type, user_id")
-      .eq("kind", "alert")
-      .eq("is_resolved", false)
-      .eq("is_dismissed", false);
+    const activeNotifs = await fetchAll<any>(
+      supabase,
+      "notifications",
+      (q) => q.eq("kind", "alert").eq("is_resolved", false).eq("is_dismissed", false),
+      "entity_id, type, user_id",
+    );
 
     const existingNotifKeys = new Set<string>();
     for (const n of activeNotifs || []) {
@@ -502,7 +523,7 @@ Deno.serve(async (req) => {
     }
 
     // ★ OPTIMIZATION: Batch preload user ID mappings (anew_users → auth_user_id)
-    const { data: allUsers } = await supabase.from("anew_users").select("id, auth_user_id");
+    const allUsers = await fetchAll<any>(supabase, "anew_users", (q) => q, "id, auth_user_id");
     const userIdMap = new Map<string, string>();
     for (const u of allUsers || []) {
       if (u.auth_user_id) userIdMap.set(u.id, u.auth_user_id);
@@ -528,10 +549,12 @@ Deno.serve(async (req) => {
     // ─────────────────────────────────────────
     if (mode === "fast") {
       // ── PROPOSALS (batch fetch, no N+1) ──
-      const { data: proposals } = await supabase
-        .from("proposals")
-        .select("id, status, sent_at, valid_until, created_at, created_by, organization_id")
-        .in("status", ["sent", "pending", "active", "draft"]);
+      const proposals = await fetchAll<any>(
+        supabase,
+        "proposals",
+        (q) => q.in("status", ["sent", "pending", "active", "draft"]),
+        "id, status, sent_at, valid_until, created_at, created_by, organization_id",
+      );
 
       for (const p of proposals || []) {
         if (!p.created_by || !p.organization_id) continue;
@@ -607,10 +630,12 @@ Deno.serve(async (req) => {
       }
 
       // ── CONTRACTS (batch fetch) ──
-      const { data: contracts } = await supabase
-        .from("client_contracts")
-        .select("id, end_date, status, created_at, created_by, organization_id, client_id")
-        .neq("status", "cancelled");
+      const contracts = await fetchAll<any>(
+        supabase,
+        "client_contracts",
+        (q) => q.neq("status", "cancelled"),
+        "id, end_date, status, created_at, created_by, organization_id, client_id",
+      );
 
       for (const ct of contracts || []) {
         if (!ct.created_by) continue;
@@ -675,9 +700,12 @@ Deno.serve(async (req) => {
       // ── QUOTES (batch fetch) ──
       // NOTE: quotes table uses `estado` (not `status`), `total` (not `total_amount`),
       // and has no `stage_changed_at` column — fall back to `updated_at`.
-      const { data: quotes } = await supabase
-        .from("quotes")
-        .select("id, estado, updated_at, total, created_by, organization_id, created_at");
+      const quotes = await fetchAll<any>(
+        supabase,
+        "quotes",
+        (x) => x,
+        "id, estado, updated_at, total, created_by, organization_id, created_at",
+      );
 
       for (const q of quotes || []) {
         if (!q.created_by) continue;
@@ -719,12 +747,15 @@ Deno.serve(async (req) => {
       // ── SCHEDULED NEXT ACTIONS (batch with optimized entity validation) ──
       const endOfToday = new Date(now);
       endOfToday.setHours(23, 59, 59, 999);
-      const { data: scheduledActions } = await supabase
-        .from("entity_interactions")
-        .select("id, entity_id, next_action_type, next_action_date, created_by, organization_id")
-        .not("next_action_date", "is", null)
-        .not("next_action_type", "is", null)
-        .lte("next_action_date", endOfToday.toISOString());
+      const scheduledActions = await fetchAll<any>(
+        supabase,
+        "entity_interactions",
+        (q) => q
+          .not("next_action_date", "is", null)
+          .not("next_action_type", "is", null)
+          .lte("next_action_date", endOfToday.toISOString()),
+        "id, entity_id, next_action_type, next_action_date, created_by, organization_id",
+      );
 
       if (scheduledActions && scheduledActions.length > 0) {
         const actionLabels: Record<string, string> = {
@@ -738,16 +769,11 @@ Deno.serve(async (req) => {
         const actionEntityIds = [...new Set(scheduledActions.map(a => a.entity_id))];
         const actionOrgIds = [...new Set(scheduledActions.map(a => a.organization_id))];
 
-        const [
-          { data: entityNames },
-          { data: actionClients },
-          { data: actionContacts },
-          { data: actionLeads },
-        ] = await Promise.all([
-          supabase.from("anew_entities").select("id, display_name").in("id", actionEntityIds),
-          supabase.from("anew_clients").select("id, entity_id, organization_id").in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "inactive"),
-          supabase.from("anew_contacts").select("id, entity_id, organization_id").in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive"),
-          supabase.from("anew_leads").select("id, entity_id, organization_id").in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "converted"),
+        const [entityNames, actionClients, actionContacts, actionLeads] = await Promise.all([
+          fetchAll<any>(supabase, "anew_entities", (q) => q.in("id", actionEntityIds), "id, display_name"),
+          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "inactive"), "id, entity_id, organization_id"),
+          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive"), "id, entity_id, organization_id"),
+          fetchAll<any>(supabase, "anew_leads", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "converted"), "id, entity_id, organization_id"),
         ]);
 
         const entityNameMap = new Map((entityNames || []).map((e: any) => [e.id, e.display_name]));
@@ -819,19 +845,22 @@ Deno.serve(async (req) => {
 
       // ── EMAIL TRACKING (batch preload proposals) ──
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
-      const { data: recentOpens } = await supabase
-        .from("proposal_sends")
-        .select("id, proposal_id, first_opened_at, open_count, recipient_email")
-        .not("first_opened_at", "is", null)
-        .gte("first_opened_at", oneDayAgo);
+      const recentOpens = await fetchAll<any>(
+        supabase,
+        "proposal_sends",
+        (q) => q.not("first_opened_at", "is", null).gte("first_opened_at", oneDayAgo),
+        "id, proposal_id, first_opened_at, open_count, recipient_email",
+      );
 
       if (recentOpens && recentOpens.length > 0) {
         // ★ OPTIMIZATION: Batch preload proposals for email tracking
         const trackingProposalIds = [...new Set(recentOpens.map(ps => ps.proposal_id))];
-        const { data: trackingProposals } = await supabase
-          .from("proposals")
-          .select("id, created_by, organization_id")
-          .in("id", trackingProposalIds);
+        const trackingProposals = await fetchAll<any>(
+          supabase,
+          "proposals",
+          (q) => q.in("id", trackingProposalIds),
+          "id, created_by, organization_id",
+        );
         const trackingProposalMap = new Map((trackingProposals || []).map((p: any) => [p.id, p]));
 
         for (const ps of recentOpens) {
@@ -885,14 +914,17 @@ Deno.serve(async (req) => {
       const pl = (n: number, s: string, p: string) => n === 1 ? `${n} ${s}` : `${n} ${p}`;
 
       // ── LEADS: grouped by user ──
-      const { data: rawLeads } = await supabase
-        .from("anew_leads")
-        .select("id, entity_id, assigned_to, created_by, organization_id, last_contact_at, created_at, status, converted_to_contact_id, converted_at, client_id")
-        .not("status", "eq", "converted")
-        .not("status", "eq", "inactive")
-        .is("converted_to_contact_id", null)
-        .is("converted_at", null)
-        .is("client_id", null);
+      const rawLeads = await fetchAll<any>(
+        supabase,
+        "anew_leads",
+        (q) => q
+          .not("status", "eq", "converted")
+          .not("status", "eq", "inactive")
+          .is("converted_to_contact_id", null)
+          .is("converted_at", null)
+          .is("client_id", null),
+        "id, entity_id, assigned_to, created_by, organization_id, last_contact_at, created_at, status, converted_to_contact_id, converted_at, client_id",
+      );
 
       let filteredLeads = rawLeads || [];
       const leadEntityIds = filteredLeads.map(l => l.entity_id).filter(Boolean) as string[];
@@ -901,14 +933,10 @@ Deno.serve(async (req) => {
         const excludedEntityIds = new Set<string>();
 
         // ★ OPTIMIZATION: Batch all chain validation queries in parallel
-        const [
-          { data: inactiveContacts },
-          { data: convertedContacts },
-          { data: inactiveDirectClients },
-        ] = await Promise.all([
-          supabase.from("anew_contacts").select("entity_id").in("entity_id", leadEntityIds).eq("status", "inactive"),
-          supabase.from("anew_contacts").select("entity_id, converted_to_client_id").in("entity_id", leadEntityIds).not("converted_to_client_id", "is", null),
-          supabase.from("anew_clients").select("entity_id").in("entity_id", leadEntityIds).in("status", ["inactive", "lost", "churned", "lost_definitive"]),
+        const [inactiveContacts, convertedContacts, inactiveDirectClients] = await Promise.all([
+          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).eq("status", "inactive"), "entity_id"),
+          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).not("converted_to_client_id", "is", null), "entity_id, converted_to_client_id"),
+          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", leadEntityIds).in("status", ["inactive", "lost", "churned", "lost_definitive"]), "entity_id"),
         ]);
 
         inactiveContacts?.forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -916,9 +944,12 @@ Deno.serve(async (req) => {
 
         if (convertedContacts?.length) {
           const clientIds = convertedContacts.map((c: any) => c.converted_to_client_id).filter(Boolean);
-          const { data: activeClients } = await supabase
-            .from("anew_clients").select("id").in("id", clientIds)
-            .not("status", "in", '("inactive","lost","churned","lost_definitive")');
+          const activeClients = await fetchAll<any>(
+            supabase,
+            "anew_clients",
+            (q) => q.in("id", clientIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+            "id",
+          );
           const activeClientIds = new Set(activeClients?.map((c: any) => c.id));
           // All converted contacts exclude the lead entity (whether client active or not)
           convertedContacts.forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -927,9 +958,9 @@ Deno.serve(async (req) => {
         // Ghost lead check: entity has active contact + active client
         const remainingEntityIds = leadEntityIds.filter(id => !excludedEntityIds.has(id));
         if (remainingEntityIds.length > 0) {
-          const [{ data: activeContacts }, { data: directActiveClients }] = await Promise.all([
-            supabase.from("anew_contacts").select("entity_id, converted_to_client_id").in("entity_id", remainingEntityIds).neq("status", "inactive"),
-            supabase.from("anew_clients").select("entity_id").in("entity_id", remainingEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+          const [activeContacts, directActiveClients] = await Promise.all([
+            fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", remainingEntityIds).neq("status", "inactive"), "entity_id, converted_to_client_id"),
+            fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", remainingEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'), "entity_id"),
           ]);
 
           const directActiveClientEntityIds = new Set((directActiveClients || []).map((c: any) => c.entity_id));
@@ -938,9 +969,12 @@ Deno.serve(async (req) => {
             const withClient = activeContacts.filter((c: any) => c.converted_to_client_id);
             if (withClient.length) {
               const cIds = withClient.map((c: any) => c.converted_to_client_id);
-              const { data: activeCli } = await supabase
-                .from("anew_clients").select("id").in("id", cIds)
-                .not("status", "in", '("inactive","lost","churned","lost_definitive")');
+              const activeCli = await fetchAll<any>(
+                supabase,
+                "anew_clients",
+                (q) => q.in("id", cIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+                "id",
+              );
               const activeCliIds = new Set(activeCli?.map((c: any) => c.id));
               withClient.filter((c: any) => activeCliIds.has(c.converted_to_client_id)).forEach((c: any) => excludedEntityIds.add(c.entity_id));
             }
@@ -1010,19 +1044,23 @@ Deno.serve(async (req) => {
       }
 
       // ── CONTACTS: grouped by user ──
-      const { data: rawContacts } = await supabase
-        .from("anew_contacts")
-        .select("id, entity_id, assigned_to, created_by, organization_id, last_interaction_at, created_at, converted_at, converted_to_client_id, status")
-        .is("converted_to_client_id", null)
-        .neq("status", "inactive");
+      const rawContacts = await fetchAll<any>(
+        supabase,
+        "anew_contacts",
+        (q) => q.is("converted_to_client_id", null).neq("status", "inactive"),
+        "id, entity_id, assigned_to, created_by, organization_id, last_interaction_at, created_at, converted_at, converted_to_client_id, status",
+      );
 
       let filteredContacts = rawContacts || [];
       const contactEntityIds = filteredContacts.map(c => c.entity_id).filter(Boolean) as string[];
 
       if (contactEntityIds.length > 0) {
-        const { data: activeClientsForContacts } = await supabase
-          .from("anew_clients").select("entity_id").in("entity_id", contactEntityIds)
-          .not("status", "in", '("inactive","lost","churned","lost_definitive")');
+        const activeClientsForContacts = await fetchAll<any>(
+          supabase,
+          "anew_clients",
+          (q) => q.in("entity_id", contactEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+          "entity_id",
+        );
 
         if (activeClientsForContacts?.length) {
           const ghostContactEntityIds = new Set(activeClientsForContacts.map((c: any) => c.entity_id));
@@ -1033,9 +1071,9 @@ Deno.serve(async (req) => {
 
       // ★ OPTIMIZATION: Batch preload deals for contact_no_deal check
       const contactIdsForDeal = filteredContacts.filter(c => c.converted_at).map(c => c.id);
-      const { data: dealsForDailyContacts } = contactIdsForDeal.length > 0
-        ? await supabase.from("deals").select("contact_id").in("contact_id", contactIdsForDeal)
-        : { data: [] };
+      const dealsForDailyContacts = contactIdsForDeal.length > 0
+        ? await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", contactIdsForDeal), "contact_id")
+        : [];
       const contactsWithDealsDaily = new Set((dealsForDailyContacts || []).map((d: any) => d.contact_id));
 
       const contactsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; noDeal: string[] }>();
@@ -1111,16 +1149,18 @@ Deno.serve(async (req) => {
       }
 
       // ── CLIENTS: grouped by user ──
-      const { data: clients } = await supabase
-        .from("anew_clients")
-        .select("id, assigned_to, created_by, organization_id, last_interaction_at, created_at, entity_id, status")
-        .not("status", "in", '("inactive","lost","churned","lost_definitive")');
+      const clients = await fetchAll<any>(
+        supabase,
+        "anew_clients",
+        (q) => q.not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+        "id, assigned_to, created_by, organization_id, last_interaction_at, created_at, entity_id, status",
+      );
 
       // ★ OPTIMIZATION: Batch preload fiscal entities for all clients
       const clientEntityIdsForNif = (clients || []).map((c: any) => c.entity_id).filter(Boolean) as string[];
-      const { data: clientFiscalEntities } = clientEntityIdsForNif.length > 0
-        ? await supabase.from("anew_entity_fiscal_entities").select("entity_id").in("entity_id", clientEntityIdsForNif)
-        : { data: [] };
+      const clientFiscalEntities = clientEntityIdsForNif.length > 0
+        ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", clientEntityIdsForNif), "entity_id")
+        : [];
       const entitiesWithFiscalDaily = new Set((clientFiscalEntities || []).map((f: any) => f.entity_id));
 
       const clientsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; missingNif: string[] }>();
@@ -1213,6 +1253,7 @@ Deno.serve(async (req) => {
     );
   } catch (error: any) {
     console.error("[notifications] Error:", error);
+    await captureError(error, { function: "generate-notifications" });
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }

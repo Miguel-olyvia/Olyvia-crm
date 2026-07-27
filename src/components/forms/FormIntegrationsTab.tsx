@@ -406,7 +406,7 @@ echo 'Lead created: ' . $data['lead_id'];`;
             <CardContent className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-xs">Campanha</Label>
-                <Select value={campaignId} onValueChange={setCampaignId}>
+                <Select value={campaignId} onValueChange={(v) => setCampaignId(v === "none" ? "" : v)}>
                   <SelectTrigger>
                     {loadingCampaigns ? (
                       <div className="flex items-center gap-2">
@@ -434,7 +434,7 @@ echo 'Lead created: ' . $data['lead_id'];`;
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Source (Origem)</Label>
-                <Select value={selectedSource} onValueChange={setSelectedSource}>
+                <Select value={selectedSource} onValueChange={(v) => setSelectedSource(v === "none" ? "" : v)}>
                   <SelectTrigger>
                     {loadingSources ? (
                       <div className="flex items-center gap-2">

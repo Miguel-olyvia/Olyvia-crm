@@ -2,18 +2,20 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
+import { withRetryResult } from "../_shared/retry.ts";
 
 const requestSchema = z.object({
   action: z.string(),
   params: z.record(z.unknown()).optional(),
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { getCorsHeaders } from "../_shared/cors.ts";
+import { initSentry, captureError } from "../_shared/sentry.ts";
+
+initSentry();
 
 serve(async (req) => {
+  const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
@@ -299,13 +301,15 @@ serve(async (req) => {
         if (!(await assertOwnership("quote_id", quote_id))) return forbidden();
 
         // Update quote status
-        await supabase.from("quotes").update({ estado: "aceite" }).eq("id", quote_id);
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("quotes").update({ estado: "aceite" }).eq("id", quote_id));
 
         // Update portal status to signed for this quote
-        await supabase.from("client_portal_users")
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_portal_users")
           .update({ portal_status: "signed" })
           .eq("auth_user_id", user.id)
-          .eq("quote_id", quote_id);
+          .eq("quote_id", quote_id));
 
         // Auto-create proposal from accepted quote
         let createdProposalId: string | null = null;
@@ -334,6 +338,7 @@ serve(async (req) => {
             }
 
             // Create proposal
+            await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
             const { data: proposal, error: pErr } = await supabase
               .from("proposals")
               .insert({
@@ -371,10 +376,12 @@ serve(async (req) => {
                     sort_order: line.sort_order || line.ordem || idx,
                   };
                 });
+                await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
                 await supabase.from("proposal_items").insert(proposalItems);
               }
 
               // Update pipeline_links
+              await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
               await supabase.from("pipeline_links")
                 .update({ proposal_id: proposal.id } as any)
                 .eq("quote_id", quote_id)
@@ -408,10 +415,11 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
         }
 
-        await supabase.from("quotes").update({
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("quotes").update({
           estado: "rejeitado",
           client_notes: safeReason,
-        }).eq("id", quote_id);
+        }).eq("id", quote_id));
 
         const { data: rejQuote } = await supabase.from("quotes").select("quote_number").eq("id", quote_id).maybeSingle();
         await maybeNotify("client_rejected_quote", {
@@ -450,23 +458,27 @@ serve(async (req) => {
             .in("id", selectedQuoteIds);
           const ownedQuoteIds = (proposalQuotes || []).map((quote: any) => quote.id);
           if (ownedQuoteIds.length !== selectedQuoteIds.length) return forbidden();
+          await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
           await supabase.from("quotes").update({ estado: "aceite" }).in("id", ownedQuoteIds);
+          await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
           await supabase.from("quotes").update({ estado: "rejeitado" }).eq("proposal_id", proposal_id).not("id", "in", `(${ownedQuoteIds.join(",")})`);
         }
 
         const now = new Date().toISOString();
-        await supabase.from("proposals").update({
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("proposals").update({
           status: "accepted",
           accepted_at: now,
           signature_image,
           acceptance_ip: detectedIp,
           acceptance_user_agent: req.headers.get("user-agent") || null,
-        }).eq("id", proposal_id);
+        }).eq("id", proposal_id));
 
-        await supabase.from("client_portal_users")
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_portal_users")
           .update({ portal_status: "signed" })
           .eq("auth_user_id", user.id)
-          .eq("proposal_id", proposal_id);
+          .eq("proposal_id", proposal_id));
 
         // ── Auto-create contract from accepted proposal ──
         let createdContractId: string | null = null;
@@ -520,6 +532,7 @@ serve(async (req) => {
               const endDate = new Date();
               endDate.setFullYear(endDate.getFullYear() + 1);
 
+              await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
               const { data: contract, error: cErr } = await supabase
                 .from("client_contracts")
                 .insert({
@@ -541,6 +554,7 @@ serve(async (req) => {
 
               if (!cErr && contract) {
                 createdContractId = contract.id;
+                await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
                 const { data: updatedLinks, error: linkUpdateError } = await supabase.from("pipeline_links")
                   .update({ contract_id: contract.id } as any)
                   .eq("proposal_id", proposal_id)
@@ -548,6 +562,7 @@ serve(async (req) => {
                   .select("id");
 
                 if (!linkUpdateError && (!updatedLinks || updatedLinks.length === 0)) {
+                  await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
                   await supabase.from("pipeline_links").insert({
                     proposal_id,
                     quote_id: linkedQuoteId,
@@ -592,12 +607,13 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
-        await supabase.from("proposals").update({
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("proposals").update({
           status: "rejected",
           rejected_at: now,
           rejection_reason_code: reason_code || null,
           rejection_notes: safeReasonText,
-        }).eq("id", proposal_id);
+        }).eq("id", proposal_id));
 
         const { data: rejProp } = await supabase.from("proposals").select("proposal_number, title").eq("id", proposal_id).maybeSingle();
         await maybeNotify("client_rejected_proposal", {
@@ -628,19 +644,21 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
-        await supabase.from("client_contracts").update({
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_contracts").update({
           status: "signed",
           signature_image,
           signature_date: now,
           signature_ip: detectedIp,
           accepted_at: now,
           signed_by_name: clientName,
-        }).eq("id", contract_id);
+        }).eq("id", contract_id));
 
-        await supabase.from("client_portal_users")
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_portal_users")
           .update({ portal_status: "signed" })
           .eq("auth_user_id", user.id)
-          .eq("contract_id", contract_id);
+          .eq("contract_id", contract_id));
 
         const { data: signedContract } = await supabase.from("client_contracts").select("contract_number").eq("id", contract_id).maybeSingle();
         await maybeNotify("client_signed_contract", {
@@ -664,12 +682,13 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
-        await supabase.from("client_contracts").update({
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_contracts").update({
           status: "rejected",
           rejected_at: now,
           rejection_reason: reason_code || null,
           rejection_notes: safeReasonText,
-        }).eq("id", contract_id);
+        }).eq("id", contract_id));
 
         const { data: rejContract } = await supabase.from("client_contracts").select("contract_number").eq("id", contract_id).maybeSingle();
         await maybeNotify("client_rejected_contract", {
@@ -774,6 +793,7 @@ serve(async (req) => {
           action: "viewed",
         });
 
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await supabase.from("client_portal_users")
           .update({ portal_status: "viewed", last_login_at: new Date().toISOString() })
           .eq("id", portalUserId)
@@ -799,6 +819,7 @@ serve(async (req) => {
     }
   } catch (err: any) {
     console.error("Error in client-portal-action:", err);
+    await captureError(err, { function: "client-portal-action" });
     return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
   }
 });

@@ -20,7 +20,7 @@ export async function resolveRootOrgIdLogic(
     if (!parent) return current;
     if (visited.has(parent)) {
       // Cycle detected — stop and return the last valid org.
-      // eslint-disable-next-line no-console
+       
       console.warn(
         `[resolveRootOrgId] Cycle detected in org hierarchy. Visited: ${[
           ...visited,

@@ -103,7 +103,6 @@ const WelcomeGuide = () => {
       gradient: "bg-gradient-to-br from-cyan-50 to-teal-100 dark:from-cyan-950/50 dark:to-teal-950/50",
       items: [
         { icon: <Users className="w-4 h-4" />, label: "Clientes", path: "/clients" },
-        { icon: <Users className="w-4 h-4" />, label: "Contactos", path: "/contacts" },
         { icon: <Calendar className="w-4 h-4" />, label: "Calendário", path: "/calendar" },
         
         { icon: <Headphones className="w-4 h-4" />, label: "Call Center", path: "/call-center" },

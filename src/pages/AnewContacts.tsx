@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, selectInBatches } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, selectInBatches, validateEntityCoherence } from "@/hooks/useEntityIdentity";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { useConversionRevert } from "@/hooks/useConversionRevert";
 import Layout from "@/components/Layout";
@@ -15,6 +15,7 @@ import { fetchSameOrgFieldsByEntity, revalidateStrongDuplicatesBeforeWrite } fro
 import { ensureEntityOrgLink, linkEntityToOrg } from "@/utils/orgEntity";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { searchEntityIds as searchEntityIdsFn } from "@/lib/clientSearch";
+import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
@@ -79,6 +80,7 @@ import { parseContactsCsv } from "@/lib/contacts/csv";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { matchesContactAttentionFilters, needsCompleteContactDataset } from "@/lib/contacts/filterDataset";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
+import { withAuditContext } from "@/utils/auditContext";
 
 // --- Types ---
 interface ContactRecord {
@@ -245,14 +247,17 @@ const AnewContacts = () => {
     [getPermissionScope, onlyMine],
   );
   const scopedUserIds = useMemo(
-    () => getContactScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds),
-    [scopeAnewUserId, scopeAuthUserId, teamMemberIds],
+    () => getContactScopeUserIds(viewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds),
+    [viewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
   );
+  // Default (no explicit companyFilter selection) is strictly the active org
+  // only — no automatic widening to descendant orgs. Explicitly picking a
+  // different org from the hierarchy dropdown (companyFilter) is still
+  // supported as a deliberate user action, not a silent default merge.
   const effectiveOrgIds = useMemo(() => {
     if (companyFilter !== "all") return [companyFilter];
-    if (scopeOrgIds.length > 0) return scopeOrgIds;
     return activeCompany?.id ? [activeCompany.id] : [];
-  }, [companyFilter, scopeOrgIds, activeCompany?.id]);
+  }, [companyFilter, activeCompany?.id]);
   const currentScopeOptions = useMemo(
     () => ({
       scope: viewScope,
@@ -443,7 +448,7 @@ const AnewContacts = () => {
       const contactPool = allContacts.length > 0 ? allContacts : contacts;
       const found = findScopedContactByRef(contactPool, openId, currentScopeOptions);
       if (found) {
-        await openContactDetails(found);
+        await openContactDetailsRef.current?.(found);
         setSearchParams({});
         return;
       }
@@ -467,7 +472,7 @@ const AnewContacts = () => {
       const fetchedContact = findScopedContactByRef((fetchedContacts || []) as any[], openId, currentScopeOptions);
 
       if (fetchedContact) {
-        await openContactDetails(fetchedContact as ContactRecord);
+        await openContactDetailsRef.current?.(fetchedContact as ContactRecord);
         setSearchParams({});
       }
     };
@@ -502,9 +507,10 @@ const AnewContacts = () => {
       clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [scopeLoading, isParentOrg]);
+  }, [scopeLoading, isParentOrg, activeCompany?.id]);
 
   const loadContactsRef = useRef<(offset: number, isInitial?: boolean) => Promise<void>>();
+  const openContactDetailsRef = useRef<(contact: ContactRecord) => Promise<void>>();
   const contactsLengthRef = useRef(0);
   const hasLoadedContactsRef = useRef(false);
   useEffect(() => { contactsLengthRef.current = contacts.length; }, [contacts.length]);
@@ -512,10 +518,21 @@ const AnewContacts = () => {
   // Cache auth user and exclude IDs to avoid redundant network calls on each scroll page
   const cachedAuthRef = useRef<{ authUserId: string | null; internalUserId: string | null } | null>(null);
   const cachedExcludeRef = useRef<{ ids: string[]; clientPairs: Set<string>; key: string } | null>(null);
+  // Abort/ignore stale requests when a filter change fires a new page-1 load
+  const loadAbortControllerRef = useRef<AbortController | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const loadContacts = useCallback(async (offset: number, isInitial: boolean = false) => {
     const shouldShowInitialLoader = isInitial && !hasLoadedContactsRef.current && contactsLengthRef.current === 0;
     if (shouldShowInitialLoader) setLoading(true); else if (offset > 0) setLoadingMore(true);
+    let requestId = 0;
+    let abortController: AbortController | null = null;
+    if (isInitial) {
+      loadAbortControllerRef.current?.abort();
+      abortController = new AbortController();
+      loadAbortControllerRef.current = abortController;
+      requestId = ++loadRequestIdRef.current;
+    }
     try {
       // Cache auth user resolution — only fetch once per session
       let authUserId: string | null = null;
@@ -560,7 +577,7 @@ const AnewContacts = () => {
           clientOrgPairs.add(`${r.entity_id}|${r.organization_id}`);
         });
         cachedExcludeRef.current = { ids: excludeEntityIds, clientPairs: clientOrgPairs, key: excludeCacheKey };
-        if (isInitial) setClientOrgPairKeys(new Set(clientOrgPairs));
+        if (isInitial && requestId === loadRequestIdRef.current) setClientOrgPairKeys(new Set(clientOrgPairs));
       }
 
       // Server-side search via shared searchEntityIds (trigram-indexed RPC: name + email + phone + NIF)
@@ -577,7 +594,7 @@ const AnewContacts = () => {
         }
         searchEntityIds = matchedIds;
         if (searchEntityIds.length === 0) {
-          if (isInitial) { setContacts([]); setTotalCount(0); }
+          if (isInitial && requestId === loadRequestIdRef.current) { setContacts([]); setTotalCount(0); }
           setHasMore(false); setLoading(false); setLoadingMore(false);
           return;
         }
@@ -596,12 +613,14 @@ const AnewContacts = () => {
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
       if (commercialFilter !== "all") query = query.eq("assigned_to", commercialFilter);
-      if (viewScope === "NONE") { if (isInitial) setContacts([]); setHasMore(false); setLoading(false); return; }
+      if (viewScope === "NONE") { if (isInitial && requestId === loadRequestIdRef.current) setContacts([]); setHasMore(false); setLoading(false); return; }
       const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
       if (scopeFilter) query = query.or(scopeFilter);
       query = query.order("created_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
+      if (isInitial && requestId !== loadRequestIdRef.current) return;
 
       let newContacts = (data || []) as ContactRecord[];
       const entityIds = newContacts.map(c => c.entity_id).filter(Boolean);
@@ -637,9 +656,12 @@ const AnewContacts = () => {
       setHasMore(newContacts.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
       hasLoadedContactsRef.current = true;
     } catch (error: any) {
+      if (isInitial && requestId !== loadRequestIdRef.current) return;
       toast({ title: t('contacts.toast.loadContactsError'), description: error.message, variant: "destructive" });
-    } finally { setLoading(false); setLoadingMore(false); }
-  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope]);
+    } finally {
+      if (!isInitial || requestId === loadRequestIdRef.current) { setLoading(false); setLoadingMore(false); }
+    }
+  }, [activeCompany?.id, effectiveOrgIds, statusFilter, dateFrom, dateTo, scopeAnewUserId, scopeLoading, isParentOrg, resolveEntities, dealsEntityIds, debouncedSearch, t, toast, commercialFilter, scopedUserIds, viewScope, getPermissionScope]);
 
   // Keep a stable ref to loadContacts for infinite scroll
   useEffect(() => { loadContactsRef.current = loadContacts; }, [loadContacts]);
@@ -660,7 +682,7 @@ const AnewContacts = () => {
       newParams.delete("_t");
       setSearchParams(newParams, { replace: true });
     }
-  }, []);
+  }, [searchParams, setSearchParams]);
 
   // Initial load + reload on filter changes — also invalidate caches
   useEffect(() => {
@@ -687,12 +709,12 @@ const AnewContacts = () => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const [interactions, tags, deals, sentiment, proposals, quotes] = await Promise.all([
-      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, id").in("entity_id", batch).gte("interaction_at", thirtyDaysAgo.toISOString())),
-      selectInBatches(uniqueIds, batch => supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", batch)),
-      selectInBatches(uniqueIds, batch => (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", batch).is("lost_reason", null)) as Promise<any[]>,
-      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", batch).not("sentiment", "is", null).order("interaction_at", { ascending: false })),
-      selectInBatches(uniqueIds, batch => (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", batch).neq("status", "rejeitada")) as Promise<any[]>,
-      selectInBatches(uniqueIds, batch => (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", batch).neq("estado", "perdido")) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, id").in("entity_id", batch).eq("organization_id", activeCompany?.id).gte("interaction_at", thirtyDaysAgo.toISOString())),
+      selectInBatches(uniqueIds, batch => supabase.from("contact_tags").select("entity_id, id, tag, color").in("entity_id", batch).eq("organization_id", activeCompany?.id)),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("deals").select("entity_id, id, value, assigned_to, created_by").in("entity_id", batch).eq("organization_id", activeCompany?.id).is("lost_reason", null)) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => supabase.from("entity_interactions").select("entity_id, sentiment, interaction_at").in("entity_id", batch).eq("organization_id", activeCompany?.id).not("sentiment", "is", null).order("interaction_at", { ascending: false })),
+      selectInBatches(uniqueIds, batch => (supabase as any).from("proposals").select("entity_id, id, value, status, proposal_items(subtotal, total)").in("entity_id", batch).eq("organization_id", activeCompany?.id).neq("status", "rejeitada")) as Promise<any[]>,
+      selectInBatches(uniqueIds, batch => (supabase as any).from("quotes").select("entity_id, id, subtotal, total, estado").in("entity_id", batch).eq("organization_id", activeCompany?.id).neq("estado", "perdido")) as Promise<any[]>,
     ]);
     const counts: Record<string, number> = {};
     (interactions || []).forEach((i: any) => { counts[i.entity_id] = (counts[i.entity_id] || 0) + 1; });
@@ -773,7 +795,7 @@ const AnewContacts = () => {
     const sentiments: Record<string, string> = {};
     (sentiment || []).forEach((s: any) => { if (!sentiments[s.entity_id]) sentiments[s.entity_id] = s.sentiment; });
     setLastSentiments(prev => ({ ...prev, ...sentiments }));
-  }, []);
+  }, [activeCompany?.id]);
 
   // Defer supplementary data loading — run after initial render, not blocking the list display
   const supplementaryLoadedRef = useRef<Set<string>>(new Set());
@@ -924,10 +946,10 @@ const AnewContacts = () => {
   // M3: aggregate counts are computed server-side instead of loading up to
   // 10,000 contacts client-side just to derive totals.
   useEffect(() => {
-    if (scopeLoading || !scopeOrgIds.length) return;
+    if (scopeLoading || !activeCompany?.id || effectiveOrgIds.length === 0) return;
     const loadAlertCounts = async () => {
       try {
-        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: scopeOrgIds });
+        const { data, error } = await supabase.rpc('get_contact_dashboard_kpis', { p_org_ids: effectiveOrgIds });
         if (!error && data) {
           setServerAlertCounts(data as any);
         }
@@ -936,7 +958,7 @@ const AnewContacts = () => {
     loadAlertCounts();
     const interval = setInterval(loadAlertCounts, 120000); // 2min instead of 30s
     return () => clearInterval(interval);
-  }, [scopeOrgIds, scopeLoading]);
+  }, [activeCompany?.id, scopeLoading, effectiveOrgIds]);
 
   useEffect(() => {
     if (activeView === "list" || scopeLoading || isParentOrg === null) return;
@@ -959,12 +981,11 @@ const AnewContacts = () => {
   useEffect(() => {
     const loadAllTags = async () => {
       if (!activeCompany?.id) return;
-      const orgIds = scopeOrgIds.length > 0 ? scopeOrgIds : [activeCompany.id];
-      const { data } = await supabase.from("contact_tags").select("tag").in("organization_id", orgIds);
+      const { data } = await supabase.from("contact_tags").select("tag").eq("organization_id", activeCompany.id);
       if (data) setAllTags([...new Set(data.map(t => t.tag))].sort());
     };
     loadAllTags();
-  }, [activeCompany?.id, scopeOrgIds]);
+  }, [activeCompany?.id]);
 
   // Load all org members upfront for the commercial filter (independent of loaded contacts)
   useEffect(() => {
@@ -982,6 +1003,15 @@ const AnewContacts = () => {
     };
     loadCompanyUsers();
   }, [activeCompany?.id, scopeOrgIds]);
+
+  // SECURITY: the "Comercial" filter must not leak other users' identities beyond
+  // the viewer's contacts.view scope (see src/lib/contacts/scope.ts). ORG keeps the
+  // full roster; TEAM/OWNED/NONE are filtered in-memory from the already-fetched list.
+  const visibleCompanyUsers = useMemo(() => {
+    if (viewScope === "ORG") return companyUsers;
+    const allowedIds = new Set(scopedUserIds);
+    return companyUsers.filter(u => allowedIds.has(u.id));
+  }, [companyUsers, viewScope, scopedUserIds]);
 
 
   const getHealthScore = useCallback((entityId: string, lastInteractionAt: string | null) => {
@@ -1054,18 +1084,23 @@ const AnewContacts = () => {
     quotesData, dealsFilter, tagsFilter, tagsData, sentimentFilter, lastSentiments, commercialFilter, smartFilter,
   ]);
 
-  // Alert data - use server-side RPC only when scope is ORG, otherwise compute from loaded data
+  // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
+  // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
+  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || searchQuery.length > 0 || statusFilter !== "all" || companyFilter !== "all";
+  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all" || smartFilter || noContact7dFilter || noContact14dFilter;
+
+  // Alert data - use server-side RPC only when scope is ORG and no client filter narrows the list, otherwise compute from loaded data
   const alertData = useMemo(() => {
     const viewScope = getPermissionScope("contacts.view");
-    if (viewScope === "ORG" && serverAlertCounts) {
+    if (viewScope === "ORG" && serverAlertCounts && !hasActiveClientFilter) {
       return {
         noContact14d: serverAlertCounts.no_contact_14d || 0,
         noDeal: serverAlertCounts.without_deals || 0,
         unassigned: serverAlertCounts.unassigned || 0,
       };
     }
-    // For OWNED/TEAM scope, compute from the scoped data
-    const source = allContacts.length > 0 ? allContacts : contacts;
+    // For OWNED/TEAM scope, or when a client filter narrows the list, compute from the scoped/filtered data
+    const source = hasActiveClientFilter ? filteredContacts : (allContacts.length > 0 ? allContacts : contacts);
     let noContact14d = 0, noDeal = 0, unassigned = 0;
     source.forEach(c => {
       const lastDate = lastInteractions[c.entity_id] || c.last_interaction_at;
@@ -1074,7 +1109,7 @@ const AnewContacts = () => {
       if (!c.assigned_to) unassigned++;
     });
     return { noContact14d, noDeal, unassigned };
-  }, [serverAlertCounts, getPermissionScope, allContacts, contacts, lastInteractions, dealsData]);
+  }, [serverAlertCounts, getPermissionScope, allContacts, contacts, filteredContacts, lastInteractions, dealsData, hasActiveClientFilter]);
 
   // Insight contacts (high health + no deal + >14d no contact) - use allContacts when available
   const insightContacts = useMemo(() => {
@@ -1089,12 +1124,7 @@ const AnewContacts = () => {
       score: getHealthScore(c.entity_id, c.last_interaction_at).score,
       entityId: c.entity_id,
     }));
-  }, [contacts, allContacts, lastInteractions, dealsData, proposalsData, interactionCounts, getIdentity, getHealthScore]);
-
-  // Determine if any client-side filter is active (to decide whether KPIs should use filtered data)
-  // Note: dealsFilter is excluded from KPI recalculation to keep alert cards stable when filtering by deals
-  const hasActiveClientFilter = commercialFilter !== "all" || onlyMine || healthFilter.length > 0 || tagsFilter.length > 0 || sentimentFilter !== "all" || searchQuery.length > 0;
-  const hasActiveClientFilterForList = hasActiveClientFilter || dealsFilter !== "all" || smartFilter || noContact7dFilter || noContact14dFilter;
+  }, [contacts, allContacts, lastInteractions, dealsData, proposalsData, interactionCounts, getIdentity, getHealthScore, quotesData]);
 
   // KPI data - use server-side counts for stable numbers when no filter, client-side filtered data when filters active
   const kpiData = useMemo(() => {
@@ -1135,11 +1165,11 @@ const AnewContacts = () => {
       pipeline: totalPipeline, withDeals, withProposals, withPipeline, withoutDeals,
       noContact7d, avgHealth: source.length > 0 ? Math.round(totalScore / source.length) : 0,
     };
-  }, [contacts, allContacts, filteredContacts, totalCount, lastInteractions, dealsData, proposalsData, quotesData, interactionCounts, getIdentity, serverAlertCounts, hasActiveClientFilter, getPermissionScope]);
+  }, [contacts, allContacts, filteredContacts, totalCount, lastInteractions, dealsData, proposalsData, quotesData, interactionCounts, getIdentity, serverAlertCounts, hasActiveClientFilter, getPermissionScope, getHealthScore]);
 
   // Active filter count
   const activeFilterCount = [
-    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact7dFilter, noContact14dFilter,
+    healthFilter.length > 0, dealsFilter !== "all", tagsFilter.length > 0, sentimentFilter !== "all", onlyMine, smartFilter, commercialFilter !== "all", noContact7dFilter, noContact14dFilter, statusFilter !== "all", companyFilter !== "all",
   ].filter(Boolean).length;
 
   const clearAllFilters = () => {
@@ -1159,7 +1189,11 @@ const AnewContacts = () => {
   const handleDeleteConfirm = async () => {
     if (!contactToDelete) return;
     try {
-      const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id });
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      const { error } = await withAuditContext(supabase, internalUserId, () =>
+        (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: contactToDelete.id })
+      );
       if (error) throw error;
       toast({ title: t('contacts.toast.movedToTrash'), description: t('contacts.toast.restoreHint') });
       setDeleteDialogOpen(false); setContactToDelete(null); setContacts([]); setHasMore(true); loadContacts(0, true);
@@ -1170,7 +1204,11 @@ const AnewContacts = () => {
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0) return;
     try {
-      const { error } = await supabase.from("anew_contacts").update({ status: bulkNewStatus }).in("id", Array.from(selectedIds));
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      const { error } = await withAuditContext(supabase, internalUserId, () =>
+        supabase.from("anew_contacts").update({ status: bulkNewStatus }).in("id", Array.from(selectedIds))
+      );
       if (error) throw error;
       toast({ title: t('contacts.toast.statusUpdated'), description: t('contacts.toast.statusUpdatedDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkStatusDialogOpen(false); setContacts([]); setHasMore(true); loadContacts(0, true);
@@ -1179,10 +1217,14 @@ const AnewContacts = () => {
   const handleBulkDelete = async () => {
     if (selectedIds.size === 0) return;
     try {
-      for (const id of Array.from(selectedIds)) {
-        const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: id });
-        if (error) throw error;
-      }
+      const internalUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!internalUserId) throw new Error("Utilizador não identificado");
+      await withAuditContext(supabase, internalUserId, async () => {
+        for (const id of Array.from(selectedIds)) {
+          const { error } = await (supabase as any).rpc("soft_delete_entity_facet", { p_kind: "contact", p_id: id });
+          if (error) throw error;
+        }
+      });
       toast({ title: t('contacts.toast.bulkMovedToTrash'), description: t('contacts.toast.bulkRestoreHint', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setContacts([]); setHasMore(true); loadContacts(0, true);
     } catch (error: any) { toast({ title: t('contacts.toast.deleteError'), description: error.message, variant: "destructive" }); }
@@ -1196,14 +1238,14 @@ const AnewContacts = () => {
   const findAvailableSlots = async (userId: string, count: number): Promise<{ start: Date; end: Date }[]> => {
     const slots: { start: Date; end: Date }[] = [];
     const now = new Date();
-    let searchStart = new Date(now); searchStart.setMinutes(0,0,0);
+    const searchStart = new Date(now); searchStart.setMinutes(0,0,0);
     if (searchStart.getHours() < 9) searchStart.setHours(9);
     else if (searchStart.getHours() >= 18) { searchStart.setDate(searchStart.getDate()+1); searchStart.setHours(9); }
     else searchStart.setHours(searchStart.getHours()+1);
     const searchEnd = new Date(searchStart); searchEnd.setDate(searchEnd.getDate()+14);
     const { data: assignedItems } = await (supabase as any).from("schedule_items").select("id, start_datetime, end_datetime, status").eq("assigned_to_user_id", userId).neq("status","cancelled").gte("start_datetime", searchStart.toISOString()).lte("start_datetime", searchEnd.toISOString());
     const busyTimes = (assignedItems||[]).map((item:any)=>({start:new Date(item.start_datetime),end:new Date(item.end_datetime)}));
-    let currentDate = new Date(searchStart); let daysSearched = 0;
+    const currentDate = new Date(searchStart); let daysSearched = 0;
     while (slots.length < count && daysSearched < 14) {
       const dow = currentDate.getDay();
       if (dow === 0 || dow === 6) { currentDate.setDate(currentDate.getDate()+1); currentDate.setHours(9,0,0,0); daysSearched++; continue; }
@@ -1226,8 +1268,26 @@ const AnewContacts = () => {
       const orgId = activeCompany?.id;
       let users: {id:string;name:string}[] = [];
       if (orgId) {
-        const { data: members } = await supabase.from("anew_memberships").select("user_id, anew_users!anew_memberships_user_id_anew_fkey(id, name)").eq("organization_id", orgId).eq("status","active");
-        users = (members||[]).map((m:any)=>m.anew_users).filter(Boolean).sort((a:any,b:any)=>(a.name||'').localeCompare(b.name||''));
+        // anew_memberships and anew_users have no FK between them, so an embedded
+        // PostgREST join (anew_users!anew_memberships_user_id_anew_fkey(...)) always
+        // fails with PGRST200. Fetch memberships and users separately and join in JS —
+        // same pattern used in src/pages/UsersNew.tsx for this exact table pair.
+        const { data: members, error: membersError } = await supabase
+          .from("anew_memberships")
+          .select("user_id")
+          .eq("organization_id", orgId)
+          .eq("status", "active");
+        if (membersError) throw membersError;
+
+        const userIds = [...new Set((members || []).map((m: any) => m.user_id).filter(Boolean))];
+        if (userIds.length > 0) {
+          const { data: usersData, error: usersError } = await supabase
+            .from("anew_users")
+            .select("id, name")
+            .in("id", userIds);
+          if (usersError) throw usersError;
+          users = (usersData || []).slice().sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+        }
       }
       setScheduleUsers(users);
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -1238,7 +1298,10 @@ const AnewContacts = () => {
       const defaultEnd = suggestions.length > 0 ? suggestions[0].end : new Date(defaultStart.getTime()+3600000);
       setScheduleFormData({ title: `Meeting with ${getIdentity(contact.entity_id)?.display_name || 'Contact'}`, description: "", visit_type: "meeting", location: "", start_time: formatDateTimeLocal(defaultStart), end_time: formatDateTimeLocal(defaultEnd), assigned_to: assignedUserId, notes: "" });
       setScheduleDialogOpen(true);
-    } catch (error) { console.error("Error loading schedule data:", error); } finally { setLoadingSuggestions(false); }
+    } catch (error: any) {
+      console.error("Error loading schedule data:", error);
+      toast({ title: t('contacts.toast.loadContactsError'), description: error?.message, variant: "destructive" });
+    } finally { setLoadingSuggestions(false); }
   };
   const handleCreateSchedule = async () => {
     if (!contactForSchedule || !scheduleFormData.title || !scheduleFormData.start_time || !scheduleFormData.end_time) {
@@ -1288,27 +1351,41 @@ const AnewContacts = () => {
       const contactVat = contactType === "person" ? formData.vat : companyFormData.vat;
       const contactFirstName = contactType === "person" ? personNames.first : null;
       const contactLastName = contactType === "person" ? personNames.last : null;
-      let contactEntityId = await resolveEntityByIdentity({ email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null });
-      const contactEntityResolved = !!contactEntityId;
-      if (!contactEntityId) {
-        contactEntityId = await createEntityWithIdentity({ displayName: contactDisplayName, type: contactEntityType as 'person'|'organization', email: contactEmail || null, phone: contactPhone || null, phoneCountryCode: contactPhoneCode, vat: contactVat || null, createdBy: internalUserId, firstName: contactFirstName, lastName: contactLastName });
+      let contactEntityId = await resolveEntityByIdentity({ email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null, organizationId });
+      if (contactEntityId) {
+        // Phone alone is a weak signal (shared/reused far more than email or
+        // VAT) — never auto-reuse an unrelated entity on phone match alone.
+        const coherence = await validateEntityCoherence(contactEntityId, { name: contactDisplayName || null, email: contactEmail || null, phone: contactPhone || null, vat: contactVat || null });
+        if (coherence.level === 'none' || coherence.phoneOnlyMatch) {
+          console.warn('[contact-create] Entity match rejected (insufficient coherence)', { rejectedEntityId: contactEntityId, coherence });
+          contactEntityId = null;
+        }
       }
+      const contactEntityResolved = !!contactEntityId;
+      // NOTE: entity creation (name/email/phone/vat) is deferred entirely to
+      // create_contact_with_role below when contactEntityId is null — the RPC
+      // creates the entity + role atomically with a single, complete audit
+      // diff. A prior version called createEntityWithIdentity() here first,
+      // which wrote the entity outside any transaction the RPC could audit,
+      // so the resulting log only ever showed the anew_contacts row (no
+      // name/email/phone). Never reintroduce a separate pre-creation call.
       // NOTE: NÃO atualizar display_name aqui — sobrescreveria o nome da entidade
       // existente ANTES de mostrar o diálogo de duplicados (faria com que os duplicados
       // aparecessem com o nome recém-digitado em vez do nome real).
       // O update é feito mais abaixo, só quando não há duplicado.
 
-      try {
-        await ensureEntityOrgLink({ entityId: contactEntityId!, organizationId, isPrimary: !contactEntityResolved });
-      } catch (e) { console.warn('[org-link] non-fatal', e); }
       const roleStatus = contactType === "person" ? formData.status : companyFormData.status;
 
-      // --- DUPLICATE CHECK: look for existing leads, contacts, clients with same entity in same org ---
-      const [{ data: existingContacts }, { data: existingLeads }, { data: existingClients }] = await Promise.all([
-        supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-        (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-        supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-      ]);
+      // --- DUPLICATE CHECK: only meaningful when reusing an existing entity —
+      // a brand-new entity (contactEntityId still null here) cannot already
+      // have leads/contacts/clients tied to it, so skip the query entirely.
+      const [{ data: existingContacts }, { data: existingLeads }, { data: existingClients }] = contactEntityResolved
+        ? await Promise.all([
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", contactEntityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+          ])
+        : [{ data: [] }, { data: [] }, { data: [] }];
 
       // Resolve real identity data for matched entities
       const allContactRawMatches = [
@@ -1378,30 +1455,33 @@ const AnewContacts = () => {
       // No duplicate — proceed with creation.
       // M1 — single transactional RPC: guarantees the contact never persists
       // without its role. Any RPC error is treated as a total creation failure.
-      const { error: createRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: contactEntityId,
-          organizationId,
-          rootOrganizationId: resolvedRootOrgId || organizationId,
-          displayName: contactDisplayName,
-          entityType: contactEntityType,
-          firstName: contactFirstName,
-          lastName: contactLastName,
-          email: contactEmail || null,
-          phone: contactPhone || null,
-          phoneCountryCode: contactPhoneCode || null,
-          vat: contactVat || null,
-          status: roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const createContactNif = contactVat || null;
+      const { error: createRpcError } = await withAuditContext(supabase, internalUserId, () =>
+        callNifWriteProxy('create_contact_with_role', {
+          p_payload: {
+            entityId: contactEntityId,
+            organizationId,
+            rootOrganizationId: resolvedRootOrgId || organizationId,
+            displayName: contactDisplayName,
+            entityType: contactEntityType,
+            firstName: contactFirstName,
+            lastName: contactLastName,
+            email: contactEmail || null,
+            phone: contactPhone || null,
+            phoneCountryCode: contactPhoneCode || null,
+            vat: contactVat || null,
+            status: roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        }, createContactNif)
+      );
       if (createRpcError) throw createRpcError;
       if (addressData.postal_code || addressData.street || addressData.city) {
         // Use shared sanitizer-aware helper to prevent placeholders ("N/A", "0000-000")
         // from being persisted. Helper is a no-op when data lacks core minimum.
         try {
-          await syncEntityPrimaryAddressFromLead({
+          const addr = await syncEntityPrimaryAddressFromLead({
             supabase,
             entityId: contactEntityId,
             fieldValues: {
@@ -1413,6 +1493,13 @@ const AnewContacts = () => {
             actorId: internalUserId,
             allowOverwriteValid: false,
           });
+          if (addr.decision === "error") {
+            console.warn("[contact-address-sync] address sync failed", addr.reason);
+            toast({
+              title: t('contacts.toast.addressSyncFailed'),
+              description: addr.reason ?? undefined,
+            });
+          }
         } catch (addrErr) {
           console.warn("[contact-address-sync] non-fatal:", addrErr);
         }
@@ -1450,12 +1537,12 @@ const AnewContacts = () => {
       setDetailsOpen(true);
     } else {
       (async () => {
-        const { data } = await (supabase as any).from("anew_contacts").select("*, anew_entities!anew_contacts_entity_id_fkey(*)").eq("id", match.id).single();
+        const { data } = await (supabase as any).from("anew_contacts").select("*, anew_entities!anew_contacts_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
         if (data) {
           setSelectedContact(data);
           setDetailsOpen(true);
         } else {
-          toast({ title: "Contacto encontrado", description: `O contacto "${match.displayName}" já existe. Pesquise na lista.` });
+          toast({ title: t('contacts.toast.duplicateFound'), description: t('contacts.toast.duplicateFoundDesc', { name: match.displayName }) });
         }
       })();
     }
@@ -1465,15 +1552,15 @@ const AnewContacts = () => {
     if (!pendingContactData) return;
     setSavingContact(true);
     try {
-      const { error: updContactErr } = await supabase.from("anew_contacts").update({ status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId } as any).eq("id", match.id);
+      const { error: updContactErr } = await supabase.from("anew_contacts").update({ status: pendingContactData.roleStatus, organization_id: pendingContactData.organizationId } as any).eq("id", match.id).eq("organization_id", activeCompany?.id);
       if (updContactErr) throw updContactErr;
       const { error: updRoleErr } = await supabase.from("anew_entity_roles").update({ status: pendingContactData.roleStatus } as any).eq("entity_id", pendingContactData.entityId).eq("role", "contact").eq("organization_id", pendingContactData.organizationId);
       if (updRoleErr) throw updRoleErr;
-      toast({ title: "Contacto atualizado", description: `Os dados do contacto "${match.displayName}" foram atualizados.` });
+      toast({ title: t('contacts.toast.updateSuccess'), description: t('contacts.toast.updateSuccessDesc', { name: match.displayName }) });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Erro ao atualizar", description: err.message, variant: "destructive" });
+      toast({ title: t('contacts.toast.updateError'), description: err.message, variant: "destructive" });
     } finally { setSavingContact(false); }
   };
 
@@ -1507,24 +1594,27 @@ const AnewContacts = () => {
       // M1 — single transactional RPC creates a brand-new entity (entityId
       // omitted) + contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
-      const { error: createAnywayRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: null,
-          organizationId: pendingContactData.organizationId,
-          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
-          displayName: pendingContactData.displayName,
-          entityType: pendingContactData.entityType,
-          firstName: pendingContactData.firstName,
-          lastName: pendingContactData.lastName,
-          email: pendingContactData.email || null,
-          phone: pendingContactData.phone || null,
-          phoneCountryCode: pendingContactData.phoneCountryCode || null,
-          vat: pendingContactData.vat || null,
-          status: pendingContactData.roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const createAnywayNif = pendingContactData.vat || null;
+      const { error: createAnywayRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
+        callNifWriteProxy('create_contact_with_role', {
+          p_payload: {
+            entityId: null,
+            organizationId: pendingContactData.organizationId,
+            rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+            displayName: pendingContactData.displayName,
+            entityType: pendingContactData.entityType,
+            firstName: pendingContactData.firstName,
+            lastName: pendingContactData.lastName,
+            email: pendingContactData.email || null,
+            phone: pendingContactData.phone || null,
+            phoneCountryCode: pendingContactData.phoneCountryCode || null,
+            vat: pendingContactData.vat || null,
+            status: pendingContactData.roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        }, createAnywayNif)
+      );
       if (createAnywayRpcError) throw createAnywayRpcError;
       toast({ title: t('contacts.toast.createSuccess') });
       setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
@@ -1542,30 +1632,33 @@ const AnewContacts = () => {
       // M1 — single transactional RPC reusing the shared entity_id: creates
       // the contact + role atomically, guaranteeing the contact never
       // persists without its role. Any RPC error is a total creation failure.
-      const { error: shareRpcError } = await supabase.rpc('create_contact_with_role', {
-        p_payload: {
-          entityId: match.entityId,
-          organizationId: pendingContactData.organizationId,
-          rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
-          displayName: pendingContactData.displayName,
-          entityType: pendingContactData.entityType,
-          firstName: pendingContactData.firstName,
-          lastName: pendingContactData.lastName,
-          email: pendingContactData.email || null,
-          phone: pendingContactData.phone || null,
-          phoneCountryCode: pendingContactData.phoneCountryCode || null,
-          vat: pendingContactData.vat || null,
-          status: pendingContactData.roleStatus,
-          sourceType: "manual",
-          assignedTo: null,
-        },
-      });
+      const shareContactNif = pendingContactData.vat || null;
+      const { error: shareRpcError } = await withAuditContext(supabase, pendingContactData.internalUserId, () =>
+        callNifWriteProxy('create_contact_with_role', {
+          p_payload: {
+            entityId: match.entityId,
+            organizationId: pendingContactData.organizationId,
+            rootOrganizationId: resolvedRootOrgId || pendingContactData.organizationId,
+            displayName: pendingContactData.displayName,
+            entityType: pendingContactData.entityType,
+            firstName: pendingContactData.firstName,
+            lastName: pendingContactData.lastName,
+            email: pendingContactData.email || null,
+            phone: pendingContactData.phone || null,
+            phoneCountryCode: pendingContactData.phoneCountryCode || null,
+            vat: pendingContactData.vat || null,
+            status: pendingContactData.roleStatus,
+            sourceType: "manual",
+            assignedTo: null,
+          },
+        }, shareContactNif)
+      );
       if (shareRpcError) throw shareRpcError;
-      toast({ title: "Contacto criado a partir de entidade do grupo" });
+      toast({ title: t('contacts.toast.createFromGroupSuccess') });
       setContactDuplicateDialogOpen(false); setOpen(false); setPendingContactData(null); setContactDuplicateMatches([]);
       setContacts([]); setHasMore(true); loadContacts(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
-      toast({ title: "Não foi possível partilhar a entidade", description: err.message, variant: "destructive" });
+      toast({ title: t('contacts.toast.shareEntityError'), description: err.message, variant: "destructive" });
     } finally { setSavingContact(false); }
   };
 
@@ -1631,11 +1724,16 @@ const AnewContacts = () => {
       if (contactsToImport.length === 0) { toast({ title: t('contacts.import.invalid'), variant: "destructive" }); return; }
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
+      const importUserId = scopeAnewUserId || (await resolveCurrentBusinessUserId());
+      if (!importUserId) throw new Error("Utilizador não identificado");
+      const { error: setCtxErr } = await supabase.rpc('set_audit_context', { p_user_id: importUserId, p_source: 'csv_import' });
+      if (setCtxErr) throw setCtxErr;
       let importedCount = 0;
       let skippedCount = 0;
       const orgId = activeCompany?.id || '';
+      try {
       for (const c of contactsToImport) {
-        const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null });
+        const entityId = await resolveEntityByIdentity({ email: c.email || null, phone: c.phone || null, vat: c.vat || null, organizationId: orgId });
         if (entityId) {
           // Check for existing active records in this org (leads, contacts, clients)
           const [{ data: exContacts }, { data: exLeads }, { data: exClients }] = await Promise.all([
@@ -1651,7 +1749,8 @@ const AnewContacts = () => {
 
         // M1 - single transactional RPC: creates entity (if needed) + contact + role
         // atomically, guaranteeing the contact never persists without its role.
-        const { error: rpcError } = await supabase.rpc('create_contact_with_role', {
+        const importContactNif = c.vat || null;
+        const { error: rpcError } = await callNifWriteProxy('create_contact_with_role', {
           p_payload: {
             entityId: entityId || null,
             organizationId: orgId,
@@ -1667,13 +1766,20 @@ const AnewContacts = () => {
             sourceType: "import",
             assignedTo: null,
           },
-        });
+        }, importContactNif);
         if (rpcError) {
           console.error('[import] create_contact_with_role failed', rpcError);
           skippedCount++;
           continue;
         }
         importedCount++;
+      }
+      } finally {
+        try {
+          await supabase.rpc('clear_audit_context');
+        } catch {
+          // Swallow: clear_audit_context failure must never mask the original import error.
+        }
       }
       const importDesc = skippedCount > 0
         ? `${importedCount} importados, ${skippedCount} ignorados por duplicacao ou erro`
@@ -1683,7 +1789,7 @@ const AnewContacts = () => {
     } catch (error: any) { toast({ title: t('contacts.import.failed'), description: error.message, variant: "destructive" }); }
   };
 
-  const openContactDetails = async (contact: ContactRecord) => {
+  const openContactDetails = useCallback(async (contact: ContactRecord) => {
     let targetContact = contact;
     let identity = getIdentity(contact.entity_id);
 
@@ -1711,7 +1817,10 @@ const AnewContacts = () => {
       vat: identity?.vat || '', position: (targetContact as any).position || '',
     });
     setDetailsOpen(true);
-  };
+  }, [getIdentity, resolveEntities]);
+
+  // Keep a stable ref to openContactDetails for effects that capture it in a dep-free closure
+  useEffect(() => { openContactDetailsRef.current = openContactDetails; }, [openContactDetails]);
 
   // Loading state is now shown inline in the table area instead of blocking the whole page
 
@@ -1926,14 +2035,14 @@ const AnewContacts = () => {
                 </div>
 
                 {/* Commercial filter */}
-                {companyUsers.length > 0 && (
+                {visibleCompanyUsers.length > 0 && (
                   <div className="flex flex-col gap-0.5">
                     <span className="text-[10px] text-muted-foreground font-medium">Comercial</span>
                     <Select value={commercialFilter} onValueChange={setCommercialFilter}>
                       <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Comercial" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos</SelectItem>
-                        {companyUsers.map(u => (
+                        {visibleCompanyUsers.map(u => (
                             <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
                           ))}
                       </SelectContent>
@@ -2119,6 +2228,7 @@ const AnewContacts = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
+                        <TooltipProvider delayDuration={200}>
                         {filteredContacts.map((contact) => {
                           const identity = getIdentity(contact.entity_id);
                           const healthScore = getHealthScore(contact.entity_id, contact.last_interaction_at);
@@ -2325,6 +2435,7 @@ const AnewContacts = () => {
                             </TableRow>
                           );
                         })}
+                        </TooltipProvider>
                       </TableBody>
                     </Table>
                     {/* Infinite scroll sentinel - inside scrollable container */}
@@ -2363,17 +2474,17 @@ const AnewContacts = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2"><Label>{t('contacts.form.firstName')}</Label><Input value={formData.first_name} onChange={(e) => setFormData({...formData, first_name: e.target.value})} required className={fieldErrors.first_name?"border-destructive":""} />{fieldErrors.first_name && <p className="text-sm text-destructive">{fieldErrors.first_name}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.lastName')}</Label><Input value={formData.last_name} onChange={(e) => setFormData({...formData, last_name: e.target.value})} required className={fieldErrors.last_name?"border-destructive":""} />{fieldErrors.last_name && <p className="text-sm text-destructive">{fieldErrors.last_name}</p>}</div>
-                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} /></div>
-                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({...formData, phone: v})} onCountryCodeChange={(v) => setFormData({...formData, phone_country_code: v})} /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={formData.vat} onChange={(e) => setFormData({...formData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} /></div>
+                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className={fieldErrors.email?"border-destructive":""} />{fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}</div>
+                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={formData.phone} countryCodeValue={formData.phone_country_code} onPhoneChange={(v) => setFormData({...formData, phone: v})} onCountryCodeChange={(v) => setFormData({...formData, phone_country_code: v})} />{fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}</div>
+                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={formData.vat} onChange={(e) => setFormData({...formData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} className={fieldErrors.vat?"border-destructive":""} />{fieldErrors.vat && <p className="text-sm text-destructive">{fieldErrors.vat}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.status')}</Label><Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">{t('contacts.status.active')}</SelectItem><SelectItem value="inactive">{t('contacts.status.inactive')}</SelectItem></SelectContent></Select></div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-2 col-span-2"><Label>{t('contacts.form.companyName')}</Label><Input value={companyFormData.name} onChange={(e) => setCompanyFormData({...companyFormData, name: e.target.value})} required /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({...companyFormData, email: e.target.value})} /></div>
-                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({...companyFormData, phone: v})} onCountryCodeChange={(v) => setCompanyFormData({...companyFormData, phone_country_code: v})} /></div>
-                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({...companyFormData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} /></div>
+                      <div className="space-y-2"><Label>{t('contacts.form.email')}</Label><Input type="email" value={companyFormData.email} onChange={(e) => setCompanyFormData({...companyFormData, email: e.target.value})} className={fieldErrors.email?"border-destructive":""} />{fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email}</p>}</div>
+                      <div className="space-y-2"><PhoneInput label={t('contacts.form.phone')} phoneValue={companyFormData.phone} countryCodeValue={companyFormData.phone_country_code} onPhoneChange={(v) => setCompanyFormData({...companyFormData, phone: v})} onCountryCodeChange={(v) => setCompanyFormData({...companyFormData, phone_country_code: v})} />{fieldErrors.phone && <p className="text-sm text-destructive">{fieldErrors.phone}</p>}</div>
+                      <div className="space-y-2"><Label>{t('contacts.form.vat')}</Label><Input value={companyFormData.vat} onChange={(e) => setCompanyFormData({...companyFormData, vat: e.target.value})} placeholder={t('contacts.form.vatPlaceholder')} className={fieldErrors.vat?"border-destructive":""} />{fieldErrors.vat && <p className="text-sm text-destructive">{fieldErrors.vat}</p>}</div>
                       <div className="space-y-2"><Label>{t('contacts.form.website')}</Label><Input value={companyFormData.website} onChange={(e) => setCompanyFormData({...companyFormData, website: e.target.value})} /></div>
                       <div className="space-y-2"><Label>{t('contacts.form.industry')}</Label><Input value={companyFormData.industry} onChange={(e) => setCompanyFormData({...companyFormData, industry: e.target.value})} /></div>
                       <div className="space-y-2"><Label>{t('contacts.form.status')}</Label><Select value={companyFormData.status} onValueChange={(v) => setCompanyFormData({...companyFormData, status: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">{t('contacts.status.active')}</SelectItem><SelectItem value="inactive">{t('contacts.status.inactive')}</SelectItem></SelectContent></Select></div>
@@ -2445,10 +2556,10 @@ const AnewContacts = () => {
                   if (convertError) throw convertError;
 
                   const reusedExistingClient = !!(convertResult as any)?.reused_existing_client;
-                  toast({ title: "Convertido em Cliente", description: reusedExistingClient ? "Cliente existente reutilizado e contacto sincronizado." : "O contacto foi convertido em cliente com sucesso." });
+                  toast({ title: t('contacts.toast.convertToClientSuccess'), description: reusedExistingClient ? t('contacts.toast.convertReusedDesc') : t('contacts.toast.convertNewDesc') });
                   cachedExcludeRef.current = null;
                   loadContacts(0, true); setDashboardKey(prev=>prev+1);
-                } catch (err: any) { toast({ title: "Erro na conversão", description: err.message, variant: "destructive" }); }
+                } catch (err: any) { toast({ title: t('contacts.toast.conversionError'), description: err.message, variant: "destructive" }); }
                 finally { convertClientLockRef.current = false; setConverting(false); setConvertDialogOpen(false); setContactToConvert(null); }
               }}>
                 {converting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Confirmar
@@ -2530,7 +2641,7 @@ const AnewContacts = () => {
                 <div className="space-y-2"><Label>{t('contacts.schedule.type')}</Label><Select value={scheduleFormData.visit_type} onValueChange={(v) => setScheduleFormData({...scheduleFormData, visit_type: v})}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="meeting">{t('contacts.schedule.type.meeting')}</SelectItem><SelectItem value="phone_call">{t('contacts.schedule.type.phoneCall')}</SelectItem><SelectItem value="site_visit">{t('contacts.schedule.type.siteVisit')}</SelectItem></SelectContent></Select></div>
                 <div className="space-y-2"><Label>{t('contacts.schedule.location')}</Label><Input value={scheduleFormData.location} onChange={(e) => setScheduleFormData({...scheduleFormData, location: e.target.value})} /></div>
               </div>
-              {suggestedSlots.length > 0 && (<div className="space-y-2"><Label className="text-sm font-medium">{t('contacts.schedule.availableSlots')}</Label><div className="flex flex-wrap gap-2">{suggestedSlots.map((slot, i) => (<Button key={i} type="button" variant="outline" size="sm" onClick={() => selectSuggestedSlot(slot)}>{format(slot.start, "dd/MM HH:mm")} - {format(slot.end, "HH:mm")}</Button>))}</div></div>)}
+              {suggestedSlots.length > 0 && (<div className="space-y-2"><Label className="text-sm font-medium">{t('contacts.schedule.availableSlots')}</Label><div className="flex flex-wrap gap-2">{suggestedSlots.map((slot) => (<Button key={slot.start.toISOString()} type="button" variant="outline" size="sm" onClick={() => selectSuggestedSlot(slot)}>{format(slot.start, "dd/MM HH:mm")} - {format(slot.end, "HH:mm")}</Button>))}</div></div>)}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>{t('contacts.schedule.startDateTime')}</Label><Input type="datetime-local" value={scheduleFormData.start_time} onChange={(e) => setScheduleFormData({...scheduleFormData, start_time: e.target.value})} /></div>
                 <div className="space-y-2"><Label>{t('contacts.schedule.endDateTime')}</Label><Input type="datetime-local" value={scheduleFormData.end_time} onChange={(e) => setScheduleFormData({...scheduleFormData, end_time: e.target.value})} /></div>

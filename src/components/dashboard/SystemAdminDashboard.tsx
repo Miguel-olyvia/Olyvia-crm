@@ -13,7 +13,7 @@ interface Stats {
   deals: number;
   dealsValue: number;
   leads: number;
-  contacts: number;
+  qualifiedLeads: number;
   clients: number;
   proposals: number;
   quotes: number;
@@ -29,7 +29,7 @@ const SystemAdminDashboard = () => {
     deals: 0,
     dealsValue: 0,
     leads: 0,
-    contacts: 0,
+    qualifiedLeads: 0,
     clients: 0,
     proposals: 0,
     quotes: 0,
@@ -53,7 +53,7 @@ const SystemAdminDashboard = () => {
           deals: Number(result.deals) || 0,
           dealsValue: Number(result.deals_value) || 0,
           leads: Number(result.leads) || 0,
-          contacts: Number(result.contacts) || 0,
+          qualifiedLeads: Number(result.qualified_leads) || 0,
           clients: Number(result.clients) || 0,
           proposals: Number(result.proposals) || 0,
           quotes: Number(result.quotes) || 0,
@@ -119,8 +119,8 @@ const SystemAdminDashboard = () => {
       bgColor: "bg-accent/10",
     },
     {
-      title: t('dashboard.cards.contacts'),
-      value: stats.contacts,
+      title: t('dashboard.cards.qualifiedLeads'),
+      value: stats.qualifiedLeads,
       icon: Contact,
       color: "text-warning",
       bgColor: "bg-warning/10",

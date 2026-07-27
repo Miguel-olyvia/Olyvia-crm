@@ -36,6 +36,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { PermissionGate } from "@/components/PermissionGate";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { leadSourceFormSchema } from "@/lib/validations";
 
 interface LeadSource {
   id: string;
@@ -68,6 +69,7 @@ const LeadSources = () => {
   const [editingSource, setEditingSource] = useState<LeadSource | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sourceToDelete, setSourceToDelete] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const { toast } = useToast();
 
   const iconOptions = [
@@ -110,14 +112,21 @@ const LeadSources = () => {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [activeCompany]);
 
   const loadData = async () => {
+    if (!activeCompany?.id) {
+      setSources([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const [sourcesRes, organizationsRes] = await Promise.all([
         supabase
           .from("lead_sources")
           .select("*, anew_organizations(name)")
+          .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
           .order("name"),
         supabase.from("anew_organizations").select("id, name").in("type", ["empresa", "holding"]),
       ]);
@@ -141,14 +150,21 @@ const LeadSources = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name.trim()) {
+    const validation = leadSourceFormSchema.safeParse(formData);
+    if (!validation.success) {
+      const errors: Record<string, string> = {};
+      validation.error.errors.forEach((err) => {
+        if (err.path[0]) errors[err.path[0].toString()] = err.message;
+      });
+      setFieldErrors(errors);
       toast({
         title: t('leadSources.toast.validationError'),
-        description: t('leadSources.toast.nameRequired'),
+        description: validation.error.errors[0]?.message || t('leadSources.toast.nameRequired'),
         variant: "destructive",
       });
       return;
     }
+    setFieldErrors({});
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -252,6 +268,7 @@ const LeadSources = () => {
       utm_aliases: Array.isArray(source.utm_aliases) ? source.utm_aliases : [],
     });
     setAliasInput("");
+    setFieldErrors({});
     setOpen(true);
   };
 
@@ -268,6 +285,7 @@ const LeadSources = () => {
       utm_aliases: [],
     });
     setAliasInput("");
+    setFieldErrors({});
   };
 
   const addAlias = (raw: string) => {
@@ -342,7 +360,7 @@ const LeadSources = () => {
               {t('leadSources.subtitle')}
             </p>
           </div>
-          <PermissionGate permission="channels.create">
+          <PermissionGate permission="lead_sources.create">
             <Button onClick={() => setOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
               {t('leadSources.newSource')}
@@ -363,10 +381,12 @@ const LeadSources = () => {
             <p className="text-muted-foreground mb-4">
               {t('leadSources.noSourcesDesc')}
             </p>
-            <Button onClick={() => setOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              {t('leadSources.createSource')}
-            </Button>
+            <PermissionGate permission="lead_sources.create">
+              <Button onClick={() => setOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                {t('leadSources.createSource')}
+              </Button>
+            </PermissionGate>
           </div>
         ) : (
           <div className="border rounded-lg overflow-hidden">
@@ -427,7 +447,7 @@ const LeadSources = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
-                          <PermissionGate permission="channels.edit">
+                          <PermissionGate permission="lead_sources.edit">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -436,7 +456,7 @@ const LeadSources = () => {
                               <Pencil className="w-4 h-4" />
                             </Button>
                           </PermissionGate>
-                          <PermissionGate permission="channels.delete">
+                          <PermissionGate permission="lead_sources.delete">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -471,7 +491,9 @@ const LeadSources = () => {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder={t('leadSources.form.namePlaceholder')}
+                  className={fieldErrors.name ? "border-destructive" : ""}
                 />
+                {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
               </div>
 
               <div className="space-y-2">
@@ -481,7 +503,9 @@ const LeadSources = () => {
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   placeholder={t('leadSources.form.descriptionPlaceholder')}
+                  className={fieldErrors.description ? "border-destructive" : ""}
                 />
+                {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-4">

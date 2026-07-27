@@ -413,9 +413,15 @@ export const parseProductsCSV = async ({
     const fromDb = await _fetchByName('product_categories', name, targetOrg);
     if (fromDb) { _createdCategories.set(key, fromDb); (categories as any[]).push(fromDb); return fromDb; }
     const slug = _slugify(name);
-    const { data } = await (supabase.from('product_categories' as any) as any)
-      .insert({ name: name.trim(), slug, path: slug, organization_id: targetOrg, created_by: userId }).select().limit(1);
-    const created = data?.[0] ?? null;
+    await supabase.rpc('set_audit_context', { p_user_id: userId, p_source: 'csv_import' });
+    let created: any = null;
+    try {
+      const { data } = await (supabase.from('product_categories' as any) as any)
+        .insert({ name: name.trim(), slug, path: slug, organization_id: targetOrg, created_by: userId }).select().limit(1);
+      created = data?.[0] ?? null;
+    } finally {
+      try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
+    }
     if (created) { _createdCategories.set(key, created); (categories as any[]).push(created); }
     return created;
   };
@@ -431,9 +437,15 @@ export const parseProductsCSV = async ({
     const fromDb = await _fetchByName('product_categories', name, targetOrg);
     if (fromDb) { _createdSubcategories.set(key, fromDb); (subcategories as any[]).push(fromDb); return fromDb; }
     const slug = _slugify(name);
-    const { data } = await (supabase.from('product_categories' as any) as any)
-      .insert({ name: name.trim(), slug, path: slug, parent_id: parentId || null, organization_id: targetOrg, created_by: userId }).select().limit(1);
-    const created = data?.[0] ?? null;
+    await supabase.rpc('set_audit_context', { p_user_id: userId, p_source: 'csv_import' });
+    let created: any = null;
+    try {
+      const { data } = await (supabase.from('product_categories' as any) as any)
+        .insert({ name: name.trim(), slug, path: slug, parent_id: parentId || null, organization_id: targetOrg, created_by: userId }).select().limit(1);
+      created = data?.[0] ?? null;
+    } finally {
+      try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
+    }
     if (created) { _createdSubcategories.set(key, created); (subcategories as any[]).push(created); }
     return created;
   };
