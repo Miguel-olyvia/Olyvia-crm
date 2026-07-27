@@ -615,6 +615,12 @@ serve(async (req) => {
           rejection_notes: safeReasonText,
         }).eq("id", proposal_id));
 
+        // Rejecting the whole proposal means nothing under it moves forward —
+        // mirrors sign_proposal's handling of unselected quotes, but here every
+        // linked quote is rejected since the proposal itself is dead.
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("quotes").update({ estado: "rejeitado" }).eq("proposal_id", proposal_id));
+
         const { data: rejProp } = await supabase.from("proposals").select("proposal_number, title").eq("id", proposal_id).maybeSingle();
         await maybeNotify("client_rejected_proposal", {
           title: "Proposta rejeitada no portal",
