@@ -148,8 +148,10 @@ async function resolveEntityForCreation(
 
   // The cleartext NIF is only ever used locally, in-process, to derive its
   // HMAC hash — it must never be embedded in a query result or response that
-  // could round-trip back through the LLM. Fall back to null (no hash) on
-  // any crypto/config failure rather than silently querying by plaintext.
+  // could round-trip back through the LLM. On any crypto/config failure,
+  // safeHashNif returns null and no plaintext NIF is passed onward at all —
+  // findLocalEntityForOrg then skips NIF-based matching entirely rather than
+  // falling back to a plaintext comparison.
   const nifHash = await safeHashNif(nif);
 
   const hit = await findLocalEntityForOrg({
@@ -157,7 +159,6 @@ async function resolveEntityForCreation(
     organizationId: ctx.organizationId as string,
     email,
     phone,
-    nif: nifHash ? null : nif,
     nifHash,
   });
   if (!hit) return { mode: "create" };

@@ -22,20 +22,26 @@ export async function findLocalEntityForOrg(params: {
   organizationId: string;
   email?: string | null;
   phone?: string | null;
+  /**
+   * @deprecated Plaintext NIF is no longer used for matching — pass
+   * `nifHash` instead. This field is ignored: when no `nifHash` is supplied
+   * (missing or hashing failed upstream), the NIF-matching clause is skipped
+   * entirely rather than falling back to a plaintext `fiscal_entities.nif`
+   * comparison. Kept only so existing callers don't need an immediate
+   * signature change.
+   */
   nif?: string | null;
   /**
    * Precomputed HMAC-SHA256 hash of the normalized NIF (see
-   * `_shared/nifCrypto.ts` hashNif). When supplied, the NIF match is done
-   * against `fiscal_entities.nif_hash` instead of the plaintext `nif` column
-   * — the caller must never pass the plaintext NIF through a channel that
-   * also reaches an external LLM. `nif` itself becomes unused for the match
-   * in that case (kept only for backward-compatible callers that don't
-   * supply a hash yet).
+   * `_shared/nifCrypto.ts` hashNif). The NIF match is done against
+   * `fiscal_entities.nif_hash` only. When this is not supplied (e.g. hashing
+   * failed upstream), no NIF-based match is attempted at all — never fall
+   * back to comparing plaintext NIF.
    */
   nifHash?: string | null;
   countryCode?: string;
 }): Promise<ScopedLookupHit | null> {
-  const { supabase, organizationId, email, phone, nif, nifHash, countryCode = "PT" } = params;
+  const { supabase, organizationId, email, phone, nifHash, countryCode = "PT" } = params;
   if (!organizationId) return null;
 
   // --- 1. Resolve candidate entity_ids from each identifier ---
@@ -70,19 +76,16 @@ export async function findLocalEntityForOrg(params: {
   }
 
   const cleanNifHash = nifHash ? String(nifHash).trim() : null;
-  const cleanNif = !cleanNifHash && nif ? String(nif).trim().toUpperCase() : null;
-  if (cleanNifHash || cleanNif) {
-    // Prefer the precomputed nif_hash (never handles plaintext here); only
-    // fall back to the legacy plaintext `nif` compare for callers that have
-    // not migrated to pass nifHash yet.
-    const query = supabase
+  if (cleanNifHash) {
+    // NIF match is only ever done against the hashed column. No `nifHash`
+    // (missing or hashing failed upstream) means no NIF-based match is
+    // attempted — never fall back to comparing plaintext `fiscal_entities.nif`.
+    const { data: fes } = await supabase
       .from("fiscal_entities")
       .select("id")
       .eq("country_code", countryCode)
+      .eq("nif_hash", cleanNifHash)
       .limit(5);
-    const { data: fes } = cleanNifHash
-      ? await query.eq("nif_hash", cleanNifHash)
-      : await query.eq("nif", cleanNif as string);
     const feIds = (fes ?? []).map((f: any) => f.id);
     if (feIds.length) {
       const { data: links } = await supabase
