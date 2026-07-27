@@ -18,6 +18,55 @@ const requestSchema = z.object({
   reason: z.string().min(10),
 });
 
+type SupabaseClientLike = any;
+
+// anew_entity_org_links is populated for leads (via create_lead_entity_for_org
+// / link_entity_to_org) but NOT for clients created through the client-creation
+// path, which stamps organization_id directly onto anew_clients instead. Try
+// the link table first (it can carry a more specific link than a client's own
+// row), then fall back to whichever of anew_clients/anew_contacts/anew_leads
+// actually has this entity_id.
+async function resolveEntityOrganizationId(
+  supabase: SupabaseClientLike,
+  entityId: string
+): Promise<string | null> {
+  const { data: orgLink, error: orgLinkError } = await supabase
+    .from("anew_entity_org_links")
+    .select("organization_id, is_primary")
+    .eq("entity_id", entityId)
+    .order("is_primary", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (orgLinkError) {
+    console.error("[request-data-erasure] org link lookup error:", orgLinkError);
+    throw new Error("Failed to resolve entity organization");
+  }
+
+  if (orgLink) {
+    return orgLink.organization_id as string;
+  }
+
+  for (const table of ["anew_clients", "anew_contacts", "anew_leads"]) {
+    const { data: row, error } = await supabase
+      .from(table)
+      .select("organization_id")
+      .eq("entity_id", entityId)
+      .maybeSingle();
+
+    if (error) {
+      console.error(`[request-data-erasure] ${table} org lookup error:`, error);
+      continue;
+    }
+
+    if (row?.organization_id) {
+      return row.organization_id as string;
+    }
+  }
+
+  return null;
+}
+
 serve(async (req: Request): Promise<Response> => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -97,24 +146,11 @@ serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    const { data: orgLink, error: orgLinkError } = await supabase
-      .from("anew_entity_org_links")
-      .select("organization_id, is_primary")
-      .eq("entity_id", entity_id)
-      .order("is_primary", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const organizationId = await resolveEntityOrganizationId(supabase, entity_id);
 
-    if (orgLinkError) {
-      console.error("[request-data-erasure] org link lookup error:", orgLinkError);
-      throw new Error("Failed to resolve entity organization");
-    }
-
-    if (!orgLink) {
+    if (!organizationId) {
       throw new AuthError("Entity has no organization link — cannot file erasure request", 409);
     }
-
-    const organizationId: string = orgLink.organization_id;
 
     // ── 3. Insert pending request ──────────────────────────────────────────
     const { data: logEntry, error: insertError } = await supabase

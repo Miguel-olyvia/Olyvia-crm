@@ -121,6 +121,7 @@ const AlertSettings = lazy(() => import("./pages/AlertSettings"));
 const ExportAudit = lazy(() => import("./pages/ExportAudit"));
 const SupportAccess = lazy(() => import("./pages/SupportAccess"));
 const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
+const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -271,6 +272,7 @@ const App = () => (
                       <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
                       <Route path="/platform/support-access" element={<ProtectedRoute permission="platform.support_access.view"><SupportAccess /></ProtectedRoute>} />
                       <Route path="/platform/auth-audit-log" element={<ProtectedRoute permission="platform.auth_audit_log.view"><AuthAuditLog /></ProtectedRoute>} />
+                      <Route path="/platform/data-erasure-requests" element={<ProtectedRoute permission="rgpd.erasure.manage"><DataErasureRequests /></ProtectedRoute>} />
                     </Route>
                   </Route>
 

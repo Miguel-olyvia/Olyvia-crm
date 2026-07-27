@@ -27,6 +27,7 @@ import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
+import { RequestErasureButton } from "@/components/RequestErasureButton";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -994,6 +995,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               onRevertToContact={() => setRevertDialogOpen(true)}
               canRevert={canRevert}
             />
+
+            {/* RGPD Art. 17 */}
+            <div className="flex justify-end -mt-2">
+              <RequestErasureButton entityId={client.entity_id} entityLabel={fullName || "este cliente"} />
+            </div>
 
             {/* SUMMARY BAR */}
             {groupCompanyNames.length > 0 && (

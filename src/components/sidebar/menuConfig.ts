@@ -216,11 +216,12 @@ export const menuSections: MenuSection[] = [
     id: "platform",
     icon: ShieldAlert,
     labelKey: "sidebar.platform",
-    paths: ["/platform/support-access", "/platform/auth-audit-log"],
-    permissions: ["platform.support_access.view", "platform.auth_audit_log.view"],
+    paths: ["/platform/support-access", "/platform/auth-audit-log", "/platform/data-erasure-requests"],
+    permissions: ["platform.support_access.view", "platform.auth_audit_log.view", "rgpd.erasure.manage"],
     items: [
       { to: "/platform/support-access", icon: ShieldAlert, labelKey: "sidebar.supportAccess", permission: "platform.support_access.view" },
       { to: "/platform/auth-audit-log", icon: ShieldAlert, labelKey: "sidebar.authAuditLog", permission: "platform.auth_audit_log.view" },
+      { to: "/platform/data-erasure-requests", icon: ShieldAlert, labelKey: "sidebar.dataErasureRequests", permission: "rgpd.erasure.manage" },
     ],
   },
 ];
