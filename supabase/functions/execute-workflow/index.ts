@@ -1161,7 +1161,15 @@ serve(async (req) => {
     const { data: rules } = await supabase.from("workflow_automation_rules").select("*").eq("source_entity", source_entity).eq("is_active", true).or(`organization_id.eq.${orgId},organization_id.is.null`).order("execution_order");
     if (rules && rules.length > 0) {
       let si: any = null;
-      if (new_stage_id) { const st = source_entity === "proposal" ? "proposal_workflow_stages" : source_entity === "lead" ? "lead_workflow_stages" : "deal_stages"; const { data } = await supabase.from(st).select("is_won, is_lost").eq("id", new_stage_id).single(); si = data; }
+      if (new_stage_id) {
+        const st = source_entity === "proposal" ? "proposal_workflow_stages" : source_entity === "lead" ? "lead_workflow_stages" : "deal_stages";
+        // lead_workflow_stages has no is_won/is_lost columns — it uses
+        // counts_as_converted/counts_as_lost instead.
+        const wonCol = st === "lead_workflow_stages" ? "counts_as_converted" : "is_won";
+        const lostCol = st === "lead_workflow_stages" ? "counts_as_lost" : "is_lost";
+        const { data } = await supabase.from(st).select(`${wonCol}, ${lostCol}`).eq("id", new_stage_id).single();
+        si = data ? { is_won: (data as any)[wonCol], is_lost: (data as any)[lostCol] } : null;
+      }
       const stm: Record<string, string> = { proposal: "proposals", lead: "anew_leads", deal: "deals", quote: "quotes" };
       const { data: sd } = await supabase.from(stm[source_entity] || "deals").select("*").eq("id", entity_id).single();
       if (sd) {
@@ -1176,7 +1184,29 @@ serve(async (req) => {
           const tid = (sd as any)[rf]; if (!tid) continue;
           if (rule.action_type === "change_stage") {
             let tsid = rule.action_stage_id;
-            if (!tsid) { const tst = rule.target_entity === "proposal" ? "proposal_workflow_stages" : rule.target_entity === "lead" ? "lead_workflow_stages" : "deal_stages"; if (si?.is_won) { const { data: w } = await supabase.from(tst).select("id").eq("is_won", true).maybeSingle(); tsid = w?.id; } else if (si?.is_lost) { const { data: l } = await supabase.from(tst).select("id").eq("is_lost", true).maybeSingle(); tsid = l?.id; } }
+            if (!tsid) {
+              const tst = rule.target_entity === "proposal" ? "proposal_workflow_stages" : rule.target_entity === "lead" ? "lead_workflow_stages" : "deal_stages";
+              // lead_workflow_stages has no is_won/is_lost columns — it uses
+              // counts_as_converted/counts_as_lost instead.
+              const wonCol = tst === "lead_workflow_stages" ? "counts_as_converted" : "is_won";
+              const lostCol = tst === "lead_workflow_stages" ? "counts_as_lost" : "is_lost";
+              // deal_stages has no organization_id (global only); proposal_workflow_stages
+              // and lead_workflow_stages can have both a global row and an org-specific
+              // override, so scope to the org and prefer the org-specific row (ordered
+              // non-null first, limit 1) — otherwise .maybeSingle() errors on >1 rows.
+              const scopeToOrg = tst !== "deal_stages";
+              if (si?.is_won) {
+                let q = supabase.from(tst).select("id").eq(wonCol, true);
+                if (scopeToOrg) q = q.or(`organization_id.eq.${orgId},organization_id.is.null`).order("organization_id", { ascending: false, nullsFirst: false }).limit(1);
+                const { data: w } = await q.maybeSingle();
+                tsid = w?.id;
+              } else if (si?.is_lost) {
+                let q = supabase.from(tst).select("id").eq(lostCol, true);
+                if (scopeToOrg) q = q.or(`organization_id.eq.${orgId},organization_id.is.null`).order("organization_id", { ascending: false, nullsFirst: false }).limit(1);
+                const { data: l } = await q.maybeSingle();
+                tsid = l?.id;
+              }
+            }
             if (tsid) {
               const tt = rule.target_entity === "proposal" ? "proposals" : rule.target_entity === "lead" ? "anew_leads" : "deals";
               const sf = rule.target_entity === "lead" ? "workflow_stage_id" : "stage_id";
