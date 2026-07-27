@@ -39,6 +39,15 @@ async function createOrganizationEntity(supabaseAdmin: any, displayName: string,
   return data.id;
 }
 
+/** Result of resolving/creating the company's fiscal entity: its id plus the
+ * HMAC-SHA256 hash already computed for it, so callers can propagate the
+ * hash onward (e.g. into anew_organizations.metadata) without ever handling
+ * or re-deriving the plaintext VAT again. */
+interface CompanyFiscalEntityResolution {
+  fiscalEntityId: string;
+  nifHash: string;
+}
+
 /**
  * Resolves-or-creates the fiscal_entities row for the company's VAT/NIF via
  * the resolve_fiscal_entity RPC — the same atomic, encryption-aware path
@@ -60,7 +69,7 @@ async function resolveOrCreateCompanyFiscalEntity(
   country: string,
   companyName: string,
   createdBy: string,
-): Promise<string | null> {
+): Promise<CompanyFiscalEntityResolution | null> {
   const normalizedNif = normalizeNif(vat || "");
   if (normalizedNif === "") return null;
 
@@ -88,7 +97,7 @@ async function resolveOrCreateCompanyFiscalEntity(
   if (!row?.fiscal_entity_id) {
     throw new Error("resolve_fiscal_entity returned no row");
   }
-  return row.fiscal_entity_id as string;
+  return { fiscalEntityId: row.fiscal_entity_id as string, nifHash };
 }
 
 /**
@@ -256,9 +265,9 @@ serve(async (req) => {
         );
       }
 
-      let fiscalEntityId: string | null = null;
+      let fiscalEntityResolution: CompanyFiscalEntityResolution | null = null;
       try {
-        fiscalEntityId = await resolveOrCreateCompanyFiscalEntity(supabaseAdmin, vat, country, company_name, anewUser.id);
+        fiscalEntityResolution = await resolveOrCreateCompanyFiscalEntity(supabaseAdmin, vat, country, company_name, anewUser.id);
       } catch (fiscalError: unknown) {
         console.error("Error resolving company fiscal entity:", fiscalError);
         await supabaseAdmin.from("anew_organizations").delete().eq("id", rootOrg.id);
@@ -271,12 +280,20 @@ serve(async (req) => {
         );
       }
 
-      const existingCompanyEntityId = fiscalEntityId
-        ? await resolveCompanyEntityByFiscalEntityId(supabaseAdmin, fiscalEntityId)
+      const existingCompanyEntityId = fiscalEntityResolution
+        ? await resolveCompanyEntityByFiscalEntityId(supabaseAdmin, fiscalEntityResolution.fiscalEntityId)
         : null;
       const companyEntityId = existingCompanyEntityId || await createOrganizationEntity(supabaseAdmin, company_name, anewUser.id);
 
       // Step 4: Create company organization (type=company)
+      //
+      // entity_id is always pre-resolved above, so the anew_organizations
+      // BEFORE INSERT trigger (ensure_organization_entity_identity) never
+      // runs its entity-resolution branch for this insert. metadata.nif_hash
+      // is still included defensively: the trigger only ever matches
+      // fiscal_entities by nif_hash (never the plaintext vat/nif keys), so
+      // if entity_id were ever left unset by a future change, resolution
+      // would still work — and would never fall back to a plaintext compare.
       const { data: companyOrg, error: companyOrgError } = await supabaseAdmin
         .from("anew_organizations")
         .insert({
@@ -285,7 +302,9 @@ serve(async (req) => {
           status: "active",
           created_by: anewUser.id,
           entity_id: companyEntityId,
-          metadata: { vat, country },
+          metadata: fiscalEntityResolution
+            ? { vat, country, nif_hash: fiscalEntityResolution.nifHash }
+            : { vat, country },
         })
         .select("id")
         .single();
@@ -302,8 +321,8 @@ serve(async (req) => {
         );
       }
 
-      if (fiscalEntityId) {
-        await linkCompanyFiscalEntity(supabaseAdmin, companyEntityId, fiscalEntityId, anewUser.id);
+      if (fiscalEntityResolution) {
+        await linkCompanyFiscalEntity(supabaseAdmin, companyEntityId, fiscalEntityResolution.fiscalEntityId, anewUser.id);
       }
 
       // Step 5: Create hierarchy (root → company)

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 export type EntityMatchScope = "same_org" | "group";
 
@@ -14,7 +15,8 @@ export interface EntityMatchResult {
 }
 
 /**
- * Cross-org duplicate detection. Wraps the `find_entity_matches` RPC.
+ * Cross-org duplicate detection. Wraps the `find-entity-matches-proxy` Edge
+ * Function (which in turn calls the `find_entity_matches` RPC server-side).
  * Never reveals entities from organizations the caller cannot see.
  */
 export async function findEntityMatches(params: {
@@ -28,25 +30,43 @@ export async function findEntityMatches(params: {
   if (!orgId) return [];
   if (!email && !phone && !nif) return [];
 
-  // p_nif_hash is included explicitly (even as null) so PostgREST resolves
-  // unambiguously to the 6-arg find_entity_matches overload added in
-  // 20261030010000_nif_enc_find_entity_matches_hash_overload.sql. Without this
-  // key present in the request, PostgREST cannot disambiguate between the
-  // 5-arg and 6-arg overloads (PGRST203) - Postgres's own "fewest defaults"
-  // tie-break does not apply at the PostgREST RPC layer. The browser has no
-  // access to the HMAC key, so it cannot compute a real hash here; null falls
-  // back to the legacy plaintext nif comparison inside the function, same
-  // behavior as before this fix.
-  const { data, error } = await (supabase as any).rpc("find_entity_matches", {
-    p_org_id: orgId,
-    p_email: email ?? null,
-    p_phone: phone ?? null,
-    p_nif: nif ?? null,
-    p_country_code: countryCode,
-    p_nif_hash: null,
+  // The browser has no access to the HMAC key used to compute nif_hash, so
+  // plaintext nif matching can never be done client-side. This calls the
+  // find-entity-matches-proxy Edge Function, which derives nif_hash
+  // server-side (deriveKeyFromEnv + hashNif, same pattern as
+  // fiscal-entity-resolve / nif-write-proxy) and forwards only the hash to
+  // find_entity_matches — the plaintext nif never reaches Postgres.
+  const { data, error } = await supabase.functions.invoke<{
+    success: boolean;
+    data?: Array<{
+      entity_id: string;
+      scope: EntityMatchScope;
+      primary_org_id: string | null;
+      primary_org_name: string | null;
+      owner_org_accessible: boolean;
+      match_field: "email" | "phone" | "nif";
+      display_name: string | null;
+    }>;
+    error?: string;
+    code?: string;
+  }>("find-entity-matches-proxy", {
+    body: {
+      orgId,
+      email: email ?? null,
+      phone: phone ?? null,
+      nif: nif ?? null,
+      countryCode,
+    },
   });
-  if (error) throw error;
-  return (data ?? []).map((r: any) => ({
+
+  if (error) {
+    throw new Error(await getFriendlyErrorMessage(error));
+  }
+  if (!data?.success) {
+    throw new Error(await getFriendlyErrorMessage(data?.error ?? null));
+  }
+
+  return (data.data ?? []).map((r) => ({
     entityId: r.entity_id,
     scope: r.scope,
     primaryOrgId: r.primary_org_id ?? null,
