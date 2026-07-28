@@ -820,8 +820,11 @@ export default function PublicLeadForm() {
         if (data?.error) {
           if (data.code === "BOOKED") {
             setResumeAlreadyBooked(true);
+          } else {
+            // INVALID/EXPIRED/USED: let the visitor know their link didn't work,
+            // then fall back to a normal fresh form instead of failing silently.
+            toast.error(data.error || "Não foi possível retomar o seu agendamento.");
           }
-          // INVALID/EXPIRED/USED: fall back to a normal fresh form, if we know which one.
           if (formId || campaignId) loadFormData();
           return;
         }

@@ -567,7 +567,7 @@ Deno.serve(async (req: Request) => {
       if (assignedResource?.user_id) {
         const { data: prof } = await supabase
           .from('anew_users')
-          .select('email, name')
+          .select('email, name, auth_user_id')
           .eq('id', assignedResource.user_id)
           .maybeSingle();
         technicianEmail = (prof?.email || '').toLowerCase().trim();
@@ -577,36 +577,56 @@ Deno.serve(async (req: Request) => {
         // separate from (and unconditional on) the meeting_notify_commercial
         // email toggle below, matching the always-on pattern used for other
         // assignment notifications (see send-schedule-invite). notifications.user_id
-        // is the AUTH user id, while schedule_resources.user_id is the business
-        // (anew_users) id, so this goes through auth_to_business_user_map.
+        // is the AUTH user id (anew_users.auth_user_id), while schedule_resources.user_id
+        // is the business (anew_users) id.
         try {
-          const { data: authMap } = await supabase
-            .from('auth_to_business_user_map')
-            .select('auth_user_id')
-            .eq('business_user_id', assignedResource.user_id)
-            .maybeSingle();
-          if (authMap?.auth_user_id) {
-            const leadFullNameForNotif = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
-            const whenFormattedForNotif = new Date(slot_start).toLocaleString('pt-PT', {
-              timeZone: 'Europe/Lisbon', weekday: 'long', day: 'numeric', month: 'long',
-              hour: '2-digit', minute: '2-digit',
-            });
-            await supabase.from('notifications').insert({
-              user_id: authMap.auth_user_id,
-              organization_id: organizationId,
-              type: 'schedule_booking',
-              kind: 'notification',
-              title: 'Nova visita agendada',
-              message: `${leadFullNameForNotif} agendou uma visita para ${whenFormattedForNotif}`,
-              link: '/scheduling',
-              entity_type: 'schedule_item',
-              entity_id: scheduleItem.id,
-              data: { schedule_item_id: scheduleItem.id, lead_id: lead.id },
-            });
+          if (prof?.auth_user_id) {
+            // Respect a per-org mute for this notification, if configured (default: on).
+            let notifEnabled = true;
+            const { data: setting } = await supabase
+              .from('alert_settings')
+              .select('is_active')
+              .eq('organization_id', organizationId)
+              .eq('alert_type', 'schedule_booking')
+              .eq('kind', 'notification')
+              .maybeSingle();
+            if (setting && setting.is_active === false) notifEnabled = false;
+
+            if (notifEnabled) {
+              const leadFullNameForNotif = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
+              const whenFormattedForNotif = new Date(slot_start).toLocaleString('pt-PT', {
+                timeZone: 'Europe/Lisbon', weekday: 'long', day: 'numeric', month: 'long',
+                hour: '2-digit', minute: '2-digit',
+              });
+              await supabase.from('notifications').insert({
+                user_id: prof.auth_user_id,
+                organization_id: organizationId,
+                type: 'schedule_booking',
+                kind: 'notification',
+                title: 'Nova visita agendada',
+                message: `${leadFullNameForNotif} agendou uma visita para ${whenFormattedForNotif}`,
+                link: '/scheduling',
+                entity_type: 'schedule_item',
+                entity_id: scheduleItem.id,
+                data: { schedule_item_id: scheduleItem.id, lead_id: lead.id },
+              });
+            }
           }
         } catch (notifErr) {
           console.error('[book-slot] in-app notification failed (non-fatal):', notifErr);
         }
+      }
+
+      // If this lead had a pending "finish scheduling" invite (completed the
+      // form earlier without picking a slot), burn it and cancel its
+      // follow-up nudge now that a slot IS booked — otherwise the visitor
+      // would get a confusing "you still need to book" email after already
+      // booking. Fail-soft.
+      try {
+        await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
+        await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
+      } catch (inviteBurnErr) {
+        console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
       }
 
       const { data: orgRow } = await supabase

@@ -292,6 +292,7 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
         .from("organization_smtp_settings")
         .select("id, name, is_default")
         .eq("organization_id", activeCompany.id)
+        .eq("is_active", true)
         .order("is_default", { ascending: false }),
     ]);
     setEmailTemplateOptions(templates || []);
