@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, formatDistanceToNow, startOfDay, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -34,6 +34,7 @@ import {
   UserCheck,
   UserPlus,
   Users,
+  X,
   Zap,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -76,6 +77,7 @@ import {
   type QualificationHistoryRow,
   type QualificationLeadRow,
 } from "./leadsDashboardHelpers";
+import { LeadsDashboardAIReport } from "./LeadsDashboardAIReport";
 
 const NEGOTIATION_LIST_LIMIT = 20;
 const ACTIVITY_FEED_LIMIT = 15;
@@ -150,6 +152,15 @@ interface LeadsDashboardProps {
   statusFilter?: string;
   onStatusFilterChange?: (status: string) => void;
   statusCounts?: Record<string, number>;
+  /**
+   * Gates the AI performance report card (LeadsDashboardAIReport) rendered at
+   * the bottom of the "leads" sub-view. Mirrors the caller-gated prop pattern
+   * from the sibling Lovable-connected repo, where a separate v1/v2 flag
+   * controlled this — this repo has no v1/v2 split, so the caller
+   * (AnewLeads.tsx) simply passes `true` unconditionally. Defaults to false
+   * so existing/other callers of LeadsDashboard don't get the card for free.
+   */
+  enableAIReport?: boolean;
 }
 
 const ALL_STATUS_FILTER = "all";
@@ -243,7 +254,15 @@ function KPICard({
 }
 
 export function LeadsDashboard(props: LeadsDashboardProps) {
-  const { query, workflowStages, teamMemberIds, statusFilter, onStatusFilterChange, statusCounts } = props;
+  const {
+    query,
+    workflowStages,
+    teamMemberIds,
+    statusFilter,
+    onStatusFilterChange,
+    statusCounts,
+    enableAIReport = false,
+  } = props;
   const { getIdentity, resolveEntities } = useEntityIdentity();
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
@@ -259,10 +278,36 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  /**
+   * Drill-down for the "Leads por Colaborador" chips below. Mirrors the
+   * statusFilter pill mechanism above (same additive-override approach), but
+   * kept as local state here instead of a caller-controlled prop since no
+   * parent currently needs to observe/persist this selection: it is applied
+   * on top of buildDashboardScopedRpcParams' own p_assigned_to (already
+   * derived from query.filters.assignedTo) right before the RPC call, and
+   * cleared by clicking the same chip again.
+   */
+  const [selectedAssignee, setSelectedAssignee] = useState<string | null>(null);
+
+  // Monotonically increasing id for the in-flight loadStats request below.
+  // Toggling the assignee chip quickly (select -> deselect) fires two
+  // overlapping RPC round-trips; without this guard, whichever one happens
+  // to resolve LAST wins the final setStats/setComparisonStats call -- even
+  // when it's the stale, now-superseded (filtered) request completing after
+  // the newer (unfiltered) one already rendered correctly. Same pattern as
+  // EntitySearchInput's latestRequestIdRef.
+  const latestStatsRequestIdRef = useRef(0);
 
   useEffect(() => {
     setDateRange(resolveDashboardDateRange(query?.filters));
   }, [query?.orgId, query?.filters?.dateFrom, query?.filters?.dateTo]);
+
+  // Reset the local drill-down whenever the underlying scoped query changes
+  // (org switch, scope switch, or a new caller-driven filter set), so a
+  // stale assignee selection never silently narrows a different query.
+  useEffect(() => {
+    setSelectedAssignee(null);
+  }, [query?.orgId, query?.filters]);
 
   useEffect(() => {
     if (!query) {
@@ -278,17 +323,36 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     const abortController = new AbortController();
 
     const loadStats = async () => {
+      // Claim this call as the latest. Any earlier call that resolves after
+      // this point will see its own id no longer match latestStatsRequestIdRef
+      // and must not touch state (see guards below).
+      const requestId = ++latestStatsRequestIdRef.current;
+
       setLoading(true);
       setError(null);
 
       try {
-        const mainParams = { ...buildDashboardScopedRpcParams(query, dateRange), p_compare_previous: false };
+        // Chip drill-down override: applied on top of buildDashboardScopedRpcParams'
+        // own p_assigned_to/p_assigned_unassigned (derived from query.filters.assignedTo),
+        // same additive pattern as the statusFilter pill above -- p_status flows in via
+        // query.filters.status there, this narrows further by assignee without a second
+        // parallel query mechanism.
+        const withAssigneeOverride = (params: Record<string, unknown>) => {
+          if (!selectedAssignee) return params;
+          const { p_assigned_unassigned, ...rest } = params;
+          return { ...rest, p_assigned_to: selectedAssignee };
+        };
+
+        const mainParams = {
+          ...withAssigneeOverride(buildDashboardScopedRpcParams(query, dateRange)),
+          p_compare_previous: false,
+        };
         const comparisonRange = compareMode ? getComparisonPeriod(dateRange) : null;
         const [mainResult, comparisonResult] = await Promise.all([
           (supabase.rpc as any)("get_lead_dashboard_stats_scoped", mainParams).abortSignal(abortController.signal),
           compareMode && comparisonRange
             ? (supabase.rpc as any)("get_lead_dashboard_stats_scoped", {
-                ...buildDashboardScopedRpcParams(query, comparisonRange),
+                ...withAssigneeOverride(buildDashboardScopedRpcParams(query, comparisonRange)),
                 p_compare_previous: false,
               }).abortSignal(abortController.signal)
             : Promise.resolve({ data: null, error: null }),
@@ -299,12 +363,13 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
           throw new Error(comparisonResult.error.message || "Erro ao carregar comparação do dashboard.");
         }
 
-        if (!cancelled) {
+        if (!cancelled && requestId === latestStatsRequestIdRef.current) {
           setStats((mainResult?.data as DashboardStats | null) ?? null);
           setComparisonStats((comparisonResult?.data as DashboardStats | null) ?? null);
         }
       } catch (loadError) {
         if (cancelled || abortController.signal.aborted) return;
+        if (requestId !== latestStatsRequestIdRef.current) return;
         const message = loadError instanceof Error ? loadError.message : "Erro ao carregar dashboard.";
         console.error("Error loading scoped lead dashboard stats:", loadError);
         setStats(null);
@@ -312,7 +377,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         setUsers([]);
         setError(message);
       } finally {
-        if (!cancelled) {
+        if (!cancelled && requestId === latestStatsRequestIdRef.current) {
           setLoading(false);
         }
       }
@@ -330,6 +395,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     dateRange.to,
     compareMode,
     refreshTick,
+    selectedAssignee,
   ]);
 
   useEffect(() => {
@@ -706,40 +772,142 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     onStatusFilterChange(status === activeStatusFilter ? ALL_STATUS_FILTER : status);
   };
 
+  // Same toggle-on-second-click pattern as handleStatusPillClick above.
+  const handleAssigneeChipClick = (userId: string) => {
+    setSelectedAssignee((current) => (current === userId ? null : userId));
+  };
+
+  const showStatusPills = dashboardView === "leads" && !!onStatusFilterChange && statusPills.length > 0;
+
+  // AI report data — reuses the KPIs/evolution/statusDistribution already
+  // computed above instead of fetching anything twice. See
+  // supabase/functions/leads-dashboard-ai-report/index.ts's PayloadSchema for
+  // the exact request contract these are shaped to match.
+  const aiReportTopAssignees = useMemo(
+    () =>
+      Object.entries(kpis.leadsByAssignee)
+        .map(([userId, count]) => ({ name: userMap.get(userId)?.name || "Desconhecido", count }))
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 20),
+    [kpis.leadsByAssignee, userMap],
+  );
+  const aiReportEvolution = useMemo(
+    () => leadsOverTime.map((point) => ({ date: point.date, leads: point.leads })),
+    [leadsOverTime],
+  );
+  const aiReportStatusDistribution = useMemo(
+    () => statusDistribution.map((entry) => ({ name: entry.name, value: entry.value })),
+    [statusDistribution],
+  );
+  const aiReportPeriodLabel = `${format(dateRange.from, "dd/MM/yyyy", { locale: pt })} - ${format(
+    dateRange.to,
+    "dd/MM/yyyy",
+    { locale: pt },
+  )}`;
+  const aiReportAssigneeName = selectedAssignee ? userMap.get(selectedAssignee)?.name ?? null : null;
+  const aiReportKpis = useMemo(
+    () => ({
+      totalLeads: kpis.totalLeads ?? 0,
+      leadsInPeriod: kpis.leadsInPeriod ?? 0,
+      leadsToday: kpis.leadsToday ?? 0,
+      pendingLeads: kpis.pendingLeads,
+      contactedLeads: kpis.contactedLeads,
+      qualifiedLeads: kpis.qualifiedLeads,
+      convertedLeads: kpis.convertedLeads ?? 0,
+      cohortConversions: kpis.cohortConversions ?? 0,
+      conversionRate: kpis.conversionRate ?? 0,
+      avgLeadsPerDay: kpis.avgLeadsPerDay ?? 0,
+      visitsScheduled: kpis.visitsScheduled ?? 0,
+      totalGrowth: kpis.totalGrowth ?? undefined,
+    }),
+    [kpis],
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-end gap-1">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              aria-label="Alternar entre vista de Leads e Pipeline"
-              title={dashboardView === "pipeline" ? "Vista: Pipeline" : "Vista: Leads"}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setDashboardView("leads")}>
-              {dashboardView === "leads" ? "✓ Leads" : "Leads"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setDashboardView("pipeline")}>
-              {dashboardView === "pipeline" ? "✓ Pipeline" : "Pipeline"}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          aria-label="Filtros de período"
-          title="Filtros de período"
-          onClick={() => setIsFiltersOpen((previous) => !previous)}
-        >
-          <Filter className="h-4 w-4" />
-        </Button>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          {showStatusPills && (
+            <>
+              <button
+                type="button"
+                onClick={() => onStatusFilterChange(ALL_STATUS_FILTER)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  activeStatusFilter === ALL_STATUS_FILTER
+                    ? "border-transparent bg-primary text-primary-foreground"
+                    : "border-input bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Todos
+                <span
+                  className={`rounded-full px-1.5 text-[11px] ${
+                    activeStatusFilter === ALL_STATUS_FILTER ? "bg-primary-foreground/20" : "bg-muted"
+                  }`}
+                >
+                  {totalStatusCount}
+                </span>
+              </button>
+              {statusPills.map((pill) => {
+                const isActive = activeStatusFilter === pill.key;
+                return (
+                  <button
+                    key={pill.key}
+                    type="button"
+                    onClick={() => handleStatusPillClick(pill.key)}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isActive
+                        ? "border-transparent text-white"
+                        : "border-input bg-background text-muted-foreground hover:bg-muted"
+                    }`}
+                    style={isActive ? { backgroundColor: pill.color } : undefined}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full shrink-0"
+                      style={{ backgroundColor: isActive ? "currentColor" : pill.color }}
+                    />
+                    {pill.label}
+                    <span className={`rounded-full px-1.5 text-[11px] ${isActive ? "bg-white/20" : "bg-muted"}`}>
+                      {pill.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1 mt-0.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Alternar entre vista de Leads e Pipeline"
+                title={dashboardView === "pipeline" ? "Vista: Pipeline" : "Vista: Leads"}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setDashboardView("leads")}>
+                {dashboardView === "leads" ? "✓ Leads" : "Leads"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDashboardView("pipeline")}>
+                {dashboardView === "pipeline" ? "✓ Pipeline" : "Pipeline"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            aria-label="Filtros de período"
+            title="Filtros de período"
+            onClick={() => setIsFiltersOpen((previous) => !previous)}
+          >
+            <Filter className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {isFiltersOpen && (
@@ -838,54 +1006,6 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </Card>
       )}
 
-      {dashboardView === "leads" && onStatusFilterChange && statusPills.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onStatusFilterChange(ALL_STATUS_FILTER)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-              activeStatusFilter === ALL_STATUS_FILTER
-                ? "border-transparent bg-primary text-primary-foreground"
-                : "border-input bg-background text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            Todos
-            <span
-              className={`rounded-full px-1.5 text-[11px] ${
-                activeStatusFilter === ALL_STATUS_FILTER ? "bg-primary-foreground/20" : "bg-muted"
-              }`}
-            >
-              {totalStatusCount}
-            </span>
-          </button>
-          {statusPills.map((pill) => {
-            const isActive = activeStatusFilter === pill.key;
-            return (
-              <button
-                key={pill.key}
-                type="button"
-                onClick={() => handleStatusPillClick(pill.key)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  isActive
-                    ? "border-transparent text-white"
-                    : "border-input bg-background text-muted-foreground hover:bg-muted"
-                }`}
-                style={isActive ? { backgroundColor: pill.color } : undefined}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: isActive ? "currentColor" : pill.color }}
-                />
-                {pill.label}
-                <span className={`rounded-full px-1.5 text-[11px] ${isActive ? "bg-white/20" : "bg-muted"}`}>
-                  {pill.count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {renderState === "missing_query" &&
         renderPlaceholderCard(
           "Configuração do dashboard em falta",
@@ -967,8 +1087,8 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                 Distribuição SQL / MQL do período, tempo médio até qualificar e taxa de conversão
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="rounded-lg border p-4 space-y-2">
                   <div className="flex items-center gap-2">
                     <div
@@ -1024,51 +1144,56 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                     {formatMetricValue(qualificationPercent("unclassified"), "%")} do total qualificado
                   </p>
                 </div>
+              </div>
 
-                <div className="rounded-lg border p-4 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                      <Zap className="h-4 w-4 text-primary" />
-                    </div>
-                    <p className="text-sm font-medium">Conversão MQL → SQL</p>
-                  </div>
-                  <p className="text-2xl font-bold">
-                    {qualificationHistoryLoading
-                      ? "--"
-                      : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
+              <div className="flex items-center gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <Zap className="h-4 w-4 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Taxa de conversão MQL → SQL</p>
+                  <p className="text-xs text-muted-foreground truncate">
                     {mqlToSqlConversion.totalMql > 0
                       ? `${mqlToSqlConversion.convertedToSql} de ${mqlToSqlConversion.totalMql} MQL viraram SQL`
                       : "Sem leads MQL no período"}
                   </p>
                 </div>
+                <p className="text-xl font-bold text-primary shrink-0">
+                  {qualificationHistoryLoading
+                    ? "--"
+                    : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")}
+                </p>
               </div>
-            </CardContent>
-          </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Tempo médio até qualificar</CardTitle>
-              <CardDescription>Dias entre a criação do lead e a primeira classificação SQL/MQL</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="rounded-lg border p-3 text-center">
-                  <p className="text-xs text-muted-foreground">SQL</p>
-                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.sql }}>
-                    {formatDaysMetric(stats?.avg_days_to_qualify?.sql)}
-                  </p>
-                </div>
-                <div className="rounded-lg border p-3 text-center">
-                  <p className="text-xs text-muted-foreground">MQL</p>
-                  <p className="text-xl font-bold" style={{ color: QUALIFICATION_COLORS.mql }}>
-                    {formatDaysMetric(stats?.avg_days_to_qualify?.mql)}
-                  </p>
-                </div>
-                <div className="rounded-lg border p-3 text-center">
-                  <p className="text-xs text-muted-foreground">Global</p>
-                  <p className="text-xl font-bold">{formatDaysMetric(stats?.avg_days_to_qualify?.overall)}</p>
+              <div>
+                <p className="text-sm font-medium mb-2">Tendência mensal SQL vs MQL</p>
+                <div className="h-[140px]">
+                  {qualificationTrendLoading && qualificationTrend.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      A carregar tendência…
+                    </div>
+                  ) : qualificationTrend.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                      Sem dados de qualificação para o período.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={qualificationTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis dataKey="monthLabel" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                        <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--background))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "8px",
+                          }}
+                        />
+                        <Bar dataKey="sql" stackId="qualification" fill={QUALIFICATION_COLORS.sql} name="SQL" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="mql" stackId="qualification" fill={QUALIFICATION_COLORS.mql} name="MQL" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -1078,21 +1203,52 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg">Leads por Colaborador</CardTitle>
-                <CardDescription>Distribuição no período selecionado</CardDescription>
+                <CardDescription>
+                  Distribuição no período selecionado · clique num colaborador para filtrar o dashboard
+                </CardDescription>
+                {selectedAssignee && (
+                  <div className="pt-1">
+                    <Badge variant="secondary" className="gap-1 pr-1">
+                      <span>Filtrado por: {userMap.get(selectedAssignee)?.name || "Desconhecido"}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-4 w-4 hover:bg-transparent"
+                        onClick={() => setSelectedAssignee(null)}
+                        aria-label="Limpar filtro de colaborador"
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </Badge>
+                  </div>
+                )}
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   {Object.entries(kpis.leadsByAssignee)
                     .sort((left, right) => right[1] - left[1])
                     .slice(0, 12)
-                    .map(([userId, count]) => (
-                      <div key={userId} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50">
-                        <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary">
-                          {count}
-                        </div>
-                        <span className="text-sm truncate">{userMap.get(userId)?.name || "Desconhecido"}</span>
-                      </div>
-                    ))}
+                    .map(([userId, count]) => {
+                      const isSelected = selectedAssignee === userId;
+                      return (
+                        <button
+                          key={userId}
+                          type="button"
+                          onClick={() => handleAssigneeChipClick(userId)}
+                          aria-pressed={isSelected}
+                          className={`flex items-center gap-2 rounded-lg p-2 text-left transition-colors cursor-pointer ${
+                            isSelected
+                              ? "bg-primary/10 ring-2 ring-primary shadow-md"
+                              : "bg-muted/50 hover:bg-muted"
+                          }`}
+                        >
+                          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary shrink-0">
+                            {count}
+                          </div>
+                          <span className="text-sm truncate">{userMap.get(userId)?.name || "Desconhecido"}</span>
+                        </button>
+                      );
+                    })}
                 </div>
               </CardContent>
             </Card>
@@ -1286,43 +1442,6 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
             </Card>
           </div>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Tendência mensal SQL vs MQL</CardTitle>
-              <CardDescription>Novas qualificações por mês (coorte por data de qualificação)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[250px]">
-                {qualificationTrendLoading && qualificationTrend.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                    A carregar tendência…
-                  </div>
-                ) : qualificationTrend.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
-                    Sem dados de qualificação para o período.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={qualificationTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="monthLabel" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
-                      <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} allowDecimals={false} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "hsl(var(--background))",
-                          border: "1px solid hsl(var(--border))",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Bar dataKey="sql" stackId="qualification" fill={QUALIFICATION_COLORS.sql} name="SQL" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="mql" stackId="qualification" fill={QUALIFICATION_COLORS.mql} name="MQL" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-200/50 dark:border-blue-800/50">
               <CardContent className="p-4 flex items-center gap-3">
@@ -1372,6 +1491,19 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               </CardContent>
             </Card>
           </div>
+
+          {enableAIReport && (
+            <LeadsDashboardAIReport
+              organizationId={query?.orgId}
+              periodLabel={aiReportPeriodLabel}
+              periodMode="range"
+              assigneeName={aiReportAssigneeName}
+              kpis={aiReportKpis}
+              topAssignees={aiReportTopAssignees}
+              evolution={aiReportEvolution}
+              statusDistribution={aiReportStatusDistribution}
+            />
+          )}
         </>
       )}
 

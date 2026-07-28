@@ -4617,6 +4617,10 @@ export default function AnewLeads() {
               statusFilter={statusFilter}
               onStatusFilterChange={setStatusFilter}
               statusCounts={statusCounts}
+              // This repo fused the sibling Lovable repo's v1/v2 dashboard
+              // split into a single implementation, so there is no separate
+              // flag to gate this on here — always enabled.
+              enableAIReport
             />
           </TabsContent>
 
