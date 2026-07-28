@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useNavigate } from "react-router-dom";
-import { Check, ArrowRight, Zap, Users, TrendingUp, Bot, Phone, Mail, BarChart3, DollarSign, Sparkles, Rocket, Building2, BadgeDollarSign, Award, CloudMoon, FileText, Calendar, Wrench, ClipboardList, Shield, HandshakeIcon, Package, Truck, ChevronDown } from "lucide-react";
+import { Check, ArrowRight, Zap, Users, TrendingUp, Bot, BarChart3, DollarSign, Sparkles, Rocket, Building2, BadgeDollarSign, Award, CloudMoon, FileText, Calendar, Wrench, ClipboardList, Shield, HandshakeIcon, Package, Truck, ChevronDown } from "lucide-react";
 import { Header } from "@/components/Header";
 import sleepingSheep from "@/assets/sleeping-sheep.jpg";
 import olyviaLogo from "@/assets/olyvia-logo.png";
@@ -18,93 +18,87 @@ const Landing = () => {
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   const features = [
-    { icon: Users, text: "Unlimited users – no extra cost per seat" },
-    { icon: TrendingUp, text: "Transparent AI-usage pricing" },
-    { icon: BarChart3, text: "Predictable monthly plans" },
-    { icon: Zap, text: "Scalable automation for all team sizes" },
-    { icon: Bot, text: "100% free CRM core forever" },
+    { icon: Users, text: t['landing.whyChoose.feature1'] },
+    { icon: TrendingUp, text: t['landing.whyChoose.feature2'] },
+    { icon: BarChart3, text: t['landing.whyChoose.feature3'] },
+    { icon: Zap, text: t['landing.whyChoose.feature4'] },
+    { icon: Bot, text: t['landing.whyChoose.feature5'] },
   ];
 
   const plans = [
     {
-      name: "Starter",
-      price: "€59",
-      description: "For small teams testing AI automation",
-      ideal: "Ideal for small founders or early sales teams testing AI workflows.",
+      id: "trial",
+      name: t['landing.plans.trial.name'],
+      price: "€0",
+      description: t['landing.plans.trial.description'],
+      ideal: t['landing.plans.trial.ideal'],
       icon: Sparkles,
       features: [
-        "Up to 5,000 contacts",
-        "Unlimited users",
-        "200 AI call minutes/month (~50–80 calls)",
-        "1,000 AI emails/month",
-        "1,000 AI conversation analyses/month",
-        "Smart contact management + 1 sales pipeline",
-        "Email support",
+        t['landing.plans.trial.feature1'],
+        t['landing.plans.trial.feature2'],
+        t['landing.plans.trial.feature3'],
+        t['landing.plans.trial.feature4'],
+        t['landing.plans.trial.feature5'],
+        t['landing.plans.trial.feature6'],
+        t['landing.plans.trial.feature7'],
+      ],
+      color: "from-sky-500/10 to-sky-600/10",
+      border: "border-sky-500/20",
+    },
+    {
+      id: "starter",
+      name: t['landing.plans.starter.name'],
+      price: "€79",
+      description: t['landing.plans.starter.description'],
+      ideal: t['landing.plans.starter.ideal'],
+      icon: Rocket,
+      features: [
+        t['landing.plans.starter.feature1'],
+        t['landing.plans.starter.feature2'],
+        t['landing.plans.starter.feature3'],
+        t['landing.plans.starter.feature4'],
+        t['landing.plans.starter.feature5'],
+        t['landing.plans.starter.feature6'],
+        t['landing.plans.starter.feature7'],
       ],
       color: "from-green-500/10 to-green-600/10",
       border: "border-green-500/20",
     },
     {
-      name: "Pro",
+      id: "pro",
+      name: t['landing.plans.pro.name'],
       price: "€119",
-      description: "For growth-stage teams scaling outreach",
-      ideal: "Your best balance of automation power and predictable cost.",
+      description: t['landing.plans.pro.description'],
+      ideal: t['landing.plans.pro.ideal'],
+      popular: true,
       icon: TrendingUp,
       features: [
-        "Up to 25,000 contacts",
-        "Unlimited users",
-        "1,000 AI call minutes/month",
-        "5,000 AI emails/month",
-        "5,000 AI conversation analyses/month",
-        "Multi-pipeline + smart lead scoring",
-        "Automated follow-ups & reminders",
-        "Gmail, LinkedIn & WhatsApp integrations",
-        "Performance reports & insights",
-        "Priority email support",
+        t['landing.plans.pro.feature1'],
+        t['landing.plans.pro.feature2'],
+        t['landing.plans.pro.feature3'],
+        t['landing.plans.pro.feature4'],
+        t['landing.plans.pro.feature5'],
+        t['landing.plans.pro.feature6'],
+        t['landing.plans.pro.feature7'],
       ],
       color: "from-primary/20 to-primary/10",
       border: "border-primary/20",
     },
     {
-      name: "Scale",
-      price: "€249",
-      description: "For companies running full AI-driven sales",
-      ideal: "For teams ready to replace manual sales with full AI operations.",
-      popular: true,
-      icon: Rocket,
-      features: [
-        "Unlimited contacts",
-        "Unlimited users",
-        "5,000 AI call minutes/month",
-        "25,000 AI emails/month",
-        "Unlimited analyses",
-        "Advanced workflow automations",
-        "API & CRM integrations",
-        "AI forecasting + conversation coaching",
-        "Dedicated success manager",
-      ],
-      color: "from-purple-500/20 to-purple-600/10",
-      border: "border-purple-500",
-    },
-    {
-      name: "Enterprise",
-      price: "Custom",
-      description: "For large enterprises with custom needs",
-      ideal: "Tailored solutions for organizations requiring maximum flexibility and control.",
-      enterprise: true,
+      id: "enterprise",
+      name: t['landing.plans.enterprise.name'],
+      price: "€199",
+      description: t['landing.plans.enterprise.description'],
+      ideal: t['landing.plans.enterprise.ideal'],
       icon: Building2,
       features: [
-        "Unlimited everything",
-        "Unlimited users",
-        "Custom AI call minutes",
-        "Custom AI emails",
-        "Unlimited analyses",
-        "White-label options",
-        "Custom integrations & APIs",
-        "On-premise deployment available",
-        "24/7 dedicated support",
-        "Custom SLAs",
-        "Security audits & compliance",
+        t['landing.plans.enterprise.feature1'],
+        t['landing.plans.enterprise.feature2'],
+        t['landing.plans.enterprise.feature3'],
+        t['landing.plans.enterprise.feature4'],
+        t['landing.plans.enterprise.feature5'],
+        t['landing.plans.enterprise.feature6'],
+        t['landing.plans.enterprise.feature7'],
       ],
       color: "from-accent/20 to-accent/10",
       border: "border-accent/50",
@@ -134,40 +128,52 @@ const Landing = () => {
 
   const summaryData = [
     {
-      plan: "Starter",
-      price: "€59/mo",
-      contacts: "5,000",
-      callMinutes: "200",
-      emails: "1,000",
-      analyses: "1,000",
-      users: "Unlimited",
+      name: t['landing.plans.trial.name'],
+      popular: false,
+      priceValue: "€0",
+      users: "3",
+      leads: "50",
+      proposals: "30",
+      quotes: "30",
+      contracts: "30",
+      emails: "50",
+      aiCredits: "20",
     },
     {
-      plan: "Pro",
-      price: "€119/mo",
-      contacts: "25,000",
-      callMinutes: "1,000",
-      emails: "5,000",
-      analyses: "5,000",
-      users: "Unlimited",
+      name: t['landing.plans.starter.name'],
+      popular: false,
+      priceValue: "€79",
+      users: "20",
+      leads: "200",
+      proposals: "100",
+      quotes: "100",
+      contracts: "100",
+      emails: "500",
+      aiCredits: "100",
     },
     {
-      plan: "Scale ⭐",
-      price: "€249/mo",
-      contacts: "Unlimited",
-      callMinutes: "5,000",
-      emails: "25,000",
-      analyses: "Unlimited",
-      users: "Unlimited",
+      name: t['landing.plans.pro.name'],
+      popular: true,
+      priceValue: "€119",
+      users: "70",
+      leads: "1000",
+      proposals: "250",
+      quotes: "250",
+      contracts: "250",
+      emails: "3000",
+      aiCredits: "200",
     },
     {
-      plan: "Enterprise",
-      price: "Custom",
-      contacts: "Unlimited",
-      callMinutes: "Custom",
-      emails: "Custom",
-      analyses: "Unlimited",
-      users: "Unlimited",
+      name: t['landing.plans.enterprise.name'],
+      popular: false,
+      priceValue: "€199",
+      users: "200",
+      leads: "5000",
+      proposals: "500",
+      quotes: "500",
+      contracts: "300",
+      emails: "10000",
+      aiCredits: "500",
     },
   ];
 
@@ -216,8 +222,8 @@ const Landing = () => {
                 </span>
                 ,{" "}
                 <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
-                  <Phone className="w-4 h-4 text-primary" />
-                  {t['hero.calls']}
+                  <Zap className="w-4 h-4 text-primary" />
+                  {t['hero.automates']}
                 </span>
                 , or{" "}
                 <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
@@ -362,21 +368,21 @@ const Landing = () => {
                 </div>
                 <CardHeader className="pb-6 relative z-10">
                   <div className="p-5 bg-gradient-to-br from-accent/20 to-accent/10 w-fit mb-6 rounded-2xl group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300">
-                    <Phone className="w-10 h-10 text-accent" />
+                    <BadgeDollarSign className="w-10 h-10 text-accent" />
                   </div>
-                  <CardTitle className="text-2xl md:text-3xl mb-3 font-bold">{t['howItWorks.calls.title']}</CardTitle>
+                  <CardTitle className="text-2xl md:text-3xl mb-3 font-bold">{t['howItWorks.pricing.title']}</CardTitle>
                   <CardDescription className="text-lg text-muted-foreground">
-                    {t['howItWorks.calls.desc']}
+                    {t['howItWorks.pricing.desc']}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="relative z-10">
                   <div className="flex flex-wrap gap-2 mb-4">
-                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.calls.tag1']}</span>
-                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.calls.tag2']}</span>
-                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.calls.tag3']}</span>
+                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.pricing.tag1']}</span>
+                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.pricing.tag2']}</span>
+                    <span className="px-3 py-1 bg-accent/10 rounded-full text-sm font-medium">{t['howItWorks.pricing.tag3']}</span>
                   </div>
                   <p className="text-muted-foreground text-sm">
-                    {t['howItWorks.calls.text']}
+                    {t['howItWorks.pricing.text']}
                   </p>
                 </CardContent>
               </Card>
@@ -478,16 +484,16 @@ const Landing = () => {
             <div className="text-center mb-20 animate-fade-in">
               <div className="inline-flex items-center gap-3 mb-6 px-8 py-4 bg-gradient-to-r from-primary/20 via-purple-500/20 to-accent/20 backdrop-blur-xl border-2 border-primary/30 rounded-full shadow-2xl hover:scale-105 transition-transform duration-300">
                 <Sparkles className="w-6 h-6 text-primary animate-pulse" />
-                <span className="text-sm font-bold bg-gradient-to-r from-primary via-purple-500 to-accent bg-clip-text text-transparent">Complete CRM Platform</span>
+                <span className="text-sm font-bold bg-gradient-to-r from-primary via-purple-500 to-accent bg-clip-text text-transparent">{t['landing.products.badge']}</span>
               </div>
               <h2 className="text-5xl md:text-6xl font-extrabold mb-6 leading-tight">
-                Everything You Need to<br />
+                {t['landing.products.titleLine1']}<br />
                 <span className="bg-gradient-to-r from-primary via-purple-500 to-accent bg-clip-text text-transparent animate-gradient">
-                  Automate Sales
+                  {t['landing.products.titleLine2']}
                 </span>
               </h2>
               <p className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed">
-                From first contact to customer retention. One platform, unlimited possibilities.
+                {t['landing.products.subtitle']}
               </p>
             </div>
 
@@ -507,7 +513,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-blue-500/30 to-blue-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Users className="w-8 h-8 text-blue-600 dark:text-blue-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">Contact Management</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{t['landing.products.contacts.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'contacts' ? 'rotate-180' : ''}`} />
                   </div>
@@ -515,20 +521,20 @@ const Landing = () => {
                 {expandedProduct === 'contacts' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Complete contact database with unlimited storage, custom fields, and smart segmentation
+                      {t['landing.products.contacts.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Unlimited contacts</span>
+                        <span className="text-sm">{t['landing.products.contacts.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Custom fields & tags</span>
+                        <span className="text-sm">{t['landing.products.contacts.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Import/export tools</span>
+                        <span className="text-sm">{t['landing.products.contacts.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -549,7 +555,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-green-500/30 to-green-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <FileText className="w-8 h-8 text-green-600 dark:text-green-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors">Proposal Management</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-green-600 dark:group-hover:text-green-400 transition-colors">{t['landing.products.proposals.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'proposals' ? 'rotate-180' : ''}`} />
                   </div>
@@ -557,20 +563,20 @@ const Landing = () => {
                 {expandedProduct === 'proposals' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Create, send and track proposals with templates, e-signatures, and automatic follow-ups
+                      {t['landing.products.proposals.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Professional templates</span>
+                        <span className="text-sm">{t['landing.products.proposals.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Digital signatures</span>
+                        <span className="text-sm">{t['landing.products.proposals.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Tracking & analytics</span>
+                        <span className="text-sm">{t['landing.products.proposals.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -591,7 +597,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-purple-500/30 to-purple-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <HandshakeIcon className="w-8 h-8 text-purple-600 dark:text-purple-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">Contract Management</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors">{t['landing.products.contracts.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'contracts' ? 'rotate-180' : ''}`} />
                   </div>
@@ -599,20 +605,20 @@ const Landing = () => {
                 {expandedProduct === 'contracts' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Manage contracts lifecycle from creation to renewal with automated alerts and compliance tracking
+                      {t['landing.products.contracts.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Contract templates</span>
+                        <span className="text-sm">{t['landing.products.contracts.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Renewal alerts</span>
+                        <span className="text-sm">{t['landing.products.contracts.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Version control</span>
+                        <span className="text-sm">{t['landing.products.contracts.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -633,7 +639,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-orange-500/30 to-orange-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Calendar className="w-8 h-8 text-orange-600 dark:text-orange-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">Technical Visits</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors">{t['landing.products.visits.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'visits' ? 'rotate-180' : ''}`} />
                   </div>
@@ -641,20 +647,20 @@ const Landing = () => {
                 {expandedProduct === 'visits' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Schedule, assign and manage technical visits with route optimization and mobile app
+                      {t['landing.products.visits.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Smart scheduling</span>
+                        <span className="text-sm">{t['landing.products.visits.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Route optimization</span>
+                        <span className="text-sm">{t['landing.products.visits.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Mobile access</span>
+                        <span className="text-sm">{t['landing.products.visits.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -675,7 +681,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-red-500/30 to-red-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Wrench className="w-8 h-8 text-red-600 dark:text-red-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors">Customer Maintenance</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors">{t['landing.products.maintenance.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'maintenance' ? 'rotate-180' : ''}`} />
                   </div>
@@ -683,20 +689,20 @@ const Landing = () => {
                 {expandedProduct === 'maintenance' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Track maintenance schedules, service history, and equipment warranties in one place
+                      {t['landing.products.maintenance.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Service schedules</span>
+                        <span className="text-sm">{t['landing.products.maintenance.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Equipment tracking</span>
+                        <span className="text-sm">{t['landing.products.maintenance.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Warranty management</span>
+                        <span className="text-sm">{t['landing.products.maintenance.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -717,7 +723,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-cyan-500/30 to-cyan-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <TrendingUp className="w-8 h-8 text-cyan-600 dark:text-cyan-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">Sales Pipeline</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors">{t['landing.products.pipeline.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'pipeline' ? 'rotate-180' : ''}`} />
                   </div>
@@ -725,20 +731,20 @@ const Landing = () => {
                 {expandedProduct === 'pipeline' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Visual pipeline management with drag-and-drop, forecasting, and win/loss analysis
+                      {t['landing.products.pipeline.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Visual kanban boards</span>
+                        <span className="text-sm">{t['landing.products.pipeline.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Sales forecasting</span>
+                        <span className="text-sm">{t['landing.products.pipeline.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Performance metrics</span>
+                        <span className="text-sm">{t['landing.products.pipeline.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -759,7 +765,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-indigo-500/30 to-indigo-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <ClipboardList className="w-8 h-8 text-indigo-600 dark:text-indigo-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">Activity Tracking</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">{t['landing.products.activity.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'activity' ? 'rotate-180' : ''}`} />
                   </div>
@@ -767,20 +773,20 @@ const Landing = () => {
                 {expandedProduct === 'activity' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Log calls, emails, meetings and tasks automatically with AI-powered insights
+                      {t['landing.products.activity.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Automatic logging</span>
+                        <span className="text-sm">{t['landing.products.activity.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Task management</span>
+                        <span className="text-sm">{t['landing.products.activity.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Email integration</span>
+                        <span className="text-sm">{t['landing.products.activity.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -801,7 +807,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-pink-500/30 to-pink-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <BarChart3 className="w-8 h-8 text-pink-600 dark:text-pink-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors">Analytics & Reports</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors">{t['landing.products.analytics.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'analytics' ? 'rotate-180' : ''}`} />
                   </div>
@@ -809,20 +815,20 @@ const Landing = () => {
                 {expandedProduct === 'analytics' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Real-time dashboards, custom reports, and AI-powered insights for data-driven decisions
+                      {t['landing.products.analytics.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Real-time dashboards</span>
+                        <span className="text-sm">{t['landing.products.analytics.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Custom reports</span>
+                        <span className="text-sm">{t['landing.products.analytics.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">AI-powered insights</span>
+                        <span className="text-sm">{t['landing.products.analytics.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -843,7 +849,7 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-emerald-500/30 to-emerald-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Shield className="w-8 h-8 text-emerald-600 dark:text-emerald-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">Security & Compliance</CardTitle>
+                      <CardTitle className="text-xl font-bold group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">{t['landing.products.security.title']}</CardTitle>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'security' ? 'rotate-180' : ''}`} />
                   </div>
@@ -851,20 +857,20 @@ const Landing = () => {
                 {expandedProduct === 'security' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Enterprise-grade security, GDPR compliance, role-based access, and audit trails
+                      {t['landing.products.security.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">GDPR compliant</span>
+                        <span className="text-sm">{t['landing.products.security.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Role-based access</span>
+                        <span className="text-sm">{t['landing.products.security.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Audit trails</span>
+                        <span className="text-sm">{t['landing.products.security.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -885,7 +891,10 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-amber-500/30 to-amber-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Package className="w-8 h-8 text-amber-600 dark:text-amber-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">Inventory Management</CardTitle>
+                      <div className="flex flex-col gap-1">
+                        <CardTitle className="text-xl font-bold group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">{t['landing.products.inventory.title']}</CardTitle>
+                        <span className="w-fit text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300">{t['landing.products.comingSoon']}</span>
+                      </div>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'inventory' ? 'rotate-180' : ''}`} />
                   </div>
@@ -893,20 +902,20 @@ const Landing = () => {
                 {expandedProduct === 'inventory' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Complete stock control with real-time tracking, automated reordering, and multi-warehouse support
+                      {t['landing.products.inventory.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Real-time stock tracking</span>
+                        <span className="text-sm">{t['landing.products.inventory.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Automated reordering</span>
+                        <span className="text-sm">{t['landing.products.inventory.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Multi-warehouse</span>
+                        <span className="text-sm">{t['landing.products.inventory.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -927,7 +936,10 @@ const Landing = () => {
                       <div className="p-4 bg-gradient-to-br from-slate-500/30 to-slate-600/20 rounded-2xl group-hover:scale-110 transition-all duration-300 shadow-lg">
                         <Truck className="w-8 h-8 text-slate-600 dark:text-slate-300" />
                       </div>
-                      <CardTitle className="text-xl font-bold group-hover:text-slate-600 dark:group-hover:text-slate-400 transition-colors">Fleet Management</CardTitle>
+                      <div className="flex flex-col gap-1">
+                        <CardTitle className="text-xl font-bold group-hover:text-slate-600 dark:group-hover:text-slate-400 transition-colors">{t['landing.products.fleet.title']}</CardTitle>
+                        <span className="w-fit text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-slate-500/20 text-slate-700 dark:text-slate-300">{t['landing.products.comingSoon']}</span>
+                      </div>
                     </div>
                     <ChevronDown className={`w-5 h-5 transition-transform duration-300 ${expandedProduct === 'fleet' ? 'rotate-180' : ''}`} />
                   </div>
@@ -935,20 +947,20 @@ const Landing = () => {
                 {expandedProduct === 'fleet' && (
                   <CardContent className="relative z-10 animate-fade-in pt-0">
                     <CardDescription className="text-base leading-relaxed mb-4">
-                      Track vehicles, maintenance schedules, fuel costs, and driver performance in real-time
+                      {t['landing.products.fleet.description']}
                     </CardDescription>
                     <ul className="space-y-2">
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Vehicle tracking</span>
+                        <span className="text-sm">{t['landing.products.fleet.feature1']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Maintenance scheduling</span>
+                        <span className="text-sm">{t['landing.products.fleet.feature2']}</span>
                       </li>
                       <li className="flex items-center gap-2">
                         <Check className="w-4 h-4 text-primary flex-shrink-0" />
-                        <span className="text-sm">Fuel monitoring</span>
+                        <span className="text-sm">{t['landing.products.fleet.feature3']}</span>
                       </li>
                     </ul>
                   </CardContent>
@@ -959,12 +971,12 @@ const Landing = () => {
             {/* Bottom CTA */}
             <div className="text-center mt-16">
               <Card className="bg-gradient-to-r from-primary/10 via-purple-500/10 to-accent/10 border-2 border-primary/30 p-8">
-                <h3 className="text-2xl font-bold mb-4">Ready to Transform Your Sales Process?</h3>
+                <h3 className="text-2xl font-bold mb-4">{t['landing.products.ctaTitle']}</h3>
                 <p className="text-muted-foreground mb-6 max-w-2xl mx-auto">
-                  Join thousands of teams already using Olyvia to automate their sales and grow their business faster.
+                  {t['landing.products.ctaDescription']}
                 </p>
                 <Button size="lg" onClick={() => navigate("/auth")} className="text-lg px-10 py-6 group">
-                  Start Free Trial Today
+                  {t['landing.products.ctaButton']}
                   <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-2 transition-transform" />
                 </Button>
               </Card>
@@ -978,41 +990,41 @@ const Landing = () => {
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-3 mb-4">
             <BadgeDollarSign className="w-10 h-10 text-primary" />
-            <h2 className="text-4xl font-bold">Pricing</h2>
+            <h2 className="text-4xl font-bold">{t['nav.pricing']}</h2>
           </div>
-          
+
           <div className="max-w-3xl mx-auto mt-8">
             <Card className="bg-card/50 border border-border/30 p-6">
-              <h3 className="text-xl font-semibold mb-4">All plans include:</h3>
+              <h3 className="text-xl font-semibold mb-4">{t['landing.pricing.includedTitle']}</h3>
               <div className="grid md:grid-cols-2 gap-4 text-left">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary/10">
-                    <Users className="w-5 h-5 text-primary" />
-                  </div>
-                  <span className="text-muted-foreground">Unlimited users (no per-seat pricing)</span>
-                </div>
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-primary/10">
                     <BarChart3 className="w-5 h-5 text-primary" />
                   </div>
-                  <span className="text-muted-foreground">Full contact and deal management</span>
+                  <span className="text-muted-foreground">{t['landing.pricing.included1']}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-primary/10">
                     <Bot className="w-5 h-5 text-primary" />
                   </div>
-                  <span className="text-muted-foreground">AI reminders and automation tools</span>
+                  <span className="text-muted-foreground">{t['landing.pricing.included2']}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-primary/10">
                     <Zap className="w-5 h-5 text-primary" />
                   </div>
-                  <span className="text-muted-foreground">Free setup & onboarding</span>
+                  <span className="text-muted-foreground">{t['landing.pricing.included3']}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-primary/10">
+                    <Users className="w-5 h-5 text-primary" />
+                  </div>
+                  <span className="text-muted-foreground">{t['landing.pricing.included4']}</span>
                 </div>
               </div>
               <div className="mt-6 pt-6 border-t border-border/30">
                 <p className="text-base font-semibold text-center">
-                  Only pay for what the AI does: calls, emails, and analysis.
+                  {t['landing.pricing.payOnlyWhen']}
                 </p>
               </div>
             </Card>
@@ -1022,14 +1034,14 @@ const Landing = () => {
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 max-w-7xl mx-auto">
           {plans.map((plan) => (
             <Card
-              key={plan.name}
+              key={plan.id}
               className={`relative bg-gradient-to-br ${plan.color} backdrop-blur border-2 ${plan.border} ${
                 plan.popular ? "scale-105 shadow-2xl" : ""
               }`}
             >
               {plan.popular && (
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-primary text-primary-foreground rounded-full text-sm font-semibold">
-                  ⭐ Most Popular
+                  {t['landing.pricing.popularBadge']}
                 </div>
               )}
               <CardHeader className="pb-8">
@@ -1038,8 +1050,8 @@ const Landing = () => {
                   <CardTitle className="text-2xl">{plan.name}</CardTitle>
                 </div>
                 <div className="flex items-baseline gap-1">
-                  <span className={`${plan.enterprise ? "text-4xl" : "text-5xl"} font-bold`}>{plan.price}</span>
-                  {!plan.enterprise && <span className="text-muted-foreground">/month</span>}
+                  <span className="text-5xl font-bold">{plan.price}</span>
+                  <span className="text-muted-foreground">{t['landing.pricing.perMonth']}</span>
                 </div>
                 <CardDescription className="text-base">{plan.description}</CardDescription>
               </CardHeader>
@@ -1059,7 +1071,7 @@ const Landing = () => {
                   size="lg"
                   onClick={() => navigate("/auth")}
                 >
-                  {plan.enterprise ? "Contact Sales" : "Get Started"}
+                  {plan.id === "trial" ? t['howItWorks.cta.button'] : t['footer.getStarted']}
                 </Button>
               </CardContent>
             </Card>
@@ -1068,32 +1080,36 @@ const Landing = () => {
 
         {/* Comparison Table */}
         <div className="max-w-6xl mx-auto mt-16">
-          <h3 className="text-2xl font-bold text-center mb-8">Plan Comparison</h3>
+          <h3 className="text-2xl font-bold text-center mb-8">{t['landing.comparison.title']}</h3>
           <Card className="bg-card/50 backdrop-blur overflow-hidden border border-border/30">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="font-bold">Plan</TableHead>
-                      <TableHead className="font-bold">Price</TableHead>
-                      <TableHead className="font-bold">Contacts</TableHead>
-                      <TableHead className="font-bold">AI Call Minutes</TableHead>
-                      <TableHead className="font-bold">AI Emails</TableHead>
-                      <TableHead className="font-bold">AI Analyses</TableHead>
-                      <TableHead className="font-bold">Users</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.plan']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.price']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.users']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.leads']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.proposals']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.quotes']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.contracts']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.emails']}</TableHead>
+                      <TableHead className="font-bold">{t['landing.comparison.aiCredits']}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {summaryData.map((row, i) => (
                       <TableRow key={i}>
-                        <TableCell className="font-semibold">{row.plan}</TableCell>
-                        <TableCell>{row.price}</TableCell>
-                        <TableCell>{row.contacts}</TableCell>
-                        <TableCell>{row.callMinutes}</TableCell>
-                        <TableCell>{row.emails}</TableCell>
-                        <TableCell>{row.analyses}</TableCell>
+                        <TableCell className="font-semibold">{row.name}{row.popular ? " ⭐" : ""}</TableCell>
+                        <TableCell>{row.priceValue}{t['landing.pricing.perMonth']}</TableCell>
                         <TableCell>{row.users}</TableCell>
+                        <TableCell>{row.leads}</TableCell>
+                        <TableCell>{row.proposals}</TableCell>
+                        <TableCell>{row.quotes}</TableCell>
+                        <TableCell>{row.contracts}</TableCell>
+                        <TableCell>{row.emails}</TableCell>
+                        <TableCell>{row.aiCredits}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1103,47 +1119,24 @@ const Landing = () => {
           </Card>
         </div>
 
-        {/* Add-ons */}
-        <div className="max-w-3xl mx-auto mt-16">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-3 mb-4">
-              <CloudMoon className="w-8 h-8 text-primary" />
-              <h3 className="text-2xl font-bold">Add-Ons</h3>
+        {/* AI Credits teaser */}
+        <div className="max-w-2xl mx-auto mt-16">
+          <Card className="relative overflow-hidden bg-gradient-to-r from-primary/10 via-purple-500/10 to-accent/10 border-2 border-primary/20 p-8 text-center">
+            <div className="mx-auto p-3 bg-primary/10 w-fit mb-4 rounded-full">
+              <Sparkles className="w-8 h-8 text-primary" />
             </div>
-            <p className="text-muted-foreground">Need more volume? Scale on demand.</p>
-          </div>
-          <div className="grid md:grid-cols-3 gap-4">
-            <Card className="bg-card border border-border/30 hover:border-primary/30 transition-colors">
-              <CardHeader className="text-center">
-                <div className="mx-auto p-3 bg-primary/10 w-fit mb-4">
-                  <Phone className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-lg">AI Call Minutes</CardTitle>
-                <div className="text-3xl font-bold py-2">€0.10</div>
-                <CardDescription>per minute</CardDescription>
-              </CardHeader>
-            </Card>
-            <Card className="bg-card border border-border/30 hover:border-primary/30 transition-colors">
-              <CardHeader className="text-center">
-                <div className="mx-auto p-3 bg-primary/10 w-fit mb-4">
-                  <Mail className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-lg">AI Emails</CardTitle>
-                <div className="text-3xl font-bold py-2">€0.02</div>
-                <CardDescription>per email</CardDescription>
-              </CardHeader>
-            </Card>
-            <Card className="bg-card border border-border/30 hover:border-primary/30 transition-colors">
-              <CardHeader className="text-center">
-                <div className="mx-auto p-3 bg-primary/10 w-fit mb-4">
-                  <BarChart3 className="w-8 h-8 text-primary" />
-                </div>
-                <CardTitle className="text-lg">AI Analyses</CardTitle>
-                <div className="text-3xl font-bold py-2">€0.005</div>
-                <CardDescription>per analysis</CardDescription>
-              </CardHeader>
-            </Card>
-          </div>
+            <h3 className="text-2xl font-bold mb-2">{t['landing.aiCredits.title']}</h3>
+            <p className="text-muted-foreground max-w-md mx-auto mb-5">
+              {t['landing.aiCredits.subtitle']}
+            </p>
+            <div className="flex items-baseline justify-center gap-2">
+              <span className="text-5xl font-bold text-primary">€0,70</span>
+              <span className="text-muted-foreground">{t['landing.aiCredits.suffix']}</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-5">
+              {t['landing.aiCredits.note']}
+            </p>
+          </Card>
         </div>
       </div>
 
@@ -1153,7 +1146,7 @@ const Landing = () => {
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-3">
               <Award className="w-8 h-8 text-primary" />
-              <h2 className="text-3xl font-bold">Why Teams Choose Olyvia</h2>
+              <h2 className="text-3xl font-bold">{t['landing.whyChoose.title']}</h2>
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-6">
@@ -1176,36 +1169,36 @@ const Landing = () => {
               <div className="space-y-4">
                 <div className="inline-flex items-center gap-3 mb-4">
                   <Zap className="w-8 h-8 text-primary" />
-                  <h2 className="text-3xl md:text-4xl font-bold">The Future of Sales Automation</h2>
+                  <h2 className="text-3xl md:text-4xl font-bold">{t['landing.finalCta.title']}</h2>
                 </div>
                 <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                  Olyvia isn't just another CRM — it's your AI Sales Team.
+                  {t['landing.finalCta.subtitle']}
                 </p>
               </div>
 
               <div className="grid md:grid-cols-2 gap-4 max-w-2xl mx-auto text-left">
                 <div className="flex items-start gap-3 p-4 bg-muted/30 border border-border/30">
                   <Bot className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-                  <span>Your agents call, email, analyze, and learn — 24/7</span>
+                  <span>{t['landing.finalCta.point1']}</span>
                 </div>
                 <div className="flex items-start gap-3 p-4 bg-muted/30 border border-border/30">
                   <Users className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
-                  <span>Your team manages relationships — not repetitive tasks</span>
+                  <span>{t['landing.finalCta.point2']}</span>
                 </div>
               </div>
 
               <div className="space-y-4 pt-4">
                 <p className="text-2xl font-bold">
-                  Unlimited users. Free CRM. Pay only when your AI works.
+                  {t['landing.finalCta.tagline']}
                 </p>
                 <div className="inline-flex items-center gap-2 px-6 py-3 bg-muted/30 border border-border/30">
                   <DollarSign className="w-5 h-5 text-primary" />
-                  <span className="text-muted-foreground">"Stop paying per user — start scaling per result."</span>
+                  <span className="text-muted-foreground">{t['landing.finalCta.quote']}</span>
                 </div>
               </div>
 
               <Button size="lg" onClick={() => navigate("/auth")} className="text-lg px-12 mt-6">
-                Start Your AI Journey <ArrowRight className="ml-2 w-5 h-5" />
+                {t['landing.finalCta.button']} <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
             </div>
           </Card>
