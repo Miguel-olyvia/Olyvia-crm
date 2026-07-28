@@ -15319,6 +15319,8 @@ export type Database = {
         Args: { p_org: string }
         Returns: {
           updated_count: number
+          unresolved_count: number
+          unresolved_lead_ids: string[]
         }[]
       }
       reject_proposal_atomic: {

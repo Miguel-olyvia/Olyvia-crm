@@ -132,6 +132,11 @@ export default {
           "80%": { transform: "rotate(1deg)" },
           "90%": { transform: "rotate(0deg)" },
         },
+        "progress-indeterminate": {
+          "0%": { transform: "translateX(-100%)" },
+          "50%": { transform: "translateX(150%)" },
+          "100%": { transform: "translateX(150%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -140,6 +145,7 @@ export default {
         "scale-in": "scale-in 0.5s ease-out",
         "shimmer": "shimmer 3s linear infinite",
         "olyvia-shake": "olyvia-shake 0.8s ease-in-out infinite",
+        "progress-indeterminate": "progress-indeterminate 1.4s ease-in-out infinite",
       },
     },
   },

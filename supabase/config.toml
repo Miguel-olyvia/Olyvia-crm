@@ -62,6 +62,9 @@ verify_jwt = true
 [functions.generate-proposal-ai]
 verify_jwt = true
 
+[functions.leads-dashboard-ai-report]
+verify_jwt = true
+
 [functions.pipeline-automation]
 verify_jwt = false
 

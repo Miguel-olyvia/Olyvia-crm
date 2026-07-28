@@ -46,6 +46,7 @@ import {
   Target, GitBranch, Settings, TrendingUp, CheckCircle2,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -290,6 +291,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  const [showRecomputeConfirm, setShowRecomputeConfirm] = useState(false);
+  const [unresolvedLeads, setUnresolvedLeads] = useState<{
+    count: number;
+    leads: Array<{ id: string; name: string }>;
+  } | null>(null);
 
   const [deletingStage, setDeletingStage] = useState<WorkflowStage | null>(null);
   const [migrationTargetId, setMigrationTargetId] = useState<string>("");
@@ -558,18 +564,55 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   const handleRecompute = async () => {
     if (!companyId) return;
+    setShowRecomputeConfirm(false);
+    setUnresolvedLeads(null);
     setRecomputing(true);
     const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
       p_org: companyId,
     });
-    setRecomputing(false);
 
     if (error) {
+      setRecomputing(false);
       toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
       return;
     }
     const updatedCount = data?.[0]?.updated_count ?? 0;
+    const unresolvedCount = data?.[0]?.unresolved_count ?? 0;
+    const unresolvedLeadIds: string[] = data?.[0]?.unresolved_lead_ids ?? [];
+
     toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
+
+    if (unresolvedCount > 0) {
+      toast({
+        title: `${unresolvedCount} lead${unresolvedCount === 1 ? "" : "s"} sem estágio resolvido`,
+        description: "Nenhuma regra de nenhum estágio correspondeu a estas leads. Reveja as regras de estágio.",
+        variant: "destructive",
+      });
+
+      // unresolvedLeadIds is already capped to 50 by the RPC — resolve a
+      // display name for each so the banner below is actionable, not just a count.
+      if (unresolvedLeadIds.length > 0) {
+        const { data: leadRows } = await (supabase as any)
+          .from("anew_leads")
+          .select("id, field_values")
+          .eq("organization_id", companyId)
+          .in("id", unresolvedLeadIds);
+
+        setUnresolvedLeads({
+          count: unresolvedCount,
+          leads: (leadRows ?? []).map((l: any) => ({
+            id: l.id,
+            name: l.field_values?.nome || l.field_values?.name || "Lead sem nome",
+          })),
+        });
+      } else {
+        setUnresolvedLeads({ count: unresolvedCount, leads: [] });
+      }
+    } else {
+      setUnresolvedLeads(null);
+    }
+
+    setRecomputing(false);
     loadLeadCounts();
     onStagesUpdated?.();
   };
@@ -678,6 +721,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     loadLeadCounts();
     onStagesUpdated?.();
   };
+
+  // Good-enough estimate for the confirmation dialog — reuses the lead
+  // counts already fetched/displayed per-stage above instead of an extra query.
+  const totalLeadCountEstimate = Object.values(leadCountByStage).reduce((sum, n) => sum + n, 0);
 
   const displayStages = stages.length > 0 ? stages : templateStages;
   const deletableLeadCount = deletingStage ? (leadCountByStage[deletingStage.id] || 0) : 0;
@@ -835,10 +882,66 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                         Simule o impacto das regras configuradas acima antes de recalcular as leads existentes.
                       </p>
                     </div>
-                    <Button variant="outline" onClick={handleRecompute} disabled={recomputing}>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowRecomputeConfirm(true)}
+                      disabled={recomputing}
+                    >
                       {recomputing ? "A recalcular..." : "Guardar & Recalcular"}
                     </Button>
                   </div>
+
+                  {recomputing && (
+                    <div className="space-y-1.5">
+                      <Progress indeterminate className="h-2" />
+                      <p className="text-xs text-muted-foreground">
+                        A recalcular estágios de todas as leads da organização...
+                      </p>
+                    </div>
+                  )}
+
+                  {unresolvedLeads && unresolvedLeads.count > 0 && (
+                    <Card className="border-destructive/40 bg-destructive/5">
+                      <CardContent className="py-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-destructive flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            {unresolvedLeads.count} lead{unresolvedLeads.count === 1 ? "" : "s"} não
+                            correspond{unresolvedLeads.count === 1 ? "e" : "em"} a nenhuma etapa configurada
+                          </p>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => setUnresolvedLeads(null)}
+                          >
+                            Dispensar
+                          </Button>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Estas leads ficaram sem estágio porque nenhuma regra de entrada correspondeu a elas.
+                          Reveja as condições de entrada dos estágios acima.
+                        </p>
+                        {unresolvedLeads.leads.length > 0 && (
+                          <ScrollArea className="max-h-32">
+                            <ul className="space-y-1">
+                              {unresolvedLeads.leads.map(lead => (
+                                <li key={lead.id} className="text-xs">
+                                  <Badge variant="outline" className="font-normal">{lead.name}</Badge>
+                                </li>
+                              ))}
+                            </ul>
+                          </ScrollArea>
+                        )}
+                        {unresolvedLeads.count > unresolvedLeads.leads.length && (
+                          <p className="text-xs text-muted-foreground">
+                            Mostrando {unresolvedLeads.leads.length} de {unresolvedLeads.count}.
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
                   <DryRunPanel
                     companyId={companyId}
                     stages={displayStages.map(s => ({
@@ -1291,6 +1394,35 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => pendingPreset && applyPresetToStages(pendingPreset)}>
               Substituir regras
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── Recompute Confirmation ─────────────────────────── */}
+      <AlertDialog open={showRecomputeConfirm} onOpenChange={setShowRecomputeConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-primary" />
+              Recalcular estágios de todas as leads?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {totalLeadCountEstimate > 0 ? (
+                <>
+                  Aproximadamente <strong>{totalLeadCountEstimate} lead{totalLeadCountEstimate === 1 ? "" : "s"}</strong> serão
+                  reavaliada{totalLeadCountEstimate === 1 ? "" : "s"} contra as regras de entrada configuradas acima
+                  e podem mudar de estágio. Esta ação não pode ser desfeita automaticamente — continuar?
+                </>
+              ) : (
+                "As leads da organização serão reavaliadas contra as regras de entrada configuradas acima e podem mudar de estágio. Esta ação não pode ser desfeita automaticamente — continuar?"
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRecompute}>
+              Guardar & Recalcular
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
