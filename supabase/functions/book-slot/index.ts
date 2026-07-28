@@ -3,6 +3,19 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { orderByLeastBusy } from "../_shared/leastBusy.ts";
+import {
+  loadFormEmailConfig,
+  loadTemplate,
+  sendEmailNow,
+  scheduleEmail,
+  renderHtml,
+  renderSubject,
+  parseEmailList,
+  uniqueEmails,
+  defaultMeetingHtml,
+  pickTemplateId,
+  buildManageUrl,
+} from '../_shared/formEmails.ts';
 
 initSentry();
 
@@ -17,6 +30,7 @@ const requestSchema = z.object({
   campaign_id: z.string().optional(),
   source_id: z.string().optional(),
   lead_id: z.string().optional(),
+  lang: z.string().optional(),
 });
 
 const corsHeaders = {
@@ -89,7 +103,9 @@ Deno.serve(async (req: Request) => {
       campaign_id,
       source_id,
       lead_id,
+      lang,
     } = parsed.data;
+    const leadLocale = (typeof lang === 'string' && lang.trim()) ? lang.trim().toLowerCase() : null;
 
     // 1. Get form info
     const { data: form, error: formError } = await supabase
@@ -458,7 +474,35 @@ Deno.serve(async (req: Request) => {
       });
 
     if (assigneeError) {
+      // Without the resource link the booking is a ghost: no technician assigned and,
+      // crucially, invisible to check_schedule_conflict (which joins assignees). Rather
+      // than mark the lead 'scheduled' on a phantom item, roll the item back and fail so
+      // the client can retry.
       console.error('Error creating schedule item assignee:', assigneeError);
+      await supabase.from('schedule_items').update({ status: 'cancelled' }).eq('id', scheduleItem.id);
+      return new Response(
+        JSON.stringify({ error: 'Não foi possível concluir a reserva. Tente novamente.', code: 'RETRY' }),
+        { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 10b. Double-booking guard (TOCTOU). The earlier conflict check and this insert are
+    //      not atomic, so a concurrent request could have booked the same resource+time in
+    //      between. Re-check NOW, excluding our own just-created item; if a real overlap
+    //      exists, roll back (free the assignee + cancel our item) and ask for another slot.
+    const { data: nowConflicts } = await supabase.rpc('check_schedule_conflict', {
+      p_resource_id: assignedResourceId,
+      p_start: slot_start,
+      p_end: slot_end,
+      p_exclude_item_id: scheduleItem.id,
+    });
+    if (nowConflicts === true) {
+      await supabase.from('schedule_item_assignees').delete().eq('item_id', scheduleItem.id);
+      await supabase.from('schedule_items').update({ status: 'cancelled' }).eq('id', scheduleItem.id);
+      return new Response(
+        JSON.stringify({ error: 'Este horário já não está disponível. Escolha outro.', code: 'SLOT_TAKEN' }),
+        { status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Update lead with scheduled_visit_id
@@ -487,9 +531,20 @@ Deno.serve(async (req: Request) => {
       console.error('Error updating lead after booking:', leadUpdateError);
     }
 
-    // 11. Create booking token for cancellation
-    const expiresAt = new Date(slot_start);
-    expiresAt.setHours(expiresAt.getHours() + 24); // token valid until 24h after visit
+    // If this lead had a pending "finish scheduling" invite (completed the form earlier
+    // without picking a slot), burn it and cancel its follow-up email now that a slot is
+    // booked — so the nudge never lands after the visit is already scheduled. Fail-soft.
+    try {
+      await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
+      await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
+    } catch (inviteBurnErr) {
+      console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
+    }
+
+    // 11. Create booking token for cancellation.
+    // Add 24h in milliseconds (UTC) rather than setHours(), which does local-time
+    // arithmetic and drifts by an hour across a DST transition.
+    const expiresAt = new Date(new Date(slot_start).getTime() + 24 * 3600000); // valid until 24h after visit
 
     const { data: bookingToken } = await supabase
       .from('booking_tokens')
@@ -501,53 +556,127 @@ Deno.serve(async (req: Request) => {
       .select('token')
       .single();
 
-    // 12. Insert scheduled email reminders (24h and 1h before)
-    const startDate = new Date(slot_start);
+    // 12. Per-form meeting emails (config on form_branding). Fail-soft: booking
+    //     must succeed regardless of email issues.
+    try {
+      const emailCfg = await loadFormEmailConfig(supabase, form_id);
 
-    const reminder24h = new Date(startDate.getTime() - 24 * 60 * 60 * 1000);
-    const reminder1h = new Date(startDate.getTime() - 1 * 60 * 60 * 1000);
-    const now = new Date();
+      // Resolve the assigned technician's name + email (schedule_resources.user_id → profiles).
+      let technicianEmail = '';
+      let technicianName = '';
+      if (assignedResource?.user_id) {
+        const { data: prof } = await supabase
+          .from('anew_users')
+          .select('email, name')
+          .eq('id', assignedResource.user_id)
+          .maybeSingle();
+        technicianEmail = (prof?.email || '').toLowerCase().trim();
+        technicianName = prof?.name || '';
+      }
 
-    const reminders = [];
-    if (reminder24h > now) {
-      reminders.push({
-        organization_id: organizationId,
-        email_type: 'schedule_reminder',
-        recipient_email: leadEmail || '',
-        subject: `Lembrete: Visita agendada para amanhã`,
-        body: JSON.stringify({
-          lead_id: lead.id,
-          schedule_item_id: scheduleItem.id,
-          slot_start,
-          slot_end,
-          lead_name: [leadFirstName, leadLastName].filter(Boolean).join(' '),
-        }),
-        scheduled_for: reminder24h.toISOString(),
-        status: 'pending',
-        metadata: { type: 'reminder_24h', schedule_item_id: scheduleItem.id },
+      const { data: orgRow } = await supabase
+        .from('anew_organizations')
+        .select('name')
+        .eq('id', organizationId)
+        .maybeSingle();
+
+      const leadFullName = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
+      const whenFormatted = new Date(slot_start).toLocaleString('pt-PT', {
+        timeZone: 'Europe/Lisbon', weekday: 'long', day: 'numeric', month: 'long',
+        hour: '2-digit', minute: '2-digit',
       });
-    }
-    if (reminder1h > now) {
-      reminders.push({
-        organization_id: organizationId,
-        email_type: 'schedule_reminder',
-        recipient_email: leadEmail || '',
-        subject: `Lembrete: Visita agendada dentro de 1 hora`,
-        body: JSON.stringify({
-          lead_id: lead.id,
-          schedule_item_id: scheduleItem.id,
-          slot_start,
-          slot_end,
-          lead_name: [leadFirstName, leadLastName].filter(Boolean).join(' '),
-        }),
-        scheduled_for: reminder1h.toISOString(),
-        status: 'pending',
-        metadata: { type: 'reminder_1h', schedule_item_id: scheduleItem.id },
-      });
-    }
+      const siteUrlEnv = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
+      const cancelLink = bookingToken?.token
+        ? buildManageUrl(emailCfg?.booking_manage_url_template, leadLocale, bookingToken.token, siteUrlEnv)
+        : '';
 
-    if (reminders.length > 0) {
-      await supabase.from('scheduled_emails').insert(reminders);
+      const baseVars: Record<string, string> = {
+        lead_name: leadFullName,
+        client_name: leadFullName,
+        lead_email: leadEmail || '',
+        client_email: leadEmail || '',
+        lead_phone: String(leadPhone || ''),
+        company_name: orgRow?.name || '',
+        technician_name: technicianName,
+        meeting_date: whenFormatted,
+        meeting_datetime: whenFormatted,
+        location: fullLocation || '',
+        cancel_url: cancelLink,
+      };
+
+      // (0) Client confirmation email — includes the booked {{meeting_date}} and the
+      //     manage/cancel link {{cancel_url}}. Only when confirmation is enabled, we
+      //     have a client email, and a template resolves.
+      if (emailCfg?.confirmation_email_enabled && leadEmail) {
+        const confTemplateId = pickTemplateId(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
+        const confTpl = confTemplateId ? await loadTemplate(supabase, confTemplateId) : null;
+        if (confTpl?.body_html) {
+          await sendEmailNow({
+            organizationId,
+            smtpId: emailCfg.email_smtp_id,
+            to: leadEmail,
+            subject: renderSubject(confTpl.subject || 'Confirmação', baseVars),
+            html: renderHtml(confTpl.body_html, baseVars),
+          });
+        }
+      }
+
+      // (a) Immediate notification to the assigned commercial + any extra emails.
+      if (emailCfg?.meeting_notify_commercial || emailCfg?.meeting_notify_emails) {
+        const extra = parseEmailList(emailCfg?.meeting_notify_emails);
+        const notifyList = uniqueEmails([
+          emailCfg?.meeting_notify_commercial ? technicianEmail : null,
+          ...extra,
+        ]);
+        if (notifyList.length > 0) {
+          const tpl = await loadTemplate(supabase, pickTemplateId(emailCfg, 'meeting_notify', leadLocale, emailCfg?.meeting_notify_template_id));
+          const subject = renderSubject(tpl?.subject || 'Nova reunião agendada — {{lead_name}}', baseVars);
+          const html = tpl?.body_html
+            ? renderHtml(tpl.body_html, baseVars)
+            : defaultMeetingHtml({
+                heading: 'Nova reunião agendada',
+                intro: 'Foi marcada uma nova visita através do formulário.',
+                leadName: leadFullName, when: whenFormatted,
+                location: fullLocation || undefined,
+                technicianName: technicianName || undefined,
+                cancelUrl: cancelLink || undefined,
+              });
+          await sendEmailNow({ organizationId, userId: createdBy, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
+        }
+      }
+
+      // (b) Reminder X hours before — to the technician AND the client.
+      if (emailCfg?.reminder_enabled) {
+        const hoursBefore = emailCfg.reminder_hours_before && emailCfg.reminder_hours_before > 0 ? emailCfg.reminder_hours_before : 2;
+        const remindAt = new Date(new Date(slot_start).getTime() - hoursBefore * 3600000);
+        if (remindAt.getTime() > Date.now()) {
+          const reminderTemplateId = pickTemplateId(emailCfg, 'reminder', leadLocale, emailCfg.reminder_template_id);
+          const tpl = await loadTemplate(supabase, reminderTemplateId);
+          const subject = renderSubject(tpl?.subject || 'Lembrete: reunião {{meeting_date}}', baseVars);
+          const htmlFor = (kind: 'client' | 'technician') => tpl?.body_html
+            ? renderHtml(tpl.body_html, baseVars)
+            : defaultMeetingHtml({
+                heading: 'Lembrete de reunião',
+                intro: kind === 'client' ? 'Este é um lembrete da sua visita agendada.' : 'Lembrete: tem uma visita agendada.',
+                leadName: leadFullName, when: whenFormatted,
+                location: fullLocation || undefined,
+                technicianName: technicianName || undefined,
+                cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
+              });
+          const targets: { email: string; kind: 'client' | 'technician' }[] = [];
+          if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });
+          if (technicianEmail) targets.push({ email: technicianEmail, kind: 'technician' });
+          for (const t of targets) {
+            await scheduleEmail(supabase, {
+              organizationId, userId: createdBy, toEmail: t.email,
+              subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
+              entityType: 'leads', entityId: lead.id, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+            });
+          }
+        }
+      }
+    } catch (emailErr) {
+      console.error('[book-slot] meeting emails failed (non-fatal):', emailErr);
     }
 
     // Build response
@@ -586,7 +715,7 @@ Deno.serve(async (req: Request) => {
     console.error('Error in book-slot:', error);
     await captureError(error, { function: "book-slot" });
     return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
