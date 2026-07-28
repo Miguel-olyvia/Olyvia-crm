@@ -118,6 +118,7 @@ serve(async (req) => {
             body: JSON.stringify({
               user_id: email.user_id,
               organization_id: email.organization_id,
+              ...(email.smtp_id ? { smtp_id: email.smtp_id } : {}),
               to: email.to_email,
               subject: email.subject,
               html: email.body_html,

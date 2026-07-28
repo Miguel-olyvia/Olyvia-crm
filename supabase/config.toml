@@ -27,6 +27,12 @@ verify_jwt = false
 [functions.fetch-holidays]
 verify_jwt = false
 
+[functions.get-scheduling-invite]
+verify_jwt = false
+
+[functions.scheduling-invite-optout]
+verify_jwt = false
+
 
 [functions.portal-login]
 verify_jwt = false
