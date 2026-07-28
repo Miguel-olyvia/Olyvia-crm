@@ -5796,6 +5796,8 @@ export default function AnewLeads() {
                         interactionCount={leadInteractionCounts[selectedEntityId] || 0}
                         dealCount={0}
                         dealValue={0}
+                        organizationId={selectedLead.organization_id}
+                        userId={scopeAnewUserId || scopeAuthUserId || ""}
                       />
                     </TabsContent>
 

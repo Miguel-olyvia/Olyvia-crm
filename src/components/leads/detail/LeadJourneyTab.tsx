@@ -1,6 +1,26 @@
-import { differenceInDays, format } from "date-fns";
-import { pt } from "date-fns/locale";
+import { useEffect, useState } from "react";
+import { differenceInDays } from "date-fns";
 import { Check, Star, HelpCircle } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { LeadQualificationCard } from "./LeadQualificationCard";
+
+interface LeadStage {
+  id: string;
+  label: string;
+  color: string | null;
+  stage_order: number;
+  qualification_hint: "none" | "mql" | "sql" | null;
+  counts_as_qualified: boolean;
+  counts_as_negotiation: boolean;
+  counts_as_converted: boolean;
+  counts_as_lost: boolean;
+}
+
+interface ResolvedStageResponse {
+  resolved_stage_id: string | null;
+  resolved_stage: LeadStage | null;
+  stages: LeadStage[];
+}
 
 interface LeadJourneyTabProps {
   // `any` kept intentionally: this prop is the raw selectedLead row from
@@ -13,59 +33,61 @@ interface LeadJourneyTabProps {
   interactionCount: number;
   dealCount: number;
   dealValue: number;
+  // Used only to key the resolved-stage fetch defensively; the RPC itself
+  // only needs the lead id.
+  organizationId?: string | null;
+  userId?: string;
 }
 
 export function LeadJourneyTab({
   lead, hasClient, clientCreatedAt,
   interactionCount, dealCount, dealValue,
+  organizationId, userId,
 }: LeadJourneyTabProps) {
+  const [resolvedStages, setResolvedStages] = useState<ResolvedStageResponse | null>(null);
+  const [stagesLoading, setStagesLoading] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+    if (!lead?.id) {
+      setResolvedStages(null);
+      return;
+    }
+
+    setStagesLoading(true);
+    supabase
+      .rpc("get_lead_resolved_stage", { p_lead_id: lead.id })
+      .then(({ data, error }) => {
+        if (isCancelled) return;
+        if (error) {
+          // Old leads / edge cases should never break this tab — fall back
+          // to no dynamic stepper data rather than surfacing the error.
+          setResolvedStages(null);
+          return;
+        }
+        setResolvedStages((data as ResolvedStageResponse) ?? null);
+      })
+      .finally(() => {
+        if (!isCancelled) setStagesLoading(false);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [lead?.id, organizationId]);
+
   const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
 
-  // qualification_type (SQL/MQL) is sticky and orthogonal to status — once
-  // set it survives later status changes, so it's shown as a suffix on the
-  // "Qualificado" node rather than tied to the live status value.
-  const qualificationSuffix =
-    lead.qualification_type === "sql" ? " · SQL"
-    : lead.qualification_type === "mql" ? " · MQL"
-    : "";
+  const stages = resolvedStages?.stages ?? [];
+  const resolvedStageOrder = resolvedStages?.resolved_stage?.stage_order ?? null;
 
-  const steps = [
-    {
-      key: "lead",
-      label: "Lead",
-      date: lead.created_at,
-      completed: true,
-      current: !isNegotiatingOrLater && !hasClient,
-    },
-    {
-      key: "contacted",
-      label: "Contactado",
-      date: lead.last_contact_at || null,
-      completed: !!lead.last_contact_at || lead.status !== "new",
-      current: false,
-    },
-    {
-      key: "qualified",
-      label: "Qualificado",
-      date: lead.status === "qualified" || isNegotiatingOrLater ? lead.updated_at : null,
-      completed: lead.status === "qualified" || isNegotiatingOrLater || hasClient,
-      current: lead.status === "qualified" && !isNegotiatingOrLater && !hasClient,
-    },
-    {
-      key: "negotiation",
-      label: "Em Negociação",
-      date: isNegotiatingOrLater ? lead.updated_at : null,
-      completed: isNegotiatingOrLater,
-      current: lead.status === "negotiation" && !hasClient,
-    },
-    {
-      key: "client",
-      label: "Cliente",
-      date: clientCreatedAt,
-      completed: hasClient,
-      current: hasClient,
-    },
-  ];
+  const steps = stages.map((stage) => ({
+    key: stage.id,
+    label: stage.label,
+    color: stage.color,
+    completed: resolvedStageOrder !== null && stage.stage_order <= resolvedStageOrder,
+    current: resolvedStageOrder !== null && stage.stage_order === resolvedStageOrder,
+  }));
 
   const leadToContactDays = isNegotiatingOrLater
     ? differenceInDays(new Date(lead.updated_at), new Date(lead.created_at))
@@ -78,42 +100,55 @@ export function LeadJourneyTab({
       </h3>
 
       {/* Journey visualization */}
-      <div className="flex items-center justify-between px-4">
-        {steps.map((step, i) => (
-          <div key={step.key} className="flex items-center flex-1">
-            <div className="flex flex-col items-center">
-              <div className={`h-10 w-10 rounded-full flex items-center justify-center border-2 ${
-                step.current ? "bg-purple-500 border-purple-500 text-white" :
-                step.completed ? "bg-green-500 border-green-500 text-white" :
-                "bg-muted border-muted-foreground/30 text-muted-foreground"
-              }`}>
-                {step.current ? <Star className="h-5 w-5" /> :
-                 step.completed ? <Check className="h-5 w-5" /> :
-                 <HelpCircle className="h-5 w-5" />}
+      {stagesLoading ? (
+        <div className="flex items-center justify-between px-4 animate-pulse">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center flex-1">
+              <div className="flex flex-col items-center">
+                <div className="h-10 w-10 rounded-full bg-muted border-2 border-muted-foreground/20" />
+                <div className="h-2.5 w-12 mt-1.5 rounded bg-muted" />
               </div>
-              <p className={`text-xs mt-1.5 font-medium ${
-                step.current ? "text-purple-600 dark:text-purple-400" :
-                step.completed ? "text-foreground" : "text-muted-foreground"
-              }`}>
-                {step.label}
-              </p>
-              <p className="text-[10px] text-muted-foreground">
-                {step.date ? format(new Date(step.date), "dd/MM/yyyy", { locale: pt }) : "—"}
-              </p>
-              {step.key === "qualified" && step.date && (
-                <p className="text-[10px] text-muted-foreground/80">
-                  {step.label} — {format(new Date(step.date), "dd/MM/yyyy", { locale: pt })}{qualificationSuffix}
+              {i < 3 && <div className="flex-1 h-0.5 mx-2 bg-muted-foreground/10" />}
+            </div>
+          ))}
+        </div>
+      ) : steps.length > 0 ? (
+        <div className="flex items-center justify-between px-4">
+          {steps.map((step, i) => (
+            <div key={step.key} className="flex items-center flex-1">
+              <div className="flex flex-col items-center">
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center border-2 ${
+                  step.current ? "bg-purple-500 border-purple-500 text-white" :
+                  step.completed ? "bg-green-500 border-green-500 text-white" :
+                  "bg-muted border-muted-foreground/30 text-muted-foreground"
+                }`}>
+                  {step.current ? <Star className="h-5 w-5" /> :
+                   step.completed ? <Check className="h-5 w-5" /> :
+                   <HelpCircle className="h-5 w-5" />}
+                </div>
+                <p className={`text-xs mt-1.5 font-medium text-center ${
+                  step.current ? "text-purple-600 dark:text-purple-400" :
+                  step.completed ? "text-foreground" : "text-muted-foreground"
+                }`}>
+                  {step.label}
                 </p>
+              </div>
+              {i < steps.length - 1 && (
+                <div className={`flex-1 h-0.5 mx-2 ${
+                  steps[i + 1].completed || steps[i + 1].current ? "bg-green-500" : "bg-muted-foreground/20"
+                }`} />
               )}
             </div>
-            {i < steps.length - 1 && (
-              <div className={`flex-1 h-0.5 mx-2 ${
-                steps[i + 1].completed || steps[i + 1].current ? "bg-green-500" : "bg-muted-foreground/20"
-              }`} />
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Qualification suggestion / confirmation */}
+      <LeadQualificationCard
+        lead={lead}
+        qualificationHint={resolvedStages?.resolved_stage?.qualification_hint ?? null}
+        userId={userId ?? ""}
+      />
 
       {/* Summary */}
       {(leadToContactDays !== null || interactionCount > 0 || dealCount > 0) && (
