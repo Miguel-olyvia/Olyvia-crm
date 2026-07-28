@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/contexts/CompanyContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, ImageIcon } from "lucide-react";
+import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, ImageIcon, Mail } from "lucide-react";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
 import { BrandingLivePreview } from "@/components/forms/BrandingLivePreview";
 import { LANGUAGES } from "@/constants/languages";
@@ -88,6 +89,19 @@ interface BrandingData {
   container_padding_x: string;
   container_padding_y: string;
   layout_config: LayoutConfig;
+  confirmation_email_enabled: boolean;
+  confirmation_email_template_id: string | null;
+  meeting_notify_commercial: boolean;
+  meeting_notify_emails: string;
+  meeting_notify_template_id: string | null;
+  reminder_enabled: boolean;
+  reminder_hours_before: number;
+  reminder_template_id: string | null;
+  booking_manage_url_template: string;
+  public_form_url_template: string;
+  email_smtp_id: string | null;
+  scheduling_invite_enabled: boolean;
+  scheduling_invite_delays_hours: string;
 }
 
 const defaultBranding: BrandingData = {
@@ -127,6 +141,19 @@ const defaultBranding: BrandingData = {
   container_padding_x: "",
   container_padding_y: "",
   layout_config: { ...DEFAULT_LAYOUT_CONFIG },
+  confirmation_email_enabled: false,
+  confirmation_email_template_id: null,
+  meeting_notify_commercial: false,
+  meeting_notify_emails: "",
+  meeting_notify_template_id: null,
+  reminder_enabled: false,
+  reminder_hours_before: 2,
+  reminder_template_id: null,
+  booking_manage_url_template: "",
+  public_form_url_template: "",
+  email_smtp_id: null,
+  scheduling_invite_enabled: true,
+  scheduling_invite_delays_hours: "24",
 };
 
 const fontOptions = [
@@ -211,7 +238,19 @@ function ColorInput({ label, description, value, onChange }: { label: string; de
   );
 }
 
+interface EmailTemplateOption {
+  id: string;
+  name: string;
+}
+
+interface SmtpOption {
+  id: string;
+  name: string;
+  is_default: boolean;
+}
+
 export function FormBrandingConfig({ open, onOpenChange, formId, formName }: FormBrandingConfigProps) {
+  const { activeCompany } = useCompany();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [branding, setBranding] = useState<BrandingData>(defaultBranding);
@@ -222,19 +261,41 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
     content: {},
   });
   const [activeLocale, setActiveLocale] = useState<string>(DEFAULT_FORM_LOCALE);
+  const [emailTemplateOptions, setEmailTemplateOptions] = useState<EmailTemplateOption[]>([]);
+  const [smtpOptions, setSmtpOptions] = useState<SmtpOption[]>([]);
 
   useEffect(() => {
     if (open && formId) {
       loadBranding();
       loadI18nConfig();
+      loadEmailOptions();
     }
-  }, [open, formId]);
+  }, [open, formId, activeCompany?.id]);
 
   const loadI18nConfig = async () => {
     const { data } = await supabase.from("forms").select("settings").eq("id", formId).maybeSingle();
     const cfg = readI18nConfig(data?.settings);
     setI18nConfig(cfg);
     setActiveLocale(cfg.default_locale || DEFAULT_FORM_LOCALE);
+  };
+
+  const loadEmailOptions = async () => {
+    if (!activeCompany?.id) return;
+    const [{ data: templates }, { data: smtps }] = await Promise.all([
+      supabase
+        .from("email_templates")
+        .select("id, name")
+        .eq("organization_id", activeCompany.id)
+        .eq("is_active", true)
+        .order("name", { ascending: true }),
+      (supabase as any)
+        .from("organization_smtp_settings")
+        .select("id, name, is_default")
+        .eq("organization_id", activeCompany.id)
+        .order("is_default", { ascending: false }),
+    ]);
+    setEmailTemplateOptions(templates || []);
+    setSmtpOptions(smtps || []);
   };
 
   const availableLocales = useMemo(() => {
@@ -318,6 +379,21 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           container_padding_x: (data as any).container_padding_x ?? "",
           container_padding_y: (data as any).container_padding_y ?? "",
           layout_config: normalizeLayoutConfig((data as any).layout_config),
+          confirmation_email_enabled: (data as any).confirmation_email_enabled ?? false,
+          confirmation_email_template_id: (data as any).confirmation_email_template_id ?? null,
+          meeting_notify_commercial: (data as any).meeting_notify_commercial ?? false,
+          meeting_notify_emails: (data as any).meeting_notify_emails ?? "",
+          meeting_notify_template_id: (data as any).meeting_notify_template_id ?? null,
+          reminder_enabled: (data as any).reminder_enabled ?? false,
+          reminder_hours_before: (data as any).reminder_hours_before ?? 2,
+          reminder_template_id: (data as any).reminder_template_id ?? null,
+          booking_manage_url_template: (data as any).booking_manage_url_template ?? "",
+          public_form_url_template: (data as any).public_form_url_template ?? "",
+          email_smtp_id: (data as any).email_smtp_id ?? null,
+          scheduling_invite_enabled: (data as any).scheduling_invite_enabled ?? true,
+          scheduling_invite_delays_hours: Array.isArray((data as any).scheduling_invite_delays_hours)
+            ? (data as any).scheduling_invite_delays_hours.join(", ")
+            : "24",
         });
       } else {
         setExistingId(null);
@@ -339,9 +415,22 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
       return;
     }
 
+    const parsedDelays = branding.scheduling_invite_delays_hours
+      .split(",")
+      .map((v) => parseInt(v.trim(), 10))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (branding.scheduling_invite_enabled && parsedDelays.length === 0) {
+      toast.error("Indique pelo menos um número de horas válido para o lembrete de agendamento por concluir");
+      return;
+    }
+
     setSaving(true);
     try {
-      const updatePayload: any = { ...branding };
+      const { scheduling_invite_delays_hours, ...rest } = branding;
+      const updatePayload: any = {
+        ...rest,
+        scheduling_invite_delays_hours: parsedDelays.length > 0 ? parsedDelays : [24],
+      };
 
       if (existingId) {
         const { error } = await supabase
@@ -433,7 +522,7 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           <div className="grid grid-cols-1 lg:grid-cols-[480px_1fr] flex-1 min-h-0 overflow-hidden">
             <div className="border-r overflow-hidden flex flex-col min-h-0">
               <Tabs defaultValue="colors" className="flex-1 flex flex-col min-h-0 px-6 pb-2">
-            <TabsList className="grid w-full grid-cols-5">
+            <TabsList className="grid w-full grid-cols-6">
               <TabsTrigger value="colors" className="text-xs">
                 <Palette className="h-4 w-4 mr-1" />
                 Cores
@@ -453,6 +542,10 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
               <TabsTrigger value="images" className="text-xs">
                 <Image className="h-4 w-4 mr-1" />
                 Imagens
+              </TabsTrigger>
+              <TabsTrigger value="emails" className="text-xs">
+                <Mail className="h-4 w-4 mr-1" />
+                Emails
               </TabsTrigger>
             </TabsList>
 
@@ -867,6 +960,204 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                   value={branding.background_image_url}
                   onChange={(value) => setBranding({ ...branding, background_image_url: value })}
                 />
+              </TabsContent>
+
+              <TabsContent value="emails" className="space-y-6 mt-0">
+                <div className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Email de confirmação</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Enviado ao cliente assim que submete o formulário (agendamento incluído).
+                      </p>
+                    </div>
+                    <Switch
+                      checked={branding.confirmation_email_enabled}
+                      onCheckedChange={(v) => setBranding({ ...branding, confirmation_email_enabled: v })}
+                    />
+                  </div>
+                  {branding.confirmation_email_enabled && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Modelo de email</Label>
+                      <Select
+                        value={branding.confirmation_email_template_id || "__default__"}
+                        onValueChange={(v) =>
+                          setBranding({
+                            ...branding,
+                            confirmation_email_template_id: v === "__default__" ? null : v,
+                          })
+                        }
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
+                          {emailTemplateOptions.map((tpl) => (
+                            <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Aviso de reunião ao comercial</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Notifica quando uma visita/reunião é agendada.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={branding.meeting_notify_commercial}
+                      onCheckedChange={(v) => setBranding({ ...branding, meeting_notify_commercial: v })}
+                    />
+                  </div>
+                  {branding.meeting_notify_commercial && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Emails adicionais a notificar</Label>
+                        <Textarea
+                          value={branding.meeting_notify_emails}
+                          onChange={(e) => setBranding({ ...branding, meeting_notify_emails: e.target.value })}
+                          placeholder="ex: comercial@empresa.pt, outro@empresa.pt"
+                          rows={2}
+                        />
+                        <p className="text-[10px] text-muted-foreground">Separe vários emails por vírgula, ponto e vírgula ou linha.</p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Modelo de email</Label>
+                        <Select
+                          value={branding.meeting_notify_template_id || "__default__"}
+                          onValueChange={(v) =>
+                            setBranding({
+                              ...branding,
+                              meeting_notify_template_id: v === "__default__" ? null : v,
+                            })
+                          }
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
+                            {emailTemplateOptions.map((tpl) => (
+                              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Lembrete antes da visita</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Enviado ao cliente e ao técnico X horas antes da visita agendada.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={branding.reminder_enabled}
+                      onCheckedChange={(v) => setBranding({ ...branding, reminder_enabled: v })}
+                    />
+                  </div>
+                  {branding.reminder_enabled && (
+                    <>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Horas de antecedência</Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={branding.reminder_hours_before}
+                          onChange={(e) =>
+                            setBranding({ ...branding, reminder_hours_before: parseInt(e.target.value, 10) || 1 })
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Modelo de email</Label>
+                        <Select
+                          value={branding.reminder_template_id || "__default__"}
+                          onValueChange={(v) =>
+                            setBranding({
+                              ...branding,
+                              reminder_template_id: v === "__default__" ? null : v,
+                            })
+                          }
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
+                            {emailTemplateOptions.map((tpl) => (
+                              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Lembrete de agendamento por concluir</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Envia um email ao lead que preencheu o formulário mas não escolheu um horário.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={branding.scheduling_invite_enabled}
+                      onCheckedChange={(v) => setBranding({ ...branding, scheduling_invite_enabled: v })}
+                    />
+                  </div>
+                  {branding.scheduling_invite_enabled && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Horas após o preenchimento (várias, separadas por vírgula)</Label>
+                      <Input
+                        value={branding.scheduling_invite_delays_hours}
+                        onChange={(e) => setBranding({ ...branding, scheduling_invite_delays_hours: e.target.value })}
+                        placeholder="ex: 24, 72, 168"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-lg border p-3">
+                  <Label>Envio</Label>
+                  <div className="space-y-1">
+                    <Label className="text-xs">SMTP a usar</Label>
+                    <Select
+                      value={branding.email_smtp_id || "__default__"}
+                      onValueChange={(v) => setBranding({ ...branding, email_smtp_id: v === "__default__" ? null : v })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">SMTP padrão da organização</SelectItem>
+                        {smtpOptions.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.name}{s.is_default ? " (padrão)" : ""}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">URL de gestão do agendamento</Label>
+                    <Input
+                      value={branding.booking_manage_url_template}
+                      onChange={(e) => setBranding({ ...branding, booking_manage_url_template: e.target.value })}
+                      placeholder="Deixe vazio para usar /booking/manage. Aceita {lang}, ex: https://site.pt/{lang}/agendamento"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">URL pública deste formulário</Label>
+                    <Input
+                      value={branding.public_form_url_template}
+                      onChange={(e) => setBranding({ ...branding, public_form_url_template: e.target.value })}
+                      placeholder="Deixe vazio para usar o padrão. Aceita {lang} e {form_id}"
+                    />
+                  </div>
+                </div>
               </TabsContent>
             </ScrollArea>
               </Tabs>
