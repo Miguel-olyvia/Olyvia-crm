@@ -587,6 +587,9 @@ export default function PublicLeadForm() {
   // links/snippets published before the alias rename.
   const querySourceId = searchParams.get("source_id") || searchParams.get("source");
   const queryLang = (searchParams.get("lang") || "").trim().toLowerCase() || null;
+  // "Finish scheduling" recovery link: a lead who filled the form but never
+  // picked a slot gets emailed a link with ?resume=<scheduling_invites.token>.
+  const queryResumeToken = searchParams.get("resume");
   // Extract whitelisted UTMs / click ids from the URL. Memoized; null when none present.
   const tracking = useMemo(() => extractTrackingFromSearchParams(searchParams), [searchParams]);
   // Marca de origem do embed (ex: "utm" do snippet recomendado). Usada server-side
@@ -636,6 +639,16 @@ export default function PublicLeadForm() {
   const [schedulingSlot, setSchedulingSlot] = useState<{ start: string; end: string } | null>(null);
   const [currentLocale, setCurrentLocale] = useState<string | null>(null);
   const [previewBranding, setPreviewBranding] = useState<any | null>(null);
+  // "Finish scheduling" resume state — resolved once from get-scheduling-invite,
+  // then used by loadFormData() to pin the right form, prefill answers and jump
+  // straight to the scheduling step instead of starting the form over.
+  const [resumeInvite, setResumeInvite] = useState<{
+    form_id: string;
+    step_number: number;
+    lead_id: string;
+    field_values: Record<string, any>;
+  } | null>(null);
+  const [resumeAlreadyBooked, setResumeAlreadyBooked] = useState(false);
   
   const formContainerRef = useRef<HTMLDivElement>(null);
   
@@ -782,10 +795,49 @@ export default function PublicLeadForm() {
   }, [isPreview, isInIframe, loading, formConfig]);
 
   useEffect(() => {
+    // When a resume token is present, wait for the invite lookup below to
+    // resolve (it may point at a different form_id) before loading anything.
+    if (queryResumeToken) return;
     if (formId || campaignId) {
       loadFormData();
     }
-  }, [formId, campaignId, queryLang]);
+  }, [formId, campaignId, queryLang, queryResumeToken]);
+
+  // Resolve a "finish scheduling" resume link once on mount. On success, the
+  // load effect below re-runs loadFormData() using the invite's own form_id.
+  useEffect(() => {
+    if (!queryResumeToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/get-scheduling-invite`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: queryResumeToken }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (data?.error) {
+          if (data.code === "BOOKED") {
+            setResumeAlreadyBooked(true);
+          }
+          // INVALID/EXPIRED/USED: fall back to a normal fresh form, if we know which one.
+          if (formId || campaignId) loadFormData();
+          return;
+        }
+        setResumeInvite(data);
+      } catch {
+        if (!cancelled && (formId || campaignId)) loadFormData();
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryResumeToken]);
+
+  useEffect(() => {
+    if (resumeInvite) loadFormData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeInvite]);
 
   // Handle success redirect
   useEffect(() => {
@@ -827,10 +879,13 @@ export default function PublicLeadForm() {
     if (!isLocaleSwitch) setLoading(true);
     setError(null);
     try {
-      // Priority: campaign_id query param > form_id path param > campaign_id path param
+      // Priority: resume-invite's own form_id (authoritative — the lead was
+      // filling THIS form) > campaign_id query param > form_id path param > campaign_id path param
       // If campaignId is from query param, use it (user explicitly wants this campaign)
       let queryParam: string;
-      if (queryCampaignId) {
+      if (resumeInvite?.form_id) {
+        queryParam = `form_id=${resumeInvite.form_id}`;
+      } else if (queryCampaignId) {
         queryParam = `campaign_id=${queryCampaignId}`;
       } else if (formId) {
         queryParam = `form_id=${formId}`;
@@ -887,7 +942,18 @@ export default function PublicLeadForm() {
             }
           });
         });
+        // Resumed answers win over field defaults — this is the visitor's own
+        // prior submission, not a fresh form load.
+        if (resumeInvite?.field_values) {
+          Object.assign(initialData, resumeInvite.field_values);
+        }
         setFormValues(initialData);
+
+        if (resumeInvite?.lead_id) {
+          setLeadId(resumeInvite.lead_id);
+          setTargetType("lead");
+          safeSetCurrentStep(resumeInvite.step_number, data.steps.length);
+        }
 
         // Track: Form loaded event (sent to all platforms)
         pushTrackingEvent('form_loaded', {
@@ -1926,6 +1992,32 @@ export default function PublicLeadForm() {
             {branding.footer_text}
           </div>
         )}
+      </div>
+    );
+  }
+
+  // Resumed a "finish scheduling" link, but the visit is already booked (e.g.
+  // the visitor booked through a different link, or double-clicked the email).
+  if (resumeAlreadyBooked) {
+    return (
+      <div className={`${isInIframe ? 'min-h-fit' : 'min-h-screen'} flex items-center justify-center p-4`} style={containerStyle}>
+        <Card className={`success-card max-w-md w-full ${getCardClassName()}`} style={cardStyle}>
+          <CardHeader className="text-center">
+            {branding?.logo_url && (
+              <img src={branding.logo_url} alt="Logo" className="h-12 mx-auto mb-4 object-contain" />
+            )}
+            <div
+              className="success-icon mx-auto mb-4 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: `${primaryColor}20` }}
+            >
+              <Check className="h-8 w-8" style={{ color: primaryColor }} />
+            </div>
+            <CardTitle style={headingStyle}>A sua visita já está agendada</CardTitle>
+            <CardDescription style={{ color: branding?.text_color }}>
+              Já tem uma visita marcada para este pedido — não é necessário fazer mais nada.
+            </CardDescription>
+          </CardHeader>
+        </Card>
       </div>
     );
   }
