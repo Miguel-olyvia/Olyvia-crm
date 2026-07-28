@@ -130,6 +130,45 @@ interface LeadsDashboardProps {
   query?: LeadsDashboardQuery | null;
   /** Visible-team user ids for the current viewer, required to replicate TEAM-scope narrowing on the direct negotiation-leads query (the scoped RPC only returns aggregates, not rows). */
   teamMemberIds?: string[];
+  /**
+   * Same statusFilter/statusCounts pair AnewLeads.tsx already uses to drive
+   * the List tab's "Quick Status Cards" (statusCounts comes from the
+   * get_lead_status_counts RPC, unaffected by statusFilter itself). Reused
+   * here instead of introducing a second, parallel filter mechanism:
+   * statusFilter already flows into `query.filters.status` ->
+   * buildDashboardScopedRpcParams -> get_lead_dashboard_stats_scoped's
+   * p_status param, so selecting a pill here already re-filters every KPI,
+   * chart and the qualification section below via the existing stats fetch.
+   */
+  statusFilter?: string;
+  onStatusFilterChange?: (status: string) => void;
+  statusCounts?: Record<string, number>;
+}
+
+const ALL_STATUS_FILTER = "all";
+
+interface StatusPill {
+  key: string;
+  label: string;
+  color: string;
+  count: number;
+}
+
+/**
+ * Builds the pill list from the org's real configured workflow stages (the
+ * same dynamic-stage source already used for the List tab's Quick Status
+ * Cards in AnewLeads.tsx), not a hardcoded status list — so a customized
+ * org's funnel is reflected correctly here too.
+ */
+function buildStatusPills(workflowStages: WorkflowStage[], statusCounts: Record<string, number>): StatusPill[] {
+  return [...workflowStages]
+    .sort((left, right) => left.stage_order - right.stage_order)
+    .map((stage) => ({
+      key: stage.name,
+      label: stage.label,
+      color: stage.color,
+      count: statusCounts[stage.name] ?? 0,
+    }));
 }
 
 function formatMetricValue(value: number | string | null, suffix = ""): string {
@@ -197,7 +236,7 @@ function KPICard({
 }
 
 export function LeadsDashboard(props: LeadsDashboardProps) {
-  const { query, workflowStages, teamMemberIds } = props;
+  const { query, workflowStages, teamMemberIds, statusFilter, onStatusFilterChange, statusCounts } = props;
   const { getIdentity, resolveEntities } = useEntityIdentity();
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
@@ -621,6 +660,16 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     () => qualificationBreakdown.reduce((sum, entry) => sum + entry.value, 0),
     [qualificationBreakdown],
   );
+  const qualificationBreakdownByKey = useMemo(
+    () => new Map(qualificationBreakdown.map((entry) => [entry.key, entry])),
+    [qualificationBreakdown],
+  );
+  const qualificationPercent = (key: string): number | null => {
+    if (qualificationBreakdownTotal === 0) return null;
+    const entry = qualificationBreakdownByKey.get(key);
+    if (!entry) return null;
+    return Math.round((entry.value / qualificationBreakdownTotal) * 100);
+  };
   const leadsByCampaign = useMemo(() => deriveCampaignDistribution(stats), [stats]);
   const sourceDistribution = useMemo(() => deriveSourceDistribution(stats), [stats]);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
@@ -630,6 +679,20 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     () => Math.max(1, ...stageFunnel.map((stage) => stage.count)),
     [stageFunnel],
   );
+
+  const activeStatusFilter = statusFilter ?? ALL_STATUS_FILTER;
+  const statusPills = useMemo(
+    () => buildStatusPills(workflowStages, statusCounts ?? {}),
+    [workflowStages, statusCounts],
+  );
+  const totalStatusCount = useMemo(
+    () => Object.values(statusCounts ?? {}).reduce((sum, count) => sum + count, 0),
+    [statusCounts],
+  );
+  const handleStatusPillClick = (status: string) => {
+    if (!onStatusFilterChange) return;
+    onStatusFilterChange(status === activeStatusFilter ? ALL_STATUS_FILTER : status);
+  };
 
   return (
     <div className="space-y-6">
@@ -744,6 +807,54 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         </Button>
       </div>
 
+      {dashboardView === "leads" && onStatusFilterChange && statusPills.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onStatusFilterChange(ALL_STATUS_FILTER)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeStatusFilter === ALL_STATUS_FILTER
+                ? "border-transparent bg-primary text-primary-foreground"
+                : "border-input bg-background text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Todos
+            <span
+              className={`rounded-full px-1.5 text-[11px] ${
+                activeStatusFilter === ALL_STATUS_FILTER ? "bg-primary-foreground/20" : "bg-muted"
+              }`}
+            >
+              {totalStatusCount}
+            </span>
+          </button>
+          {statusPills.map((pill) => {
+            const isActive = activeStatusFilter === pill.key;
+            return (
+              <button
+                key={pill.key}
+                type="button"
+                onClick={() => handleStatusPillClick(pill.key)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  isActive
+                    ? "border-transparent text-white"
+                    : "border-input bg-background text-muted-foreground hover:bg-muted"
+                }`}
+                style={isActive ? { backgroundColor: pill.color } : undefined}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: isActive ? "currentColor" : pill.color }}
+                />
+                {pill.label}
+                <span className={`rounded-full px-1.5 text-[11px] ${isActive ? "bg-white/20" : "bg-muted"}`}>
+                  {pill.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {renderState === "missing_query" &&
         renderPlaceholderCard(
           "Configuração do dashboard em falta",
@@ -831,6 +942,93 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               icon={Zap}
             />
           </div>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Qualificação de Leads</CardTitle>
+              <CardDescription>
+                Distribuição SQL / MQL do período, tempo médio até qualificar e taxa de conversão
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `${QUALIFICATION_COLORS.sql}1a` }}
+                    >
+                      <Target className="h-4 w-4" style={{ color: QUALIFICATION_COLORS.sql }} />
+                    </div>
+                    <p className="text-sm font-medium">SQL (Sales Qualified)</p>
+                  </div>
+                  <p className="text-2xl font-bold" style={{ color: QUALIFICATION_COLORS.sql }}>
+                    {formatMetricValue(qualificationBreakdownByKey.get("sql")?.value ?? 0)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatMetricValue(qualificationPercent("sql"), "%")} do total qualificado ·{" "}
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.sql)} em média
+                  </p>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `${QUALIFICATION_COLORS.mql}1a` }}
+                    >
+                      <UserCheck className="h-4 w-4" style={{ color: QUALIFICATION_COLORS.mql }} />
+                    </div>
+                    <p className="text-sm font-medium">MQL (Marketing Qualified)</p>
+                  </div>
+                  <p className="text-2xl font-bold" style={{ color: QUALIFICATION_COLORS.mql }}>
+                    {formatMetricValue(qualificationBreakdownByKey.get("mql")?.value ?? 0)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatMetricValue(qualificationPercent("mql"), "%")} do total qualificado ·{" "}
+                    {formatDaysMetric(stats?.avg_days_to_qualify?.mql)} em média
+                  </p>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: `${QUALIFICATION_COLORS.unclassified}1a` }}
+                    >
+                      <Users className="h-4 w-4" style={{ color: QUALIFICATION_COLORS.unclassified }} />
+                    </div>
+                    <p className="text-sm font-medium">Não classificado</p>
+                  </div>
+                  <p className="text-2xl font-bold" style={{ color: QUALIFICATION_COLORS.unclassified }}>
+                    {formatMetricValue(qualificationBreakdownByKey.get("unclassified")?.value ?? 0)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatMetricValue(qualificationPercent("unclassified"), "%")} do total qualificado
+                  </p>
+                </div>
+
+                <div className="rounded-lg border p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                      <Zap className="h-4 w-4 text-primary" />
+                    </div>
+                    <p className="text-sm font-medium">Conversão MQL → SQL</p>
+                  </div>
+                  <p className="text-2xl font-bold">
+                    {qualificationHistoryLoading
+                      ? "--"
+                      : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {mqlToSqlConversion.totalMql > 0
+                      ? `${mqlToSqlConversion.convertedToSql} de ${mqlToSqlConversion.totalMql} MQL viraram SQL`
+                      : "Sem leads MQL no período"}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader className="pb-2">
@@ -995,34 +1193,6 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                     </div>
                   ))}
                 </div>
-
-                {qualificationBreakdown.length > 0 && (
-                  <div className="mt-4 border-t pt-3">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">
-                      Classificação SQL / MQL (independente do estado)
-                    </p>
-                    <div className="space-y-1.5">
-                      {qualificationBreakdown.map((item) => {
-                        const widthPercent =
-                          qualificationBreakdownTotal > 0
-                            ? Math.max(2, Math.round((item.value / qualificationBreakdownTotal) * 100))
-                            : 0;
-                        return (
-                          <div key={item.key} className="flex items-center gap-2 text-xs">
-                            <span className="w-24 shrink-0 text-muted-foreground">{item.label}</span>
-                            <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${widthPercent}%`, backgroundColor: item.color }}
-                              />
-                            </div>
-                            <span className="w-8 shrink-0 text-right font-medium">{item.value}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </CardContent>
             </Card>
           </div>

@@ -4614,6 +4614,9 @@ export default function AnewLeads() {
               companyId={activeCompanyId}
               query={dashboardQuery}
               teamMemberIds={teamMemberIds}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              statusCounts={statusCounts}
             />
           </TabsContent>
 

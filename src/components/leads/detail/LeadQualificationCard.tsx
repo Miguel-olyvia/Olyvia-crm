@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Target, TrendingUp, CheckCircle2 } from "lucide-react";
+import { Sparkles, Target, TrendingUp, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -114,10 +114,26 @@ export function LeadQualificationCard({
   return (
     <Card>
       <CardContent className="py-4 px-4 space-y-3">
-        <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
-          <Target className="h-4 w-4 text-muted-foreground" />
-          Qualificação comercial
-        </h4>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <h4 className="text-sm font-medium text-foreground flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-purple-500" />
+            Qualificação comercial
+          </h4>
+          <div className="flex items-center gap-1.5">
+            {(["mql", "sql"] as const).map((type) => (
+              <Button
+                key={type}
+                size="sm"
+                variant={suggested === type ? "default" : "outline"}
+                className="h-7 px-2 text-[11px]"
+                disabled={saving !== null}
+                onClick={() => handleClassify(type)}
+              >
+                {saving === type ? "A classificar..." : `Marcar como ${type.toUpperCase()}`}
+              </Button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {(["mql", "sql"] as const).map((type) => {
             const isSuggested = suggested === type;
@@ -141,15 +157,6 @@ export function LeadQualificationCard({
                 <p className="text-[11px] text-muted-foreground leading-snug">
                   {QUALIFICATION_COPY[type].description}
                 </p>
-                <Button
-                  size="sm"
-                  variant={isSuggested ? "default" : "outline"}
-                  className="w-full text-xs"
-                  disabled={saving !== null}
-                  onClick={() => handleClassify(type)}
-                >
-                  {saving === type ? "A classificar..." : `Marcar como ${type.toUpperCase()}`}
-                </Button>
               </div>
             );
           })}
