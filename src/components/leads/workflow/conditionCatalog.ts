@@ -258,6 +258,29 @@ export function setNumericValueInBucket(
   };
 }
 
+/**
+ * The original 12 catalog keys (pre migration 20261111200000), in the exact
+ * order the Lovable v2 "Qualificação" reference UI displays them. Used by
+ * QualificationRulesTab to render only this subset - the org-level MQL/SQL
+ * suggestion rules intentionally mirror that reference 1:1, while the
+ * per-stage reached_when editor (LeadWorkflowConfig "Fluxo" tab) still
+ * exposes the full expanded catalog.
+ */
+export const QUALIFICATION_LEGACY_KEYS = [
+  "has_assignee",
+  "has_source",
+  "has_contact_logged",
+  "has_scheduled_visit",
+  "has_active_deal",
+  "has_active_quote",
+  "has_active_proposal",
+  "has_signed_contract",
+  "qualification_is_mql",
+  "qualification_is_sql",
+  "last_contact_is_negative",
+  "last_contact_is_positive",
+];
+
 export function isEmptyRule(rule: RuleGroup | null | undefined): boolean {
   return !rule || ((rule.all?.length ?? 0) === 0 && (rule.any?.length ?? 0) === 0);
 }

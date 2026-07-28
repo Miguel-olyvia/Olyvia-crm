@@ -75,7 +75,7 @@ export function QualificationRulesTab({ companyId }: QualificationRulesTabProps)
               Sinais que indicam interesse qualificado por Marketing.
             </p>
           </div>
-          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} organizationId={companyId} />
+          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} organizationId={companyId} compact />
         </CardContent>
       </Card>
 
@@ -89,7 +89,7 @@ export function QualificationRulesTab({ companyId }: QualificationRulesTabProps)
               Sinais que indicam que Vendas pode avançar com proposta.
             </p>
           </div>
-          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} organizationId={companyId} />
+          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} organizationId={companyId} compact />
         </CardContent>
       </Card>
 

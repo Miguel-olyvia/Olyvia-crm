@@ -6,6 +6,7 @@ import { useLeadContactResults } from "@/hooks/useLeadContactResults";
 import {
   buildContactResultCatalogRows,
   CONDITION_CATALOG,
+  QUALIFICATION_LEGACY_KEYS,
   isRowInBucket,
   conditionForRowInBucket,
   setNumericValueInBucket,
@@ -24,6 +25,14 @@ interface StageRulesEditorProps {
    * yet - the sub-list then falls back to global-only results.
    */
   organizationId?: string | null;
+  /**
+   * When true, restricts each column to the original 12 signals
+   * (QUALIFICATION_LEGACY_KEYS) and hides the dynamic "Último resultado de
+   * contacto" sub-list, matching the Lovable v2 "Qualificação" reference
+   * exactly. Used by QualificationRulesTab; the per-stage reached_when
+   * editor omits this to keep the full expanded catalog available.
+   */
+  compact?: boolean;
 }
 
 const COLUMNS: Array<{ bucket: "all" | "any"; title: string; tooltip: string }> = [
@@ -49,9 +58,12 @@ const COLUMNS: Array<{ bucket: "all" | "any"; title: string; tooltip: string }> 
  * neither. Rows with a numeric parameter (the "days since" conditions) show
  * a small number input once checked, tracked independently per column.
  */
-export function StageRulesEditor({ value, onChange, organizationId }: StageRulesEditorProps) {
+export function StageRulesEditor({ value, onChange, organizationId, compact }: StageRulesEditorProps) {
   const { contactResults } = useLeadContactResults(organizationId);
-  const contactResultRows = buildContactResultCatalogRows(contactResults);
+  const contactResultRows = compact ? [] : buildContactResultCatalogRows(contactResults);
+  const catalog = compact
+    ? CONDITION_CATALOG.filter(row => QUALIFICATION_LEGACY_KEYS.includes(row.key))
+    : CONDITION_CATALOG;
 
   const renderRow = (row: CatalogRow, bucket: "all" | "any") => {
     const checked = isRowInBucket(value, row, bucket);
@@ -117,7 +129,7 @@ export function StageRulesEditor({ value, onChange, organizationId }: StageRules
       </Tooltip>
 
       <div className="divide-y">
-        {CONDITION_CATALOG.map(row => renderRow(row, bucket))}
+        {catalog.map(row => renderRow(row, bucket))}
       </div>
 
       {contactResultRows.length > 0 && (
