@@ -12,6 +12,16 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import EmailTemplateEditorDialog, { type EmailTemplateData } from "@/components/email-templates/EmailTemplateEditorDialog";
 import {
   Plus, Mail, Target, Users, Building, FileText, FileCheck, BookOpen, Handshake,
@@ -71,6 +81,8 @@ export default function EmailTemplates() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplateData | null>(null);
+  const [templateToDelete, setTemplateToDelete] = useState<EmailTemplate | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const orgId = activeCompany?.id;
 
@@ -120,15 +132,23 @@ export default function EmailTemplates() {
     }
   };
 
-  const handleDelete = async (tpl: EmailTemplate) => {
+  const handleDelete = (tpl: EmailTemplate) => {
     if (tpl.is_system) return;
-    const { error } = await supabase.from("email_templates").delete().eq("id", tpl.id);
+    setTemplateToDelete(tpl);
+  };
+
+  const confirmDelete = async () => {
+    if (!templateToDelete) return;
+    setDeleting(true);
+    const { error } = await supabase.from("email_templates").delete().eq("id", templateToDelete.id);
+    setDeleting(false);
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Eliminado", description: "Template eliminado" });
       fetchTemplates();
     }
+    setTemplateToDelete(null);
   };
 
   const handleToggleActive = async (tpl: EmailTemplate) => {
@@ -301,6 +321,35 @@ export default function EmailTemplates() {
           template={editingTemplate}
           onSaved={fetchTemplates}
         />
+
+        <AlertDialog open={!!templateToDelete} onOpenChange={open => { if (!open && !deleting) setTemplateToDelete(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                  <Trash2 className="h-4 w-4" />
+                </span>
+                Eliminar template
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta ação é permanente e não pode ser desfeita.
+                {templateToDelete && (
+                  <> Vai eliminar o template <strong>{templateToDelete.name}</strong>.</>
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={e => { e.preventDefault(); confirmDelete(); }}
+                disabled={deleting}
+                className="gap-1.5 bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleting ? "A eliminar..." : "Eliminar"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </>
   );
