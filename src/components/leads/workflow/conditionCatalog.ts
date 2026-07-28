@@ -184,45 +184,77 @@ export function buildContactResultCatalogRows(results: ContactResultCatalogSourc
   }));
 }
 
-export function bucketForRow(rule: RuleGroup | null, row: CatalogRow): RuleBucket {
-  if ((rule?.all ?? []).some(row.matches)) return "all";
-  if ((rule?.any ?? []).some(row.matches)) return "any";
-  return "none";
+/**
+ * Non-exclusive bucket helpers - unlike the old single-toggle model, a given
+ * signal can independently be part of the "all" (AND) set, the "any" (OR)
+ * set, both, or neither (two-column checkbox layout, see StageRulesEditor).
+ */
+export function isRowInBucket(rule: RuleGroup | null, row: CatalogRow, bucket: "all" | "any"): boolean {
+  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  return list.some(row.matches);
 }
 
-export function conditionForRow(rule: RuleGroup | null, row: CatalogRow): RuleCondition | undefined {
-  return (rule?.all ?? []).find(row.matches) ?? (rule?.any ?? []).find(row.matches);
-}
-
-export function setBucketForRow(rule: RuleGroup | null, row: CatalogRow, bucket: RuleBucket): RuleGroup | null {
-  const existing = conditionForRow(rule, row);
-  const all = (rule?.all ?? []).filter(c => !row.matches(c));
-  const any = (rule?.any ?? []).filter(c => !row.matches(c));
-
-  if (bucket === "all") all.push(existing ?? row.build());
-  else if (bucket === "any") any.push(existing ?? row.build());
-
-  if (all.length === 0 && any.length === 0) return null;
-  return { all, any };
+export function conditionForRowInBucket(
+  rule: RuleGroup | null,
+  row: CatalogRow,
+  bucket: "all" | "any"
+): RuleCondition | undefined {
+  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  return list.find(row.matches);
 }
 
 /**
- * Updates the numeric parameter of a row's condition in-place (whichever
- * bucket it currently lives in), without touching its bucket assignment.
- * No-op if the row has no numericParam or isn't currently selected.
+ * Checks/unchecks a row's condition within a single bucket only - the other
+ * bucket's contents are left untouched, so the same signal can be checked in
+ * both the AND and OR columns at once.
  */
-export function setNumericValueForRow(rule: RuleGroup | null, row: CatalogRow, value: number): RuleGroup | null {
+export function setRowInBucket(
+  rule: RuleGroup | null,
+  row: CatalogRow,
+  bucket: "all" | "any",
+  checked: boolean
+): RuleGroup | null {
+  const all = rule?.all ?? [];
+  const any = rule?.any ?? [];
+  const list = bucket === "all" ? all : any;
+  const existing = list.find(row.matches);
+
+  const nextList = checked
+    ? (existing ? list : [...list, row.build()])
+    : list.filter(c => !row.matches(c));
+
+  const nextAll = bucket === "all" ? nextList : all;
+  const nextAny = bucket === "any" ? nextList : any;
+
+  if (nextAll.length === 0 && nextAny.length === 0) return null;
+  return { all: nextAll, any: nextAny };
+}
+
+/**
+ * Updates the numeric parameter of a row's condition within a single bucket,
+ * leaving the other bucket's copy (if any) untouched - the AND and OR
+ * columns can hold independent numeric values for the same condition type.
+ * No-op if the row has no numericParam or isn't currently checked in that bucket.
+ */
+export function setNumericValueInBucket(
+  rule: RuleGroup | null,
+  row: CatalogRow,
+  bucket: "all" | "any",
+  value: number
+): RuleGroup | null {
   if (!row.numericParam) return rule;
 
-  const bucket = bucketForRow(rule, row);
-  if (bucket === "none") return rule;
+  const all = rule?.all ?? [];
+  const any = rule?.any ?? [];
+  const list = bucket === "all" ? all : any;
+  if (!list.some(row.matches)) return rule;
 
   const updated = row.numericParam.withValue(value);
-  const replaceInList = (list: RuleCondition[]) => list.map(c => (row.matches(c) ? updated : c));
+  const nextList = list.map(c => (row.matches(c) ? updated : c));
 
   return {
-    all: replaceInList(rule?.all ?? []),
-    any: replaceInList(rule?.any ?? []),
+    all: bucket === "all" ? nextList : all,
+    any: bucket === "any" ? nextList : any,
   };
 }
 
