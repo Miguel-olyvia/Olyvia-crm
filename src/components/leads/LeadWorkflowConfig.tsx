@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Plus, Pencil, Trash2, GripVertical, Copy, AlertTriangle,
-  ArrowRight, UserCheck, Users, Zap, HelpCircle,
+  ArrowRight, ArrowUp, ArrowDown, UserCheck, Users, Zap, HelpCircle,
   Target, GitBranch, Settings, TrendingUp, CheckCircle2,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -132,16 +132,24 @@ function SortableStageRow({
   stage,
   isTemplate,
   leadCount,
+  isFirst,
+  isLast,
   onEdit,
   onDelete,
   onDuplicate,
+  onMoveUp,
+  onMoveDown,
 }: {
   stage: WorkflowStage;
   isTemplate: boolean;
   leadCount: number;
+  isFirst: boolean;
+  isLast: boolean;
   onEdit: (s: WorkflowStage) => void;
   onDelete: (s: WorkflowStage) => void;
   onDuplicate: (s: WorkflowStage) => void;
+  onMoveUp: (s: WorkflowStage) => void;
+  onMoveDown: (s: WorkflowStage) => void;
 }) {
   const {
     attributes,
@@ -239,6 +247,40 @@ function SortableStageRow({
       <TableCell className="text-right">
         {!isTemplate && (
           <div className="flex justify-end gap-0.5">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => onMoveUp(stage)}
+                    disabled={isFirst}
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Mover para cima</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => onMoveDown(stage)}
+                    disabled={isLast}
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Mover para baixo</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -674,15 +716,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     applyPresetToStages(preset);
   };
 
-  // ─── Drag & Drop ──────────────────────────────────────────
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = stages.findIndex(s => s.id === active.id);
-    const newIndex = stages.findIndex(s => s.id === over.id);
-    const reordered = arrayMove(stages, oldIndex, newIndex);
-
+  // ─── Reordering (drag-and-drop + up/down buttons) ──────────
+  const persistReorder = async (reordered: WorkflowStage[]) => {
     setStages(reordered);
 
     const payload: StagePayload[] = reordered.map(toStagePayload);
@@ -693,6 +728,25 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       return;
     }
     onStagesUpdated?.();
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = stages.findIndex(s => s.id === active.id);
+    const newIndex = stages.findIndex(s => s.id === over.id);
+    await persistReorder(arrayMove(stages, oldIndex, newIndex));
+  };
+
+  const handleMoveStage = async (stageId: string, direction: "up" | "down") => {
+    const index = stages.findIndex(s => s.id === stageId);
+    if (index === -1) return;
+
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= stages.length) return;
+
+    await persistReorder(arrayMove(stages, index, targetIndex));
   };
 
   const copyTemplateToCompany = async () => {
@@ -775,15 +829,15 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               </TabsTrigger>
               <TabsTrigger value="actions" className="gap-1.5">
                 <Zap className="w-3.5 h-3.5" />
-                Acções
-              </TabsTrigger>
-              <TabsTrigger value="automations" className="gap-1.5">
-                <Zap className="w-3.5 h-3.5" />
-                Automações
+                Ações
               </TabsTrigger>
               <TabsTrigger value="qualification" className="gap-1.5">
                 <Target className="w-3.5 h-3.5" />
                 Qualificação
+              </TabsTrigger>
+              <TabsTrigger value="automations" className="gap-1.5">
+                <Zap className="w-3.5 h-3.5" />
+                Automações
               </TabsTrigger>
             </TabsList>
 
@@ -829,18 +883,22 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     </TableHeader>
                     <SortableContext items={displayStages.map(s => s.id)} strategy={verticalListSortingStrategy}>
                       <TableBody>
-                        {displayStages.map(stage => (
+                        {displayStages.map((stage, index) => (
                           <SortableStageRow
                             key={stage.id}
                             stage={stage}
                             isTemplate={isUsingTemplate}
                             leadCount={leadCountByStage[stage.id] || 0}
+                            isFirst={index === 0}
+                            isLast={index === displayStages.length - 1}
                             onEdit={setEditingStage}
                             onDelete={(s) => {
                               setDeletingStage(s);
                               setMigrationTargetId("");
                             }}
                             onDuplicate={handleDuplicateStage}
+                            onMoveUp={(s) => handleMoveStage(s.id, "up")}
+                            onMoveDown={(s) => handleMoveStage(s.id, "down")}
                           />
                         ))}
                       </TableBody>
@@ -887,7 +945,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       onClick={() => setShowRecomputeConfirm(true)}
                       disabled={recomputing}
                     >
-                      {recomputing ? "A recalcular..." : "Guardar & Recalcular"}
+                      {recomputing ? "A recalcular..." : "Recalcular buckets das leads"}
                     </Button>
                   </div>
 
@@ -1200,6 +1258,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <StageRulesEditor
                       value={editingStage.reached_when ?? null}
                       onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
+                      organizationId={companyId}
                     />
                   </div>
                 </div>
@@ -1577,7 +1636,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     </p>
                   </div>
                   <div className="bg-muted/30 rounded-md p-3 border">
-                    <p className="font-medium mb-1">⚡ Acções</p>
+                    <p className="font-medium mb-1">⚡ Ações</p>
                     <p className="text-muted-foreground">
                       Configure o que acontece automaticamente quando uma lead entra num estágio.
                     </p>
@@ -1611,7 +1670,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                    <p><strong>Automatize tarefas repetitivas:</strong> Use as Acções para criar follow-ups automáticos.</p>
+                    <p><strong>Automatize tarefas repetitivas:</strong> Use as Ações para criar follow-ups automáticos.</p>
                   </div>
                 </div>
               </div>

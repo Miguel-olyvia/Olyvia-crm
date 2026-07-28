@@ -67,6 +67,9 @@ export function DryRunPanel({ companyId, stages }: DryRunPanelProps) {
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Calcula quantas leads mudariam de bucket com as regras atuais — sem gravar.
+      </p>
       <Button variant="outline" onClick={handleSimulate} disabled={loading || !companyId}>
         {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
         Simular impacto

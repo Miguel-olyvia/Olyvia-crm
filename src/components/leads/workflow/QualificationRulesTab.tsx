@@ -65,17 +65,31 @@ export function QualificationRulesTab({ companyId }: QualificationRulesTabProps)
         feita directamente na lead tem sempre prioridade sobre esta sugestão.
       </p>
 
-      <Card>
+      <Card className="bg-orange-500/5 border-orange-500/20">
         <CardContent className="py-4 space-y-3">
-          <Label className="text-sm font-medium">Condições para MQL</Label>
-          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} />
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-orange-700 dark:text-orange-400">
+              Quando uma lead é MQL
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Sinais que indicam interesse qualificado por Marketing.
+            </p>
+          </div>
+          <StageRulesEditor value={mqlWhen} onChange={setMqlWhen} organizationId={companyId} />
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-emerald-500/5 border-emerald-500/20">
         <CardContent className="py-4 space-y-3">
-          <Label className="text-sm font-medium">Condições para SQL</Label>
-          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} />
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+              Quando uma lead é SQL
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Sinais que indicam que Vendas pode avançar com proposta.
+            </p>
+          </div>
+          <StageRulesEditor value={sqlWhen} onChange={setSqlWhen} organizationId={companyId} />
         </CardContent>
       </Card>
 

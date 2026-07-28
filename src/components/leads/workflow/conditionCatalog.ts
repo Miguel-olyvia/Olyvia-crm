@@ -35,7 +35,8 @@ export type RuleCondition =
   | { type: "has_proposal_accepted" }
   | { type: "has_needs_assessment_done" }
   | { type: "days_since_created_gt"; value: number }
-  | { type: "days_since_last_contact_gt"; value: number };
+  | { type: "days_since_last_contact_gt"; value: number }
+  | { type: "last_contact_result_is"; value: string };
 
 export interface RuleGroup {
   all: RuleCondition[];
@@ -55,7 +56,7 @@ interface NumericParam {
   withValue: (value: number) => RuleCondition;
 }
 
-interface CatalogRow {
+export interface CatalogRow {
   key: string;
   label: string;
   build: () => RuleCondition;
@@ -155,6 +156,33 @@ export const CONDITION_CATALOG: CatalogRow[] = [
     },
   },
 ];
+
+/**
+ * Bare-minimum shape needed from a `lead_contact_results` row to build its
+ * catalog entry - see useLeadContactResults.ts for the full row shape.
+ */
+export interface ContactResultCatalogSource {
+  id: string;
+  name: string;
+}
+
+/**
+ * Builds one CatalogRow per active `lead_contact_results` row (global + org,
+ * see useLeadContactResults.ts), for the "Último resultado de contacto é X"
+ * condition (last_contact_result_is - migration 20261111220000). This is
+ * NOT part of the static CONDITION_CATALOG above because the set of
+ * available results is per-organization and fetched at render time, not a
+ * fixed list - StageRulesEditor renders these as a separate, distinctly
+ * labelled sub-list alongside the fixed catalog rows.
+ */
+export function buildContactResultCatalogRows(results: ContactResultCatalogSource[]): CatalogRow[] {
+  return results.map(result => ({
+    key: `last_contact_result_is_${result.id}`,
+    label: result.name,
+    build: () => ({ type: "last_contact_result_is", value: result.id }),
+    matches: c => c.type === "last_contact_result_is" && c.value === result.id,
+  }));
+}
 
 export function bucketForRow(rule: RuleGroup | null, row: CatalogRow): RuleBucket {
   if ((rule?.all ?? []).some(row.matches)) return "all";
