@@ -24,6 +24,7 @@ import {
   CalendarRange,
   Clock,
   Filter,
+  LayoutGrid,
   Mail,
   MessageCircle,
   PhoneCall,
@@ -41,6 +42,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -241,6 +248,11 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
   const [dateRange, setDateRange] = useState(() => resolveDashboardDateRange(query?.filters));
   const [compareMode, setCompareMode] = useState(false);
   const [dashboardView, setDashboardView] = useState<"leads" | "pipeline">("leads");
+  // Period picker and the Leads/Pipeline switch are hidden by default so the
+  // Dashboard tab opens straight into the status pills + KPI cards (matching
+  // the reference design). Both stay reachable via the small icon triggers
+  // rendered above the pill bar.
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [comparisonStats, setComparisonStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -696,116 +708,135 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
 
   return (
     <div className="space-y-6">
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <Label className="text-sm font-medium">Período:</Label>
-            </div>
-            <div className="flex items-center gap-2">
-              <Popover modal={false}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="justify-start text-left font-normal">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {format(dateRange.from, "dd/MM/yyyy", { locale: pt })}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={dateRange.from}
-                    onSelect={(date) => date && setDateRange((previous) => ({ ...previous, from: startOfDay(date) }))}
-                    initialFocus
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-              <span className="text-muted-foreground">até</span>
-              <Popover modal={false}>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" size="sm" className="justify-start text-left font-normal">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {format(dateRange.to, "dd/MM/yyyy", { locale: pt })}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={dateRange.to}
-                    onSelect={(date) => date && setDateRange((previous) => ({ ...previous, to: date }))}
-                    initialFocus
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-            <div className="flex items-center gap-1">
-              {[
-                { label: "Hoje", days: 0 },
-                { label: "7 dias", days: 7 },
-                { label: "30 dias", days: 30 },
-              ].map(({ label, days }) => {
-                const now = new Date();
-                const from = days === 0 ? startOfDay(now) : subDays(now, days);
-                const isActive =
-                  format(dateRange.from, "yyyy-MM-dd") === format(from, "yyyy-MM-dd") &&
-                  format(dateRange.to, "yyyy-MM-dd") === format(now, "yyyy-MM-dd");
-
-                return (
-                  <Button
-                    key={days}
-                    variant={isActive ? "default" : "outline"}
-                    size="sm"
-                    className="h-8 text-xs"
-                    onClick={() => setDateRange({ from, to: now })}
-                  >
-                    {label}
-                  </Button>
-                );
-              })}
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
-              <Label htmlFor="compare" className="text-sm text-muted-foreground">
-                Comparar período anterior
-              </Label>
-              <input
-                type="checkbox"
-                id="compare"
-                checked={compareMode}
-                onChange={(event) => setCompareMode(event.target.checked)}
-                className="rounded border-input"
-              />
-            </div>
-          </div>
-          {compareMode && (
-            <div className="mt-2 text-xs text-muted-foreground">
-              <CalendarRange className="inline h-3 w-3 mr-1" />
-              Comparando com: {format(comparisonPeriod.from, "dd/MM", { locale: pt })} -{" "}
-              {format(comparisonPeriod.to, "dd/MM", { locale: pt })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="flex items-center gap-1">
+      <div className="flex items-center justify-end gap-1">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              aria-label="Alternar entre vista de Leads e Pipeline"
+              title={dashboardView === "pipeline" ? "Vista: Pipeline" : "Vista: Leads"}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setDashboardView("leads")}>
+              {dashboardView === "leads" ? "✓ Leads" : "Leads"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setDashboardView("pipeline")}>
+              {dashboardView === "pipeline" ? "✓ Pipeline" : "Pipeline"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
-          variant={dashboardView === "leads" ? "default" : "outline"}
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => setDashboardView("leads")}
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          aria-label="Filtros de período"
+          title="Filtros de período"
+          onClick={() => setIsFiltersOpen((previous) => !previous)}
         >
-          Leads
-        </Button>
-        <Button
-          variant={dashboardView === "pipeline" ? "default" : "outline"}
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => setDashboardView("pipeline")}
-        >
-          Pipeline
+          <Filter className="h-4 w-4" />
         </Button>
       </div>
+
+      {isFiltersOpen && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <Label className="text-sm font-medium">Período:</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Popover modal={false}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(dateRange.from, "dd/MM/yyyy", { locale: pt })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={dateRange.from}
+                      onSelect={(date) =>
+                        date && setDateRange((previous) => ({ ...previous, from: startOfDay(date) }))
+                      }
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+                <span className="text-muted-foreground">até</span>
+                <Popover modal={false}>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" className="justify-start text-left font-normal">
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {format(dateRange.to, "dd/MM/yyyy", { locale: pt })}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={dateRange.to}
+                      onSelect={(date) => date && setDateRange((previous) => ({ ...previous, to: date }))}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="flex items-center gap-1">
+                {[
+                  { label: "Hoje", days: 0 },
+                  { label: "7 dias", days: 7 },
+                  { label: "30 dias", days: 30 },
+                ].map(({ label, days }) => {
+                  const now = new Date();
+                  const from = days === 0 ? startOfDay(now) : subDays(now, days);
+                  const isActive =
+                    format(dateRange.from, "yyyy-MM-dd") === format(from, "yyyy-MM-dd") &&
+                    format(dateRange.to, "yyyy-MM-dd") === format(now, "yyyy-MM-dd");
+
+                  return (
+                    <Button
+                      key={days}
+                      variant={isActive ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() => setDateRange({ from, to: now })}
+                    >
+                      {label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2 ml-auto">
+                <Label htmlFor="compare" className="text-sm text-muted-foreground">
+                  Comparar período anterior
+                </Label>
+                <input
+                  type="checkbox"
+                  id="compare"
+                  checked={compareMode}
+                  onChange={(event) => setCompareMode(event.target.checked)}
+                  className="rounded border-input"
+                />
+              </div>
+            </div>
+            {compareMode && (
+              <div className="mt-2 text-xs text-muted-foreground">
+                <CalendarRange className="inline h-3 w-3 mr-1" />
+                Comparando com: {format(comparisonPeriod.from, "dd/MM", { locale: pt })} -{" "}
+                {format(comparisonPeriod.to, "dd/MM", { locale: pt })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {dashboardView === "leads" && onStatusFilterChange && statusPills.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
