@@ -71,7 +71,11 @@ import { LeadStageActionsConfig } from "./LeadStageActionsConfig";
 import { StageRulesEditor } from "./workflow/StageRulesEditor";
 import { QualificationRulesTab } from "./workflow/QualificationRulesTab";
 import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
+import { StageRulesSimulator } from "./workflow/StageRulesSimulator";
 import type { RuleGroup } from "./workflow/conditionCatalog";
+import { isEmptyRule } from "./workflow/conditionCatalog";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 
 export interface WorkflowStage {
   id: string;
@@ -291,6 +295,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [migrationTargetId, setMigrationTargetId] = useState<string>("");
   const [leadCountByStage, setLeadCountByStage] = useState<Record<string, number>>({});
 
+  // Sector presets ("Presets de setor", Regras tab) — pendingPreset holds a
+  // preset the user picked while at least one existing stage already has
+  // non-default rules, so we can confirm before overwriting them.
+  const [pendingPreset, setPendingPreset] = useState<FunnelPreset | null>(null);
+
   const [newStage, setNewStage] = useState({
     name: "",
     label: "",
@@ -306,27 +315,39 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     useSensor(KeyboardSensor)
   );
 
+  // Org-scoped lead_workflow_stages + lead_qualification_rules fetch is
+  // shared (react-query cached + cache-busted) via useLeadPipelineRules, so
+  // a save from QualificationRulesTab (or anywhere else using this hook)
+  // immediately refetches the stages shown here, and vice-versa.
+  const {
+    stages: pipelineStages,
+    isLoading: stagesLoading,
+    invalidate: invalidatePipelineRules,
+  } = useLeadPipelineRules(companyId);
+
+  useEffect(() => {
+    if (!open) return;
+    setStages(pipelineStages);
+    setIsUsingTemplate(pipelineStages.length === 0);
+  }, [open, pipelineStages]);
+
+  useEffect(() => {
+    setLoading(stagesLoading);
+  }, [stagesLoading]);
+
   useEffect(() => {
     if (open && companyId) {
-      loadStages();
+      invalidatePipelineRules();
       loadTemplateStages();
       loadLeadCounts();
     }
   }, [open, companyId]);
 
+  // Kept as a thin wrapper (instead of inlining invalidatePipelineRules at
+  // every call site) so existing call sites below don't need to change.
   const loadStages = async () => {
     if (!companyId) return;
-    setLoading(true);
-    const { data } = await (supabase
-      .from("lead_workflow_stages") as any)
-      .select("*")
-      .eq("organization_id", companyId)
-      .eq("is_active", true)
-      .order("stage_order");
-
-    setStages(data || []);
-    setIsUsingTemplate((data || []).length === 0);
-    setLoading(false);
+    await invalidatePipelineRules();
   };
 
   const loadTemplateStages = async () => {
@@ -551,6 +572,63 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
     loadLeadCounts();
     onStagesUpdated?.();
+  };
+
+  // ─── Sector presets ("Presets de setor") ──────────────────
+  // A stage counts as "customized" once anything a preset would touch
+  // deviates from the app's own neutral defaults (see toStagePayload).
+  const stageHasCustomRules = (stage: WorkflowStage): boolean => {
+    const defaultMatching = stage.matching_statuses == null
+      || (stage.matching_statuses.length === 1 && stage.matching_statuses[0] === stage.name);
+    return !defaultMatching
+      || !isEmptyRule(stage.reached_when ?? null)
+      || !!stage.auto_advance
+      || (stage.qualification_hint ?? "none") !== "none"
+      || !!stage.counts_as_qualified
+      || !!stage.counts_as_negotiation
+      || !!stage.counts_as_converted
+      || !!stage.counts_as_lost;
+  };
+
+  const applyPresetToStages = (preset: FunnelPreset) => {
+    const nextStages = stages.map(stage => {
+      const rule = findPresetStageRule(preset, stage.name, stage.stage_order);
+      if (!rule) return stage;
+      return {
+        ...stage,
+        matching_statuses: rule.matchingStatuses.length > 0 ? rule.matchingStatuses : [stage.name],
+        reached_when: rule.reachedWhen,
+        auto_advance: rule.autoAdvance,
+        qualification_hint: rule.qualificationHint,
+        counts_as_qualified: rule.countsAsQualified,
+        counts_as_negotiation: rule.countsAsNegotiation,
+        counts_as_converted: rule.countsAsConverted,
+        counts_as_lost: rule.countsAsLost,
+      };
+    });
+
+    setStages(nextStages);
+    setEditingStage(current => {
+      if (!current) return current;
+      return nextStages.find(s => s.id === current.id) ?? current;
+    });
+    setPendingPreset(null);
+    toast({
+      title: `Preset "${preset.label}" aplicado`,
+      description: "Regras por gravar — reveja e clique em Guardar & Recalcular para confirmar.",
+    });
+  };
+
+  const handleSelectPreset = (presetId: string) => {
+    const preset = LEAD_FUNNEL_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+
+    const hasCustomizedStage = stages.some(stageHasCustomRules);
+    if (hasCustomizedStage) {
+      setPendingPreset(preset);
+      return;
+    }
+    applyPresetToStages(preset);
   };
 
   // ─── Drag & Drop ──────────────────────────────────────────
@@ -965,6 +1043,31 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               </TabsContent>
 
               <TabsContent value="rules" className="space-y-4 mt-4">
+                <div className="flex items-center gap-2 pb-3 border-b">
+                  <Label className="text-sm shrink-0">Presets de setor</Label>
+                  <Select value="" onValueChange={handleSelectPreset}>
+                    <SelectTrigger className="w-56">
+                      <SelectValue placeholder="Aplicar preset a todo o funil..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEAD_FUNNEL_PRESETS.map(preset => (
+                        <SelectItem key={preset.id} value={preset.id}>{preset.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="w-4 h-4 text-muted-foreground shrink-0" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs">
+                        Preenche as regras de TODOS os estágios do funil (não só este) com valores
+                        típicos do setor escolhido. Nada é gravado até clicar em "Guardar & Recalcular".
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+
                 <div>
                   <Label className="text-sm">Status literais associados</Label>
                   <div className="flex flex-wrap gap-1 mt-2">
@@ -1083,6 +1186,28 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     </SelectContent>
                   </Select>
                 </div>
+
+                <div className="pt-2 border-t">
+                  <Label className="text-sm">Impacto destas regras (ainda não gravadas)</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+                    Simula estas regras contra as leads reais da organização sem gravar nada.
+                  </p>
+                  <StageRulesSimulator
+                    key={editingStage.id}
+                    companyId={companyId}
+                    stage={{
+                      id: editingStage.id,
+                      matching_statuses: editingStage.matching_statuses ?? [editingStage.name],
+                      reached_when: editingStage.reached_when ?? null,
+                      auto_advance: editingStage.auto_advance ?? false,
+                      qualification_hint: editingStage.qualification_hint ?? "none",
+                      counts_as_converted: editingStage.counts_as_converted ?? false,
+                      counts_as_lost: editingStage.counts_as_lost ?? false,
+                      counts_as_qualified: editingStage.counts_as_qualified ?? false,
+                      counts_as_negotiation: editingStage.counts_as_negotiation ?? false,
+                    }}
+                  />
+                </div>
               </TabsContent>
             </Tabs>
           )}
@@ -1142,6 +1267,30 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deletableLeadCount > 0 ? `Migrar e Eliminar` : `Eliminar`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── Sector Preset Overwrite Confirmation ──────────────── */}
+      <AlertDialog open={!!pendingPreset} onOpenChange={(v) => { if (!v) setPendingPreset(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-destructive" />
+              Substituir regras existentes?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Pelo menos um estágio deste funil já tem regras personalizadas (condições de entrada,
+              auto-avanço, bucket ou qualificação). Aplicar o preset <strong>"{pendingPreset?.label}"</strong> vai
+              substituir essas regras em todos os estágios correspondentes. Nada é gravado até clicar em
+              "Guardar & Recalcular" — pode rever ou cancelar antes disso.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => pendingPreset && applyPresetToStages(pendingPreset)}>
+              Substituir regras
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

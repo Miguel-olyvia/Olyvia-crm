@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { StageRulesEditor } from "./StageRulesEditor";
 import type { RuleGroup } from "./conditionCatalog";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 
 interface QualificationRulesTabProps {
   companyId: string | null;
@@ -17,28 +18,22 @@ interface QualificationRulesTabProps {
  * classification on the lead itself (anew_leads.qualification_type, set via
  * AnewLeadEditDialog) always wins over this suggestion - these rules only
  * feed the "qualification_is" condition inside stage_reached().
+ *
+ * Fetching goes through useLeadPipelineRules so a save here immediately
+ * invalidates/refetches the same org-scoped cache consumed by
+ * LeadWorkflowConfig.tsx (and vice-versa).
  */
 export function QualificationRulesTab({ companyId }: QualificationRulesTabProps) {
   const { toast } = useToast();
+  const { qualificationRules, isLoading, invalidate } = useLeadPipelineRules(companyId);
   const [mqlWhen, setMqlWhen] = useState<RuleGroup | null>(null);
   const [sqlWhen, setSqlWhen] = useState<RuleGroup | null>(null);
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!companyId) return;
-    setLoading(true);
-    (supabase as any)
-      .from("lead_qualification_rules")
-      .select("mql_when, sql_when")
-      .eq("organization_id", companyId)
-      .maybeSingle()
-      .then(({ data }: any) => {
-        setMqlWhen(data?.mql_when ?? null);
-        setSqlWhen(data?.sql_when ?? null);
-        setLoading(false);
-      });
-  }, [companyId]);
+    setMqlWhen(qualificationRules?.mql_when ?? null);
+    setSqlWhen(qualificationRules?.sql_when ?? null);
+  }, [qualificationRules]);
 
   const handleSave = async () => {
     if (!companyId) return;
@@ -55,10 +50,11 @@ export function QualificationRulesTab({ companyId }: QualificationRulesTabProps)
       toast({ title: "Erro ao gravar regras de qualificação", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Regras de qualificação guardadas" });
+      invalidate();
     }
   };
 
-  if (loading) {
+  if (isLoading) {
     return <p className="text-sm text-muted-foreground">A carregar...</p>;
   }
 
