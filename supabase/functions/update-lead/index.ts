@@ -16,13 +16,16 @@ const requestSchema = z.object({
   from_chat_widget: z.boolean().optional(),
   form_id: z.string().optional(),
   tracking: z.record(z.unknown()).optional(),
+  needs_manual_scheduling: z.boolean().optional(),
+  lang: z.string().optional(),
 }).refine(
   (v) => !!v.lead_id || !!v.target_id,
   { message: "Either lead_id or target_id must be provided" },
 );
-import { normalizeFirstLast } from "../_shared/composeDisplayName.ts";
+import { normalizeFirstLast, composeDisplayName } from "../_shared/composeDisplayName.ts";
 import { runMarketingAttribution } from "../_shared/marketingAttribution.ts";
-import { sanitizeFieldValues } from "../_shared/inputSanitizers.ts";
+import { sanitizeFieldValues, sanitizeEmail } from "../_shared/inputSanitizers.ts";
+import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from "../_shared/formEmails.ts";
 import { resolveCanonicalFormId, validateLocationDistrict } from "../_shared/leadsValidation.ts";
 
 const corsHeaders = {
@@ -108,7 +111,8 @@ Deno.serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const { lead_id, campaign_id, step_number, field_values, from_chat_widget, form_id, tracking } = parsed.data;
+    const { lead_id, campaign_id, step_number, field_values, from_chat_widget, form_id, tracking, needs_manual_scheduling, lang } = parsed.data;
+    const leadLocale = (typeof lang === "string" && lang.trim()) ? lang.trim().toLowerCase() : null;
 
     // Polymorphic continuation key: prefer explicit target_type/target_id.
     // Fall back to treating a bare lead_id as target_type="lead" for
@@ -509,13 +513,20 @@ Deno.serve(async (req) => {
     }
 
     // Update the lead
+    const leadUpdate: Record<string, any> = {
+      field_values: updatedFieldValues,
+      status: isComplete ? "new" : "incomplete",
+      updated_at: new Date().toISOString(),
+    };
+    if (typeof needs_manual_scheduling === "boolean") {
+      leadUpdate.needs_manual_scheduling = needs_manual_scheduling;
+    }
+    if (leadLocale) {
+      leadUpdate.locale = leadLocale;
+    }
     const { error: updateError } = await supabase
       .from("anew_leads")
-      .update({
-        field_values: updatedFieldValues,
-        status: isComplete ? "new" : "incomplete",
-        updated_at: new Date().toISOString(),
-      })
+      .update(leadUpdate)
       .eq("id", targetId);
 
     if (updateError) {
@@ -557,6 +568,62 @@ Deno.serve(async (req) => {
       console.error("[attribution] update-lead outer guard", attrErr);
     }
 
+    // Post-completion emails (per-form options) — same rules as create-lead:
+    // confirmation unless the form has a scheduling step (book-slot sends its
+    // own richer one), otherwise queue the "finish scheduling" recovery nudge
+    // when the visitor didn't pick a slot. Fail-soft.
+    if (isComplete && canonicalFormId) {
+      try {
+        const resolveEmail = (): string | null => {
+          for (const key of ["email", "po_email", "Email"]) {
+            const v = updatedFieldValues[key];
+            const sanitized = sanitizeEmail(v);
+            if (sanitized) return sanitized;
+          }
+          return null;
+        };
+        const leadEmail = resolveEmail();
+        const organizationId = existingLead.organization_id || existingLead.campaigns?.organization_id;
+
+        if (leadEmail && organizationId) {
+          const leadName = composeDisplayName(
+            updatedFieldValues.first_name || updatedFieldValues.po_nome || updatedFieldValues.nome || "",
+            updatedFieldValues.last_name || updatedFieldValues.po_apelido || updatedFieldValues.apelido || "",
+          ) || "";
+
+          const { data: schedulingStepCheck } = await supabase
+            .from("form_steps")
+            .select("id")
+            .eq("form_id", canonicalFormId)
+            .eq("step_type", "scheduling")
+            .limit(1)
+            .maybeSingle();
+
+          if (!schedulingStepCheck) {
+            await sendLeadConfirmationEmail(supabase, {
+              organizationId,
+              formId: canonicalFormId,
+              leadEmail,
+              leadName,
+              leadLocale,
+            });
+          } else if (needs_manual_scheduling) {
+            await queueSchedulingInviteRecovery(supabase, {
+              organizationId,
+              formId: canonicalFormId,
+              leadId: targetId,
+              leadName,
+              leadEmail,
+              leadLocale,
+              fieldValues: updatedFieldValues,
+              needsManualScheduling: true,
+            });
+          }
+        }
+      } catch (emailErr) {
+        console.error("[update-lead] post-completion email failed (non-fatal):", emailErr);
+      }
+    }
 
     return new Response(
       JSON.stringify({

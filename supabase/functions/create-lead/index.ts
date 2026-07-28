@@ -16,8 +16,11 @@ const requestSchema = z.object({
   from_chat_widget: z.boolean().optional(),
   tracking: z.record(z.unknown()).optional(),
   embed: z.string().optional(),
+  needs_manual_scheduling: z.boolean().optional(),
+  lang: z.string().optional(),
 });
 import { runMarketingAttribution } from '../_shared/marketingAttribution.ts';
+import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from '../_shared/formEmails.ts';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import {
   findLocalEntityForOrg,
@@ -136,7 +139,8 @@ Deno.serve(async (req) => {
     // SECURITY: company_id is intentionally NOT destructured from the body.
     // organization_id is always derived from campaigns.organization_id (single source of truth)
     // to prevent cross-tenant lead injection via a public endpoint.
-    const { campaign_id, form_id, business_unit_id, step_number, field_values, source, notes, tags, from_chat_widget, tracking, embed } = parsedBody.data;
+    const { campaign_id, form_id, business_unit_id, step_number, field_values, source, notes, tags, from_chat_widget, tracking, embed, needs_manual_scheduling, lang } = parsedBody.data;
+    const leadLocale = (typeof lang === 'string' && lang.trim()) ? lang.trim().toLowerCase() : null;
     // Aceitar tanto snake_case como camelCase para compatibilidade com integrações antigas/novas.
     const incomingSourceId: string | null = parsedBody.data.source_id ?? parsedBody.data.sourceId ?? null;
     const ALLOWED_EMBED_KINDS = new Set(['popup', 'inline', 'widget', 'utm', 'chat', '']);
@@ -873,6 +877,8 @@ Deno.serve(async (req) => {
         notes: notes || null,
         tags: tags || null,
         status: isComplete ? 'new' : 'incomplete',
+        needs_manual_scheduling: !!needs_manual_scheduling,
+        locale: leadLocale,
         created_by: null // Public API, no user
       })
       .select("id, campaign_id, organization_id, root_organization_id, field_values, status, source, source_id, created_at")
@@ -917,8 +923,49 @@ Deno.serve(async (req) => {
       console.error("[attribution] outer guard", attrErr);
     }
 
+    // Post-completion emails (per-form options). Fail-soft — never let an
+    // email problem break the lead-creation response. Confirmation is
+    // skipped for forms with a scheduling step; book-slot sends its own
+    // richer confirmation for those instead.
+    if (isComplete && form_id && lead?.id && leadEmail) {
+      try {
+        const { data: schedulingStepCheck } = await supabase
+          .from('form_steps')
+          .select('id')
+          .eq('form_id', form_id)
+          .eq('step_type', 'scheduling')
+          .limit(1)
+          .maybeSingle();
+        const leadName = composeDisplayName(leadFirstName, leadLastName) || '';
+
+        if (!schedulingStepCheck) {
+          await sendLeadConfirmationEmail(supabase, {
+            organizationId: organization_id,
+            formId: form_id,
+            leadEmail,
+            leadName,
+            leadPhone,
+            leadLocale,
+          });
+        } else if (needs_manual_scheduling) {
+          await queueSchedulingInviteRecovery(supabase, {
+            organizationId: organization_id,
+            formId: form_id,
+            leadId: lead.id,
+            leadName,
+            leadEmail,
+            leadLocale,
+            fieldValues: lead.field_values || field_values || {},
+            needsManualScheduling: true,
+          });
+        }
+      } catch (emailErr) {
+        console.error('[create-lead] post-completion email failed (non-fatal):', emailErr);
+      }
+    }
+
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         success: true,
         lead_id: lead.id,
         target_type: 'lead',

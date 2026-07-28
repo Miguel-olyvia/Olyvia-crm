@@ -1191,6 +1191,10 @@ export default function PublicLeadForm() {
       });
 
       const hasSchedulingStep = formConfig.steps.some(s => s.step_type === 'scheduling');
+      // True only once the visitor reaches/passes the scheduling step without
+      // picking a slot — lets create-lead/update-lead queue a "finish
+      // scheduling" recovery email instead of the normal confirmation.
+      const needsManualScheduling = hasSchedulingStep && !schedulingSlot;
 
       // Use form_id for new workflow, fallback to campaign_id
       const requestBody: any = {
@@ -1198,8 +1202,12 @@ export default function PublicLeadForm() {
         field_values: stepFieldValues,
         source: "public_form",
         source_id: resolvedSourceId || null,
+        needs_manual_scheduling: needsManualScheduling,
       };
-      
+      if (currentLocale) {
+        requestBody.lang = currentLocale;
+      }
+
       if (formConfig.form_id) {
         requestBody.form_id = formConfig.form_id;
       }
@@ -1284,7 +1292,9 @@ export default function PublicLeadForm() {
           step_number: currentStep,
           field_values: stepFieldValues,
           form_id: formConfig.form_id || undefined,
+          needs_manual_scheduling: needsManualScheduling,
         };
+        if (currentLocale) updateBody.lang = currentLocale;
         if (tracking) updateBody.tracking = tracking;
         const response = await fetch(`${SUPABASE_URL}/functions/v1/update-lead`, {
           method: "POST",

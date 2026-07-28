@@ -333,3 +333,198 @@ export function defaultMeetingHtml(opts: {
     ${cancel}
   </div>`;
 }
+
+/**
+ * Send the per-form "confirmation" email on lead completion. Fail-soft —
+ * never throws; a misconfigured template or SMTP must never break lead
+ * creation. Requires an admin-configured template (no generic fallback,
+ * mirroring how confirmation_email_template_id is the only source of copy).
+ * Callers must skip this for forms with a scheduling step — book-slot already
+ * sends a richer confirmation (with the booked date + manage link) for those.
+ */
+export async function sendLeadConfirmationEmail(
+  supabase: any,
+  params: {
+    organizationId: string;
+    formId: string;
+    leadEmail: string;
+    leadName: string;
+    leadPhone?: string | null;
+    leadLocale?: string | null;
+  },
+): Promise<void> {
+  try {
+    const emailCfg = await loadFormEmailConfig(supabase, params.formId);
+    const confTemplateId = pickTemplateId(
+      emailCfg,
+      "confirmation",
+      params.leadLocale,
+      emailCfg?.confirmation_email_template_id,
+    );
+    if (!emailCfg?.confirmation_email_enabled || !confTemplateId) return;
+
+    const tpl = await loadTemplate(supabase, confTemplateId);
+    if (!tpl?.body_html) return;
+
+    const { data: org } = await supabase
+      .from("anew_organizations")
+      .select("name")
+      .eq("id", params.organizationId)
+      .maybeSingle();
+
+    const vars: Record<string, string> = {
+      lead_name: params.leadName,
+      client_name: params.leadName,
+      lead_email: params.leadEmail,
+      client_email: params.leadEmail,
+      lead_phone: params.leadPhone || "",
+      company_name: org?.name || "",
+    };
+    await sendEmailNow({
+      organizationId: params.organizationId,
+      smtpId: emailCfg.email_smtp_id,
+      to: params.leadEmail,
+      subject: renderSubject(tpl.subject || "Confirmação", vars),
+      html: renderHtml(tpl.body_html, vars),
+    });
+  } catch (err) {
+    console.error("[formEmails] sendLeadConfirmationEmail failed (non-fatal):", err);
+  }
+}
+
+/**
+ * "Finish scheduling" recovery: when a lead completes a form with a
+ * scheduling step but doesn't pick a slot (needsManualScheduling), and their
+ * district is actually covered by a real resource, queue one recovery email
+ * per configured delay (default 24h) with a secure resume link. Fail-soft —
+ * never throws.
+ *
+ * Uses find_nearest_resources (this repo's existing, already-verified RPC —
+ * it already supports p_district_id, see migration
+ * 20261110640000_scheduling_district_filter_and_capacity.sql) instead of
+ * upstream's separate find_resources_by_district, which was never ported here.
+ */
+export async function queueSchedulingInviteRecovery(
+  supabase: any,
+  params: {
+    organizationId: string;
+    formId: string;
+    leadId: string;
+    leadName: string;
+    leadEmail: string;
+    leadLocale?: string | null;
+    fieldValues: Record<string, any>;
+    needsManualScheduling: boolean;
+  },
+): Promise<void> {
+  if (!params.needsManualScheduling) return;
+  try {
+    const { data: schedStep } = await supabase
+      .from("form_steps")
+      .select("step_number, scheduling_board_id, scheduling_district_field_key, scheduling_duration_minutes")
+      .eq("form_id", params.formId)
+      .eq("step_type", "scheduling")
+      .order("step_number", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    const boardId = schedStep?.scheduling_board_id || null;
+    if (!schedStep || !boardId) return;
+
+    const inviteCfg = await loadFormEmailConfig(supabase, params.formId);
+    if (inviteCfg?.scheduling_invite_enabled === false) return;
+
+    let districtKey: string | null = schedStep.scheduling_district_field_key || null;
+    if (!districtKey) {
+      const { data: dField } = await supabase
+        .from("form_fields")
+        .select("field_key")
+        .eq("form_id", params.formId)
+        .eq("field_type", "ref_district")
+        .limit(1)
+        .maybeSingle();
+      districtKey = dField?.field_key || null;
+    }
+    const districtId = districtKey ? params.fieldValues?.[districtKey] || null : null;
+    if (!districtId) return;
+
+    // Coverage check: is any resource actually serving this district on the board?
+    const target = new Date(Date.now() + 24 * 3600000).toISOString().slice(0, 10);
+    const { data: resources } = await supabase.rpc("find_nearest_resources", {
+      p_board_id: boardId,
+      p_target_date: target,
+      p_duration_minutes: schedStep.scheduling_duration_minutes || 60,
+      p_limit: 1,
+      p_district_id: districtId,
+    });
+    if (!Array.isArray(resources) || resources.length === 0) return;
+
+    // scheduled_emails.user_id is NOT NULL — resolve any active org member.
+    const { data: member } = await supabase
+      .from("anew_memberships")
+      .select("user_id")
+      .eq("organization_id", params.organizationId)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+    const inviteUserId = member?.user_id || null;
+    if (!inviteUserId) return;
+
+    const expiresAt = new Date(Date.now() + 14 * 24 * 3600000); // link valid 14 days
+    const { data: invite } = await supabase
+      .from("scheduling_invites")
+      .insert({
+        lead_id: params.leadId,
+        form_id: params.formId,
+        step_number: schedStep.step_number,
+        organization_id: params.organizationId,
+        expires_at: expiresAt.toISOString(),
+      })
+      .select("token")
+      .single();
+    if (!invite?.token) return;
+
+    const base = Deno.env.get("PUBLIC_FORM_BASE_URL") || "https://olyvia-ai.com";
+    let resumeUrl = buildResumeUrl(inviteCfg?.public_form_url_template, params.leadLocale, invite.token, params.formId, base);
+    if (params.leadLocale && !/[?&]lang=/.test(resumeUrl)) {
+      resumeUrl += `&lang=${encodeURIComponent(params.leadLocale)}`;
+    }
+    const unsubscribeUrl = resumeUrl.replace(/([?&])resume=/, "$1unsub=");
+
+    const { data: org } = await supabase
+      .from("anew_organizations")
+      .select("name")
+      .eq("id", params.organizationId)
+      .maybeSingle();
+    const html = defaultSchedulingInviteHtml({
+      leadName: params.leadName,
+      companyName: org?.name || "",
+      resumeUrl,
+      unsubscribeUrl,
+    });
+
+    const delays = Array.isArray(inviteCfg?.scheduling_invite_delays_hours) && inviteCfg!.scheduling_invite_delays_hours!.length > 0
+      ? inviteCfg!.scheduling_invite_delays_hours!
+      : [24];
+    let queued = 0;
+    for (const h of delays) {
+      const hours = Number(h);
+      if (!Number.isFinite(hours) || hours < 0) continue;
+      await scheduleEmail(supabase, {
+        organizationId: params.organizationId,
+        userId: inviteUserId,
+        toEmail: params.leadEmail,
+        subject: "Falta agendar a sua visita técnica gratuita",
+        bodyHtml: html,
+        scheduledFor: new Date(Date.now() + hours * 3600000).toISOString(),
+        entityType: "lead_scheduling_invite",
+        entityId: params.leadId,
+        smtpId: inviteCfg?.email_smtp_id || null,
+      });
+      queued++;
+    }
+    console.log(`[formEmails] ${queued} scheduling invite(s) queued for lead ${params.leadId} (covered district)`);
+  } catch (err) {
+    console.error("[formEmails] queueSchedulingInviteRecovery failed (non-fatal):", err);
+  }
+}
