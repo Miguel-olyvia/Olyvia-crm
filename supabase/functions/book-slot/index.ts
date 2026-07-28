@@ -572,6 +572,41 @@ Deno.serve(async (req: Request) => {
           .maybeSingle();
         technicianEmail = (prof?.email || '').toLowerCase().trim();
         technicianName = prof?.name || '';
+
+        // In-app bell notification to the assigned commercial/technician —
+        // separate from (and unconditional on) the meeting_notify_commercial
+        // email toggle below, matching the always-on pattern used for other
+        // assignment notifications (see send-schedule-invite). notifications.user_id
+        // is the AUTH user id, while schedule_resources.user_id is the business
+        // (anew_users) id, so this goes through auth_to_business_user_map.
+        try {
+          const { data: authMap } = await supabase
+            .from('auth_to_business_user_map')
+            .select('auth_user_id')
+            .eq('business_user_id', assignedResource.user_id)
+            .maybeSingle();
+          if (authMap?.auth_user_id) {
+            const leadFullNameForNotif = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
+            const whenFormattedForNotif = new Date(slot_start).toLocaleString('pt-PT', {
+              timeZone: 'Europe/Lisbon', weekday: 'long', day: 'numeric', month: 'long',
+              hour: '2-digit', minute: '2-digit',
+            });
+            await supabase.from('notifications').insert({
+              user_id: authMap.auth_user_id,
+              organization_id: organizationId,
+              type: 'schedule_booking',
+              kind: 'notification',
+              title: 'Nova visita agendada',
+              message: `${leadFullNameForNotif} agendou uma visita para ${whenFormattedForNotif}`,
+              link: '/scheduling',
+              entity_type: 'schedule_item',
+              entity_id: scheduleItem.id,
+              data: { schedule_item_id: scheduleItem.id, lead_id: lead.id },
+            });
+          }
+        } catch (notifErr) {
+          console.error('[book-slot] in-app notification failed (non-fatal):', notifErr);
+        }
       }
 
       const { data: orgRow } = await supabase
