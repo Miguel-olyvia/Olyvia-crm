@@ -888,9 +888,9 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
 
       {renderState === "ready" && dashboardView === "leads" && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             <KPICard
-              title="Total Pipeline Ativo"
+              title="Pipeline Ativo no Período"
               value={formatMetricValue(kpis.totalLeads)}
               subtitle={`leads em pipeline no período · ${formatMetricValue(kpis.leadsToday)} hoje`}
               icon={Users}
@@ -926,20 +926,6 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               value={formatMetricValue(kpis.conversionRate, "%")}
               subtitle={`${formatMetricValue(kpis.cohortConversions)} dos ${formatMetricValue(kpis.leadsInPeriod)} novos converteram`}
               icon={Target}
-            />
-            <KPICard
-              title="Conversão MQL → SQL"
-              value={
-                qualificationHistoryLoading
-                  ? "--"
-                  : formatMetricValue(mqlToSqlConversion.rate === null ? null : mqlToSqlConversion.rate, "%")
-              }
-              subtitle={
-                mqlToSqlConversion.totalMql > 0
-                  ? `${mqlToSqlConversion.convertedToSql} de ${mqlToSqlConversion.totalMql} MQL viraram SQL`
-                  : "Sem leads MQL no período"
-              }
-              icon={Zap}
             />
           </div>
 
