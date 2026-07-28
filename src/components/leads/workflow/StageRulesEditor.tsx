@@ -50,8 +50,6 @@ const COLUMNS: Array<{ bucket: "all" | "any"; title: string; tooltip: string }> 
  * a small number input once checked, tracked independently per column.
  */
 export function StageRulesEditor({ value, onChange, organizationId }: StageRulesEditorProps) {
-  const requiredCount = value?.all.length ?? 0;
-  const anyCount = value?.any.length ?? 0;
   const { contactResults } = useLeadContactResults(organizationId);
   const contactResultRows = buildContactResultCatalogRows(contactResults);
 
@@ -138,23 +136,6 @@ export function StageRulesEditor({ value, onChange, organizationId }: StageRules
   return (
     <TooltipProvider>
       <div className="space-y-2">
-        <div className="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground space-y-1">
-          <p><strong>Todas (AND)</strong> — tem de ser verdadeira; se marcares várias, todas têm de o ser.</p>
-          <p><strong>Qualquer (OU)</strong> — basta que uma das marcadas seja verdadeira.</p>
-          <p>A regra fica: (todas as marcadas em AND) <strong>E</strong> (pelo menos uma marcada em OR, se houver alguma).</p>
-        </div>
-
-        {requiredCount > 0 && anyCount > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Esta regra está activa: <strong>todas</strong> as condições em AND e <strong>pelo menos uma</strong> das condições em OR têm de ser verdadeiras.
-          </p>
-        )}
-        {requiredCount === 0 && anyCount === 0 && (
-          <p className="text-xs text-muted-foreground">
-            Nenhuma condição seleccionada — alcançada apenas pelo status literal (ver abaixo).
-          </p>
-        )}
-
         <div className={cn("flex flex-col gap-3 md:flex-row")}>
           {COLUMNS.map(col => renderColumn(col.bucket, col.title, col.tooltip))}
         </div>
