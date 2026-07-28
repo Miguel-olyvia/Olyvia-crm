@@ -15,14 +15,6 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -675,6 +667,29 @@ export default function Forms() {
     return t(typeKey) || type;
   };
 
+  const hasActiveFilters =
+    searchTerm.trim() !== "" ||
+    filterOrganization !== "all" ||
+    filterType !== "all" ||
+    filterStatus !== "all";
+
+  const formTypeBadgeClass = (type: string) => {
+    switch (type) {
+      case "lead":
+        return "bg-[#85D3BE]/15 text-[#0f766e] border-[#85D3BE]/40";
+      case "registration":
+        return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+      case "survey":
+        return "bg-purple-500/10 text-purple-600 border-purple-500/20";
+      case "feedback":
+        return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+      case "contact":
+        return "bg-slate-500/10 text-slate-600 border-slate-500/20";
+      default:
+        return "bg-muted text-muted-foreground border-border";
+    }
+  };
+
   if (companyLoading) {
     return (
       <>
@@ -700,39 +715,54 @@ export default function Forms() {
     <>
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{t("forms.title")}</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">{t("forms.title")}</h1>
+              {!loading && (
+                <Badge
+                  variant="secondary"
+                  className="rounded-full px-2.5 font-medium"
+                  aria-label={`${forms.length} ${t("forms.title")}`}
+                >
+                  {forms.length}
+                </Badge>
+              )}
+            </div>
             <p className="text-muted-foreground">
               {t("forms.subtitle")}
             </p>
           </div>
           <PermissionGate permission="forms.create">
-            <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
+            <Button
+              onClick={() => { resetForm(); setDialogOpen(true); }}
+              className="min-h-[44px] bg-[#85D3BE] text-[#0b3b32] hover:bg-[#6fc4ad] shadow-sm"
+            >
               <Plus className="h-4 w-4 mr-2" />
               {t("forms.new")}
             </Button>
           </PermissionGate>
         </div>
 
-        {/* Filters */}
+        {/* Toolbar: search + filters */}
         <Card>
           <CardContent className="p-4">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex-1 min-w-[200px]">
+            <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
+              <div className="flex-1 min-w-[220px]">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder={t("forms.search")}
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9"
+                    className="pl-9 min-h-[44px]"
+                    aria-label={t("forms.search")}
                   />
                 </div>
               </div>
-              
+
               <Select value={filterOrganization} onValueChange={setFilterOrganization}>
-                <SelectTrigger className="w-[180px]">
+                <SelectTrigger className="w-full min-h-[44px] sm:w-[180px]" aria-label={t("forms.filter.allCompanies")}>
                   <SelectValue placeholder={t("forms.filter.allCompanies")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -744,7 +774,7 @@ export default function Forms() {
               </Select>
 
               <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-full min-h-[44px] sm:w-[150px]" aria-label={t("forms.filter.allTypes")}>
                   <SelectValue placeholder={t("forms.filter.allTypes")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -758,7 +788,7 @@ export default function Forms() {
               </Select>
 
               <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-full min-h-[44px] sm:w-[150px]" aria-label={t("forms.filter.allStatus")}>
                   <SelectValue placeholder={t("forms.filter.allStatus")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -771,214 +801,258 @@ export default function Forms() {
           </CardContent>
         </Card>
 
-        {/* Forms Table */}
-        <Card>
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <OlyviaLoader size={40} />
+        {/* Forms grid */}
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <OlyviaLoader size={40} />
+          </div>
+        ) : filteredForms.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#85D3BE]/15">
+                <FileText className="h-8 w-8 text-[#0f766e]" />
               </div>
-            ) : filteredForms.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-lg font-medium">{t("forms.noFormsFound")}</p>
-                <p className="text-sm">{t("forms.createFirst")}</p>
+              <div className="space-y-1">
+                <p className="text-lg font-semibold">{t("forms.noFormsFound")}</p>
+                <p className="text-sm text-muted-foreground">
+                  {hasActiveFilters ? t("forms.subtitle") : t("forms.createFirst")}
+                </p>
               </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("forms.table.name")}</TableHead>
-                    <TableHead>{t("forms.table.company")}</TableHead>
-                    <TableHead>{t("forms.table.type")}</TableHead>
-                    <TableHead className="text-center">{t("forms.table.fields")}</TableHead>
-                    <TableHead className="text-center">{t("forms.table.steps")}</TableHead>
-                    <TableHead className="text-center">{t("forms.table.status")}</TableHead>
-                    <TableHead className="text-center">{t("forms.table.primary")}</TableHead>
-                    <TableHead className="text-center">{t("forms.table.quickActions")}</TableHead>
-                    <TableHead className="text-right">{t("forms.table.menu")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredForms.map(form => (
-                    <TableRow key={form.id}>
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{form.name}</p>
-                          <p className="text-xs text-muted-foreground">/{form.slug}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-sm">{form.anew_organizations?.name || "-"}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{getFormTypeLabel(form.form_type)}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="secondary">{form._count?.fields || 0}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="secondary">{form._count?.steps || 0}</Badge>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {form.is_active ? (
-                          <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
-                            <CheckCircle2 className="h-3 w-3 mr-1" />
-                            {t("forms.status.active")}
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary">
-                            <XCircle className="h-3 w-3 mr-1" />
-                            {t("forms.status.inactive")}
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-center">
+              <PermissionGate permission="forms.create">
+                <Button
+                  onClick={() => { resetForm(); setDialogOpen(true); }}
+                  className="mt-2 min-h-[44px] bg-[#85D3BE] text-[#0b3b32] hover:bg-[#6fc4ad]"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  {t("forms.new")}
+                </Button>
+              </PermissionGate>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {filteredForms.map(form => (
+              <Card
+                key={form.id}
+                className="group flex flex-col overflow-hidden transition-all hover:shadow-md hover:border-[#85D3BE]/50"
+              >
+                {/* Accent top border */}
+                <div className="h-1 w-full bg-[#85D3BE]" />
+                <CardContent className="flex flex-1 flex-col gap-4 p-5">
+                  {/* Title row */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-1.5">
                         {form.is_primary && (
-                          <Star className="h-4 w-4 text-yellow-500 mx-auto fill-yellow-500" />
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Star
+                                className="h-4 w-4 shrink-0 fill-yellow-500 text-yellow-500"
+                                aria-label={t("forms.table.primary")}
+                              />
+                            </TooltipTrigger>
+                            <TooltipContent>{t("forms.table.primary")}</TooltipContent>
+                          </Tooltip>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-center gap-1">
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={(e) => copyPublicLink(form, e)}
-                              >
-                                {copiedLinkId === form.id ? (
-                                  <Check className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <Link2 className="h-4 w-4" />
-                                )}
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("forms.tooltip.copyLink")}</TooltipContent>
-                          </Tooltip>
-                          
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openPreview(form)}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("forms.tooltip.preview")}</TooltipContent>
-                          </Tooltip>
-                          
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openBranding(form)}
-                              >
-                                <Palette className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("forms.tooltip.branding")}</TooltipContent>
-                          </Tooltip>
-                          
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openLocation(form)}
-                              >
-                                <MapPin className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{t("forms.tooltip.location")}</TooltipContent>
-                          </Tooltip>
+                        <h3 className="truncate font-semibold leading-tight" title={form.name}>
+                          {form.name}
+                        </h3>
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground" title={`/${form.slug}`}>
+                        /{form.slug}
+                      </p>
+                    </div>
 
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => openIntegrations(form)}
-                              >
-                                <Code className="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Integrações / Embed</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <PermissionGate permission="forms.edit">
-                              <DropdownMenuItem onClick={() => openBuilder(form)}>
-                                <Settings2 className="h-4 w-4 mr-2" />
-                                {t("forms.menu.configureFields")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => openEditDialog(form)}>
-                                <Pencil className="h-4 w-4 mr-2" />
-                                {t("forms.menu.edit")}
-                              </DropdownMenuItem>
-                            </PermissionGate>
-                            <PermissionGate permission="forms.create">
-                              <DropdownMenuItem onClick={() => handleDuplicate(form)}>
-                                <Copy className="h-4 w-4 mr-2" />
-                                {t("forms.menu.duplicate")}
-                              </DropdownMenuItem>
-                            </PermissionGate>
-                            {!form.is_primary && (
-                              <PermissionGate permission="forms.edit">
-                                <DropdownMenuItem onClick={() => handleSetPrimary(form)}>
-                                  <Star className="h-4 w-4 mr-2" />
-                                  {t("forms.menu.setPrimary")}
-                                </DropdownMenuItem>
-                              </PermissionGate>
-                            )}
-                            <PermissionGate permission="forms.edit">
-                              <DropdownMenuItem onClick={() => openIntegrations(form)}>
-                                <Code className="h-4 w-4 mr-2" />
-                                Integrações
-                              </DropdownMenuItem>
-                            </PermissionGate>
-                            <PermissionGate permission="forms.edit">
-                              <DropdownMenuItem onClick={() => openLocales(form)}>
-                                <Globe className="h-4 w-4 mr-2" />
-                                Idiomas
-                              </DropdownMenuItem>
-                            </PermissionGate>
-                            <DropdownMenuSeparator />
-                            <PermissionGate permission="forms.delete">
-                              <DropdownMenuItem 
-                                className="text-destructive"
-                                onClick={() => { setFormToDelete(form); setDeleteDialogOpen(true); }}
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                {t("forms.menu.delete")}
-                              </DropdownMenuItem>
-                            </PermissionGate>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-9 w-9 shrink-0"
+                          aria-label={t("forms.table.menu")}
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <PermissionGate permission="forms.edit">
+                          <DropdownMenuItem onClick={() => openBuilder(form)}>
+                            <Settings2 className="h-4 w-4 mr-2" />
+                            {t("forms.menu.configureFields")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEditDialog(form)}>
+                            <Pencil className="h-4 w-4 mr-2" />
+                            {t("forms.menu.edit")}
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        <PermissionGate permission="forms.create">
+                          <DropdownMenuItem onClick={() => handleDuplicate(form)}>
+                            <Copy className="h-4 w-4 mr-2" />
+                            {t("forms.menu.duplicate")}
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        {!form.is_primary && (
+                          <PermissionGate permission="forms.edit">
+                            <DropdownMenuItem onClick={() => handleSetPrimary(form)}>
+                              <Star className="h-4 w-4 mr-2" />
+                              {t("forms.menu.setPrimary")}
+                            </DropdownMenuItem>
+                          </PermissionGate>
+                        )}
+                        <PermissionGate permission="forms.edit">
+                          <DropdownMenuItem onClick={() => openLocation(form)}>
+                            <MapPin className="h-4 w-4 mr-2" />
+                            {t("forms.tooltip.location")}
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        <PermissionGate permission="forms.edit">
+                          <DropdownMenuItem onClick={() => openIntegrations(form)}>
+                            <Code className="h-4 w-4 mr-2" />
+                            Integrações
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        <PermissionGate permission="forms.edit">
+                          <DropdownMenuItem onClick={() => openLocales(form)}>
+                            <Globe className="h-4 w-4 mr-2" />
+                            Idiomas
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        <DropdownMenuSeparator />
+                        <PermissionGate permission="forms.delete">
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => { setFormToDelete(form); setDeleteDialogOpen(true); }}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            {t("forms.menu.delete")}
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  {/* Badges */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className={formTypeBadgeClass(form.form_type)}>
+                      {getFormTypeLabel(form.form_type)}
+                    </Badge>
+                    {form.is_active ? (
+                      <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        {t("forms.status.active")}
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">
+                        <XCircle className="h-3 w-3 mr-1" />
+                        {t("forms.status.inactive")}
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Counts */}
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                    <span className="flex items-center gap-1.5">
+                      <FileText className="h-4 w-4" />
+                      <span className="font-medium text-foreground">{form._count?.fields || 0}</span>
+                      {t("forms.table.fields")}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <Settings2 className="h-4 w-4" />
+                      <span className="font-medium text-foreground">{form._count?.steps || 0}</span>
+                      {t("forms.table.steps")}
+                    </span>
+                  </div>
+
+                  {/* Quick actions */}
+                  <div className="mt-auto flex items-center gap-1 border-t pt-3">
+                    <PermissionGate permission="forms.edit">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-11 w-11"
+                            onClick={() => openEditDialog(form)}
+                            aria-label={t("forms.menu.edit")}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("forms.menu.edit")}</TooltipContent>
+                      </Tooltip>
+                    </PermissionGate>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-11 w-11"
+                          onClick={() => openBranding(form)}
+                          aria-label={t("forms.tooltip.branding")}
+                        >
+                          <Palette className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("forms.tooltip.branding")}</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-11 w-11"
+                          onClick={() => openPreview(form)}
+                          aria-label={t("forms.tooltip.preview")}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("forms.tooltip.preview")}</TooltipContent>
+                    </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-11 w-11"
+                          onClick={(e) => copyPublicLink(form, e)}
+                          aria-label={t("forms.tooltip.copyLink")}
+                        >
+                          {copiedLinkId === form.id ? (
+                            <Check className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <Link2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{t("forms.tooltip.copyLink")}</TooltipContent>
+                    </Tooltip>
+
+                    <PermissionGate permission="forms.delete">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-11 w-11 text-muted-foreground hover:text-destructive"
+                            onClick={() => { setFormToDelete(form); setDeleteDialogOpen(true); }}
+                            aria-label={t("forms.menu.delete")}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{t("forms.menu.delete")}</TooltipContent>
+                      </Tooltip>
+                    </PermissionGate>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Create/Edit Form Dialog */}
