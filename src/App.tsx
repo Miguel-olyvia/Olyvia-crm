@@ -122,6 +122,7 @@ const ExportAudit = lazy(() => import("./pages/ExportAudit"));
 const SupportAccess = lazy(() => import("./pages/SupportAccess"));
 const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
+const BookingManage = lazy(() => import("./pages/BookingManage"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -168,6 +169,8 @@ const App = () => (
                   <Route path="/campaign/:campaignId" element={<PublicLeadForm />} />
                   <Route path="/test-iframe" element={<TestIframe />} />
                   <Route path="/test-widget" element={<TestWidget />} />
+                  <Route path="/booking/manage" element={<BookingManage />} />
+                  <Route path="/booking/cancel" element={<BookingManage />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
