@@ -1231,6 +1231,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
                 <div>
                   <Label className="text-sm">Status literais associados</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    A lead atinge esta etapa se o campo status for um dos selecionados (usado quando não há condições avançadas em baixo).
+                  </p>
                   <div className="flex flex-wrap gap-1 mt-2">
                     {LEAD_STATUS_OPTIONS.map(opt => {
                       const selected = (editingStage.matching_statuses ?? [editingStage.name]).includes(opt.value);
@@ -1253,7 +1256,12 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                 </div>
 
                 <div>
-                  <Label className="text-sm">Condições de entrada</Label>
+                  <Label className="text-sm">Condições avançadas (motor)</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    A lead atinge esta etapa quando <strong>todas</strong> as condições em <strong>Todas</strong> forem
+                    verdadeiras <strong>E</strong> pelo menos uma das condições em <strong>Qualquer</strong> for verdadeira.
+                    Deixe vazio para usar apenas os status.
+                  </p>
                   <div className="mt-2">
                     <StageRulesEditor
                       value={editingStage.reached_when ?? null}
@@ -1263,21 +1271,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={editingStage.auto_advance ?? false}
-                    onCheckedChange={v => setEditingStage({ ...editingStage, auto_advance: v })}
-                  />
-                  <Label>Auto-avançar quando as condições forem cumpridas</Label>
-                </div>
-
-                <div>
-                  <Label className="text-sm">Contabiliza como</Label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Cada estágio conta apenas para um bucket — ligar um desliga os outros.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-4 mt-2">
-                    <div className="flex items-center gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="rounded-md border p-3 space-y-2">
+                    <Label className="text-sm">Esta etapa contabiliza como</Label>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-normal">Qualificada</Label>
                       <Switch
                         checked={editingStage.counts_as_qualified ?? false}
                         onCheckedChange={v => setEditingStage({
@@ -1288,9 +1286,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                           counts_as_lost: v ? false : editingStage.counts_as_lost,
                         })}
                       />
-                      <Label className="text-sm">Qualificado</Label>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-normal">Em Negociação</Label>
                       <Switch
                         checked={editingStage.counts_as_negotiation ?? false}
                         onCheckedChange={v => setEditingStage({
@@ -1301,9 +1299,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                           counts_as_lost: v ? false : editingStage.counts_as_lost,
                         })}
                       />
-                      <Label className="text-sm">Negociação</Label>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-normal">Convertida</Label>
                       <Switch
                         checked={editingStage.counts_as_converted ?? false}
                         onCheckedChange={v => setEditingStage({
@@ -1314,9 +1312,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                           counts_as_lost: v ? false : editingStage.counts_as_lost,
                         })}
                       />
-                      <Label className="text-sm">Convertido</Label>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-normal">Perdida</Label>
                       <Switch
                         checked={editingStage.counts_as_lost ?? false}
                         onCheckedChange={v => setEditingStage({
@@ -1327,26 +1325,36 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                           counts_as_converted: v ? false : editingStage.counts_as_converted,
                         })}
                       />
-                      <Label className="text-sm">Perdido</Label>
                     </div>
                   </div>
-                </div>
 
-                <div>
-                  <Label className="text-sm">Sugestão de qualificação</Label>
-                  <Select
-                    value={editingStage.qualification_hint ?? "none"}
-                    onValueChange={(v: "none" | "mql" | "sql") => setEditingStage({ ...editingStage, qualification_hint: v })}
-                  >
-                    <SelectTrigger className="w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhuma</SelectItem>
-                      <SelectItem value="mql">MQL</SelectItem>
-                      <SelectItem value="sql">SQL</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="rounded-md border p-3 space-y-3">
+                    <Label className="text-sm">Sugestão de qualificação</Label>
+                    <div className="flex flex-wrap gap-1">
+                      {(["none", "mql", "sql"] as const).map(opt => (
+                        <Badge
+                          key={opt}
+                          variant={(editingStage.qualification_hint ?? "none") === opt ? "default" : "outline"}
+                          className="cursor-pointer text-xs"
+                          onClick={() => setEditingStage({ ...editingStage, qualification_hint: opt })}
+                        >
+                          {opt === "none" ? "Nenhuma" : opt.toUpperCase()}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t">
+                      <div>
+                        <Label className="text-sm font-normal">Auto-avançar</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Permite ao motor mover leads automaticamente para esta etapa.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={editingStage.auto_advance ?? false}
+                        onCheckedChange={v => setEditingStage({ ...editingStage, auto_advance: v })}
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-2 border-t">
