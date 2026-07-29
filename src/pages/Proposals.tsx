@@ -3410,7 +3410,6 @@ const Proposals = () => {
         entityId={callTarget.entityId}
         entityName={callTarget.name}
         organizationId={activeCompany?.id || ""}
-        contactId=""
         onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
       />
       <WhatsAppSendDialog

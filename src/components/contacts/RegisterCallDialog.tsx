@@ -42,7 +42,13 @@ interface RegisterCallDialogProps {
   entityId: string;
   entityName: string;
   organizationId: string;
-  contactId: string;
+  /**
+   * Called after the interaction row is inserted, so the caller can perform
+   * any entity-specific bookkeeping (e.g. updating `anew_contacts.last_interaction_at`
+   * for contacts, or `contact_attempts`/`last_contact_at` for leads).
+   * Receives the ISO timestamp used for the interaction.
+   */
+  onInteractionSaved?: (interactionAt: string) => void | Promise<void>;
   onCallRegistered?: () => void;
   onOpenWhatsApp?: (entityId: string, entityName: string, ctx?: ChannelContext) => void;
   onOpenEmail?: (entityId: string, entityName: string, ctx?: ChannelContext) => void;
@@ -64,7 +70,7 @@ const NEXT_ACTIONS = [
 ];
 
 export function RegisterCallDialog({
-  open, onOpenChange, entityId, entityName, organizationId, contactId, onCallRegistered, onOpenWhatsApp, onOpenEmail,
+  open, onOpenChange, entityId, entityName, organizationId, onInteractionSaved, onCallRegistered, onOpenWhatsApp, onOpenEmail,
 }: RegisterCallDialogProps) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -230,8 +236,12 @@ export function RegisterCallDialog({
       });
       if (error) throw error;
 
-      // Update last_interaction_at on anew_contacts
-      await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", contactId);
+      // Let the caller perform any entity-specific bookkeeping (e.g. updating
+      // anew_contacts.last_interaction_at, or lead contact_attempts/last_contact_at).
+      await onInteractionSaved?.(now);
+
+      // Notify any listeners (e.g. LeadTimelineTab) so the timeline refreshes immediately.
+      window.dispatchEvent(new CustomEvent("entity-interaction-created", { detail: { entityId } }));
 
       // Open WhatsApp or Email dialog if channel selected
       const selectedChannel = needsChannel ? nextActionChannel : null;

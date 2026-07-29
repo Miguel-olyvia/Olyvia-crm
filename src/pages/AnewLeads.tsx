@@ -66,6 +66,8 @@ import { Switch } from "@/components/ui/switch";
 import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkflowConfig";
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
+import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
+import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
 import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
 import { LeadsTableColumns, ColumnConfig, DEFAULT_SYSTEM_COLUMNS } from "@/components/leads/LeadsTableColumns";
@@ -620,6 +622,12 @@ export default function AnewLeads() {
   const [emailTarget, setEmailTarget] = useState<{ id: string; name: string; email: string; leadId?: string; entityId?: string }>({ id: "", name: "", email: "" });
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
+
+  // Compact "Registar atividade" dialog opened from the Timeline tab. Kept
+  // separate from showContactDialog/AnewLeadContactDialog: it must open ON
+  // TOP of the lead detail dialog (not replace it) and stays a lightweight
+  // activity log rather than the full contact/workflow flow.
+  const [showRegisterActivityDialog, setShowRegisterActivityDialog] = useState(false);
 
   const openContactDialogForLead = useCallback((lead: Lead) => {
     setSelectedLead(lead);
@@ -5781,10 +5789,7 @@ export default function AnewLeads() {
                       <LeadTimelineTab
                         entityId={selectedLead.entity_id || null}
                         organizationId={selectedLead.organization_id}
-                        onRegisterCall={() => {
-                          setShowDetails(false);
-                          openContactDialogForLead(selectedLead);
-                        }}
+                        onRegisterCall={() => setShowRegisterActivityDialog(true)}
                         userMap={Object.fromEntries(companyUsers.map(u => [u.id, u.name]))}
                       />
                     </TabsContent>
@@ -6659,6 +6664,34 @@ export default function AnewLeads() {
           companyId={activeCompanyId || null}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
         />
+
+        {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline
+            tab. Renders on top of the lead detail dialog (which stays open). */}
+        {selectedLead?.entity_id && (
+          <RegisterCallDialog
+            open={showRegisterActivityDialog}
+            onOpenChange={setShowRegisterActivityDialog}
+            entityId={selectedLead.entity_id}
+            entityName={getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name}
+            organizationId={selectedLead.organization_id}
+            onInteractionSaved={async () => {
+              const lead = selectedLead;
+              if (!lead) return;
+              const { data: userData } = await supabase.auth.getUser();
+              const businessUserId = await resolveBusinessUserId(userData?.user?.id);
+              await supabase
+                .from("anew_leads")
+                .update({
+                  contact_attempts: (lead.contact_attempts || 0) + 1,
+                  last_contact_at: new Date().toISOString(),
+                  last_contact_by: businessUserId,
+                } as any)
+                .eq("id", lead.id);
+              refreshSingleLead(lead.id);
+            }}
+            onCallRegistered={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          />
+        )}
 
         {/* AI Scheduling Rules Config */}
         <LeadAISchedulingRulesConfig

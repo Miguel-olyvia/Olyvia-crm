@@ -1026,7 +1026,9 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
           entityId={contact.entity_id}
           entityName={[contact.first_name, contact.last_name].filter(Boolean).join(" ")}
           organizationId={contact.organization_id || ""}
-          contactId={contact.id}
+          onInteractionSaved={async (now) => {
+            await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", contact.id);
+          }}
           onCallRegistered={() => { loadContactDetails(); loadEnrichedData(); }}
           onOpenWhatsApp={(_eid, _ename, ctx) => {
             setShowCallDialog(false);

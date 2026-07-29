@@ -2550,7 +2550,11 @@ const AnewClients = () => {
             entityId={callTarget.entityId}
             entityName={callTarget.name}
             organizationId={activeCompany?.id || ""}
-            contactId={callTarget.clientId || ""}
+            onInteractionSaved={async (now) => {
+              if (callTarget.clientId) {
+                await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", callTarget.clientId);
+              }
+            }}
             onCallRegistered={() => { setShowCallDialog(false); setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1); }}
             onOpenWhatsApp={(eid, ename, ctx) => {
               const identity = getIdentity(eid);
