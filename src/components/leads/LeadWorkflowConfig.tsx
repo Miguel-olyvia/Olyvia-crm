@@ -718,9 +718,14 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
   // ─── Reordering (drag-and-drop + up/down buttons) ──────────
   const persistReorder = async (reordered: WorkflowStage[]) => {
-    setStages(reordered);
+    // Reflect the new position in stage_order immediately so the "Ordem"
+    // badge doesn't lag behind the row swap until the next fetch - the RPC
+    // itself derives the persisted order from payload array position, this
+    // only keeps the locally-displayed number in sync with it.
+    const withUpdatedOrder = reordered.map((s, i) => ({ ...s, stage_order: i + 1 }));
+    setStages(withUpdatedOrder);
 
-    const payload: StagePayload[] = reordered.map(toStagePayload);
+    const payload: StagePayload[] = withUpdatedOrder.map(toStagePayload);
     const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao reordenar", description: error.message, variant: "destructive" });
