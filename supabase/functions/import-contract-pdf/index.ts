@@ -94,7 +94,7 @@ serve(async (req) => {
       : `data:application/pdf;base64,${pdfBase64}`;
 
     const response = await callAiGateway({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         temperature: 0.1,
         messages: [
           {

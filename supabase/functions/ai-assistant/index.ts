@@ -15,7 +15,7 @@ import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 
 initSentry();
 
-const MODEL = "google/gemini-2.5-flash";
+const MODEL = "gemini-2.5-flash";
 
 // Matches the real request body sent by src/components/AIAssistant.tsx
 // (messages/conversationId/userId/organizationId/language/currentContext/

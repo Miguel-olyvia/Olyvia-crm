@@ -58,7 +58,7 @@
  *   following the nif-reveal / fiscal-entity-resolve pattern:
  *     - export a `handleSuggestScheduleAssigneeRequest(req, deps)` function
  *       taking an injected Supabase client (or client factory) and any other
- *       env-derived config (AI_GATEWAY_API_KEY, rate-limit client) as `deps`;
+ *       env-derived config (GEMINI_API_KEY, rate-limit client) as `deps`;
  *     - keep `index.ts` as a 5-10 line file that only builds real deps and
  *       calls `Deno.serve` with the handler;
  *     - then this file could import handler.ts directly (no Deno.serve, no
@@ -289,10 +289,10 @@ Deno.test({
     "Currently not runnable: suggest-schedule-assignee/index.ts has no handler.ts, so the real " +
     "request handling logic (auth, org-scope validation, all Supabase reads, the AI gateway call) " +
     "cannot be invoked in a test process without executing Deno.serve and requiring real env vars " +
-    "(SUPABASE_URL, SUPABASE_ANON_KEY/SERVICE_ROLE_KEY, AI_GATEWAY_API_KEY) and a real Supabase client. " +
+    "(SUPABASE_URL, SUPABASE_ANON_KEY/SERVICE_ROLE_KEY, GEMINI_API_KEY) and a real Supabase client. " +
     "To unpend: extract a `handleSuggestScheduleAssigneeRequest(req, deps)` from index.ts " +
     "(same pattern as nif-reveal/handler.ts and fiscal-entity-resolve/handler.ts), injecting the " +
-    "Supabase client(s) and AI_GATEWAY_API_KEY via `deps`, then drive this scenario through that " +
+    "Supabase client(s) and GEMINI_API_KEY via `deps`, then drive this scenario through that " +
     "function with two independent mock Supabase clients/datasets (one per org) and two distinct " +
     "caller identities.",
   ignore: true,

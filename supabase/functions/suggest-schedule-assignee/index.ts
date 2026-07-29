@@ -386,7 +386,7 @@ serve(async (req) => {
     });
 
     // 6. Use AI to analyze and suggest best assignees
-    if (!Deno.env.get("AI_GATEWAY_API_KEY")) {
+    if (!Deno.env.get("GEMINI_API_KEY")) {
       // Fallback without AI
       const availableAssignees = assigneeSchedules
         .filter(assignee => {
@@ -498,7 +498,7 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
 ]`;
 
     const aiResponse = await callAiGateway({
-      model: "google/gemini-3-flash",
+      model: "gemini-3-flash-preview",
       messages: [
         { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
         { role: "user", content: prompt }

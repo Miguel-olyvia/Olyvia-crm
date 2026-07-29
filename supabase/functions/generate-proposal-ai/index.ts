@@ -162,7 +162,7 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
       : "Gera uma proposta personalizada com base no histórico completo.";
 
     const response = await callAiGateway({
-      model: "google/gemini-3-flash",
+      model: "gemini-3-flash-preview",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
