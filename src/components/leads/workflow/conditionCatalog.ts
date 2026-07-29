@@ -124,7 +124,7 @@ export const CONDITION_CATALOG: CatalogRow[] = [
     build: () => ({ type: "has_proposal_accepted" }), matches: c => c.type === "has_proposal_accepted" },
   {
     key: "has_needs_assessment_done",
-    label: "Levantamento de necessidades concluído (aproximado)",
+    label: "Levantamento de necessidades concluído",
     build: () => ({ type: "has_needs_assessment_done" }),
     matches: c => c.type === "has_needs_assessment_done",
     // Aproximação: proxy via deal_needs.status = 'orcamentado' num deal
