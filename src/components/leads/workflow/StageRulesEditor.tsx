@@ -83,6 +83,18 @@ export function StageRulesEditor({ value, onChange, organizationId, compact }: S
           />
           <Label htmlFor={inputId} className="text-sm font-normal cursor-pointer truncate">
             {row.label}
+            {row.sentiment && (
+              <span
+                className={cn(
+                  "ml-1.5 rounded px-1 py-0.5 text-[10px] font-medium",
+                  row.sentiment === "pos"
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                    : "bg-red-500/15 text-red-600 dark:text-red-400"
+                )}
+              >
+                {row.sentiment}
+              </span>
+            )}
             {row.approximate && (
               <Tooltip>
                 <TooltipTrigger asChild>

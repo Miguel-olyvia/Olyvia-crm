@@ -64,6 +64,8 @@ export interface CatalogRow {
   numericParam?: NumericParam;
   /** Set for conditions that are only an approximation of the stated fact - see catalog row for details. */
   approximate?: boolean;
+  /** Set on "Último resultado de contacto" rows from the source lead_contact_results.is_positive/is_negative flags. */
+  sentiment?: "pos" | "neg";
 }
 
 /**
@@ -164,6 +166,8 @@ export const CONDITION_CATALOG: CatalogRow[] = [
 export interface ContactResultCatalogSource {
   id: string;
   name: string;
+  is_positive?: boolean;
+  is_negative?: boolean;
 }
 
 /**
@@ -181,6 +185,7 @@ export function buildContactResultCatalogRows(results: ContactResultCatalogSourc
     label: result.name,
     build: () => ({ type: "last_contact_result_is", value: result.id }),
     matches: c => c.type === "last_contact_result_is" && c.value === result.id,
+    sentiment: result.is_positive ? "pos" : result.is_negative ? "neg" : undefined,
   }));
 }
 
