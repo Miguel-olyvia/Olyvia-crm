@@ -17,6 +17,32 @@ initSentry();
 
 const MODEL = "google/gemini-2.5-flash";
 
+// Matches the real request body sent by src/components/AIAssistant.tsx
+// (messages/conversationId/userId/organizationId/language/currentContext/
+// pendingTool) - conversationId/userId aren't consumed here but are allowed
+// through since z.object() strips unrecognized keys rather than rejecting them.
+const requestSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant", "system"]),
+        content: z.string(),
+      }),
+    )
+    .default([]),
+  language: z.string().optional(),
+  organizationId: z.string().nullable().optional(),
+  companyId: z.string().nullable().optional(),
+  currentContext: z.record(z.unknown()).nullable().optional(),
+  pendingTool: z
+    .object({
+      name: z.string(),
+      args: z.record(z.unknown()).optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
 // Authenticated AI assistant — persistent (DB-backed) rate limit per user, to
 // bound AI-gateway cost/abuse even though the caller is already authenticated.
 const RATE_LIMIT_BUCKET = "ai-assistant";
