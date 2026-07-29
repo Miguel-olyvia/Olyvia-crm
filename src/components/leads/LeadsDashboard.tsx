@@ -24,7 +24,6 @@ import {
   CalendarRange,
   Clock,
   Filter,
-  LayoutGrid,
   Mail,
   MessageCircle,
   PhoneCall,
@@ -43,12 +42,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -879,39 +872,6 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               })}
             </>
           )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1 mt-0.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                aria-label="Alternar entre vista de Leads e Pipeline"
-                title={dashboardView === "pipeline" ? "Vista: Pipeline" : "Vista: Leads"}
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setDashboardView("leads")}>
-                {dashboardView === "leads" ? "✓ Leads" : "Leads"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setDashboardView("pipeline")}>
-                {dashboardView === "pipeline" ? "✓ Pipeline" : "Pipeline"}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            aria-label="Filtros de período"
-            title="Filtros de período"
-            onClick={() => setIsFiltersOpen((previous) => !previous)}
-          >
-            <Filter className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
