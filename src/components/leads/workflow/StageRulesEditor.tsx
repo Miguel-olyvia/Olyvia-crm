@@ -128,7 +128,7 @@ export function StageRulesEditor({ value, onChange, organizationId, compact }: S
   };
 
   const renderColumn = (bucket: "all" | "any", title: string, tooltip: string) => (
-    <div className="flex-1 min-w-0 rounded-md border">
+    <div key={bucket} className="flex-1 min-w-0 rounded-md border">
       <Tooltip>
         <TooltipTrigger asChild>
           <div className="border-b bg-muted/50 px-3 py-2 text-xs font-semibold cursor-help">
