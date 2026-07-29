@@ -540,7 +540,10 @@ export default function AnewLeads() {
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<import("@/components/shared/DuplicateEntityDialog").DuplicateMatch[]>([]);
   const [pendingLeadData, setPendingLeadData] = useState<{ entityId: string; fieldValues: Record<string, any>; assignedTo: string | null; resolvedRootOrgId: string | null; createdBy: string; displayName: string; emailValue: string; phoneValue: string; allFieldDefs: any[] } | null>(null);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "list" | "kanban">("list");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "list">("list");
+  // Kanban is now a view toggle inside the "list" tab's toolbar, not its own
+  // top-level tab — see the segmented Lista/Kanban toggle above the leads table.
+  const [leadsSubView, setLeadsSubView] = useState<"list" | "kanban">("list");
   const [detailTab, setDetailTab] = useState("info");
   const [showFilters, setShowFilters] = useState(true);
   
@@ -2082,10 +2085,10 @@ export default function AnewLeads() {
   // as the list/status-counts effect above), so switching to the kanban tab
   // always shows the same filtered set as the list and the dashboard.
   useEffect(() => {
-    if (activeTab !== "kanban" || !activeCompanyId || scopeLoading) return;
+    if (activeTab !== "list" || leadsSubView !== "kanban" || !activeCompanyId || scopeLoading) return;
     loadKanbanLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -4500,9 +4503,9 @@ export default function AnewLeads() {
         )}
 
         {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list" | "kanban")} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "dashboard" | "list")} className="space-y-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <TabsList className="grid w-full max-w-sm grid-cols-3">
+            <TabsList className="grid w-full max-w-sm grid-cols-2">
               <TabsTrigger value="dashboard" className="flex items-center gap-2">
                 <BarChart3 className="h-4 w-4" />
                 {t('leads.tabs.dashboard')}
@@ -4510,10 +4513,6 @@ export default function AnewLeads() {
               <TabsTrigger value="list" className="flex items-center gap-2">
                 <List className="h-4 w-4" />
                 {t('leads.tabs.list')}
-              </TabsTrigger>
-              <TabsTrigger value="kanban" className="flex items-center gap-2">
-                <Columns3 className="h-4 w-4" />
-                {t('leads.tabs.kanban')}
               </TabsTrigger>
             </TabsList>
             
@@ -4534,6 +4533,7 @@ export default function AnewLeads() {
                   setDateFrom(undefined);
                   setDateTo(undefined);
                   setActiveTab("list");
+                  setLeadsSubView("list");
                 }}
               >
                 <div className="w-2 h-2 rounded-full bg-primary"></div>
@@ -4624,65 +4624,6 @@ export default function AnewLeads() {
             />
           </TabsContent>
 
-          {/* Kanban Tab */}
-          <TabsContent value="kanban" className="space-y-4 mt-6">
-            {kanbanTruncated && (
-              <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md px-3 py-2">
-                A mostrar as {KANBAN_LEADS_LIMIT} leads mais recentes que correspondem aos filtros atuais. Refina os filtros para ver leads mais antigas.
-              </div>
-            )}
-            {kanbanLoading ? (
-              <div className="flex items-center justify-center py-16 text-muted-foreground">
-                A carregar kanban...
-              </div>
-            ) : workflowStages.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-muted-foreground">
-                Configura as fases do workflow de leads para usar o kanban.
-              </div>
-            ) : (
-              <LeadsKanbanView
-                leads={kanbanLeads.map(lead => {
-                  const phone = extractPhoneFromLead(lead.field_values);
-                  const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                  const name = identity?.first_name && identity?.last_name
-                    ? `${identity.first_name} ${identity.last_name}`
-                    : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                  const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
-                  return {
-                    id: lead.id,
-                    created_at: lead.created_at,
-                    campaigns: lead.campaigns,
-                    assigned_user: lead.assigned_user,
-                    name,
-                    phone,
-                    email: email || null,
-                  };
-                })}
-                stages={workflowStages.filter(s => s.is_active !== false)}
-                getStageIdForLead={(leadId) => {
-                  const lead = kanbanLeads.find(l => l.id === leadId);
-                  if (!lead) return undefined;
-                  // Prefer workflow_stage_id (kept in sync with the configurable rule
-                  // engine by recompute_leads_v2_buckets / auto_advance - see
-                  // migrations 20261110540000/20261110570000) so the Kanban obeys
-                  // whatever reached_when rules the org has configured, not just the
-                  // raw literal status. Falls back to a literal-status match only for
-                  // leads that were never resolved (workflow_stage_id still null).
-                  const stageId = (lead as any).workflow_stage_id as string | null | undefined;
-                  if (stageId && workflowStages.some(s => s.id === stageId)) {
-                    return stageId;
-                  }
-                  const effectiveStatus = getEffectiveStatus(lead);
-                  return workflowStages.find(s => s.name === effectiveStatus)?.id;
-                }}
-                onStageDrop={handleKanbanStageDrop}
-                onViewDetails={(leadId) => {
-                  const lead = kanbanLeads.find(l => l.id === leadId);
-                  if (lead) handleRowViewDetails(lead);
-                }}
-              />
-            )}
-          </TabsContent>
 
           {/* List Tab */}
           <TabsContent value="list" className="space-y-6 mt-6">
@@ -5134,11 +5075,31 @@ export default function AnewLeads() {
               isUpdating={isBulkUpdating}
             />
 
-            {/* Leads Table */}
-            <Card data-leads-table className="flex flex-col max-h-[calc(100vh-280px)] overflow-hidden">
-              <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span>{filteredLeads.length} leads</span>
+            {/* Leads Table / Kanban toggle */}
+            <div className="flex items-center justify-between p-4 border-b flex-shrink-0" data-leads-table>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>{filteredLeads.length} leads</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 border rounded-md p-0.5">
+                  <Button
+                    size="sm"
+                    variant={leadsSubView === "list" ? "default" : "ghost"}
+                    className="h-7 gap-1.5 px-2"
+                    onClick={() => setLeadsSubView("list")}
+                  >
+                    <List className="h-3.5 w-3.5" />
+                    Lista
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={leadsSubView === "kanban" ? "default" : "ghost"}
+                    className="h-7 gap-1.5 px-2"
+                    onClick={() => setLeadsSubView("kanban")}
+                  >
+                    <Columns3 className="h-3.5 w-3.5" />
+                    Kanban
+                  </Button>
                 </div>
                 <LeadsTableColumns
                   campaignId={campaignFilter !== "all" ? campaignFilter : undefined}
@@ -5146,6 +5107,10 @@ export default function AnewLeads() {
                   onColumnsChange={setVisibleColumns}
                 />
               </div>
+            </div>
+
+            {leadsSubView === "list" && (
+            <Card className="flex flex-col max-h-[calc(100vh-280px)] overflow-hidden">
               <div
                 ref={leadsTableScrollRef}
                 className="flex-1 min-h-0 overflow-auto leads-table-scroll"
@@ -5414,6 +5379,68 @@ export default function AnewLeads() {
                   </div>
               </div>
             </Card>
+            )}
+
+            {leadsSubView === "kanban" && (
+              <div className="space-y-4">
+                {kanbanTruncated && (
+                  <div className="text-xs text-muted-foreground bg-muted/50 border rounded-md px-3 py-2">
+                    A mostrar as {KANBAN_LEADS_LIMIT} leads mais recentes que correspondem aos filtros atuais. Refina os filtros para ver leads mais antigas.
+                  </div>
+                )}
+                {kanbanLoading ? (
+                  <div className="flex items-center justify-center py-16 text-muted-foreground">
+                    A carregar kanban...
+                  </div>
+                ) : workflowStages.length === 0 ? (
+                  <div className="flex items-center justify-center py-16 text-muted-foreground">
+                    Configura as fases do workflow de leads para usar o kanban.
+                  </div>
+                ) : (
+                  <LeadsKanbanView
+                    leads={kanbanLeads.map(lead => {
+                      const phone = extractPhoneFromLead(lead.field_values);
+                      const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+                      const name = identity?.first_name && identity?.last_name
+                        ? `${identity.first_name} ${identity.last_name}`
+                        : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+                      const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                      return {
+                        id: lead.id,
+                        created_at: lead.created_at,
+                        campaigns: lead.campaigns,
+                        assigned_user: lead.assigned_user,
+                        name,
+                        phone,
+                        email: email || null,
+                      };
+                    })}
+                    stages={workflowStages.filter(s => s.is_active !== false)}
+                    getStageIdForLead={(leadId) => {
+                      const lead = kanbanLeads.find(l => l.id === leadId);
+                      if (!lead) return undefined;
+                      // Prefer workflow_stage_id (kept in sync with the configurable rule
+                      // engine by recompute_leads_v2_buckets / auto_advance - see
+                      // migrations 20261110540000/20261110570000) so the Kanban obeys
+                      // whatever reached_when rules the org has configured, not just the
+                      // raw literal status. Falls back to a literal-status match only for
+                      // leads that were never resolved (workflow_stage_id still null).
+                      const stageId = (lead as any).workflow_stage_id as string | null | undefined;
+                      if (stageId && workflowStages.some(s => s.id === stageId)) {
+                        return stageId;
+                      }
+                      const effectiveStatus = getEffectiveStatus(lead);
+                      return workflowStages.find(s => s.name === effectiveStatus)?.id;
+                    }}
+                    onStageDrop={handleKanbanStageDrop}
+                    onViewDetails={(leadId) => {
+                      const lead = kanbanLeads.find(l => l.id === leadId);
+                      if (lead) handleRowViewDetails(lead);
+                    }}
+                  />
+                )}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
 
