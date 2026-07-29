@@ -77,13 +77,13 @@ Antes de aplicar alterações na base de dados ativa:
 
 ### Secrets das Edge Functions
 
-As funcionalidades de IA (`ai-assistant`, `chat-widget-ai`, `quote-ai-assistant`, `generate-proposal-ai`, `import-contract-pdf`, `suggest-schedule-assignee`) chamam o Google Gemini através de `supabase/functions/_shared/aiGateway.ts`, que requer o secret `GEMINI_API_KEY` configurado no projeto Supabase:
+As funcionalidades de IA (`ai-assistant`, `chat-widget-ai`, `quote-ai-assistant`, `generate-proposal-ai`, `import-contract-pdf`, `suggest-schedule-assignee`, `leads-dashboard-ai-report`) chamam a Vercel AI Gateway (endpoint OpenAI-compatible, atualmente a encaminhar para modelos Google Gemini) através de `supabase/functions/_shared/aiGateway.ts`, que requer o secret `AI_GATEWAY_API_KEY` configurado no projeto Supabase:
 
 ```bash
-supabase secrets set GEMINI_API_KEY="your-key-here"
+supabase secrets set AI_GATEWAY_API_KEY="your-key-here"
 ```
 
-Obtém uma chave em https://aistudio.google.com/apikey.
+Obtém uma chave em https://vercel.com/ai-gateway.
 
 ## Branches
 

@@ -10,7 +10,7 @@
  *   - Auth: resolveCallerIdentity + validateOrgScope (../_shared/auth.ts)
  *     instead of Lovable's unauthenticated function.
  *   - LLM: the shared aiGateway helper (../_shared/aiGateway.ts), which
- *     targets this repo's real provider (Gemini via GEMINI_API_KEY),
+ *     targets Vercel AI Gateway (via AI_GATEWAY_API_KEY),
  *     instead of Lovable's ai.gateway.lovable.dev + LOVABLE_API_KEY.
  *   - Schema: anew_leads is this repo's single fused leads/contacts table;
  *     nothing here queries a separate contacts table.
@@ -32,7 +32,7 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 
 initSentry();
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "google/gemini-2.5-flash";
 
 // Authenticated, per-user feature — persistent (DB-backed) rate limit bounds
 // AI-gateway cost/abuse the same way ai-assistant does.

@@ -15,7 +15,7 @@ import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 
 initSentry();
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "google/gemini-2.5-flash";
 
 // Authenticated AI assistant — persistent (DB-backed) rate limit per user, to
 // bound AI-gateway cost/abuse even though the caller is already authenticated.
