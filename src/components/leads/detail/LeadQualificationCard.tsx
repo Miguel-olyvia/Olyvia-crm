@@ -23,11 +23,11 @@ interface LeadQualificationCardProps {
 const QUALIFICATION_COPY: Record<QualificationType, { title: string; description: string }> = {
   mql: {
     title: "MQL — Marketing Qualified Lead",
-    description: "Demonstrou interesse (ex: conteúdos, formulário) mas ainda não valida orçamento/urgência para venda.",
+    description: "Demonstrou interesse (formulário, download, pedido de info) mas ainda não está pronto para comprar. Precisa de nutrição antes de passar ao comercial.",
   },
   sql: {
     title: "SQL — Sales Qualified Lead",
-    description: "Já reúne critérios comerciais (orçamento, autoridade, necessidade, prazo) para avançar para negociação.",
+    description: "Já validada pelo comercial: tem intenção, orçamento e timing para avançar. Pronta para receber proposta.",
   },
 };
 
@@ -40,12 +40,6 @@ export function LeadQualificationCard({
 
   const confirmedType: QualificationType | null =
     localOverride ?? (lead.qualification_type === "mql" || lead.qualification_type === "sql" ? lead.qualification_type : null);
-
-  // Nothing to show: already classified leads are shown as confirmed below,
-  // but unclassified leads with no hint have nothing worth suggesting.
-  if (!confirmedType && (!qualificationHint || qualificationHint === "none")) {
-    return null;
-  }
 
   const handleClassify = async (type: QualificationType) => {
     if (!lead?.id || saving) return;
@@ -129,11 +123,15 @@ export function LeadQualificationCard({
                 disabled={saving !== null}
                 onClick={() => handleClassify(type)}
               >
-                {saving === type ? "A classificar..." : `Marcar como ${type.toUpperCase()}`}
+                {saving === type ? "A classificar..." : type.toUpperCase()}
               </Button>
             ))}
           </div>
         </div>
+        <p className="text-xs text-muted-foreground -mt-1">
+          Marca como <strong>MQL</strong> quando o interesse está demonstrado (ex.: visita agendada). Promove a{" "}
+          <strong>SQL</strong> quando estiver pronta para receber proposta.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {(["mql", "sql"] as const).map((type) => {
             const isSuggested = suggested === type;
