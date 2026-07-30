@@ -32,7 +32,7 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 
 initSentry();
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-flash-latest";
 
 // Authenticated, per-user feature — persistent (DB-backed) rate limit bounds
 // AI-gateway cost/abuse the same way ai-assistant does.
@@ -303,7 +303,10 @@ Exactamente 3 bullets accionáveis para a semana seguinte.`;
       const text = await aiRes.text();
       console.error("leads-dashboard-ai-report: AI gateway error", aiRes.status, text);
       return new Response(
-        JSON.stringify({ error: "ai_gateway_error", status: aiRes.status }),
+        // `detail` surfaces the real upstream error text (already logged
+        // server-side above) so it's visible in "Detalhes técnicos" without
+        // needing Edge Function log access to diagnose provider-side issues.
+        JSON.stringify({ error: "ai_gateway_error", status: aiRes.status, detail: text }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
