@@ -176,21 +176,13 @@ Deno.serve(async (req) => {
     }
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, rateLimitIdentifier);
 
-    // Capabilities block — fonte canónica = TOOLS no registry, gerado em runtime
-    // para que o prompt da BD nunca tenha de listar nomes de tools.
-    const capabilitiesBlock = (() => {
-      const lines = TOOLS
-        .map((t: any) => {
-          const fn = t?.function;
-          if (!fn?.name) return null;
-          const desc = (fn.description || "").replace(/\s+/g, " ").trim();
-          return `- ${fn.name}: ${desc}`;
-        })
-        .filter(Boolean) as string[];
-      return `## CAPACIDADES (auto)\nFerramentas reais disponíveis nesta sessão. Usa estes nomes exactos; se algo não está aqui, não existe.\n${lines.join("\n")}`;
-    })();
-
-    const systemPrompt = await fetchSystemPrompt(supabase, capabilitiesBlock);
+    // The full tool catalog (names, descriptions, parameter schemas) is
+    // already sent to Gemini via the `tools` field on every callAiGateway
+    // invocation below, which is what actually drives function-calling -
+    // restating tool names/descriptions again as plain text in the system
+    // prompt (the previous `capabilitiesBlock`) was pure duplicate content,
+    // costing ~5.7k tokens per call for zero added capability. Removed.
+    const systemPrompt = await fetchSystemPrompt(supabase);
     const helpKnowledge = await fetchHelpKnowledge(supabase, language);
     const deepLinksFormat = `\n\n## DEEP LINKS:\nQuando incluíres links no texto, usa formato markdown [Texto](/caminho). O frontend deteta automaticamente. Para abrir um ecrã sem fazer outra ação, usa a ferramenta navigate.`;
 
