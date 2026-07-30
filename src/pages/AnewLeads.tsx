@@ -2,6 +2,11 @@ import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "rea
 import { useQuery } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
+import {
+  resolveLeadDialogFieldDefinitions,
+  createSupabaseLeadDialogFieldDefinitionResolverClient,
+  type LeadDialogFieldDefinition,
+} from "@/lib/leads/fieldDefinitions";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -341,6 +346,38 @@ function buildLeadsBaseQuery(params: {
   }
 
   return applyLeadsServerFilters(query, params.filters);
+}
+
+// Shared resolver client for lead field definitions (used by the "Formulários"
+// tab of the lead detail dialog to resolve field_key -> field_label per
+// submission's campaign), following the same module-level pattern used in
+// AnewLeadContactDialog.tsx.
+const leadFormsFieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
+
+// Fallback labels for the "Formulários" tab when an org has no explicit
+// lead_field_definitions row for a key (e.g. manual-source leads with no
+// campaign) - mirrors LeadTimelineTab.tsx's FIELD_LABELS convention. Beyond
+// this small common set, an unresolved key is humanized (snake_case -> Title
+// Case) rather than ever shown raw.
+const COMMON_FORM_FIELD_LABELS: Record<string, string> = {
+  first_name: "Primeiro Nome",
+  last_name: "Apelido",
+  display_name: "Nome",
+  email: "Email",
+  phone: "Telefone",
+  phone_number: "Telefone",
+  morada: "Morada",
+  address: "Morada",
+  cidade: "Localidade",
+  city: "Localidade",
+  codigo_postal: "Código Postal",
+  postal_code: "Código Postal",
+  source: "Origem",
+  notes: "Notas",
+};
+
+function humanizeFormFieldKey(key: string): string {
+  return COMMON_FORM_FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export default function AnewLeads() {
@@ -741,6 +778,81 @@ export default function AnewLeads() {
   const leadDetailDeals = leadDetailFinanceData?.deals || [];
   const leadDetailProposals = leadDetailFinanceData?.proposals || [];
   const leadDetailQuotes = leadDetailFinanceData?.quotes || [];
+
+  // "Formulários" tab — every anew_leads row sharing this lead's entity_id
+  // that carries actual submitted field_values (i.e. one card per form
+  // submission tied to the same underlying person/entity, including this
+  // lead's own submission). Read-only, scoped by entity_id + RLS, same
+  // convention as the deals/proposals/quotes query above.
+  const { data: leadDetailFormSubmissions = [], isLoading: leadDetailFormsLoading } = useQuery({
+    queryKey: ["lead-detail-form-submissions", leadDetailEntityId, leadDetailOrganizationId],
+    queryFn: async () => {
+      const entityId = leadDetailEntityId as string;
+
+      const { data } = await supabase
+        .from("anew_leads")
+        .select("id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")
+        .eq("entity_id", entityId)
+        .is("deleted_at", null)
+        .not("field_values", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      const submissions = (data || []).filter((row: any) => {
+        const keys = Object.keys(row.field_values || {}).filter((key) => key !== "_meta");
+        return keys.length > 0;
+      });
+
+      const campaignIds = Array.from(
+        new Set(submissions.map((row: any) => row.campaign_id).filter(Boolean)),
+      ) as string[];
+      // Manual-source submissions carry no campaign_id - resolve those against
+      // the org's own field definitions instead of leaving them unlabeled.
+      const hasNoCampaignSubmission = submissions.some((row: any) => !row.campaign_id);
+
+      const definitionsByCampaign: Record<string, LeadDialogFieldDefinition[]> = {};
+      await Promise.all([
+        ...campaignIds.map(async (campaignId) => {
+          definitionsByCampaign[campaignId] = await resolveLeadDialogFieldDefinitions(
+            { campaignId, organizationId: leadDetailOrganizationId },
+            leadFormsFieldDefinitionResolverClient,
+          );
+        }),
+        hasNoCampaignSubmission
+          ? (async () => {
+              definitionsByCampaign["__org__"] = await resolveLeadDialogFieldDefinitions(
+                { organizationId: leadDetailOrganizationId },
+                leadFormsFieldDefinitionResolverClient,
+              );
+            })()
+          : Promise.resolve(),
+      ]);
+
+      // ref_district fields store a district UUID - resolve those to real
+      // names once, same lookup AnewLeadContactDialog.tsx already uses.
+      const allDefinitions = Object.values(definitionsByCampaign).flat();
+      const districtFieldKeys = new Set(
+        allDefinitions.filter((d) => d.field_type === "ref_district").map((d) => d.field_key),
+      );
+      let districtNameById: Record<string, string> = {};
+      if (districtFieldKeys.size > 0) {
+        const { data: districts } = await supabase
+          .from("administrative_divisions")
+          .select("id, name")
+          .eq("admin_level", 1);
+        districtNameById = Object.fromEntries((districts || []).map((d: any) => [d.id, d.name]));
+      }
+
+      return submissions.map((row: any) => {
+        const definitions = row.campaign_id
+          ? definitionsByCampaign[row.campaign_id] || []
+          : definitionsByCampaign["__org__"] || [];
+        const fieldLabels = Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
+        return { ...row, fieldLabels, districtFieldKeys, districtNameById };
+      });
+    },
+    enabled: showDetails && !!leadDetailEntityId,
+  });
 
   // Dedicated query for today's callbacks (independent of pagination/filters).
   // Ensures the banner reflects ALL callbacks scheduled for today, not only the page rows.
@@ -5585,6 +5697,7 @@ export default function AnewLeads() {
                     <div className="overflow-x-auto">
                       <TabsList className="inline-flex w-auto min-w-full">
                         <TabsTrigger value="info">Info</TabsTrigger>
+                        <TabsTrigger value="forms">Formulários ({leadDetailFormSubmissions.length})</TabsTrigger>
                         <TabsTrigger value="edit">Editar</TabsTrigger>
                         <TabsTrigger value="deals">Negócios</TabsTrigger>
                         <TabsTrigger value="quotes">Orçamentos</TabsTrigger>
@@ -5642,6 +5755,55 @@ export default function AnewLeads() {
                         onAssociateClient={handleAssociateClient}
                         leadId={selectedLead.id}
                       />
+                    </TabsContent>
+
+                    {/* TAB: FORMS */}
+                    <TabsContent value="forms" className="mt-4">
+                      {leadDetailFormsLoading ? (
+                        <div className="flex justify-center py-8"><OlyviaLoader size={20} inline /></div>
+                      ) : leadDetailFormSubmissions.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-8">Sem submissões de formulário associadas a esta lead</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {leadDetailFormSubmissions.map((submission: any) => {
+                            const entries = Object.entries(submission.field_values || {}).filter(
+                              ([key]) => key !== "_meta",
+                            );
+                            const statusLabel = statusToStageMap[submission.status] || submission.status;
+                            return (
+                              <Card key={submission.id}>
+                                <CardContent className="py-3 px-4 space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <p className="text-sm font-medium">{submission.campaigns?.name || "Sem campanha"}</p>
+                                    <div className="flex items-center gap-2">
+                                      {submission.source && <span className="text-[10px] text-muted-foreground">{submission.source}</span>}
+                                      {statusLabel && <Badge variant="outline" className="text-[10px] capitalize">{statusLabel}</Badge>}
+                                      {submission.created_at && (
+                                        <span className="text-[10px] text-muted-foreground">
+                                          {new Date(submission.created_at).toLocaleString("pt-PT")}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+                                    {entries.map(([key, value]) => {
+                                      const resolvedValue = submission.districtFieldKeys?.has(key)
+                                        ? submission.districtNameById?.[value as string] ?? value
+                                        : value;
+                                      return (
+                                        <div key={key} className="flex items-baseline justify-between gap-2 text-xs border-b border-dashed py-1">
+                                          <span className="text-muted-foreground">{submission.fieldLabels?.[key] || humanizeFormFieldKey(key)}</span>
+                                          <span className="font-medium text-right">{sanitizeFieldValue(resolvedValue)}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      )}
                     </TabsContent>
 
                     {/* TAB: EDIT */}
