@@ -28,7 +28,13 @@ const requestSchema = z.object({
   district_id: z.string().uuid().optional(),
   field_values: z.record(z.unknown()),
   campaign_id: z.string().optional(),
-  source_id: z.string().optional(),
+  // Nullable: PublicLeadForm.tsx sends `source_id: resolvedSourceId || null`
+  // whenever no tracking source resolved (the normal case for an organic/
+  // direct visit) - .optional() alone only accepts undefined, rejecting the
+  // real null the client sends with a 400. Same bug class fixed earlier
+  // today in create-lead/index.ts's source_id/sourceId fields; line 409
+  // below already treats null as the correct "no source" value.
+  source_id: z.string().optional().nullable(),
   lead_id: z.string().optional(),
   lang: z.string().optional(),
 });
