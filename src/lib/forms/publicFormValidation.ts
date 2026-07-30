@@ -21,6 +21,7 @@ export interface ValidatableField {
   field_type: string;
   is_required: boolean;
   is_multi_select?: boolean;
+  display_style?: string;
   min_length?: number | null;
   max_length?: number | null;
   min_value?: number | null;
@@ -61,7 +62,13 @@ function safeRegExp(pattern: string): RegExp | null {
 function buildFieldSchema(field: ValidatableField): z.ZodTypeAny {
   const label = field.field_label || field.field_key;
 
-  if (field.is_multi_select) {
+  // Checkbox-style fields are rendered/stored as string arrays via
+  // handleMultiSelectChange in PublicLeadForm.tsx regardless of is_multi_select
+  // (see the render condition at PublicLeadForm.tsx ~line 1599:
+  // `field.is_multi_select || displayStyle === 'checkbox'`) - mirror that
+  // exact condition here, or a checkbox field with is_multi_select=false gets
+  // validated as a plain string against an array value and always fails.
+  if (field.is_multi_select || field.display_style === "checkbox") {
     // Multi-select values are string arrays; only bounds checks apply.
     let schema = z.array(z.string());
     if (typeof field.min_length === "number") {

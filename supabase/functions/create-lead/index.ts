@@ -9,8 +9,14 @@ const requestSchema = z.object({
   step_number: z.number().optional(),
   field_values: z.record(z.unknown()).optional(),
   source: z.string().optional(),
-  source_id: z.string().uuid().optional(),
-  sourceId: z.string().uuid().optional(),
+  // Nullable because PublicLeadForm.tsx sends `source_id: resolvedSourceId ||
+  // null` whenever no source resolved for this visit (the common case) -
+  // .optional() alone only accepts undefined, rejecting the real null the
+  // client sends and blocking every such submission with a 400. Line ~145
+  // already treats `?? null` as the correct "no source" fallback, so this
+  // just matches validation to the behavior that was already assumed.
+  source_id: z.string().uuid().optional().nullable(),
+  sourceId: z.string().uuid().optional().nullable(),
   notes: z.string().optional(),
   tags: z.array(z.string()).optional(),
   from_chat_widget: z.boolean().optional(),
