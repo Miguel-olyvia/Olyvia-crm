@@ -32,7 +32,7 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 
 initSentry();
 
-const MODEL = "gemini-3.5-flash";
+const MODEL = "gemini-3.5-flash-lite";
 
 // Authenticated, per-user feature — persistent (DB-backed) rate limit bounds
 // AI-gateway cost/abuse the same way ai-assistant does.
