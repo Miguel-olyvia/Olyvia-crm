@@ -509,7 +509,7 @@ IMPORTANTE:
 - Se o cliente foi encontrado e já viu as suas propostas/visitas, marca is_complete=true`;
 
     const response = await callAiGateway({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-flash",
       messages: [
         { role: "system", content: systemPrompt },
         ...messages
