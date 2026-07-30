@@ -74,6 +74,16 @@ interface OpenAiToolCall {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /**
+   * Gemini 3 models attach a `thoughtSignature` to functionCall parts and
+   * REQUIRE it echoed back on the same call in the next turn's request, or
+   * they reject the follow-up with "Function call is missing a
+   * thought_signature" (confirmed live). OpenAI's tool_call shape has no
+   * slot for this, so it rides along here purely as an internal round-trip
+   * field - callers just forward `choice.message`/tool_calls untouched, so
+   * it survives without needing any caller-side changes.
+   */
+  thought_signature?: string;
 }
 
 interface OpenAiMessage {
@@ -121,6 +131,9 @@ interface GeminiPart {
   inline_data?: GeminiInlineData;
   functionCall?: { name: string; args: Record<string, unknown> };
   functionResponse?: { name: string; response: Record<string, unknown> };
+  // See OpenAiToolCall.thought_signature - required by Gemini 3 on the
+  // functionCall part when it's echoed back in a later turn.
+  thoughtSignature?: string;
 }
 
 interface GeminiContent {
@@ -205,7 +218,10 @@ function messagesToGeminiContents(messages: OpenAiMessage[]): {
         } catch {
           args = {};
         }
-        parts.push({ functionCall: { name: tc.function.name, args } });
+        parts.push({
+          functionCall: { name: tc.function.name, args },
+          ...(tc.thought_signature ? { thoughtSignature: tc.thought_signature } : {}),
+        });
       }
       contents.push({ role: "model", parts });
       continue;
@@ -334,6 +350,7 @@ function geminiCandidateToOpenAiMessage(parts: GeminiPart[]): {
           name: part.functionCall.name,
           arguments: JSON.stringify(part.functionCall.args ?? {}),
         },
+        ...(part.thoughtSignature ? { thought_signature: part.thoughtSignature } : {}),
       });
     }
   }
