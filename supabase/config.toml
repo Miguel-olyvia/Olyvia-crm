@@ -40,6 +40,9 @@ verify_jwt = false
 [functions.create-lead]
 verify_jwt = false
 
+[functions.book-slot]
+verify_jwt = false
+
 
 [functions.get-campaign-form]
 verify_jwt = false
