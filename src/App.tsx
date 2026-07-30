@@ -78,6 +78,7 @@ const WelcomeGuide = lazy(() => import("./pages/WelcomeGuide"));
 
 
 const AnewLeads = lazy(() => import("./pages/AnewLeads"));
+const PendingFormSubmissions = lazy(() => import("./pages/PendingFormSubmissions"));
 // AnewContacts page retired: Contacto merged into Lead lifecycle (Fase 1). Route removed from routing, file kept on disk for reference.
 const AnewClients = lazy(() => import("./pages/AnewClients"));
 const Gallery = lazy(() => import("./pages/Gallery"));
@@ -196,6 +197,7 @@ const App = () => (
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
+                      <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="leads.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
                       <Route path="/acquisition-help" element={<AcquisitionHelp />} />

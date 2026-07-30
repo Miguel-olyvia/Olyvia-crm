@@ -7,6 +7,7 @@ import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
+import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -358,27 +359,8 @@ const leadFormsFieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefi
 // lead_field_definitions row for a key (e.g. manual-source leads with no
 // campaign) - mirrors LeadTimelineTab.tsx's FIELD_LABELS convention. Beyond
 // this small common set, an unresolved key is humanized (snake_case -> Title
-// Case) rather than ever shown raw.
-const COMMON_FORM_FIELD_LABELS: Record<string, string> = {
-  first_name: "Primeiro Nome",
-  last_name: "Apelido",
-  display_name: "Nome",
-  email: "Email",
-  phone: "Telefone",
-  phone_number: "Telefone",
-  morada: "Morada",
-  address: "Morada",
-  cidade: "Localidade",
-  city: "Localidade",
-  codigo_postal: "Código Postal",
-  postal_code: "Código Postal",
-  source: "Origem",
-  notes: "Notas",
-};
-
-function humanizeFormFieldKey(key: string): string {
-  return COMMON_FORM_FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
+// Case) rather than ever shown raw. Extracted to src/lib/leads/fieldLabels.ts
+// so other surfaces (pending form_submissions review page) share it.
 
 export default function AnewLeads() {
   const { t } = useTranslation();

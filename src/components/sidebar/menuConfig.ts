@@ -121,10 +121,11 @@ export const menuSections: MenuSection[] = [
     id: "crm",
     icon: UsersRound,
     labelKey: "sidebar.crm",
-    paths: ["/leads", "/clients"],
+    paths: ["/leads", "/leads/pending-submissions", "/clients"],
     permissions: ["leads.view", "clients.view"],
     items: [
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
+      { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "leads.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },
     ],
   },

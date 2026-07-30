@@ -1232,6 +1232,8 @@ export type Database = {
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          locale: string | null
+          needs_manual_scheduling: boolean
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -1269,6 +1271,8 @@ export type Database = {
           last_contact_by?: string | null
           last_contact_result?: string | null
           lead_district_id?: string | null
+          locale?: string | null
+          needs_manual_scheduling?: boolean
           notes?: string | null
           organization_id: string
           pipeline_dirty_at?: string | null
@@ -1306,6 +1310,8 @@ export type Database = {
           last_contact_by?: string | null
           last_contact_result?: string | null
           lead_district_id?: string | null
+          locale?: string | null
+          needs_manual_scheduling?: boolean
           notes?: string | null
           organization_id?: string
           pipeline_dirty_at?: string | null
@@ -1799,7 +1805,22 @@ export type Database = {
           source_org_id?: string
           target_org_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "anew_relations_source_org_id_fkey"
+            columns: ["source_org_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "anew_relations_target_org_id_fkey"
+            columns: ["target_org_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       anew_role_permissions: {
         Row: {
@@ -1985,6 +2006,13 @@ export type Database = {
           usage_count?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "api_keys_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "api_keys_organization_id_fkey"
             columns: ["organization_id"]
@@ -6491,6 +6519,7 @@ export type Database = {
           back_button_text_color: string | null
           background_color: string | null
           background_image_url: string | null
+          booking_manage_url_template: string | null
           border_radius: string | null
           button_option_border_radius: string | null
           button_option_border_width: string | null
@@ -6508,6 +6537,8 @@ export type Database = {
           checkbox_border_width: string | null
           checkbox_padding: string | null
           checkbox_size: string | null
+          confirmation_email_enabled: boolean
+          confirmation_email_template_id: string | null
           contact_soon_text: string | null
           container_padding_x: string | null
           container_padding_y: string | null
@@ -6516,6 +6547,8 @@ export type Database = {
           created_by: string | null
           custom_css: string | null
           date_placeholder: string | null
+          email_locale_templates: Json
+          email_smtp_id: string | null
           error_display_style: string | null
           error_message: string | null
           error_title: string | null
@@ -6547,6 +6580,9 @@ export type Database = {
           location_not_available_title: string | null
           location_rejection_message: string | null
           logo_url: string | null
+          meeting_notify_commercial: boolean
+          meeting_notify_emails: string | null
+          meeting_notify_template_id: string | null
           multi_select_placeholder: string | null
           nav_button_border_radius: string | null
           nav_button_font_size: string | null
@@ -6560,6 +6596,7 @@ export type Database = {
           progress_bar_border_radius: string | null
           progress_bar_height: string | null
           progress_indicator_style: string | null
+          public_form_url_template: string | null
           radio_border_radius: string | null
           radio_border_width: string | null
           radio_button_color: string | null
@@ -6567,7 +6604,12 @@ export type Database = {
           radio_inner_size: string | null
           radio_padding: string | null
           redirecting_text: string | null
+          reminder_enabled: boolean
+          reminder_hours_before: number
+          reminder_template_id: string | null
           required_field_label: string | null
+          scheduling_invite_delays_hours: number[]
+          scheduling_invite_enabled: boolean
           secondary_color: string | null
           seconds_text: string | null
           select_border_radius: string | null
@@ -6610,6 +6652,7 @@ export type Database = {
           back_button_text_color?: string | null
           background_color?: string | null
           background_image_url?: string | null
+          booking_manage_url_template?: string | null
           border_radius?: string | null
           button_option_border_radius?: string | null
           button_option_border_width?: string | null
@@ -6627,6 +6670,8 @@ export type Database = {
           checkbox_border_width?: string | null
           checkbox_padding?: string | null
           checkbox_size?: string | null
+          confirmation_email_enabled?: boolean
+          confirmation_email_template_id?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -6635,6 +6680,8 @@ export type Database = {
           created_by?: string | null
           custom_css?: string | null
           date_placeholder?: string | null
+          email_locale_templates?: Json
+          email_smtp_id?: string | null
           error_display_style?: string | null
           error_message?: string | null
           error_title?: string | null
@@ -6666,6 +6713,9 @@ export type Database = {
           location_not_available_title?: string | null
           location_rejection_message?: string | null
           logo_url?: string | null
+          meeting_notify_commercial?: boolean
+          meeting_notify_emails?: string | null
+          meeting_notify_template_id?: string | null
           multi_select_placeholder?: string | null
           nav_button_border_radius?: string | null
           nav_button_font_size?: string | null
@@ -6679,6 +6729,7 @@ export type Database = {
           progress_bar_border_radius?: string | null
           progress_bar_height?: string | null
           progress_indicator_style?: string | null
+          public_form_url_template?: string | null
           radio_border_radius?: string | null
           radio_border_width?: string | null
           radio_button_color?: string | null
@@ -6686,7 +6737,12 @@ export type Database = {
           radio_inner_size?: string | null
           radio_padding?: string | null
           redirecting_text?: string | null
+          reminder_enabled?: boolean
+          reminder_hours_before?: number
+          reminder_template_id?: string | null
           required_field_label?: string | null
+          scheduling_invite_delays_hours?: number[]
+          scheduling_invite_enabled?: boolean
           secondary_color?: string | null
           seconds_text?: string | null
           select_border_radius?: string | null
@@ -6729,6 +6785,7 @@ export type Database = {
           back_button_text_color?: string | null
           background_color?: string | null
           background_image_url?: string | null
+          booking_manage_url_template?: string | null
           border_radius?: string | null
           button_option_border_radius?: string | null
           button_option_border_width?: string | null
@@ -6746,6 +6803,8 @@ export type Database = {
           checkbox_border_width?: string | null
           checkbox_padding?: string | null
           checkbox_size?: string | null
+          confirmation_email_enabled?: boolean
+          confirmation_email_template_id?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -6754,6 +6813,8 @@ export type Database = {
           created_by?: string | null
           custom_css?: string | null
           date_placeholder?: string | null
+          email_locale_templates?: Json
+          email_smtp_id?: string | null
           error_display_style?: string | null
           error_message?: string | null
           error_title?: string | null
@@ -6785,6 +6846,9 @@ export type Database = {
           location_not_available_title?: string | null
           location_rejection_message?: string | null
           logo_url?: string | null
+          meeting_notify_commercial?: boolean
+          meeting_notify_emails?: string | null
+          meeting_notify_template_id?: string | null
           multi_select_placeholder?: string | null
           nav_button_border_radius?: string | null
           nav_button_font_size?: string | null
@@ -6798,6 +6862,7 @@ export type Database = {
           progress_bar_border_radius?: string | null
           progress_bar_height?: string | null
           progress_indicator_style?: string | null
+          public_form_url_template?: string | null
           radio_border_radius?: string | null
           radio_border_width?: string | null
           radio_button_color?: string | null
@@ -6805,7 +6870,12 @@ export type Database = {
           radio_inner_size?: string | null
           radio_padding?: string | null
           redirecting_text?: string | null
+          reminder_enabled?: boolean
+          reminder_hours_before?: number
+          reminder_template_id?: string | null
           required_field_label?: string | null
+          scheduling_invite_delays_hours?: number[]
+          scheduling_invite_enabled?: boolean
           secondary_color?: string | null
           seconds_text?: string | null
           select_border_radius?: string | null
@@ -6841,10 +6911,38 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "form_branding_confirmation_email_template_id_fkey"
+            columns: ["confirmation_email_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_email_smtp_id_fkey"
+            columns: ["email_smtp_id"]
+            isOneToOne: false
+            referencedRelation: "organization_smtp_settings"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "form_branding_form_id_fkey"
             columns: ["form_id"]
             isOneToOne: true
             referencedRelation: "forms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_meeting_notify_template_id_fkey"
+            columns: ["meeting_notify_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_reminder_template_id_fkey"
+            columns: ["reminder_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -7063,6 +7161,9 @@ export type Database = {
           id: string
           is_complete: boolean
           organization_id: string
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
           root_organization_id: string
           status: string
           target_id: string
@@ -7083,6 +7184,9 @@ export type Database = {
           id?: string
           is_complete?: boolean
           organization_id: string
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           root_organization_id: string
           status?: string
           target_id: string
@@ -7103,6 +7207,9 @@ export type Database = {
           id?: string
           is_complete?: boolean
           organization_id?: string
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
           root_organization_id?: string
           status?: string
           target_id?: string
@@ -7137,6 +7244,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_submissions_resolved_by_fkey"
+            columns: ["resolved_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
             referencedColumns: ["id"]
           },
           {
@@ -8933,7 +9047,7 @@ export type Database = {
           name: string | null
           organization_id: string
           smtp_host: string
-          smtp_password: string
+          smtp_password_secret_id: string
           smtp_port: number
           smtp_secure: boolean
           smtp_username: string
@@ -8952,7 +9066,7 @@ export type Database = {
           name?: string | null
           organization_id: string
           smtp_host: string
-          smtp_password: string
+          smtp_password_secret_id: string
           smtp_port?: number
           smtp_secure?: boolean
           smtp_username: string
@@ -8971,13 +9085,78 @@ export type Database = {
           name?: string | null
           organization_id?: string
           smtp_host?: string
-          smtp_password?: string
+          smtp_password_secret_id?: string
           smtp_port?: number
           smtp_secure?: boolean
           smtp_username?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "organization_smtp_settings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_subscriptions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          current_period_end: string | null
+          id: string
+          organization_id: string
+          plan: string
+          status: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          trial_ends_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          current_period_end?: string | null
+          id?: string
+          organization_id: string
+          plan?: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          current_period_end?: string | null
+          id?: string
+          organization_id?: string
+          plan?: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_subscriptions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_subscriptions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       organization_team_members: {
         Row: {
@@ -12827,6 +13006,7 @@ export type Database = {
           organization_id: string | null
           scheduled_for: string
           sent_at: string | null
+          smtp_id: string | null
           status: string
           subject: string | null
           template_id: string | null
@@ -12845,6 +13025,7 @@ export type Database = {
           organization_id?: string | null
           scheduled_for: string
           sent_at?: string | null
+          smtp_id?: string | null
           status?: string
           subject?: string | null
           template_id?: string | null
@@ -12863,6 +13044,7 @@ export type Database = {
           organization_id?: string | null
           scheduled_for?: string
           sent_at?: string | null
+          smtp_id?: string | null
           status?: string
           subject?: string | null
           template_id?: string | null
@@ -12878,10 +13060,71 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "scheduled_emails_smtp_id_fkey"
+            columns: ["smtp_id"]
+            isOneToOne: false
+            referencedRelation: "organization_smtp_settings"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "scheduled_emails_template_id_fkey"
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduling_invites: {
+        Row: {
+          created_at: string
+          expires_at: string
+          form_id: string
+          id: string
+          lead_id: string
+          organization_id: string | null
+          step_number: number
+          token: string
+          unsubscribed_at: string | null
+          used_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          form_id: string
+          id?: string
+          lead_id: string
+          organization_id?: string | null
+          step_number: number
+          token?: string
+          unsubscribed_at?: string | null
+          used_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          form_id?: string
+          id?: string
+          lead_id?: string
+          organization_id?: string | null
+          step_number?: number
+          token?: string
+          unsubscribed_at?: string | null
+          used_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduling_invites_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "anew_leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduling_invites_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads_pending_retention_review"
             referencedColumns: ["id"]
           },
         ]
@@ -14030,7 +14273,7 @@ export type Database = {
           organization_id: string | null
           reply_to: string | null
           smtp_host: string
-          smtp_password: string
+          smtp_password_secret_id: string
           smtp_port: number
           smtp_secure: boolean | null
           smtp_username: string
@@ -14050,7 +14293,7 @@ export type Database = {
           organization_id?: string | null
           reply_to?: string | null
           smtp_host: string
-          smtp_password: string
+          smtp_password_secret_id: string
           smtp_port?: number
           smtp_secure?: boolean | null
           smtp_username: string
@@ -14070,7 +14313,7 @@ export type Database = {
           organization_id?: string | null
           reply_to?: string | null
           smtp_host?: string
-          smtp_password?: string
+          smtp_password_secret_id?: string
           smtp_port?: number
           smtp_secure?: boolean | null
           smtp_username?: string
@@ -14356,6 +14599,7 @@ export type Database = {
           executed_at: string
           executed_by: string | null
           execution_data: Json | null
+          execution_id: string | null
           id: string
           rule_id: string | null
           source_entity: string
@@ -14370,6 +14614,7 @@ export type Database = {
           executed_at?: string
           executed_by?: string | null
           execution_data?: Json | null
+          execution_id?: string | null
           id?: string
           rule_id?: string | null
           source_entity: string
@@ -14384,6 +14629,7 @@ export type Database = {
           executed_at?: string
           executed_by?: string | null
           execution_data?: Json | null
+          execution_id?: string | null
           id?: string
           rule_id?: string | null
           source_entity?: string
@@ -15071,6 +15317,7 @@ export type Database = {
           quote_value_with_iva: number
         }[]
       }
+      get_lead_resolved_stage: { Args: { p_lead_id: string }; Returns: Json }
       get_lead_source_options: {
         Args: { p_is_root?: boolean; p_org_id: string; p_scope?: string }
         Returns: {
@@ -15291,6 +15538,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      org_has_active_access: { Args: { _org_id: string }; Returns: boolean }
       portal_user_can_see_doc: {
         Args: { _entity_id: string; _entity_type: string }
         Returns: boolean
@@ -15318,9 +15566,9 @@ export type Database = {
       recompute_leads_v2_buckets: {
         Args: { p_org: string }
         Returns: {
-          updated_count: number
           unresolved_count: number
           unresolved_lead_ids: string[]
+          updated_count: number
         }[]
       }
       reject_proposal_atomic: {
@@ -15953,6 +16201,8 @@ export type Database = {
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          locale: string | null
+          needs_manual_scheduling: boolean
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -16011,6 +16261,8 @@ export type Database = {
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          locale: string | null
+          needs_manual_scheduling: boolean
           notes: string | null
           organization_id: string
           pipeline_dirty_at: string | null
@@ -16912,6 +17164,14 @@ export type Database = {
         Args: { p_id: string; p_new_owner_id: string }
         Returns: string
       }
+      rpc_resolve_form_submission: {
+        Args: {
+          p_action: string
+          p_field_overrides?: Json
+          p_submission_id: string
+        }
+        Returns: Json
+      }
       rpc_restore_brand: {
         Args: { p_id: string; p_organization_id: string }
         Returns: undefined
@@ -17493,125 +17753,68 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_update_lead:
-        | {
-            Args: {
-              p_assigned_to: string
-              p_display_name: string
-              p_field_values: Json
-              p_first_name: string
-              p_last_name: string
-              p_lead_id: string
-              p_notes: string
-              p_source: string
-              p_status: string
-              p_status_changed: boolean
-              p_workflow_stage_id: string
-            }
-            Returns: {
-              assigned_to: string | null
-              callback_notes: string | null
-              callback_scheduled_at: string | null
-              campaign_id: string | null
-              contact_attempts: number | null
-              converted_at: string | null
-              converted_by: string | null
-              converted_to_client_id: string | null
-              converted_to_contact_id: string | null
-              created_at: string
-              created_by: string | null
-              deleted_at: string | null
-              deleted_by: string | null
-              entity_id: string | null
-              field_values: Json
-              id: string
-              last_contact_at: string | null
-              last_contact_by: string | null
-              last_contact_result: string | null
-              lead_district_id: string | null
-              notes: string | null
-              organization_id: string
-              pipeline_dirty_at: string | null
-              qualification_set_by: string | null
-              qualification_type: string | null
-              qualified_at: string | null
-              root_organization_id: string
-              scheduled_visit_id: string | null
-              search_text: string | null
-              source: string | null
-              source_id: string | null
-              status: string | null
-              tags: string[] | null
-              updated_at: string
-              workflow_stage_id: string | null
-            }
-            SetofOptions: {
-              from: "*"
-              to: "anew_leads"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
-        | {
-            Args: {
-              p_assigned_to: string
-              p_display_name: string
-              p_field_values: Json
-              p_first_name: string
-              p_last_name: string
-              p_lead_id: string
-              p_notes: string
-              p_qualification_changed?: boolean
-              p_qualification_type?: string
-              p_source: string
-              p_status: string
-              p_status_changed: boolean
-              p_workflow_stage_id: string
-            }
-            Returns: {
-              assigned_to: string | null
-              callback_notes: string | null
-              callback_scheduled_at: string | null
-              campaign_id: string | null
-              contact_attempts: number | null
-              converted_at: string | null
-              converted_by: string | null
-              converted_to_client_id: string | null
-              converted_to_contact_id: string | null
-              created_at: string
-              created_by: string | null
-              deleted_at: string | null
-              deleted_by: string | null
-              entity_id: string | null
-              field_values: Json
-              id: string
-              last_contact_at: string | null
-              last_contact_by: string | null
-              last_contact_result: string | null
-              lead_district_id: string | null
-              notes: string | null
-              organization_id: string
-              pipeline_dirty_at: string | null
-              qualification_set_by: string | null
-              qualification_type: string | null
-              qualified_at: string | null
-              root_organization_id: string
-              scheduled_visit_id: string | null
-              search_text: string | null
-              source: string | null
-              source_id: string | null
-              status: string | null
-              tags: string[] | null
-              updated_at: string
-              workflow_stage_id: string | null
-            }
-            SetofOptions: {
-              from: "*"
-              to: "anew_leads"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
+      rpc_update_lead: {
+        Args: {
+          p_assigned_to: string
+          p_display_name: string
+          p_field_values: Json
+          p_first_name: string
+          p_last_name: string
+          p_lead_id: string
+          p_notes: string
+          p_qualification_changed?: boolean
+          p_qualification_type?: string
+          p_source: string
+          p_status: string
+          p_status_changed: boolean
+          p_workflow_stage_id: string
+        }
+        Returns: {
+          assigned_to: string | null
+          callback_notes: string | null
+          callback_scheduled_at: string | null
+          campaign_id: string | null
+          contact_attempts: number | null
+          converted_at: string | null
+          converted_by: string | null
+          converted_to_client_id: string | null
+          converted_to_contact_id: string | null
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          entity_id: string | null
+          field_values: Json
+          id: string
+          last_contact_at: string | null
+          last_contact_by: string | null
+          last_contact_result: string | null
+          lead_district_id: string | null
+          locale: string | null
+          needs_manual_scheduling: boolean
+          notes: string | null
+          organization_id: string
+          pipeline_dirty_at: string | null
+          qualification_set_by: string | null
+          qualification_type: string | null
+          qualified_at: string | null
+          root_organization_id: string
+          scheduled_visit_id: string | null
+          search_text: string | null
+          source: string | null
+          source_id: string | null
+          status: string | null
+          tags: string[] | null
+          updated_at: string
+          workflow_stage_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "anew_leads"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_update_organization: {
         Args: {
           p_addresses: Json
@@ -18179,6 +18382,48 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_upsert_org_smtp_settings: {
+        Args: {
+          p_daily_limit: number
+          p_encryption: string
+          p_from_email: string
+          p_from_name: string
+          p_id: string
+          p_is_default: boolean
+          p_name: string
+          p_organization_id: string
+          p_smtp_host: string
+          p_smtp_password: string
+          p_smtp_port: number
+          p_smtp_secure: boolean
+          p_smtp_username: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string | null
+          daily_limit: number | null
+          encryption: string | null
+          from_email: string
+          from_name: string
+          id: string
+          is_active: boolean
+          is_default: boolean | null
+          name: string | null
+          organization_id: string
+          smtp_host: string
+          smtp_password_secret_id: string
+          smtp_port: number
+          smtp_secure: boolean
+          smtp_username: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_smtp_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_upsert_signup_profile: {
         Args: {
           p_company_name?: string
@@ -18206,6 +18451,56 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_upsert_user_smtp_settings: {
+        Args: {
+          p_daily_limit: number
+          p_encryption: string
+          p_from_email: string
+          p_from_name: string
+          p_id: string
+          p_is_default: boolean
+          p_name: string
+          p_organization_id: string
+          p_reply_to: string
+          p_smtp_host: string
+          p_smtp_password: string
+          p_smtp_port: number
+          p_smtp_secure: boolean
+          p_smtp_username: string
+        }
+        Returns: {
+          created_at: string
+          daily_limit: number | null
+          encryption: string | null
+          from_email: string
+          from_name: string
+          id: string
+          is_active: boolean | null
+          is_default: boolean | null
+          name: string | null
+          organization_id: string | null
+          reply_to: string | null
+          smtp_host: string
+          smtp_password_secret_id: string
+          smtp_port: number
+          smtp_secure: boolean | null
+          smtp_username: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "user_smtp_settings"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      search_lead_entities: {
+        Args: { p_limit?: number; p_org_ids: string[]; p_search: string }
+        Returns: {
+          entity_id: string
+        }[]
       }
       search_proposal_entities:
         | {
@@ -18252,6 +18547,21 @@ export type Database = {
       }
       simulate_lead_v2_bucket_changes: {
         Args: { p_org: string; p_qual?: Json; p_stages: Json }
+        Returns: Json
+      }
+      simulate_lead_workflow_stage_rules: {
+        Args: {
+          p_auto_advance: boolean
+          p_counts_as_converted: boolean
+          p_counts_as_lost: boolean
+          p_counts_as_negotiation: boolean
+          p_counts_as_qualified: boolean
+          p_matching_statuses: string[]
+          p_org_id: string
+          p_qualification_hint: string
+          p_reached_when: Json
+          p_stage_id: string
+        }
         Returns: Json
       }
       soft_delete_business_entity: {
