@@ -498,7 +498,7 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
 ]`;
 
     const aiResponse = await callAiGateway({
-      model: "gemini-flash-latest",
+      model: "gemini-3.5-flash",
       messages: [
         { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
         { role: "user", content: prompt }

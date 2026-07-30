@@ -304,7 +304,7 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
 }`;
 
     const response = await callAiGateway({
-      model: "gemini-flash-latest",
+      model: "gemini-3.5-flash",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: query },
