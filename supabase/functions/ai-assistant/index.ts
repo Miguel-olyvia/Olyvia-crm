@@ -407,7 +407,7 @@ Deno.serve(async (req) => {
         }
         const errorText = await response.text();
         console.error("AI gateway error:", response.status, errorText);
-        throw new Error("AI gateway error");
+        throw new Error(`AI gateway error: ${response.status} ${errorText}`);
       }
 
       const aiResponse = await response.json();

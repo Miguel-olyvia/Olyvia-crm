@@ -236,6 +236,41 @@ function messagesToGeminiContents(messages: OpenAiMessage[]): {
   };
 }
 
+/**
+ * Gemini's tool-parameter schema is proto-based and only accepts a single
+ * string `type` per property - it rejects the JSON-Schema union form
+ * `type: ["string", "null"]` that some of ai-assistant's TOOLS declarations
+ * use for nullable fields (confirmed live: "Proto field is not repeating,
+ * cannot start list"). Recursively sanitizes any such array `type` down to
+ * its first non-"null" member, adding `nullable: true` when "null" was
+ * present, so schema authors don't need to special-case Gemini.
+ */
+function sanitizeSchemaForGemini(schema: unknown): unknown {
+  if (Array.isArray(schema) || schema === null || typeof schema !== "object") return schema;
+  const obj = schema as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...obj };
+
+  if (Array.isArray(result.type)) {
+    const types = result.type as unknown[];
+    const hasNull = types.includes("null");
+    const nonNull = types.find((t) => t !== "null");
+    if (typeof nonNull === "string") result.type = nonNull;
+    else delete result.type;
+    if (hasNull) result.nullable = true;
+  }
+
+  if (result.properties && typeof result.properties === "object") {
+    const props = result.properties as Record<string, unknown>;
+    result.properties = Object.fromEntries(
+      Object.entries(props).map(([k, v]) => [k, sanitizeSchemaForGemini(v)]),
+    );
+  }
+  if (result.items) result.items = sanitizeSchemaForGemini(result.items);
+  if (Array.isArray(result.anyOf)) result.anyOf = result.anyOf.map(sanitizeSchemaForGemini);
+
+  return result;
+}
+
 function openAiToolsToGemini(tools: OpenAiTool[] | undefined): Array<{ functionDeclarations: unknown[] }> | undefined {
   if (!tools || tools.length === 0) return undefined;
   const functionDeclarations = tools
@@ -243,7 +278,7 @@ function openAiToolsToGemini(tools: OpenAiTool[] | undefined): Array<{ functionD
     .map((t) => ({
       name: t.function.name,
       description: t.function.description,
-      parameters: t.function.parameters,
+      parameters: sanitizeSchemaForGemini(t.function.parameters),
     }));
   if (functionDeclarations.length === 0) return undefined;
   return [{ functionDeclarations }];
