@@ -175,6 +175,304 @@ export const TOOLS: ToolDef[] = [
 
 
 
+// ---------------------------------------------------------------------------
+// Tool filtering by page context ("currentContext.path" sent by the frontend)
+// ---------------------------------------------------------------------------
+//
+// Every callAiGateway() call in index.ts's tool-calling loop used to pass the
+// FULL `TOOLS` array (123 function-calling schemas, ~15k tokens) regardless
+// of what the user could plausibly be asking about on the current page. That
+// is the dominant fixed cost of every request. Instead, index.ts now calls
+// `selectToolsForContext(currentContext?.path)` to get a smaller, page-aware
+// subset and passes THAT to `tools:`.
+//
+// IMPORTANT: this only changes which schemas are shown to the model — it does
+// NOT change what can be executed. `HANDLERS` below stays keyed by the FULL
+// tool set, because a tool the model was never shown can never be requested
+// in the first place (the model can only emit tool_calls for names it saw in
+// the `tools` array of that same request). So no separate filtering is
+// needed on the execution side.
+//
+// Design: a static category → ToolDef[] map, a small "core" set always
+// included, and a path-prefix → categories[] table. Matching is deliberately
+// GENEROUS (a page maps to several related categories) because the goal is
+// "meaningfully fewer tools" (~30-50 instead of 123), not a minimal/fragile
+// set that risks the model wanting a tool it wasn't shown. If the path is
+// missing or doesn't match any rule, we fall back to the FULL `TOOLS` array
+// — never silently under-serve on an unrecognized/absent signal.
+//
+// Known tradeoff (documented per task scope, not implemented): if the model's
+// first response contains no tool call because the tool it needed was
+// filtered out for this page, there's no automatic "retry with full tool set"
+// here. A clean version of that fallback would need to inspect free-text
+// model output for "I can't do that" style signals, which is heuristic and
+// easy to get wrong (false positives double cost, false negatives silently
+// eat the failure) for a first cut. Given tool coverage per category is
+// intentionally generous, and every category used by more than one page is
+// still included redundantly across those pages, this is expected to be a
+// rare edge case. Revisit if logs (see the console.log below) show it firing
+// often in practice.
+
+export type ToolCategory =
+  | "leads"
+  | "contacts"
+  | "clients"
+  | "entity_facets"
+  | "deals"
+  | "proposals"
+  | "quotes"
+  | "catalog"
+  | "schedule"
+  | "workflows"
+  | "users"
+  | "notifications"
+  | "reports"
+  | "contracts"
+  | "activities";
+
+// Always sent, regardless of page: broadly useful on every screen by nature.
+export const CORE_TOOLS: ToolDef[] = [
+  navigation.navigateDef,
+  context.getCurrentContextDef,
+  search.searchEntitiesDef,
+  reports.getStatsDef,
+];
+
+const CATEGORY_TOOLS: Record<ToolCategory, ToolDef[]> = {
+  leads: [
+    crm.createLeadDef,
+    crm.searchLeadsDef,
+    crm.updateLeadStatusDef,
+    crm.updateLeadDef,
+    crm.getLeadDetailsDef,
+    crm.deleteLeadDef,
+    crm.convertLeadDef,
+    entities.restoreLeadDef,
+    deals.createDealFromLeadDef,
+    reports.getLeadsReportDef,
+  ],
+  contacts: [
+    crm.createContactDef,
+    crm.searchContactsDef,
+    crm.updateContactDef,
+    crm.updateContactNotesDef,
+    crm.getContactDetailsDef,
+    crm.deleteContactDef,
+    entities.restoreContactDef,
+  ],
+  clients: [
+    crm.searchClientsDef,
+    crm.getClientDetailsDef,
+    crm.updateClientDef,
+    crm.deleteClientDef,
+    entities.restoreClientDef,
+  ],
+  // Email/phone/address/tag CRUD — applies to leads, contacts and clients alike.
+  entity_facets: [
+    entities.addEntityEmailDef,
+    entities.deleteEntityEmailDef,
+    entities.setPrimaryEmailDef,
+    entities.addEntityPhoneDef,
+    entities.deleteEntityPhoneDef,
+    entities.setPrimaryPhoneDef,
+    entities.setEntityAddressDef,
+    entities.addContactTagDef,
+    entities.removeContactTagDef,
+    entities.listContactTagsDef,
+  ],
+  deals: [
+    deals.createDealDef,
+    deals.listDealsDef,
+    deals.updateDealDef,
+    deals.closeDealDef,
+    deals.cancelDealDef,
+    deals.getDealDetailsDef,
+    deals.createDealFromLeadDef,
+  ],
+  proposals: [
+    proposals.createProposalDef,
+    proposals.listProposalsDef,
+    proposals.sendProposalDef,
+    proposals.getProposalDetailsDef,
+    proposals.updateProposalDef,
+    proposals.cancelProposalDef,
+  ],
+  quotes: [
+    quotes.createQuoteDef,
+    quotes.listQuotesDef,
+    quotes.sendQuoteDef,
+    quotes.duplicateQuoteDef,
+    quotes.addQuoteItemsDef,
+    quotes.setQuoteTemplateDef,
+    quotes.listQuoteTemplatesDef,
+    quotes.listQuoteModelsDef,
+    quotes.setQuoteModelDef,
+    quotes.getQuoteDetailsDef,
+    quotes.removeQuoteLinesDef,
+    quotes.updateQuoteLineDef,
+    quotes.updateQuoteDef,
+    quotes.deleteQuoteDef,
+    quotes.listServiceFeesDef,
+    quotes.listQuoteFeesDef,
+    quotes.addQuoteFeeDef,
+    quotes.removeQuoteFeeDef,
+  ],
+  catalog: [
+    catalog.searchProductsDef,
+    catalog.listProductsDef,
+    catalog.listServicesDef,
+    catalog.listBundlesDef,
+    catalogRead.getProductDetailsDef,
+    catalogRead.searchServicesDef,
+    catalogRead.getServiceDetailsDef,
+    catalogRead.searchBundlesDef,
+    catalogRead.getBundleDetailsDef,
+    catalogRead.listCategoriesDef,
+    catalogRead.getProductPriceDef,
+    catalogRead.getProductStockDef,
+    catalogRead.listBrandsDef,
+    catalogRead.listProductAttributesDef,
+    catalogRead.getProductAttributeDetailsDef,
+    catalogRead.listUnitsOfMeasureDef,
+  ],
+  schedule: [
+    schedule.createScheduleItemDef,
+    schedule.listScheduleDef,
+    schedule.updateScheduleItemDef,
+    schedule.getScheduleItemDef,
+    schedule.completeScheduleItemDef,
+    schedule.cancelScheduleItemDef,
+    schedule.rescheduleScheduleItemDef,
+    schedule.assignScheduleItemDef,
+    schedule.listMyAgendaDef,
+    schedule.findAvailableResourcesDef,
+    schedule.listScheduleResourcesDef,
+  ],
+  workflows: [
+    workflows.listWorkflowRulesDef,
+    workflows.listWorkflowLogsDef,
+    workflows.executeWorkflowDef,
+    workflows.createWorkflowRuleDef,
+    workflows.updateWorkflowRuleDef,
+    workflows.toggleWorkflowRuleDef,
+    workflows.deleteWorkflowRuleDef,
+    workflowStages.listWorkflowStagesDef,
+    workflowStages.createWorkflowStageDef,
+    workflowStages.updateWorkflowStageDef,
+    workflowStages.deactivateWorkflowStageDef,
+    stageActions.listStageActionsDef,
+    stageActions.createStageActionDef,
+    stageActions.toggleStageActionDef,
+    stageActions.deleteStageActionDef,
+  ],
+  users: [
+    users.searchUsersDef,
+    users.assignCrmRecordDef,
+  ],
+  notifications: [
+    notifications.listNotificationsDef,
+  ],
+  reports: [
+    reports.getPipelineReportDef,
+    reports.getOverdueItemsDef,
+    reports.getTopClientsDef,
+    reports.getTeamPerformanceDef,
+    reports.getLeadsReportDef,
+  ],
+  contracts: [
+    contracts.listContractsDef,
+    contracts.getContractDetailsDef,
+    contracts.updateContractDef,
+    contracts.cancelContractDef,
+    contracts.restoreContractDef,
+  ],
+  activities: [
+    activities.addNoteDef,
+    activities.logCallDef,
+    activities.listActivitiesDef,
+  ],
+};
+
+// Path-prefix → categories, matched generously (a page usually pulls in
+// several adjacent categories, e.g. the deals page also needs quotes,
+// proposals and CRM lookups because deals reference all of them).
+// Matching is by exact path or by "prefix + /" so sub-routes (e.g.
+// "/leads/123") match their parent rule.
+const PATH_CATEGORY_RULES: Array<{ prefix: string; categories: ToolCategory[] }> = [
+  { prefix: "/leads", categories: ["leads", "contacts", "entity_facets", "activities", "deals", "reports"] },
+  { prefix: "/deals", categories: ["deals", "quotes", "proposals", "clients", "activities", "reports"] },
+  { prefix: "/proposals", categories: ["proposals", "deals", "quotes", "activities", "contracts"] },
+  { prefix: "/proposal-templates", categories: ["proposals", "quotes"] },
+  { prefix: "/quotes", categories: ["quotes", "catalog", "activities"] },
+  { prefix: "/quote-models", categories: ["quotes", "catalog"] },
+  { prefix: "/quote-templates", categories: ["quotes", "catalog"] },
+  { prefix: "/clients", categories: ["clients", "contacts", "entity_facets", "contracts", "deals", "activities", "reports"] },
+  { prefix: "/anew-clients", categories: ["clients", "contacts", "entity_facets", "contracts", "deals", "activities", "reports"] },
+  { prefix: "/scheduling", categories: ["schedule", "users", "activities"] },
+  { prefix: "/calendar", categories: ["schedule", "users", "activities"] },
+  { prefix: "/users", categories: ["users"] },
+  { prefix: "/roles", categories: ["users"] },
+  { prefix: "/organizations", categories: ["clients", "users"] },
+  { prefix: "/company-groups", categories: ["clients", "users"] },
+  { prefix: "/catalog-items", categories: ["catalog"] },
+  { prefix: "/products", categories: ["catalog"] },
+  { prefix: "/product-configurator-lab", categories: ["catalog"] },
+  { prefix: "/product-categories", categories: ["catalog"] },
+  { prefix: "/product-subcategories", categories: ["catalog"] },
+  { prefix: "/product-attributes", categories: ["catalog"] },
+  { prefix: "/brands", categories: ["catalog"] },
+  { prefix: "/units-of-measure", categories: ["catalog"] },
+  { prefix: "/bundles", categories: ["catalog"] },
+  { prefix: "/services", categories: ["catalog"] },
+  { prefix: "/service-categories", categories: ["catalog"] },
+  { prefix: "/service-subcategories", categories: ["catalog"] },
+  { prefix: "/service-catalog-items", categories: ["catalog"] },
+  { prefix: "/service-fees", categories: ["catalog", "quotes"] },
+  { prefix: "/stocks", categories: ["catalog"] },
+  { prefix: "/warehouses", categories: ["catalog"] },
+  { prefix: "/purchase-orders", categories: ["catalog"] },
+  { prefix: "/suppliers", categories: ["catalog"] },
+  { prefix: "/client-contracts", categories: ["contracts", "clients"] },
+  { prefix: "/contract-templates", categories: ["contracts"] },
+  { prefix: "/notifications", categories: ["notifications"] },
+  { prefix: "/flow-builder", categories: ["workflows"] },
+  { prefix: "/campaigns", categories: ["leads", "reports"] },
+  { prefix: "/channels", categories: ["leads", "reports"] },
+  { prefix: "/lead-sources", categories: ["leads"] },
+  { prefix: "/lead-contact-results", categories: ["leads"] },
+  { prefix: "/forms", categories: ["leads"] },
+  { prefix: "/dashboard", categories: ["reports", "leads", "deals", "quotes", "proposals"] },
+  { prefix: "/home", categories: ["reports", "leads", "deals"] },
+];
+
+/**
+ * Picks the tool subset to expose to the model for a given `currentContext.path`.
+ * Always includes CORE_TOOLS. Falls back to the FULL `TOOLS` array (safety
+ * net) when `path` is missing, not a string, or matches no known rule — we
+ * never want to silently under-serve on an unreliable/absent signal.
+ */
+export function selectToolsForContext(path: unknown): ToolDef[] {
+  if (typeof path !== "string" || path.length === 0) return TOOLS;
+
+  const cleanPath = path.split("?")[0].split("#")[0] || "/";
+  const matchedRules = PATH_CATEGORY_RULES.filter(
+    (r) => cleanPath === r.prefix || cleanPath.startsWith(`${r.prefix}/`),
+  );
+  if (matchedRules.length === 0) return TOOLS;
+
+  const categories = new Set<ToolCategory>();
+  for (const rule of matchedRules) {
+    for (const c of rule.categories) categories.add(c);
+  }
+
+  const byName = new Map<string, ToolDef>();
+  for (const t of CORE_TOOLS) byName.set(t.function.name, t);
+  for (const c of categories) {
+    for (const t of CATEGORY_TOOLS[c]) byName.set(t.function.name, t);
+  }
+  return Array.from(byName.values());
+}
+
 export const HANDLERS: Record<string, Handler> = {
   ...crm.handlers,
   ...deals.handlers,

@@ -4,7 +4,7 @@ import { buildExecCtx } from "./shared/context.ts";
 import { fetchSystemPrompt, fetchHelpKnowledge } from "./shared/prompt.ts";
 import { summarizeToolArgs } from "./shared/summarizeArgs.ts";
 import { resolveEntityId, type EntityKind } from "./shared/resolveEntityId.ts";
-import { TOOLS, HANDLERS } from "./tools/registry.ts";
+import { TOOLS, HANDLERS, selectToolsForContext } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
 
@@ -109,7 +109,25 @@ function streamWithToolCalls(
   });
 }
 
-async function executeTool(ctx: ExecCtx, toolName: string, args: any): Promise<ToolResult> {
+async function executeTool(
+  ctx: ExecCtx,
+  toolName: string,
+  args: any,
+  allowedToolNames?: Set<string>,
+): Promise<ToolResult> {
+  // Gemini isn't guaranteed to only ever request a tool name it was actually
+  // shown in this request's `tools` schema — confirmed live: it can emit a
+  // functionCall for a plausible-sounding name outside the page-filtered
+  // subset (see selectToolsForContext in tools/registry.ts). HANDLERS itself
+  // stays keyed by the full tool set for simplicity, so this check is what
+  // actually enforces the filter - without it, filtering only reduces token
+  // cost and provides no behavioral boundary at all.
+  if (allowedToolNames && !allowedToolNames.has(toolName)) {
+    return {
+      success: false,
+      message: `Ferramenta "${toolName}" não está disponível neste contexto. Muda de página ou reformula o pedido.`,
+    };
+  }
   const handler = HANDLERS[toolName];
   if (!handler) return { success: false, message: `Ferramenta "${toolName}" não reconhecida.` };
   try {
@@ -153,6 +171,21 @@ Deno.serve(async (req) => {
       pendingTool = null,
     } = parsed.data;
     const organizationId: string | null = bodyOrgId || companyId || null;
+
+    // Tool filtering: send only the subset of the 123 registered tools that's
+    // plausibly relevant to the page the user is on (see selectToolsForContext
+    // in tools/registry.ts for the category design + fallback rules). This is
+    // the dominant cost lever for this function — the full schema set is
+    // ~15k tokens sent on every single call.
+    const contextPath =
+      currentContext && typeof currentContext === "object" ? (currentContext as Record<string, unknown>).path : null;
+    const filteredTools = selectToolsForContext(contextPath);
+    const filteredToolNames = new Set(filteredTools.map((t) => t.function.name));
+    console.log(
+      `[ai-assistant] tool filter: sent ${filteredTools.length}/${TOOLS.length} tools for context path=${
+        typeof contextPath === "string" ? contextPath : "(none)"
+      }`,
+    );
 
     const built = await buildExecCtx({ req, supabase, organizationId });
     if (!built.ok) {
@@ -380,7 +413,7 @@ Deno.serve(async (req) => {
       const response = await callAiGateway({
         model: MODEL,
         messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
-        tools: TOOLS,
+        tools: filteredTools,
         tool_choice: "auto",
       });
 
@@ -673,7 +706,7 @@ Deno.serve(async (req) => {
             }
           }
 
-          result = await executeTool(ctx, toolName, toolArgs);
+          result = await executeTool(ctx, toolName, toolArgs, filteredToolNames);
           const durationMs = performance.now() - startedAt;
           return {
             tool_call_id: tc.id,
