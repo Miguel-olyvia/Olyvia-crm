@@ -727,6 +727,30 @@ Deno.serve(async (req) => {
       if (leadFirstName) entityPayload.first_name = leadFirstName;
       if (leadLastName) entityPayload.last_name = leadLastName;
 
+      // create_entity_with_contacts_and_roles (20260821020000) requires a
+      // non-null p_created_by when called as service_role with no auth.uid()
+      // (this public, anonymous Edge Function never has one) - resolve an
+      // org admin the same way insert-lead already does, or every brand-new
+      // lead submission 500s with "Autenticacao necessaria" (confirmed live).
+      const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
+      const { data: adminRoleRows } = await supabase
+        .from('anew_roles')
+        .select('id')
+        .in('code', adminRoleCodes);
+      const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
+      let entityCreatedBy: string | null = null;
+      if (adminRoleIds.length > 0) {
+        const { data: adminMembership } = await supabase
+          .from('anew_memberships')
+          .select('user_id')
+          .eq('organization_id', rootOrgId)
+          .eq('status', 'active')
+          .in('role_id', adminRoleIds)
+          .limit(1)
+          .maybeSingle();
+        entityCreatedBy = adminMembership?.user_id || null;
+      }
+
       const { data: rpcEntityId, error: rpcError } = await supabase.rpc(
         'create_entity_with_contacts_and_roles',
         {
@@ -736,7 +760,7 @@ Deno.serve(async (req) => {
           p_phones: phonesPayload,
           p_addresses: addressesPayload,
           p_roles: rolesPayload,
-          p_created_by: null,
+          p_created_by: entityCreatedBy,
         },
       );
 
