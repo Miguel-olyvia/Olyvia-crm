@@ -620,36 +620,36 @@ Deno.serve(async (req) => {
 
     // --- Contact/client target: skip anew_leads entirely, upsert form_submissions ---
     if (contactOrClientTarget) {
-      const { data: submission, error: submissionError } = await supabase
-        .from('form_submissions')
-        .upsert(
-          {
-            organization_id,
-            root_organization_id: rootOrgId,
-            entity_id: entityId,
-            form_id: canonicalFormId ?? null,
-            campaign_id: campaign_id ?? null,
-            target_type: contactOrClientTarget.targetType,
-            target_id: contactOrClientTarget.targetId,
-            field_values: fieldValuesWithMeta,
-            status: isComplete ? 'complete' : 'in_progress',
-            is_complete: isComplete,
-            current_step: currentStep,
-            total_steps: totalSteps,
-            created_by: null,
-          },
-          { onConflict: 'organization_id,entity_id,form_id,campaign_id' },
-        )
-        .select('id')
-        .single();
+      // form_submissions' real uniqueness guarantee is an EXPRESSION-based
+      // unique index (COALESCE(form_id,...), COALESCE(campaign_id,...)) —
+      // the JS client's .upsert({onConflict: '...'}) only supports a bare
+      // column list and cannot target it, which made every upsert here 500
+      // with "no unique or exclusion constraint matching the ON CONFLICT
+      // specification" (confirmed live). upsert_form_submission (migration
+      // 20261111250000) does the correct native upsert instead.
+      const { data: submissionId, error: submissionError } = await supabase.rpc('upsert_form_submission', {
+        p_organization_id: organization_id,
+        p_root_organization_id: rootOrgId,
+        p_entity_id: entityId,
+        p_form_id: canonicalFormId ?? null,
+        p_campaign_id: campaign_id ?? null,
+        p_target_type: contactOrClientTarget.targetType,
+        p_target_id: contactOrClientTarget.targetId,
+        p_field_values: fieldValuesWithMeta,
+        p_status: isComplete ? 'complete' : 'in_progress',
+        p_is_complete: isComplete,
+        p_current_step: currentStep,
+        p_total_steps: totalSteps,
+      });
 
-      if (submissionError || !submission) {
+      if (submissionError || !submissionId) {
         console.error('Error upserting form_submissions:', submissionError);
         return new Response(
           JSON.stringify({ error: 'Failed to record form submission', details: submissionError?.message }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
         );
       }
+      const submission = { id: submissionId };
 
       return new Response(
         JSON.stringify({
