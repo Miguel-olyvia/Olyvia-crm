@@ -64,9 +64,13 @@ function generateProposalEmailHtml(
   customMessage?: string,
   senderName?: string
 ): string {
-  const template = proposal.proposal_templates;
+  // Frozen at proposal-creation time — always wins when present, so editing
+  // the shared template never retroactively changes an existing proposal's
+  // send email. Only proposals created before this column existed fall back
+  // to the live join.
+  const template = proposal.template_snapshot || proposal.proposal_templates;
   const primaryColor = template?.primary_color || "#3b82f6";
-  
+
   return `
 <!DOCTYPE html>
 <html>
@@ -83,8 +87,8 @@ function generateProposalEmailHtml(
           <!-- Header -->
           <tr>
             <td style="background: linear-gradient(135deg, ${primaryColor}, #1e40af); padding: 40px; text-align: center;">
-              ${proposal.proposal_templates?.logo_url ? 
-                `<img src="${proposal.proposal_templates.logo_url}" alt="Logo" style="max-height: 60px; margin-bottom: 20px;">` : ''
+              ${template?.logo_url ?
+                `<img src="${template.logo_url}" alt="Logo" style="max-height: 60px; margin-bottom: 20px;">` : ''
               }
               <h1 style="color: #ffffff; margin: 0; font-size: 24px;">${proposal.title}</h1>
             </td>

@@ -406,7 +406,6 @@ BEGIN
   );
 END;
 $function$;
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -423,4 +422,4 @@ $function$;
 --    appears in stage_distribution under that template stage's label.
 -- 4. Confirm function signature (17 parameters, defaults, return type) is
 --    unchanged and every other JSON key/behavior is identical to the
---    previous definition.
+--    previous definition.;

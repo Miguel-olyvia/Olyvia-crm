@@ -451,7 +451,6 @@ BEGIN
   );
 END;
 $function$;
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -477,4 +476,4 @@ $function$;
 --    stage_distribution accordingly -- only the date restriction was
 --    dropped from snapshot_rows, every other filter still applies.
 -- 5. Confirm the function signature (17 parameters, defaults, return type)
---    is unchanged and existing frontend calls work without changes.
+--    is unchanged and existing frontend calls work without changes.;

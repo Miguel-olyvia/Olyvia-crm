@@ -24,6 +24,15 @@ interface CommercialInfoRow {
 }
 
 async function loadTemplate(proposal: any) {
+  // Frozen at proposal-creation time — always wins when present, so editing
+  // the shared template (or a future per-proposal editor) never retroactively
+  // changes how an existing proposal renders. Only proposals created before
+  // this column existed (and not yet covered by the backfill) fall through
+  // to the live lookups below.
+  if (proposal?.template_snapshot) {
+    return proposal.template_snapshot;
+  }
+
   if (proposal?.proposal_templates) {
     return proposal.proposal_templates;
   }

@@ -55,26 +55,21 @@ ALTER TABLE "public"."form_submissions"
   ADD COLUMN IF NOT EXISTS "resolved_at" timestamp with time zone,
   ADD COLUMN IF NOT EXISTS "resolved_by" "uuid",
   ADD COLUMN IF NOT EXISTS "resolution" "text";
-
 ALTER TABLE "public"."form_submissions"
   ADD CONSTRAINT "form_submissions_resolution_check"
     CHECK (("resolution" IS NULL) OR ("resolution" = ANY (ARRAY['merged'::"text", 'new_lead'::"text"])));
-
 ALTER TABLE "public"."form_submissions"
   ADD CONSTRAINT "form_submissions_resolved_by_fkey"
     FOREIGN KEY ("resolved_by") REFERENCES "public"."anew_users"("id");
-
 COMMENT ON COLUMN "public"."form_submissions"."resolved_at" IS
   'Set once a reviewer acts on this submission via rpc_resolve_form_submission. NULL = still pending review.';
 COMMENT ON COLUMN "public"."form_submissions"."resolution" IS
   'merged: acknowledged as the existing contact/client, logged as an entity_interactions note. new_lead: the match was wrong, a fresh anew_leads row was created instead.';
-
 -- Primary access pattern for the pending-review list: org-scoped, unresolved,
 -- most recent first.
 CREATE INDEX IF NOT EXISTS "idx_form_submissions_pending"
   ON "public"."form_submissions" USING "btree" ("organization_id", "created_at" DESC)
   WHERE ("resolved_at" IS NULL);
-
 -- ============================================================
 -- 2. rpc_resolve_form_submission(p_submission_id, p_action, p_field_overrides)
 -- ============================================================
@@ -196,10 +191,8 @@ BEGIN
   RETURN v_result;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION "public"."rpc_resolve_form_submission"("uuid", "text", "jsonb") FROM PUBLIC, "anon";
 GRANT EXECUTE ON FUNCTION "public"."rpc_resolve_form_submission"("uuid", "text", "jsonb") TO "authenticated";
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -214,4 +207,4 @@ GRANT EXECUTE ON FUNCTION "public"."rpc_resolve_form_submission"("uuid", "text",
 -- 4. Calling the RPC twice on the same submission id raises
 --    object_not_in_prerequisite_state on the second call.
 -- 5. idx_form_submissions_pending keeps the "pending" list query
---    (organization_id = ? AND resolved_at IS NULL ORDER BY created_at DESC) index-backed.
+--    (organization_id = ? AND resolved_at IS NULL ORDER BY created_at DESC) index-backed.;
