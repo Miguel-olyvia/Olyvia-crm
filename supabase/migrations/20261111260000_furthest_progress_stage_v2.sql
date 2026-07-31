@@ -77,11 +77,9 @@ BEGIN
   RETURN NULL;
 END;
 $function$;
-
 REVOKE ALL ON FUNCTION public.compute_lead_furthest_progress_stage_v2(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.compute_lead_furthest_progress_stage_v2(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.compute_lead_furthest_progress_stage_v2(uuid) TO service_role;
-
 -- ============================================================
 -- get_lead_resolved_stage — additive extension only. Adds
 -- furthest_progress_stage_id / furthest_progress_stage alongside the
@@ -203,11 +201,9 @@ BEGIN
   );
 END;
 $function$;
-
 REVOKE ALL ON FUNCTION public.get_lead_resolved_stage(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO service_role;
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -225,4 +221,4 @@ GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO service_role;
 --    (b6ffce4f-f630-4933-833a-008649757a33) during authoring of this
 --    migration.
 -- 3. furthest_progress_stage_id can legitimately be NULL (lead still at the
---    very first stage, no other stage's conditions met) -- not an error.
+--    very first stage, no other stage's conditions met) -- not an error.;

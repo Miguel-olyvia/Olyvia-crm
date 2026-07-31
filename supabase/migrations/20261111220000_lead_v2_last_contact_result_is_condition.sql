@@ -246,7 +246,6 @@ BEGIN
   RETURN v_result;
 END;
 $function$;
-
 -- ============================================================
 -- evaluate_condition — acrescenta 'last_contact_result_is', comparação de
 -- texto simples entre o id do último resultado e o "value" pedido pela
@@ -306,7 +305,6 @@ BEGIN
   END;
 END;
 $function$;
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -323,4 +321,4 @@ $function$;
 -- 3. Confirmar que stage_reached()/compute_lead_stage_v2() continuam a
 --    resolver a mesma paridade de dashboard para orgs sem regras
 --    configuradas — nenhuma regra existente referencia
---    'last_contact_result_is'.
+--    'last_contact_result_is'.;

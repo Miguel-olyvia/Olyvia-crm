@@ -26,6 +26,39 @@ import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposal
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 
+/**
+ * Freezes the resolved template's full config into the new proposal at
+ * creation time (proposals.template_snapshot), so a later edit to the shared
+ * proposal_templates row never retroactively changes this proposal's layout.
+ * Mirrors the exact same resolution priority as proposalPortalData's
+ * loadTemplate(): explicit template_id, else the org's default active
+ * "proposal" template, else no template at all (null — matches today's
+ * behavior when an org has none).
+ */
+async function resolveTemplateSnapshot(
+  templateId: string | null,
+  organizationId: string,
+): Promise<Record<string, unknown> | null> {
+  if (templateId) {
+    const { data } = await supabase
+      .from("proposal_templates")
+      .select("*")
+      .eq("id", templateId)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  const { data } = await supabase
+    .from("proposal_templates")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("template_type", "proposal")
+    .eq("is_default", true)
+    .eq("is_active", true)
+    .maybeSingle();
+  return data ?? null;
+}
+
 interface WorkflowStage {
   id: string;
   name: string;
@@ -284,6 +317,8 @@ export function ProposalCreateDialog({
       const probability = selectedDeal?.probability ?? 50;
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
+      const templateSnapshot = await resolveTemplateSnapshot(templateId, activeCompany.id);
+
       const proposalData = {
         title: formData.title,
         description: formData.description || null,
@@ -298,6 +333,7 @@ export function ProposalCreateDialog({
         organization_id: activeCompany.id,
         root_organization_id: rootOrgId,
         template_id: templateId,
+        template_snapshot: templateSnapshot,
       };
 
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
@@ -462,8 +498,13 @@ export function ProposalCreateDialog({
           description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
         });
       } else {
+        // Snapshot resolved only on creation, and merged into a copy of
+        // proposalData used ONLY for this call — never for rpc_update_proposal
+        // above, so editing an existing proposal's fields can never
+        // re-resolve/overwrite its already-frozen layout.
+        const templateSnapshot = await resolveTemplateSnapshot(templateId, activeCompany.id);
         const { data, error } = await supabase.rpc('rpc_create_proposal', {
-          p_proposal_data: proposalData,
+          p_proposal_data: { ...proposalData, template_snapshot: templateSnapshot },
           p_selected_quote_ids: selectedQuoteIds,
           p_inline_quotes: inlineQuotesPayload,
           p_proposal_items: proposalItemsPayload,

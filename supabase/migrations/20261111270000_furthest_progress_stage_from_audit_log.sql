@@ -130,11 +130,9 @@ BEGIN
   RETURN v_stage_id;
 END;
 $function$;
-
 REVOKE ALL ON FUNCTION public.get_lead_last_stage_before_terminal(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_lead_last_stage_before_terminal(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_lead_last_stage_before_terminal(uuid) TO service_role;
-
 -- ============================================================
 -- get_lead_resolved_stage — use the audit-log-based function for
 -- furthest_progress_stage_id only when the resolved stage is itself
@@ -273,11 +271,9 @@ BEGIN
   );
 END;
 $function$;
-
 REVOKE ALL ON FUNCTION public.get_lead_resolved_stage(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO service_role;
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -294,4 +290,4 @@ GRANT EXECUTE ON FUNCTION public.get_lead_resolved_stage(uuid) TO service_role;
 --    "most recent status-change audit row" logic, not "first ever" logic.
 -- 4. No audit row at all (lead created directly as rejected, or predates the
 --    audit trigger) -> furthest_progress_stage_id is NULL, which is the
---    honest answer, not a guessed default.
+--    honest answer, not a guessed default.;

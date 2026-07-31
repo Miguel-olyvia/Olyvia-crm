@@ -80,17 +80,14 @@ BEGIN
   RETURN v_id;
 END;
 $$;
-
 COMMENT ON FUNCTION "public"."upsert_form_submission" IS
   'Correct native upsert for form_submissions, targeting the real COALESCE-expression unique index (uniq_form_submissions_org_entity_form_campaign) that the Supabase JS client''s .upsert({onConflict: "..."}) cannot express (it only supports a bare column list). Called by create-lead via service_role — not exposed to authenticated/anon (this table is service_role-write-only by design, see 20260823010000).';
-
 -- Table is service_role-write-only by design (see 20260823010000's own
 -- comment) - keep it that way, only the Edge Functions (via service_role,
 -- which bypasses grants entirely) are meant to call this.
 REVOKE ALL ON FUNCTION "public"."upsert_form_submission"(
   "uuid", "uuid", "uuid", "uuid", "uuid", "text", "uuid", "jsonb", "text", boolean, integer, integer
 ) FROM PUBLIC, "anon", "authenticated";
-
 -- ============================================================
 -- Verification notes (not executed)
 -- ============================================================
@@ -98,4 +95,4 @@ REVOKE ALL ON FUNCTION "public"."upsert_form_submission"(
 --    campaign_id) tuple (including both NULL) updates the same row (same id
 --    returned both times) instead of erroring or creating a duplicate.
 -- 2. A different form_id or campaign_id for the same (org, entity) creates a
---    distinct row.
+--    distinct row.;
