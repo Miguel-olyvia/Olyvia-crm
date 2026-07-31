@@ -6,18 +6,36 @@ interface WorkflowStage {
   label?: string;
   color?: string;
   sort_order?: number;
+  is_rejection?: boolean;
 }
 
 interface LeadPipelineBarProps {
   currentStatus: string;
   workflowStages: WorkflowStage[];
+  // Id of the last genuinely-reached stage before the lead was rejected,
+  // resolved via the get_lead_resolved_stage RPC. Only relevant/fetched
+  // when the current stage is a rejection stage; undefined/null otherwise
+  // (including "not fetched yet"), in which case we fall back to not
+  // marking any stage as past for a rejected lead.
+  furthestProgressStageId?: string | null;
 }
 
-export function LeadPipelineBar({ currentStatus, workflowStages }: LeadPipelineBarProps) {
+export function LeadPipelineBar({ currentStatus, workflowStages, furthestProgressStageId }: LeadPipelineBarProps) {
   if (workflowStages.length === 0) return null;
 
   const sortedStages = [...workflowStages].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   const currentIndex = sortedStages.findIndex(s => s.name === currentStatus);
+  const isCurrentStageRejection = currentIndex >= 0 && sortedStages[currentIndex]?.is_rejection === true;
+  // For a rejected lead, "past" stages are the ones genuinely reached before
+  // rejection (furthestProgressStageId), not everything before the rejection
+  // stage's own order — otherwise every stage would render as reached simply
+  // because the rejection stage always sorts last.
+  const furthestIndex = isCurrentStageRejection
+    ? sortedStages.findIndex(s => s.id === furthestProgressStageId)
+    : currentIndex;
+  const pastBoundaryIndex = isCurrentStageRejection
+    ? (furthestProgressStageId ? furthestIndex : -1)
+    : currentIndex;
 
   return (
     <div className="space-y-2">
@@ -27,8 +45,8 @@ export function LeadPipelineBar({ currentStatus, workflowStages }: LeadPipelineB
       <div className="flex items-center gap-1">
         {sortedStages.map((stage, i) => {
           const isCurrent = stage.name === currentStatus;
-          const isPast = currentIndex >= 0 && i < currentIndex;
-          const isFuture = currentIndex >= 0 && i > currentIndex;
+          const isPast = !isCurrent && pastBoundaryIndex >= 0 && i <= pastBoundaryIndex;
+          const isFuture = !isCurrent && !isPast;
 
           return (
             <div key={stage.id} className="flex items-center flex-1">

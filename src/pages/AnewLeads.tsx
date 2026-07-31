@@ -1599,6 +1599,25 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Only fetch the resolved-stage RPC when the selected lead currently sits
+  // in a rejection stage — for every other status the pipeline bar keeps
+  // using the plain currentStatus-based rendering, so this stays a no-op.
+  const selectedLeadIsRejected = !!selectedLead &&
+    workflowStages.find(s => s.name === selectedLead.status)?.is_rejection === true;
+
+  const { data: selectedLeadResolvedStage } = useQuery({
+    queryKey: ["lead-resolved-stage", selectedLead?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("get_lead_resolved_stage", {
+        p_lead_id: selectedLead!.id,
+      });
+      if (error) return null;
+      return data as { furthest_progress_stage_id: string | null } | null;
+    },
+    enabled: selectedLeadIsRejected && !!selectedLead?.id,
+    staleTime: 60 * 1000,
+  });
+
   // Helper to get status color from workflow stage or fallback
   const getStatusColor = useCallback((status: string) => {
     const stage = workflowStages.find(s => s.name === status);
@@ -5636,6 +5655,7 @@ export default function AnewLeads() {
                   <LeadPipelineBar
                     currentStatus={selectedLead.status}
                     workflowStages={workflowStages}
+                    furthestProgressStageId={selectedLeadResolvedStage?.furthest_progress_stage_id ?? null}
                   />
 
                   {/* SUMMARY BAR */}

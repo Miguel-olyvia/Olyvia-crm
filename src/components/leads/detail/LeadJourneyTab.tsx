@@ -20,6 +20,8 @@ interface ResolvedStageResponse {
   resolved_stage_id: string | null;
   resolved_stage: LeadStage | null;
   stages: LeadStage[];
+  furthest_progress_stage_id: string | null;
+  furthest_progress_stage: LeadStage | null;
 }
 
 interface LeadJourneyTabProps {
@@ -79,14 +81,24 @@ export function LeadJourneyTab({
   const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
 
   const stages = resolvedStages?.stages ?? [];
-  const resolvedStageOrder = resolvedStages?.resolved_stage?.stage_order ?? null;
+  const isLost = resolvedStages?.resolved_stage?.counts_as_lost === true;
+  // For a lost/rejected lead, the fill threshold is the furthest genuinely
+  // reached stage (reconstructed from audit history), not the rejection
+  // stage's own order — otherwise every stage would render as "completed"
+  // simply because the rejection stage always has the highest stage_order.
+  const fillThresholdOrder = isLost
+    ? resolvedStages?.furthest_progress_stage?.stage_order ?? null
+    : resolvedStages?.resolved_stage?.stage_order ?? null;
 
   const steps = stages.map((stage) => ({
     key: stage.id,
     label: stage.label,
     color: stage.color,
-    completed: resolvedStageOrder !== null && stage.stage_order <= resolvedStageOrder,
-    current: resolvedStageOrder !== null && stage.stage_order === resolvedStageOrder,
+    completed:
+      fillThresholdOrder !== null &&
+      stage.stage_order <= fillThresholdOrder &&
+      stage.id !== resolvedStages?.resolved_stage_id,
+    current: stage.id === resolvedStages?.resolved_stage_id,
   }));
 
   const leadToContactDays = isNegotiatingOrLater
