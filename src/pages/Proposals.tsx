@@ -129,6 +129,9 @@ interface Proposal {
   rejected_at?: string | null;
   rejection_reason?: string | null;
   sent_at?: string | null;
+  proposal_number?: string | null;
+  published_at?: string | null;
+  has_unpublished_changes?: boolean | null;
 }
 
 interface Deal {
@@ -1013,7 +1016,9 @@ const Proposals = () => {
   };
 
   const requestPortalPublish = (proposal: Proposal, forceNewPassword: boolean) => {
-    if (proposal.status === "accepted") {
+    // Accepted proposals with pending changes should warn the user that
+    // republication will invalidate the previous signature.
+    if (proposal.status === "accepted" && proposal.has_unpublished_changes) {
       setPortalReopenConfirm({ proposal, forceNewPassword });
       return;
     }
@@ -2180,7 +2185,14 @@ const Proposals = () => {
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔗 Portal</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center justify-between">
+          <span>🔗 Portal</span>
+          {proposal.has_unpublished_changes && (
+            <span className="text-[10px] text-amber-600 font-semibold normal-case tracking-normal">
+              ● Alterações por publicar
+            </span>
+          )}
+        </DropdownMenuLabel>
         <DropdownMenuItem
           disabled={portalAccessLoading}
           onClick={(e) => {
@@ -2188,7 +2200,7 @@ const Proposals = () => {
             requestPortalPublish(proposal, false);
           }}
         >
-          <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+          <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> {proposal.published_at ? "Republicar no portal" : "Enviar para Portal Cliente"}
         </DropdownMenuItem>
         <DropdownMenuItem 
           onClick={async (e) => {
@@ -3422,18 +3434,30 @@ const Proposals = () => {
       <AlertDialog open={!!portalReopenConfirm} onOpenChange={(openState) => { if (!openState) setPortalReopenConfirm(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reabrir proposta para nova assinatura?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta proposta já foi aceite e assinada. Ao republicá-la no Portal Cliente, a aceitação e assinatura anteriores deixam de ser válidas
-              e o cliente terá de aceitar e assinar novamente com os valores atualizados.
-              {portalReopenConfirm && pipelineLinks[portalReopenConfirm.proposal.id]?.contract_id
-                ? " O contrato associado a esta proposta será descartado e substituído quando o cliente assinar de novo."
-                : " Se entretanto já existir um contrato associado, este poderá ser descartado e substituído quando o cliente assinar de novo."}
+            <AlertDialogTitle>Republicar proposta aceite?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>Esta proposta já foi aceite. Foram detetadas alterações nos orçamentos após a aceitação.</p>
+                <p>Ao republicar, a assinatura anterior deixa de ser válida e o cliente terá de aceitar e assinar novamente com os novos valores.</p>
+                {portalReopenConfirm && (
+                  <p className="text-xs text-muted-foreground">
+                    {portalReopenConfirm.proposal.proposal_number ? `${portalReopenConfirm.proposal.proposal_number} — ` : ""}
+                    {portalReopenConfirm.proposal.title}
+                    {" · "}
+                    {formatCurrency(Number(portalReopenConfirm.proposal.value ?? 0))}
+                  </p>
+                )}
+                <p className="text-xs font-medium text-amber-600">
+                  Nota: se já existir um contrato assinado, a republicação será bloqueada. Se existir apenas um rascunho, ele será removido e regenerado após a nova aceitação.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePortalReopenConfirm}>Reabrir e reenviar</AlertDialogAction>
+            <AlertDialogCancel onClick={() => setPortalReopenConfirm(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePortalReopenConfirm} className="bg-purple-600 text-white hover:bg-purple-700">
+              Republicar
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -474,20 +474,18 @@ serve(async (req) => {
           acceptance_user_agent: req.headers.get("user-agent") || null,
         }).eq("id", proposal_id));
 
-        // Snapshot "what was accepted" for later change detection — fail-soft,
+        // Freeze the decided snapshot for later change detection — fail-soft,
         // never blocks the acceptance flow that already succeeded above.
         try {
-          const { data: contentHash, error: hashError } = await supabase.rpc(
-            'compute_proposal_content_hash',
+          const { error: decisionError } = await supabase.rpc(
+            'record_proposal_decision',
             { p_proposal_id: proposal_id },
           );
-          if (hashError) {
-            console.error("compute_proposal_content_hash error:", hashError);
-          } else if (contentHash) {
-            await supabase.from("proposals").update({ accepted_content_hash: contentHash }).eq("id", proposal_id);
+          if (decisionError) {
+            console.error("record_proposal_decision error:", decisionError);
           }
         } catch (e) {
-          console.error("Error storing accepted_content_hash:", e);
+          console.error("Error recording proposal decision:", e);
         }
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
@@ -630,6 +628,20 @@ serve(async (req) => {
           rejection_reason_code: reason_code || null,
           rejection_notes: safeReasonText,
         }).eq("id", proposal_id));
+
+        // Freeze the decided snapshot for later change detection — fail-soft,
+        // never blocks the rejection flow that already succeeded above.
+        try {
+          const { error: decisionError } = await supabase.rpc(
+            'record_proposal_decision',
+            { p_proposal_id: proposal_id },
+          );
+          if (decisionError) {
+            console.error("record_proposal_decision error:", decisionError);
+          }
+        } catch (e) {
+          console.error("Error recording proposal decision:", e);
+        }
 
         // Rejecting the whole proposal means nothing under it moves forward —
         // mirrors sign_proposal's handling of unselected quotes, but here every

@@ -98,7 +98,7 @@ serve(async (req: Request) => {
     }
 
     // Client scoped to the caller's own JWT (not service_role) — required for
-    // reopen_accepted_proposal_if_changed, which authorizes internally via
+    // republish_proposal_snapshot, which authorizes internally via
     // auth.uid()/get_user_visible_org_ids() and would always reject a
     // service_role caller (auth.uid() is NULL under service_role).
     const callerClient = createClient(
@@ -148,7 +148,6 @@ serve(async (req: Request) => {
     // 1. Get document and its entity
     let entityId: string | null = null;
     let documentTitle = "";
-    let proposalReopened = false;
 
     if (document_type === "proposal") {
       const { data: proposal } = await supabase
@@ -164,23 +163,24 @@ serve(async (req: Request) => {
       documentTitle = proposal.title;
       entityId = proposal.entity_id || null;
 
-      // Re-check whether an already-accepted proposal was edited since acceptance.
-      // Reopens it for re-signature (RPC handles all mutations atomically), or
-      // blocks republishing entirely when a signed contract already exists.
-      const { data: reopenResult, error: reopenError } = await callerClient.rpc(
-        'reopen_accepted_proposal_if_changed',
-        { p_proposal_id: document_id },
+      // (Re)publish the proposal snapshot to the portal. If the proposal was
+      // already accepted/rejected and real content changed since the decision,
+      // the RPC reopens it for re-signature atomically — unless a signed
+      // contract is already linked, in which case it raises an exception and
+      // republishing is blocked entirely.
+      const { error: republishError } = await callerClient.rpc(
+        'republish_proposal_snapshot',
+        { p_proposal_id: document_id, p_published_by: callerAnew?.id ?? null },
       );
-      if (reopenError) {
-        console.error("[create-client-portal-access] reopen check failed:", reopenError);
-        // fail-soft: don't block republishing over a check we can't complete — proceed as before
-      } else if (reopenResult?.blocked && reopenResult?.reason === 'proposal_has_signed_contract') {
-        return new Response(
-          JSON.stringify({ error: "proposal_has_signed_contract", message: "Esta proposta já tem contrato assinado — crie uma nova proposta/adenda em vez de republicar." }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      } else if (reopenResult?.reopened === true) {
-        proposalReopened = true;
+      if (republishError) {
+        if (republishError.message === 'proposal_has_signed_contract') {
+          return new Response(
+            JSON.stringify({ error: "proposal_has_signed_contract", message: "Esta proposta já tem contrato assinado — crie uma nova proposta/adenda em vez de republicar." }),
+            { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+        console.error("[create-client-portal-access] republish_proposal_snapshot failed:", republishError);
+        // fail-soft: don't block republishing over an unrelated RPC hiccup — proceed as before
       }
 
       // Get entity from deal
@@ -723,7 +723,6 @@ serve(async (req: Request) => {
           : `Acesso atualizado para ${email}. ${safeMessage}`,
         smtp_status: "not_found",
         smtp_warning: true,
-        ...(proposalReopened ? { proposal_reopened: true } : {}),
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -793,10 +792,6 @@ serve(async (req: Request) => {
       email,
       login_url: finalLoginUrl,
     };
-
-    if (proposalReopened) {
-      response.proposal_reopened = true;
-    }
 
     if (emailSent) {
       // BASE-USR-012: password was delivered via email — do NOT echo it back in
