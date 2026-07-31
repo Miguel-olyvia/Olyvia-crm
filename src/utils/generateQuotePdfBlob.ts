@@ -4,6 +4,7 @@ import { QuotePDFDocument } from '@/components/QuotePDFDocument';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchDefaultQuotePdfTemplate, fetchQuotePdfTemplateById } from '@/utils/quotePdfTemplate';
 import { buildQuoteRenderContext } from '@/utils/buildQuoteRenderContext';
+import type { AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
 const fetchBlobWithTimeout = async (url: string, timeoutMs = 5000): Promise<Blob> => {
   const controller = new AbortController();
@@ -26,6 +27,10 @@ export async function generateQuotePdfBlob(
   options: {
     templateOverride?: any | null;
     documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
+    /** Multi-quote proposal PDFs: hide this quote's own totals block. */
+    hideTotals?: boolean;
+    /** Multi-quote proposal PDFs: render the aggregated totals block instead. */
+    totalsOverride?: AggregatedTotals;
   } = {},
 ): Promise<{ blob: Blob; fileName: string }> {
   const { data: quoteData, error: quoteError } = await (supabase as any)
@@ -89,6 +94,8 @@ export async function generateQuotePdfBlob(
     // underlying quote — keep rendering instead of throwing the whole PDF away.
     strictVariables: options.documentContext?.kind === 'proposal' ? false : true,
     documentContext: options.documentContext ?? { kind: 'quote' },
+    hideTotals: options.hideTotals ?? false,
+    totalsOverride: options.totalsOverride,
   });
   const blob = await (pdf as any)(pdfElement).toBlob();
 

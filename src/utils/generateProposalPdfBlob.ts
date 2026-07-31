@@ -7,6 +7,7 @@ import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
 import { ProposalPortalDocument } from '@/components/proposals/ProposalPortalDocument';
 import { loadProposalPortalData, type ProposalPortalData } from '@/components/proposals/proposalPortalData';
+import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
 const STATUS_LABELS: Record<string, string> = {
   sent: 'A aguardar decisão',
@@ -177,7 +178,37 @@ async function generateFromQuotePdfs(
     throw new Error('Esta proposta não tem orçamentos associados para gerar PDF.');
   }
 
+  // Multi-quote proposals: compute a single aggregated totals block (shown
+  // only on the last quote's page) instead of one disconnected totals block
+  // per quote. Fetch each quote's lines/fees with the same query shape used
+  // by generateQuotePdfBlob for a single quote, so the aggregate math stays
+  // consistent with the per-quote math.
+  let aggregatedTotals: AggregatedTotals | null = null;
+  if (resolvedQuotes.length > 1) {
+    try {
+      const perQuoteData = await Promise.all(
+        resolvedQuotes.map(async (quote) => {
+          const [{ data: quoteRow }, { data: linesData }, { data: feesData }] = await Promise.all([
+            (supabase as any).from('quotes').select('desconto_global_percent').eq('id', quote.id).maybeSingle(),
+            supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quote.id).order('ordem'),
+            supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quote.id),
+          ]);
+          return {
+            lines: linesData || [],
+            fees: feesData || [],
+            descontoPercent: quoteRow?.desconto_global_percent || 0,
+          };
+        })
+      );
+      aggregatedTotals = aggregateQuoteTotals(perQuoteData);
+    } catch (e) {
+      console.error('[generateProposalPdfBlob] Failed to compute aggregated totals:', e);
+      aggregatedTotals = null;
+    }
+  }
+
   const merged = await PDFDocument.create();
+  const lastQuoteId = resolvedQuotes[resolvedQuotes.length - 1]?.id;
 
   for (const quote of resolvedQuotes) {
     try {
@@ -186,6 +217,7 @@ async function generateFromQuotePdfs(
         ? await fetchQuotePdfTemplateById(quote.template_id)
         : null;
       const templateForQuote = quoteOwnTemplate ?? fallbackTemplate;
+      const isLastQuote = quote.id === lastQuoteId;
       // Mark this render as proposal-context so a quote missing a variable
       // referenced only by the proposal template renders (blank/placeholder)
       // instead of being silently dropped from the merged PDF.
@@ -196,6 +228,11 @@ async function generateFromQuotePdfs(
           number: proposal?.proposal_number ?? null,
           title: proposal?.title ?? null,
         },
+        // Hide every quote's own totals except the last, which instead shows
+        // the single aggregated "Valor da Proposta" block for the whole
+        // merged document. Single-quote proposals keep default behavior.
+        hideTotals: aggregatedTotals ? !isLastQuote : false,
+        totalsOverride: aggregatedTotals && isLastQuote ? aggregatedTotals : undefined,
       });
       const arrayBuffer = await blob.arrayBuffer();
       const src = await PDFDocument.load(arrayBuffer);

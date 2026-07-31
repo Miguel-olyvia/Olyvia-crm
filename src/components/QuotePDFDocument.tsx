@@ -2,6 +2,8 @@ import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
 import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
+import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
+import { computeQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -186,6 +188,20 @@ interface QuotePDFProps {
   renderContext?: RenderContext | null;
   /** Quando true (envio/download), variáveis vazias em modo "variable" lançam erro. */
   strictVariables?: boolean;
+  /**
+   * Quando true, o bloco de totais ("VALOR DO ORÇAMENTO") não é renderizado.
+   * Usado em propostas multi-orçamento: todos os orçamentos exceto o último
+   * escondem os seus totais individuais, para dar lugar a um único bloco
+   * agregado no final do documento fundido.
+   */
+  hideTotals?: boolean;
+  /**
+   * Quando fornecido, o bloco de totais usa estes valores agregados (soma de
+   * todos os orçamentos da proposta) em vez de calcular a partir de `lines`/
+   * `fees` deste orçamento. Usado apenas no último orçamento de uma proposta
+   * multi-orçamento.
+   */
+  totalsOverride?: AggregatedTotals;
 }
 
 // Extract attributes from a line as a list of { label, value, priceImpact }
@@ -204,70 +220,6 @@ const getLineAttributes = (line: any): { label: string; value: string; priceImpa
     result.push({ label: attr.label, value, priceImpact });
   });
   return result;
-};
-
-type BundleComponentAttr = { label: string; value: string };
-type BundleComponentForPdf = {
-  name: string;
-  sku: string | null;
-  quantity: number;
-  unit_price: number;
-  vat_rate: number;
-  attributes: BundleComponentAttr[];
-  hasAttributeStructure: boolean;
-};
-
-const extractComponentAttributes = (component: any): BundleComponentAttr[] => {
-  const attrs = component?.selected_attributes;
-  if (!attrs || typeof attrs !== 'object') return [];
-  const result: BundleComponentAttr[] = [];
-  Object.values(attrs).forEach((attr: any) => {
-    if (!attr || !attr.label) return;
-    const raw = attr.value ?? attr.option_label;
-    if (raw === undefined || raw === null || raw === '') return;
-    const unit = attr.unit || '';
-    let formatted: string;
-    if (typeof raw === 'boolean') formatted = raw ? 'Sim' : 'Não';
-    else formatted = unit ? `${raw} ${unit}` : String(raw);
-    result.push({ label: attr.label, value: formatted });
-  });
-  return result;
-};
-
-const componentHasAttributeStructure = (component: any): boolean => {
-  const attrs = component?.selected_attributes;
-  if (!attrs || typeof attrs !== 'object') return false;
-  return Object.values(attrs).some((a: any) => a && typeof a === 'object' && a.label);
-};
-
-const getBundleComponents = (line: any): BundleComponentForPdf[] => {
-  const directComponents = Array.isArray(line.bundle_components) ? line.bundle_components : [];
-  const metadataComponents = Array.isArray(line.selected_attributes?.bundle_components)
-    ? line.selected_attributes.bundle_components
-    : [];
-  const attributeComponents = Array.isArray(line.selected_attributes?.bundle_components_data)
-    ? line.selected_attributes.bundle_components_data
-    : [];
-
-  const source = directComponents.length > 0
-    ? directComponents
-    : (metadataComponents.length > 0 ? metadataComponents : attributeComponents);
-
-  return source
-    .filter((component: any) => component && typeof component.name === 'string')
-    .map((component: any) => ({
-      name: component.name,
-      sku: component.sku || null,
-      quantity: parseFloat(String(component.quantity || 0)) || 0,
-      unit_price: parseFloat(String(component.unit_price || 0)) || 0,
-      vat_rate: parseFloat(String(component.vat_rate || 23)) || 23,
-      attributes: extractComponentAttributes(component),
-      hasAttributeStructure: componentHasAttributeStructure(component),
-    }));
-};
-
-const isBundleLine = (line: any): boolean => {
-  return !!line?.bundle_id || line?.categoria === 'Bundles';
 };
 
 const stripHtml = (value?: string | null): string => {
@@ -294,7 +246,7 @@ const resolveTemplateText = (template: any, section: any, keys: string[]): strin
   return '';
 };
 
-export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], user, descontoPercent = 0, proposalTemplate = null, renderContext = null, strictVariables = false }: QuotePDFProps) => {
+export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], user, descontoPercent = 0, proposalTemplate = null, renderContext = null, strictVariables = false, hideTotals = false, totalsOverride }: QuotePDFProps) => {
   /**
    * Helper para os 3 blocos configuráveis (client_info, company_info, footer).
    * Backward-compat: se não houver renderContext ou se fieldModes[key] estiver
@@ -380,94 +332,25 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     borderTop: `2 solid ${brandColor}`,
   };
   
-  // Calculate totals
-  const subtotalBruto = lines.reduce((sum, line) => {
-    return sum + (parseFloat(String(line.total_sem_iva || 0)));
-  }, 0);
-
-  // Apply global discount. Round the discounted subtotal to cents (matching
-  // QuoteBuilder.calculateTotals' round2(totalSemIvaComDesconto)) so the PDF
-  // total reconciles with the on-screen total to the cent.
-  const discountFactor = descontoPercent > 0 ? (1 - descontoPercent / 100) : 1;
-  const subtotal = round2(subtotalBruto * discountFactor);
-  const discountValue = subtotalBruto - subtotal;
-
-  // Calculate service fees totals
-  const totalFeesValue = fees.reduce((sum, fee) => {
-    return sum + parseFloat(String(fee.calculated_value || 0));
-  }, 0);
-
-  const totalFeesVat = fees.reduce((sum, fee) => {
-    return sum + parseFloat(String(fee.vat_amount || 0));
-  }, 0);
-
-  // Group VAT by rate (e.g. 6%, 23%) — apply global discount proportionally.
-  // For bundle lines with components having mixed VAT, split the line base
-  // proportionally by each component's subtotal and use each component's own rate.
-  const vatByRateMap = new Map<number, { base: number; vat: number }>();
-  lines.forEach((line) => {
-    const lineBase = parseFloat(String(line.total_sem_iva || 0)) * discountFactor;
-    const components = getBundleComponents(line);
-    const componentsTotal = components.reduce(
-      (s, c) => s + (c.unit_price * c.quantity),
-      0
-    );
-    const ivaOverrideRaw = (line as any)?.selected_attributes?.iva_override;
-    const hasOverride = typeof ivaOverrideRaw === "number" && !Number.isNaN(ivaOverrideRaw);
-
-    if (components.length > 0 && componentsTotal > 0 && !hasOverride) {
-      // Split line base across components by their share of the gross components total
-      components.forEach((c) => {
-        const share = (c.unit_price * c.quantity) / componentsTotal;
-        const base = lineBase * share;
-        const rate = c.vat_rate;
-        const vat = base * (rate / 100);
-        const existing = vatByRateMap.get(rate) || { base: 0, vat: 0 };
-        vatByRateMap.set(rate, { base: existing.base + base, vat: existing.vat + vat });
-      });
-    } else {
-      const rate = hasOverride ? ivaOverrideRaw : parseFloat(String(line.iva_percent || 0));
-      const vat = lineBase * (rate / 100);
-      const existing = vatByRateMap.get(rate) || { base: 0, vat: 0 };
-      vatByRateMap.set(rate, { base: existing.base + lineBase, vat: existing.vat + vat });
-    }
-  });
-  // Compute fee VAT: merge with product VAT bucket when same rate exists,
-  // otherwise show as a separate "IVA X% (Nome)" line.
-  const feeVatBreakdown: { name: string; rate: number; vat: number }[] = [];
-  fees.forEach((fee) => {
-    const base = parseFloat(String(fee.calculated_value || 0));
-    const storedVat = parseFloat(String(fee.vat_amount || 0));
-    const rateField = parseFloat(String(fee.vat_rate ?? 0));
-    const rate = rateField > 0
-      ? rateField
-      : (base > 0 && storedVat > 0 ? Math.round((storedVat / base) * 100) : 0);
-    const vat = storedVat > 0 ? storedVat : base * (rate / 100);
-    if (vat <= 0 && rate <= 0) return;
-    const existing = vatByRateMap.get(rate);
-    if (existing) {
-      vatByRateMap.set(rate, { base: existing.base + base, vat: existing.vat + vat });
-    } else {
-      const name = fee.service_fee_types?.name || 'Taxa';
-      feeVatBreakdown.push({ name, rate, vat });
-    }
-  });
-
-  // Round each VAT-rate bucket to cents before summing (matching
-  // QuoteBuilder.calculateTotals' round2(data.vat) discipline) so the total
-  // matches the visual sum of the individual rows shown below.
-  const vatBreakdown = Array.from(vatByRateMap.entries())
-    .map(([rate, v]) => [rate, { base: v.base, vat: round2(v.vat) }] as const)
-    .filter(([, v]) => v.base > 0 || v.vat > 0)
-    .sort((a, b) => a[0] - b[0]);
-
-  const roundedFeeVatBreakdown = feeVatBreakdown.map((f) => ({ ...f, vat: round2(f.vat) }));
-
-  const totalIva = vatBreakdown.reduce((sum, [, v]) => sum + v.vat, 0)
-    + roundedFeeVatBreakdown.reduce((sum, f) => sum + f.vat, 0);
-  const totalFeesValueRounded = round2(totalFeesValue);
-  const subtotalWithFees = subtotal + totalFeesValueRounded;
-  const total = subtotalWithFees + totalIva;
+  // Calculate totals for this quote's own lines/fees. When `totalsOverride`
+  // is provided (multi-quote proposal, last quote only), the render below
+  // uses the aggregated values instead — `ownTotals` is still computed so
+  // behavior stays byte-for-byte identical to today whenever no override is
+  // passed in.
+  const ownTotals = computeQuoteTotals(lines, fees, descontoPercent);
+  const subtotalBruto = totalsOverride ? totalsOverride.subtotalBruto : ownTotals.subtotalBruto;
+  const discountValue = ownTotals.discountValue;
+  const vatBreakdown = totalsOverride ? totalsOverride.vatBreakdown : ownTotals.vatBreakdown;
+  const roundedFeeVatBreakdown = totalsOverride ? totalsOverride.feeVatBreakdown : ownTotals.roundedFeeVatBreakdown;
+  const totalIva = totalsOverride ? totalsOverride.totalIva : ownTotals.totalIva;
+  const subtotalWithFees = totalsOverride ? totalsOverride.subtotalWithFees : ownTotals.subtotalWithFees;
+  const total = totalsOverride ? totalsOverride.total : ownTotals.total;
+  // Flat list of fee rows to render: this quote's own fees, or — when an
+  // aggregate is supplied — every fee from every quote in the proposal,
+  // each kept as its own separate named row (never merged/summed).
+  const feeRows: { name: string; value: number }[] = totalsOverride
+    ? totalsOverride.fees
+    : fees.map((fee) => ({ name: fee.service_fee_types?.name || 'Taxa', value: parseFloat(String(fee.calculated_value || 0)) }));
 
 
   // Calculate unit price from costs and margin
@@ -723,7 +606,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           ));
         })()}
       </View>
-      {!hasValueSection && renderTotals()}
+      {!hideTotals && !hasValueSection && renderTotals()}
     </View>
   );
 
@@ -745,11 +628,16 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     </View>
   ) : null;
 
-  const renderTotals = () => (
+  const renderTotals = () => {
+    if (hideTotals) return null;
+    return (
     <View style={styles.totalsSection} wrap={false} minPresenceAhead={95}>
       <View style={styles.totalsRow}><Text style={styles.totalLabel}>Subtotal Produtos (sem IVA):</Text><Text style={styles.totalValue}>€{subtotalBruto.toFixed(2)}</Text></View>
-      {descontoPercent > 0 && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global ({descontoPercent}%):</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
-      {fees.length > 0 && (() => {
+      {!totalsOverride && descontoPercent > 0 && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global ({descontoPercent}%):</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
+      {feeRows.length > 0 && (() => {
+        if (totalsOverride) {
+          return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço:</Text></View>);
+        }
         const feeRates = Array.from(new Set(fees.map(f => {
           const base = parseFloat(String(f.calculated_value || 0));
           const storedVat = parseFloat(String(f.vat_amount || 0));
@@ -759,28 +647,29 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         const rateLabel = feeRates.length === 1 ? `${feeRates[0].toFixed(0)}%` : '';
         return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço{rateLabel ? ` (IVA ${rateLabel})` : ''}:</Text></View>);
       })()}
-      {fees.length > 0 && <>{fees.map((fee, index) => {
-        const feeValue = parseFloat(String(fee.calculated_value || 0));
-        return (
-          <React.Fragment key={index}>
-            <View style={styles.totalsRow}><Text style={styles.totalLabel}>{fee.service_fee_types?.name || 'Taxa'}:</Text><Text style={styles.totalValue}>€{feeValue.toFixed(2)}</Text></View>
-          </React.Fragment>
-        );
-      })}</>}
+      {feeRows.length > 0 && <>{feeRows.map((fee, index) => (
+        <React.Fragment key={index}>
+          <View style={styles.totalsRow}><Text style={styles.totalLabel}>{fee.name}:</Text><Text style={styles.totalValue}>€{fee.value.toFixed(2)}</Text></View>
+        </React.Fragment>
+      ))}</>}
       <View style={[styles.totalsRow, { marginTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 5 }]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>SUBTOTAL (sem IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{subtotalWithFees.toFixed(2)}</Text></View>
-      {vatBreakdown.map(([rate, v]) => <View key={rate} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {rate.toFixed(0)}%:</Text><Text style={styles.totalValue}>€{v.vat.toFixed(2)}</Text></View>)}
+      {vatBreakdown.map((v) => <View key={v.rate} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {v.rate.toFixed(0)}%:</Text><Text style={styles.totalValue}>€{v.vat.toFixed(2)}</Text></View>)}
       {roundedFeeVatBreakdown.map((f, i) => <View key={`fee-vat-${i}`} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {f.rate.toFixed(0)}% ({f.name}):</Text><Text style={styles.totalValue}>€{f.vat.toFixed(2)}</Text></View>)}
       <View style={styles.totalsRow}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>IVA Total:</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{totalIva.toFixed(2)}</Text></View>
       <View style={[styles.totalsRow, styles.grandTotal]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>TOTAL GERAL (c/ IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{total.toFixed(2)}</Text></View>
     </View>
-  );
+    );
+  };
 
-  const renderValue = (section: any) => (
+  const renderValue = (section: any) => {
+    if (hideTotals) return null;
+    return (
     <View style={styles.section} wrap={false} minPresenceAhead={115}>
       <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALOR DO ORÇAMENTO')}</Text>
       {renderTotals()}
     </View>
-  );
+    );
+  };
 
   const renderCustom = (section: any) => {
     const content = stripHtml(section?.settings?.content || section?.settings?.text || '');
