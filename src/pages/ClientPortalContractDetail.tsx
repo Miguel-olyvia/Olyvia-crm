@@ -95,6 +95,7 @@ const ClientPortalContractDetail = () => {
   const canSign = contract && (contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
   const isSigned = contract?.status === "signed";
   const isRejected = contract?.status === "rejected";
+  const isCancelled = contract?.status === "cancelled";
 
   async function handleSendOtp() {
     if (!id) return; // H4
@@ -284,6 +285,24 @@ const ClientPortalContractDetail = () => {
         {isRejected && (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-5">
             <h3 className="text-lg font-bold text-destructive">❌ Contrato rejeitado</h3>
+          </div>
+        )}
+
+        {/* Cancelled Banner */}
+        {isCancelled && (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-5">
+            <h3 className="text-lg font-bold text-destructive">🚫 Contrato anulado</h3>
+            {contract.cancellation_reason && (
+              <p className="text-sm text-muted-foreground mt-1">Motivo: {contract.cancellation_reason}</p>
+            )}
+            {contract.cancelled_at && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Anulado em {format(new Date(contract.cancelled_at), "d 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })}
+              </p>
+            )}
+            <p className="text-sm text-muted-foreground mt-2">
+              Este contrato deixou de estar em vigor. Se lhe for enviado um contrato substituto, encontrará essa notificação separadamente.
+            </p>
           </div>
         )}
 

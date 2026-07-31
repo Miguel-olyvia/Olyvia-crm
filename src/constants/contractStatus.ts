@@ -15,7 +15,7 @@ export const CONTRACT_STATUS_LABELS: Record<string, string> = {
   signed: "Contrato assinado",
   rejected: "Contrato rejeitado",
   expired: "Expirado",
-  cancelled: "Cancelado",
+  cancelled: "Anulado",
 };
 
 export const CONTRACT_STATUS_VARIANTS: Record<

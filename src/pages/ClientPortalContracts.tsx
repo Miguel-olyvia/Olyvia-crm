@@ -106,9 +106,14 @@ const ClientPortalContracts = () => {
                     <div className="flex items-center gap-3 flex-1 min-w-0">
                       <ScrollText className="h-5 w-5 text-emerald-600 shrink-0" />
                       <div className="min-w-0">
-                        <p className="font-medium text-sm">
-                          {contract.contract_number || "Contrato"}
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-sm">
+                            {contract.contract_number || "Contrato"}
+                          </p>
+                          <Badge variant={STATUS_VARIANTS[contract.status] || "outline"} className="text-[10px]">
+                            {STATUS_LABELS[contract.status] || contract.status}
+                          </Badge>
+                        </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                           {contract.total_value && (
                             <>
