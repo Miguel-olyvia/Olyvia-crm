@@ -474,6 +474,22 @@ serve(async (req) => {
           acceptance_user_agent: req.headers.get("user-agent") || null,
         }).eq("id", proposal_id));
 
+        // Snapshot "what was accepted" for later change detection — fail-soft,
+        // never blocks the acceptance flow that already succeeded above.
+        try {
+          const { data: contentHash, error: hashError } = await supabase.rpc(
+            'compute_proposal_content_hash',
+            { p_proposal_id: proposal_id },
+          );
+          if (hashError) {
+            console.error("compute_proposal_content_hash error:", hashError);
+          } else if (contentHash) {
+            await supabase.from("proposals").update({ accepted_content_hash: contentHash }).eq("id", proposal_id);
+          }
+        } catch (e) {
+          console.error("Error storing accepted_content_hash:", e);
+        }
+
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("client_portal_users")
           .update({ portal_status: "signed" })

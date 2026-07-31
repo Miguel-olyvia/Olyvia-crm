@@ -10,6 +10,8 @@ const PORTAL_ERROR_MESSAGES: Record<string, string> = {
     "Este email pertence a um utilizador da plataforma. Use outro email para o acesso ao portal.",
   portal_email_used_by_other_entity:
     "Este email já está associado a outro cliente nesta organização. Use outro email para manter os acessos separados.",
+  proposal_has_signed_contract:
+    "Esta proposta já tem contrato assinado — crie uma nova proposta/adenda em vez de republicar.",
 };
 
 interface UseClientPortalAccessOptions {
@@ -101,6 +103,12 @@ Apenas o link de login foi copiado para a área de transferência.`,
         sonnerToast.warning(`Falha no envio de email`, {
           description: `O email não foi enviado (erro SMTP). Contacte o cliente (${data.email ?? "email desconhecido"}) por outro canal para lhe fornecer as credenciais de acesso ao portal.`,
           duration: 12000,
+        });
+      } else if (documentType === "proposal" && data.proposal_reopened) {
+        // Case D: proposal was reopened for re-signature because its content changed after acceptance
+        sonnerToast.success("Proposta reaberta e reenviada para o Portal Cliente", {
+          description: "O cliente terá de aceitar e assinar novamente com os valores atualizados.",
+          duration: 8000,
         });
       } else {
         // Case C: normal success

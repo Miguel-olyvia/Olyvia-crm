@@ -97,6 +97,16 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Invalid token" }), { status: 401, headers: corsHeaders });
     }
 
+    // Client scoped to the caller's own JWT (not service_role) — required for
+    // reopen_accepted_proposal_if_changed, which authorizes internally via
+    // auth.uid()/get_user_visible_org_ids() and would always reject a
+    // service_role caller (auth.uid() is NULL under service_role).
+    const callerClient = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } },
+    );
+
     // Get caller's anew_user
     const { data: callerAnew } = await supabase
       .from("anew_users")
@@ -138,6 +148,7 @@ serve(async (req: Request) => {
     // 1. Get document and its entity
     let entityId: string | null = null;
     let documentTitle = "";
+    let proposalReopened = false;
 
     if (document_type === "proposal") {
       const { data: proposal } = await supabase
@@ -152,6 +163,25 @@ serve(async (req: Request) => {
       }
       documentTitle = proposal.title;
       entityId = proposal.entity_id || null;
+
+      // Re-check whether an already-accepted proposal was edited since acceptance.
+      // Reopens it for re-signature (RPC handles all mutations atomically), or
+      // blocks republishing entirely when a signed contract already exists.
+      const { data: reopenResult, error: reopenError } = await callerClient.rpc(
+        'reopen_accepted_proposal_if_changed',
+        { p_proposal_id: document_id },
+      );
+      if (reopenError) {
+        console.error("[create-client-portal-access] reopen check failed:", reopenError);
+        // fail-soft: don't block republishing over a check we can't complete — proceed as before
+      } else if (reopenResult?.blocked && reopenResult?.reason === 'proposal_has_signed_contract') {
+        return new Response(
+          JSON.stringify({ error: "proposal_has_signed_contract", message: "Esta proposta já tem contrato assinado — crie uma nova proposta/adenda em vez de republicar." }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      } else if (reopenResult?.reopened === true) {
+        proposalReopened = true;
+      }
 
       // Get entity from deal
       if (!entityId && proposal.deal_id) {
@@ -693,6 +723,7 @@ serve(async (req: Request) => {
           : `Acesso atualizado para ${email}. ${safeMessage}`,
         smtp_status: "not_found",
         smtp_warning: true,
+        ...(proposalReopened ? { proposal_reopened: true } : {}),
       }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
@@ -762,6 +793,10 @@ serve(async (req: Request) => {
       email,
       login_url: finalLoginUrl,
     };
+
+    if (proposalReopened) {
+      response.proposal_reopened = true;
+    }
 
     if (emailSent) {
       // BASE-USR-012: password was delivered via email — do NOT echo it back in

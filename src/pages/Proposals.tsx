@@ -167,6 +167,9 @@ const Proposals = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Republishing an already-accepted proposal to the portal reopens it for re-signature
+  // (backend resets status + clears the prior signature). Confirm with the user first.
+  const [portalReopenConfirm, setPortalReopenConfirm] = useState<{ proposal: Proposal; forceNewPassword: boolean } | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
@@ -1007,6 +1010,21 @@ const Proposals = () => {
       setDeleteDialogOpen(false);
       setDeletingId(null);
     }
+  };
+
+  const requestPortalPublish = (proposal: Proposal, forceNewPassword: boolean) => {
+    if (proposal.status === "accepted") {
+      setPortalReopenConfirm({ proposal, forceNewPassword });
+      return;
+    }
+    generatePortalAccess("proposal", proposal.id, forceNewPassword);
+  };
+
+  const handlePortalReopenConfirm = () => {
+    if (!portalReopenConfirm) return;
+    const { proposal, forceNewPassword } = portalReopenConfirm;
+    setPortalReopenConfirm(null);
+    generatePortalAccess("proposal", proposal.id, forceNewPassword);
   };
 
   const handleSelectAll = (checked: boolean) => {
@@ -2163,11 +2181,11 @@ const Proposals = () => {
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔗 Portal</DropdownMenuLabel>
-        <DropdownMenuItem 
+        <DropdownMenuItem
           disabled={portalAccessLoading}
           onClick={(e) => {
             e.preventDefault();
-            generatePortalAccess("proposal", proposal.id);
+            requestPortalPublish(proposal, false);
           }}
         >
           <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
@@ -2182,11 +2200,11 @@ const Proposals = () => {
         >
           <Link2 className="w-3.5 h-3.5 mr-2" /> Copiar link do portal
         </DropdownMenuItem>
-        <DropdownMenuItem 
+        <DropdownMenuItem
           disabled={portalAccessLoading}
           onClick={(e) => {
             e.preventDefault();
-            generatePortalAccess("proposal", proposal.id, true);
+            requestPortalPublish(proposal, true);
           }}
         >
           <KeyRound className="w-3.5 h-3.5 mr-2" /> Reenviar credenciais
@@ -3397,6 +3415,25 @@ const Proposals = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('proposals.form.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('proposals.actions.delete')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!portalReopenConfirm} onOpenChange={(openState) => { if (!openState) setPortalReopenConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reabrir proposta para nova assinatura?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta proposta já foi aceite e assinada. Ao republicá-la no Portal Cliente, a aceitação e assinatura anteriores deixam de ser válidas
+              e o cliente terá de aceitar e assinar novamente com os valores atualizados.
+              {portalReopenConfirm && pipelineLinks[portalReopenConfirm.proposal.id]?.contract_id
+                ? " O contrato associado a esta proposta será descartado e substituído quando o cliente assinar de novo."
+                : " Se entretanto já existir um contrato associado, este poderá ser descartado e substituído quando o cliente assinar de novo."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handlePortalReopenConfirm}>Reabrir e reenviar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
