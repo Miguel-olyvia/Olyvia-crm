@@ -447,11 +447,11 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
   if (contract.proposal_id) {
     const { data: proposal } = await (supabase as any)
       .from("proposals")
-      .select("title, proposal_number, total_value, created_at")
+      .select("title, proposal_number, value, created_at")
       .eq("id", contract.proposal_id)
       .single();
     data.proposta_numero = proposal?.proposal_number || proposal?.title || "";
-    const proposalValue = parseNumericAmount(proposal?.total_value);
+    const proposalValue = parseNumericAmount(proposal?.value);
     if (proposalValue != null) data.proposta_valor = proposalValue;
     if (proposal?.created_at) data.proposta_data = proposal.created_at;
   }
