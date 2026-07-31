@@ -95,6 +95,28 @@ export function ContractDetailDialog({
     },
     enabled: !!activeCompany?.id && open,
   });
+  // Resolves the contract_number of a cancelled contract's linked replacement/original
+  // (replaced_by_contract_id / replaces_contract_id) for display in the Info tab.
+  const relatedCancellationContractIds = [contract?.replaced_by_contract_id, contract?.replaces_contract_id].filter(Boolean);
+  const { data: relatedCancellationContractNumbers } = useQuery({
+    queryKey: ["contract-cancellation-related-numbers", contract?.id, contract?.replaced_by_contract_id, contract?.replaces_contract_id],
+    queryFn: async () => {
+      const ids = [contract?.replaced_by_contract_id, contract?.replaces_contract_id].filter(Boolean);
+      if (ids.length === 0) return {} as Record<string, string>;
+      const { data, error } = await (supabase as any)
+        .from("client_contracts")
+        .select("id, contract_number")
+        .in("id", ids);
+      if (error) throw error;
+      const map: Record<string, string> = {};
+      (data || []).forEach((row: { id: string; contract_number: string | null }) => {
+        if (row.contract_number) map[row.id] = row.contract_number;
+      });
+      return map;
+    },
+    enabled: !!contract && relatedCancellationContractIds.length > 0,
+  });
+
   // Stable reference: a `= []` destructure default creates a new array literal on every
   // render while `data` stays undefined, which cascaded into an infinite re-render loop
   // via promptVars/setPromptValues below.
@@ -344,6 +366,46 @@ export function ContractDetailDialog({
                   <InfoRow icon={<Clock className="h-4 w-4" />} label="Criado em" value={new Date(contract.created_at).toLocaleString("pt-PT")} />
                   <Separator />
                   <InfoRow icon={<Clock className="h-4 w-4" />} label="Última actualização" value={new Date(contract.updated_at).toLocaleString("pt-PT")} />
+                  {contract.status === "cancelled" && (
+                    <>
+                      <Separator />
+                      <InfoRow
+                        icon={<AlertTriangle className="h-4 w-4" />}
+                        label="Motivo da anulação"
+                        value={contract.cancellation_reason}
+                      />
+                      <Separator />
+                      <InfoRow
+                        icon={<Clock className="h-4 w-4" />}
+                        label="Anulado em"
+                        value={contract.cancelled_at ? new Date(contract.cancelled_at).toLocaleString("pt-PT") : null}
+                      />
+                      {contract.replaced_by_contract_id && (
+                        <>
+                          <Separator />
+                          <InfoRow
+                            icon={<FileText className="h-4 w-4" />}
+                            label="Substituído por"
+                            value={relatedCancellationContractNumbers?.[contract.replaced_by_contract_id] || null}
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
+                  {contract.replaces_contract_id && (
+                    <>
+                      <Separator />
+                      <InfoRow
+                        icon={<FileText className="h-4 w-4" />}
+                        label="Substitui"
+                        value={
+                          relatedCancellationContractNumbers?.[contract.replaces_contract_id]
+                            ? `Substitui ${relatedCancellationContractNumbers[contract.replaces_contract_id]}`
+                            : null
+                        }
+                      />
+                    </>
+                  )}
                 </div>
               </TabsContent>
             )}

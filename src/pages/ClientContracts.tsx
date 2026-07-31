@@ -13,6 +13,7 @@ import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Eye, Loader2, FileText, ShieldAlert, Send, Download, FileSignature, Settings, CheckCheck, Phone, Mail, RotateCcw, User, MoreHorizontal, Search, Sparkles, Filter, ListChecks, BarChart3, RefreshCw, PenTool, ExternalLink, CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -149,6 +150,10 @@ const ClientContracts = () => {
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
   const [reassigningContract, setReassigningContract] = useState<ClientContract | null>(null);
   const [reassignOwnerId, setReassignOwnerId] = useState<string>("");
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [cancellingContract, setCancellingContract] = useState<ClientContract | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [createReplacementOnCancel, setCreateReplacementOnCancel] = useState(true);
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
 
@@ -341,7 +346,7 @@ const ClientContracts = () => {
   const getTranslatedStatus = (status: string) => {
     const statusMap: Record<string, string> = {
       draft: "Draft", pending_signature: "Enviado", signed: "Assinado",
-      active: "Activo", expired: "Expirado", cancelled: "Cancelado",
+      active: "Activo", expired: "Expirado", cancelled: "Anulado",
     };
     return statusMap[status] || status;
   };
@@ -797,6 +802,120 @@ const ClientContracts = () => {
       out = out.replace(new RegExp(`\\{\\{\\s*${safe}\\s*\\}\\}`, "g"), v);
     }
     return out;
+  };
+
+  // Maps the plain-text errors raised by cancel_and_replace_contract (RAISE
+  // EXCEPTION, not a wrapped JSON payload) to friendly Portuguese messages.
+  const getCancelContractErrorMessage = (rawMessage: string | undefined | null): string => {
+    const message = (rawMessage || "").trim();
+    const knownMessages: Record<string, string> = {
+      reason_required: "É necessário indicar um motivo.",
+      contract_not_found: "Contrato não encontrado.",
+      contract_already_deleted: "Este contrato já foi eliminado.",
+      contract_not_cancellable: "Este contrato não pode ser anulado no estado atual.",
+      contract_already_cancelled: "Este contrato já foi anulado.",
+      insufficient_permission: "Não tens permissão para anular este contrato.",
+    };
+    return knownMessages[message] || "Não foi possível anular o contrato. Tente novamente.";
+  };
+
+  // Regenera o contract_body_html do contrato substituto (criado em rascunho,
+  // sempre com contract_body_html = NULL) a partir da minuta original, usando
+  // os dados ACTUAIS do cliente — reaproveita exactamente a mesma lógica de
+  // geração usada em createMutation / GenerateFromTemplateDialog (gatherContractData
+  // + injectSignatoryIntoSignatureBlock), sem substituir os tokens {{…}} (isso
+  // acontece em runtime, ao visualizar/exportar o contrato).
+  const regenerateReplacementContractBody = async (replacementContractId: string): Promise<string | null> => {
+    const { data: replacement, error: fetchError } = await (supabase as any)
+      .from("client_contracts")
+      .select("id, entity_id, client_id, contract_template_id, organization_id, prompt_values, contract_number")
+      .eq("id", replacementContractId)
+      .single();
+    if (fetchError || !replacement) return null;
+    if (!replacement.contract_template_id) return replacement.contract_number || null;
+
+    const { data: template } = await (supabase as any)
+      .from("client_contract_templates")
+      .select("body_html")
+      .eq("id", replacement.contract_template_id)
+      .single();
+    if (!template?.body_html) return replacement.contract_number || null;
+
+    const variableData = await gatherContractData(
+      { entity_id: replacement.entity_id || null, client_id: replacement.client_id, contract_template_id: replacement.contract_template_id },
+      replacement.organization_id,
+    );
+    const withPrompts = applyPromptValues(template.body_html, replacement.prompt_values || undefined);
+    const finalHtml = injectSignatoryIntoSignatureBlock(
+      withPrompts,
+      (variableData as any).signatario_nome,
+      (variableData as any).signatario_cargo,
+    );
+
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (businessUserId) {
+      await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+    }
+    const { error: updateError } = await (supabase as any)
+      .from("client_contracts")
+      .update({ contract_body_html: finalHtml })
+      .eq("id", replacementContractId);
+    if (updateError) throw updateError;
+
+    return replacement.contract_number || null;
+  };
+
+  const cancelContractMutation = useMutation({
+    mutationFn: async () => {
+      if (!cancellingContract) throw new Error("No contract selected");
+      const reason = cancelReason.trim();
+      if (!reason) throw new Error("reason_required");
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { data, error } = await supabase.rpc('cancel_and_replace_contract' as any, {
+        p_contract_id: cancellingContract.id,
+        p_reason: reason,
+        p_create_replacement: createReplacementOnCancel,
+      });
+      if (error) throw error;
+      return data as { cancelled_contract_id: string; replacement_contract_id: string | null };
+    },
+    onSuccess: async (data) => {
+      let replacementNumber: string | null = null;
+      if (data?.replacement_contract_id) {
+        try {
+          replacementNumber = await regenerateReplacementContractBody(data.replacement_contract_id);
+        } catch (err: unknown) {
+          console.error('[ClientContracts] Failed to regenerate replacement contract body', err);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(
+        data?.replacement_contract_id
+          ? `Contrato anulado${replacementNumber ? ` e substituto ${replacementNumber} criado em rascunho` : " e substituto criado em rascunho"}.`
+          : "Contrato anulado."
+      );
+      setIsCancelDialogOpen(false);
+      setCancellingContract(null);
+      setCancelReason("");
+      setCreateReplacementOnCancel(true);
+    },
+    onError: (error: any) => {
+      toast.error(getCancelContractErrorMessage(error?.message));
+    },
+  });
+
+  const handleOpenCancelDialog = (contract: ClientContract) => {
+    if (!(isSystemAdmin || canEdit)) {
+      toast.error(t('clientContracts.accessDenied'));
+      return;
+    }
+    setCancellingContract(contract);
+    setCancelReason("");
+    setCreateReplacementOnCancel(true);
+    setIsCancelDialogOpen(true);
   };
 
   const createMutation = useMutation({
@@ -1498,6 +1617,7 @@ const ClientContracts = () => {
                   <SelectItem value="pending_signature">Enviado</SelectItem>
                   <SelectItem value="signed">Assinado</SelectItem>
                   <SelectItem value="expired">Expirado</SelectItem>
+                  <SelectItem value="cancelled">Anulado</SelectItem>
                   <SelectItem value="expiring">A expirar</SelectItem>
                 </SelectContent>
               </Select>
@@ -1798,6 +1918,11 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
+                                  {(isSystemAdmin || canEdit) && (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
+                                      🚫 Anular contrato
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
                                     🗑 Eliminar
                                   </DropdownMenuItem>
@@ -1829,6 +1954,11 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
+                                  {(isSystemAdmin || canEdit) && (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
+                                      🚫 Anular contrato
+                                    </DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (assinado não pode ser eliminado)</DropdownMenuItem>
                                 </>
                               )}
@@ -1937,6 +2067,57 @@ const ClientContracts = () => {
               <AlertDialogAction onClick={() => deleteId && deleteMutation.mutate(deleteId)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                 {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Eliminar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Cancel (Anular) Contract Dialog */}
+        <AlertDialog
+          open={isCancelDialogOpen}
+          onOpenChange={(open) => {
+            setIsCancelDialogOpen(open);
+            if (!open) { setCancellingContract(null); setCancelReason(""); setCreateReplacementOnCancel(true); }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>🚫 Anular contrato</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta ação vai anular {cancellingContract?.contract_number ? `o contrato ${cancellingContract.contract_number}` : "este contrato"}. Indique o motivo da anulação.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="cancel-reason">Motivo *</Label>
+                <Textarea
+                  id="cancel-reason"
+                  placeholder="Descreva o motivo da anulação..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  rows={3}
+                />
+              </div>
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="create-replacement"
+                  checked={createReplacementOnCancel}
+                  onCheckedChange={(checked) => setCreateReplacementOnCancel(checked === true)}
+                />
+                <Label htmlFor="create-replacement" className="font-normal leading-snug cursor-pointer">
+                  Gerar contrato substituto a partir da mesma proposta
+                </Label>
+              </div>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={!cancelReason.trim() || cancelContractMutation.isPending}
+                onClick={(e) => { e.preventDefault(); cancelContractMutation.mutate(); }}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {cancelContractMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Anular contrato
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
