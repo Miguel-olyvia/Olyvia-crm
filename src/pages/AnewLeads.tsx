@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import {
@@ -368,6 +368,7 @@ export default function AnewLeads() {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
   const { resolveEntities, getIdentity } = useEntityIdentity();
+  const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
   const CONTACT_FIELDS = useMemo(() => CONTACT_FIELD_KEYS.map(f => ({ value: f.value, label: t(f.labelKey) })), [t]);
@@ -2324,12 +2325,19 @@ export default function AnewLeads() {
     setSelectedLead((previous) => previous?.id === leadId ? mapped : previous);
     // Refresh status counts since the lead's status may have changed
     loadStatusCounts();
+    // The Funil's current-stage highlight is cached separately (react-query,
+    // staleTime 60s) and keyed only by leadId — it won't pick up a rule-engine
+    // change (e.g. a newly-filled field satisfying a reached_when condition)
+    // on its own since the lead's row data changing doesn't touch that
+    // queryKey. Force it fresh on every refresh, same as Percurso already is.
+    queryClient.invalidateQueries({ queryKey: ["lead-resolved-stage", leadId] });
     return mapped;
   }, [
     activeCompanyId,
     getPermissionScope,
     loadStatusCounts,
     onlyMine,
+    queryClient,
     scopeAnewUserId,
     scopeAuthUserId,
     selectedLead,
