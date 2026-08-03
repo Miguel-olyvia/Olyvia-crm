@@ -72,6 +72,7 @@ import { Switch } from "@/components/ui/switch";
 import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkflowConfig";
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
+import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
 import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
@@ -648,10 +649,10 @@ export default function AnewLeads() {
   // activity log rather than the full contact/workflow flow.
   const [showRegisterActivityDialog, setShowRegisterActivityDialog] = useState(false);
 
-  // Set when the "Agendar Visita" quick action opens AnewLeadContactDialog,
-  // so it lands with the scheduling section already expanded instead of
-  // requiring an extra click to find it.
-  const [contactDialogDefaultScheduleVisit, setContactDialogDefaultScheduleVisit] = useState(false);
+  // Dedicated lightweight "Agendar Visita" dialog (ScheduleLeadVisitDialog) —
+  // kept separate from AnewLeadContactDialog, which is the full contact/
+  // workflow-logging flow and shouldn't open just to book a visit.
+  const [showScheduleVisitDialog, setShowScheduleVisitDialog] = useState(false);
 
   const openContactDialogForLead = useCallback((lead: Lead) => {
     setSelectedLead(lead);
@@ -670,7 +671,6 @@ export default function AnewLeads() {
   const handleContactDialogOpenChange = useCallback((nextOpen: boolean) => {
     setShowContactDialog(nextOpen);
     if (!nextOpen) {
-      setContactDialogDefaultScheduleVisit(false);
       try {
         localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
       } catch {
@@ -6053,11 +6053,7 @@ export default function AnewLeads() {
                       <Button size="sm" variant="outline" onClick={() => setDetailTab("notes")}>
                         <StickyNote className="w-3.5 h-3.5 mr-1" /> Nota
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => {
-                        setShowDetails(false);
-                        setContactDialogDefaultScheduleVisit(true);
-                        openContactDialogForLead(selectedLead);
-                      }}>
+                      <Button size="sm" variant="outline" onClick={() => setShowScheduleVisitDialog(true)}>
                         <CalendarIcon className="w-3.5 h-3.5 mr-1" /> Agendar Visita
                       </Button>
                       <PermissionGate permission="deals.create">
@@ -6835,7 +6831,15 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           companyId={activeCompanyId || null}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
-          defaultScheduleVisit={contactDialogDefaultScheduleVisit}
+        />
+
+        <ScheduleLeadVisitDialog
+          open={showScheduleVisitDialog}
+          onOpenChange={setShowScheduleVisitDialog}
+          lead={selectedLead as any}
+          leadName={leadName}
+          companyId={activeCompanyId || null}
+          onScheduled={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
         />
 
         {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline

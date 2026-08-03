@@ -127,9 +127,6 @@ interface LeadContactDialogProps {
   lead: Lead | null;
   companyId: string | null;
   onLeadUpdated?: (payload?: LeadContactDialogUpdate) => void;
-  // Pre-checks the "Agendar visita" section on open, for the "Agendar Visita"
-  // quick action, which should land straight on the scheduling fields.
-  defaultScheduleVisit?: boolean;
 }
 
 export interface LeadContactDialogUpdate {
@@ -152,7 +149,6 @@ export function AnewLeadContactDialog({
   lead,
   companyId,
   onLeadUpdated,
-  defaultScheduleVisit,
 }: LeadContactDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -218,7 +214,7 @@ export function AnewLeadContactDialog({
       setScheduleCallback(false);
       setCallbackDate("");
       setCallbackTime("");
-      setScheduleVisit(!!defaultScheduleVisit);
+      setScheduleVisit(false);
       setVisitDate("");
       setVisitTime("");
       setVisitDuration("60");
@@ -272,7 +268,7 @@ export function AnewLeadContactDialog({
       setFieldDefinitions([]);
       setVisitLocation("");
     }
-  }, [open, lead?.id, lead?.campaign_id, companyId, draftStorageKey, defaultScheduleVisit]);
+  }, [open, lead?.id, lead?.campaign_id, companyId, draftStorageKey]);
 
   useEffect(() => {
     if (!open || !draftStorageKey || !lead) return;
