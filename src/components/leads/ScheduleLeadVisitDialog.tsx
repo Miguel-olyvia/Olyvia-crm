@@ -10,7 +10,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCalendarScheduling } from "@/hooks/useCalendarScheduling";
 import { extractLeadLocation } from "@/lib/leads/location";
-import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 
 const DURATIONS = [
   { value: "30", label: "30 min" },
@@ -29,11 +28,12 @@ interface ScheduleLeadVisitDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   lead: { id: string; organization_id?: string | null; field_values?: Record<string, any> | null } | null;
+  leadName: string;
   companyId: string | null;
   onScheduled?: () => void;
 }
 
-export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, companyId, onScheduled }: ScheduleLeadVisitDialogProps) {
+export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, leadName, companyId, onScheduled }: ScheduleLeadVisitDialogProps) {
   const { toast } = useToast();
   const { createVisit, loading } = useCalendarScheduling(companyId || undefined);
   const [orgUsers, setOrgUsers] = useState<{ id: string; name: string }[]>([]);
@@ -48,8 +48,6 @@ export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, companyId, o
 
   useEffect(() => {
     if (!open || !lead) return;
-
-    const leadName = extractLeadContactInfo(lead.field_values).name || "Lead";
 
     setVisitType("meeting");
     setTitle(`Visita/Reunião com ${leadName}`);
@@ -72,7 +70,7 @@ export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, companyId, o
       setOrgUsers((users || []).slice().sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
     };
     loadOrgUsers();
-  }, [open, lead, companyId]);
+  }, [open, lead, leadName, companyId]);
 
   const handleSchedule = async () => {
     if (!lead || !title || !startTime) {
@@ -90,7 +88,6 @@ export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, companyId, o
       location,
       start_time: start.toISOString(),
       end_time: end.toISOString(),
-      duration_minutes: parseInt(duration),
       status: "scheduled",
       notes,
       assigned_to: assignedTo || undefined,

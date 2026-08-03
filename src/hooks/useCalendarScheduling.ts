@@ -304,7 +304,6 @@ export function useCalendarScheduling(companyId?: string) {
     location?: string;
     start_time: string;
     end_time: string;
-    duration_minutes?: number;
     status: string;
     notes?: string;
     assigned_to?: string;
@@ -328,7 +327,6 @@ export function useCalendarScheduling(companyId?: string) {
           location: visitData.location,
           start_datetime: visitData.start_time,
           end_datetime: visitData.end_time,
-          duration_minutes: visitData.duration_minutes,
           status: visitData.status === 'scheduled' ? 'scheduled' :
                   visitData.status === 'completed' ? 'completed' :
                   visitData.status === 'cancelled' ? 'cancelled' : 'scheduled',
