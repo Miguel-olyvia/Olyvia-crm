@@ -12,6 +12,13 @@ interface WorkflowStage {
 interface LeadPipelineBarProps {
   currentStatus: string;
   workflowStages: WorkflowStage[];
+  // Id of the stage resolved by the rule engine (get_lead_resolved_stage /
+  // compute_lead_stage_v2 — the same one the Percurso tab uses), so a stage
+  // reached only via a configured reached_when rule (not a literal status
+  // match) still lights up here. Undefined/null while the query hasn't
+  // resolved yet, in which case we fall back to the literal currentStatus
+  // match so the bar isn't blank during the initial load.
+  currentStageId?: string | null;
   // Id of the last genuinely-reached stage before the lead was rejected,
   // resolved via the get_lead_resolved_stage RPC. Only relevant/fetched
   // when the current stage is a rejection stage; undefined/null otherwise
@@ -20,11 +27,13 @@ interface LeadPipelineBarProps {
   furthestProgressStageId?: string | null;
 }
 
-export function LeadPipelineBar({ currentStatus, workflowStages, furthestProgressStageId }: LeadPipelineBarProps) {
+export function LeadPipelineBar({ currentStatus, currentStageId, workflowStages, furthestProgressStageId }: LeadPipelineBarProps) {
   if (workflowStages.length === 0) return null;
 
   const sortedStages = [...workflowStages].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-  const currentIndex = sortedStages.findIndex(s => s.name === currentStatus);
+  const currentIndex = currentStageId
+    ? sortedStages.findIndex(s => s.id === currentStageId)
+    : sortedStages.findIndex(s => s.name === currentStatus);
   const isCurrentStageRejection = currentIndex >= 0 && sortedStages[currentIndex]?.is_rejection === true;
   // For a rejected lead, "past" stages are the ones genuinely reached before
   // rejection (furthestProgressStageId), not everything before the rejection
@@ -44,7 +53,7 @@ export function LeadPipelineBar({ currentStatus, workflowStages, furthestProgres
       </p>
       <div className="flex items-center gap-1">
         {sortedStages.map((stage, i) => {
-          const isCurrent = stage.name === currentStatus;
+          const isCurrent = i === currentIndex;
           const isPast = !isCurrent && pastBoundaryIndex >= 0 && i <= pastBoundaryIndex;
           const isFuture = !isCurrent && !isPast;
 

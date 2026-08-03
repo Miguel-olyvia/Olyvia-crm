@@ -648,6 +648,11 @@ export default function AnewLeads() {
   // activity log rather than the full contact/workflow flow.
   const [showRegisterActivityDialog, setShowRegisterActivityDialog] = useState(false);
 
+  // Set when the "Agendar Visita" quick action opens AnewLeadContactDialog,
+  // so it lands with the scheduling section already expanded instead of
+  // requiring an extra click to find it.
+  const [contactDialogDefaultScheduleVisit, setContactDialogDefaultScheduleVisit] = useState(false);
+
   const openContactDialogForLead = useCallback((lead: Lead) => {
     setSelectedLead(lead);
     setShowContactDialog(true);
@@ -665,6 +670,7 @@ export default function AnewLeads() {
   const handleContactDialogOpenChange = useCallback((nextOpen: boolean) => {
     setShowContactDialog(nextOpen);
     if (!nextOpen) {
+      setContactDialogDefaultScheduleVisit(false);
       try {
         localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
       } catch {
@@ -1599,12 +1605,11 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Only fetch the resolved-stage RPC when the selected lead currently sits
-  // in a rejection stage — for every other status the pipeline bar keeps
-  // using the plain currentStatus-based rendering, so this stays a no-op.
-  const selectedLeadIsRejected = !!selectedLead &&
-    workflowStages.find(s => s.name === selectedLead.status)?.is_rejection === true;
-
+  // Drives the Funil's "current stage" highlight via the same rule engine
+  // (reached_when/matching_statuses) the Percurso tab already uses, instead
+  // of a plain literal comparison against the lead's raw status text — so a
+  // stage reached only through a configured rule (e.g. "has an active
+  // proposal") lights up on the Funil too, not just the Percurso.
   const { data: selectedLeadResolvedStage } = useQuery({
     queryKey: ["lead-resolved-stage", selectedLead?.id],
     queryFn: async () => {
@@ -1612,9 +1617,9 @@ export default function AnewLeads() {
         p_lead_id: selectedLead!.id,
       });
       if (error) return null;
-      return data as { furthest_progress_stage_id: string | null } | null;
+      return data as { resolved_stage_id: string | null; furthest_progress_stage_id: string | null } | null;
     },
-    enabled: selectedLeadIsRejected && !!selectedLead?.id,
+    enabled: !!selectedLead?.id,
     staleTime: 60 * 1000,
   });
 
@@ -5654,6 +5659,7 @@ export default function AnewLeads() {
                   {/* PIPELINE BAR */}
                   <LeadPipelineBar
                     currentStatus={selectedLead.status}
+                    currentStageId={selectedLeadResolvedStage?.resolved_stage_id ?? null}
                     workflowStages={workflowStages}
                     furthestProgressStageId={selectedLeadResolvedStage?.furthest_progress_stage_id ?? null}
                   />
@@ -6048,7 +6054,9 @@ export default function AnewLeads() {
                         <StickyNote className="w-3.5 h-3.5 mr-1" /> Nota
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => {
-                        // TODO: Schedule visit
+                        setShowDetails(false);
+                        setContactDialogDefaultScheduleVisit(true);
+                        openContactDialogForLead(selectedLead);
                       }}>
                         <CalendarIcon className="w-3.5 h-3.5 mr-1" /> Agendar Visita
                       </Button>
@@ -6827,6 +6835,7 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           companyId={activeCompanyId || null}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          defaultScheduleVisit={contactDialogDefaultScheduleVisit}
         />
 
         {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline

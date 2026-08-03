@@ -127,6 +127,9 @@ interface LeadContactDialogProps {
   lead: Lead | null;
   companyId: string | null;
   onLeadUpdated?: (payload?: LeadContactDialogUpdate) => void;
+  // Pre-checks the "Agendar visita" section on open, for the "Agendar Visita"
+  // quick action, which should land straight on the scheduling fields.
+  defaultScheduleVisit?: boolean;
 }
 
 export interface LeadContactDialogUpdate {
@@ -143,12 +146,13 @@ export interface LeadContactDialogUpdate {
 
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
-export function AnewLeadContactDialog({ 
-  open, 
-  onOpenChange, 
-  lead, 
+export function AnewLeadContactDialog({
+  open,
+  onOpenChange,
+  lead,
   companyId,
-  onLeadUpdated 
+  onLeadUpdated,
+  defaultScheduleVisit,
 }: LeadContactDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -214,11 +218,11 @@ export function AnewLeadContactDialog({
       setScheduleCallback(false);
       setCallbackDate("");
       setCallbackTime("");
-      setScheduleVisit(false);
+      setScheduleVisit(!!defaultScheduleVisit);
       setVisitDate("");
       setVisitTime("");
       setVisitDuration("60");
-      
+
       loadContactHistory();
       loadUsers();
       loadContactResults();
@@ -268,7 +272,7 @@ export function AnewLeadContactDialog({
       setFieldDefinitions([]);
       setVisitLocation("");
     }
-  }, [open, lead?.id, lead?.campaign_id, companyId, draftStorageKey]);
+  }, [open, lead?.id, lead?.campaign_id, companyId, draftStorageKey, defaultScheduleVisit]);
 
   useEffect(() => {
     if (!open || !draftStorageKey || !lead) return;
