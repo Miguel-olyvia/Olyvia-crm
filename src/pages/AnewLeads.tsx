@@ -6837,7 +6837,6 @@ export default function AnewLeads() {
           open={showScheduleVisitDialog}
           onOpenChange={setShowScheduleVisitDialog}
           lead={selectedLead as any}
-          leadName={leadName}
           companyId={activeCompanyId || null}
           onScheduled={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
         />
