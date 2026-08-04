@@ -118,6 +118,22 @@ function resolveBranchScope(viewer: ScopedSearchViewer, permissionCode: string):
 }
 
 /**
+ * Awaits a query and surfaces its error instead of silently yielding [].
+ *
+ * Every branch here used to destructure only `data`, so a failing query was
+ * indistinguishable from "no matches" — the search box simply stopped
+ * reacting, with nothing in the console to explain it.
+ */
+async function runQuery(label: string, query: any): Promise<any[]> {
+  const { data, error } = await query;
+  if (error) {
+    console.error(`[scopedEntitySearch] ${label} query failed:`, error);
+    return [];
+  }
+  return data || [];
+}
+
+/**
  * Applies an owner restriction to a query builder.
  *
  * Returns the query unchanged for an ORG scope, and a guaranteed-empty query
@@ -163,17 +179,19 @@ async function searchDeals(
   // Two passes: the title itself, and deals whose contact/entity matched the
   // term. A deal called "Remodelação T3" must still be found by typing the
   // client's name, and vice-versa.
-  const queries: Promise<{ data: any[] | null }>[] = [
-    applyOwnerScope(baseQuery().ilike("title", like), scope),
+  const queries: Promise<any[]>[] = [
+    runQuery("deals.title", applyOwnerScope(baseQuery().ilike("title", like), scope)),
   ];
   if (matchedEntityIds.length > 0) {
-    queries.push(applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope));
+    queries.push(
+      runQuery("deals.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope)),
+    );
   }
 
   const responses = await Promise.all(queries);
   const merged = new Map<string, any>();
-  responses.forEach((response) => {
-    (response.data || []).forEach((row: any) => merged.set(row.id, row));
+  responses.forEach((rows) => {
+    rows.forEach((row: any) => merged.set(row.id, row));
   });
 
   return Array.from(merged.values()).map((row: any) => ({
@@ -227,17 +245,22 @@ async function searchLeads(
   // Leads list yet invisible to an entity-join search: the lead's identity
   // does not necessarily live in a linked anew_entities row. Matching only by
   // entity id is exactly what made leads go missing from this picker.
-  const queries: Promise<{ data: any[] | null }>[] = [
-    applyOwnerScope(baseQuery().ilike("search_text", `%${escapeIlike(term)}%`), scope),
+  const queries: Promise<any[]>[] = [
+    runQuery(
+      "leads.search_text",
+      applyOwnerScope(baseQuery().ilike("search_text", `%${escapeIlike(term)}%`), scope),
+    ),
   ];
   if (matchedEntityIds.length > 0) {
-    queries.push(applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope));
+    queries.push(
+      runQuery("leads.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope)),
+    );
   }
 
   const responses = await Promise.all(queries);
   const merged = new Map<string, any>();
-  responses.forEach((response) => {
-    (response.data || []).forEach((row: any) => merged.set(row.id, row));
+  responses.forEach((rows) => {
+    rows.forEach((row: any) => merged.set(row.id, row));
   });
 
   return Array.from(merged.values()).map((row: any) => {
@@ -289,8 +312,8 @@ async function searchClients(
     scope,
   );
 
-  const { data } = await query;
-  return (data || []).map((row: any) => ({
+  const data = await runQuery("clients.entity", query);
+  return data.map((row: any) => ({
     kind: "client" as const,
     id: row.id,
     name: "",
