@@ -42,9 +42,15 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 let matchedEntityIds: string[] = [];
+let entityLookupDelayMs = 0;
 vi.mock("@/lib/clientSearch", () => ({
   escapeIlike: (s: string) => s,
-  searchEntityIds: async () => ({ ids: matchedEntityIds, truncated: false }),
+  searchEntityIds: async () => {
+    if (entityLookupDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, entityLookupDelayMs));
+    }
+    return { ids: matchedEntityIds, truncated: false };
+  },
 }));
 
 const { searchDealsLeadsClients } = await import("@/lib/search/scopedEntitySearch");
@@ -77,6 +83,7 @@ beforeEach(() => {
   tableRows = {};
   tableErrors = {};
   matchedEntityIds = [];
+  entityLookupDelayMs = 0;
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -116,6 +123,37 @@ describe("searchDealsLeadsClients — failing branches", () => {
 
     // A broken leads branch must not take the deals branch down with it.
     expect(results.map((r) => r.kind)).toEqual(["deal"]);
+  });
+
+  it("degrades instead of hanging when the contact lookup is too slow, and says so", async () => {
+    vi.useFakeTimers();
+    try {
+      entityLookupDelayMs = 60_000;
+      matchedEntityIds = ["ent-1"];
+      tableRows = {
+        deals: [{ id: "deal-1", title: "Remodelação", organization_id: "org-1", entity_id: null }],
+      };
+      const onBranchErrors = vi.fn();
+
+      const pending = searchDealsLeadsClients({
+        term: "remodela",
+        orgIds: ["org-1"],
+        viewer: viewerWith(ALL_ORG),
+        onBranchErrors,
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      const results = await pending;
+
+      // The fast passes still returned; only contact-based matches are missing.
+      expect(results.map((r) => r.kind)).toEqual(["deal"]);
+      expect(onBranchErrors).toHaveBeenCalledTimes(1);
+      const [reported] = onBranchErrors.mock.calls[0] as [Array<{ branch: string }>];
+      expect(reported.map((e) => e.branch)).toContain("contactos");
+      // The client branch depends on contacts, so it never ran.
+      expect(queriesFor("anew_clients")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not report anything when every branch succeeds", async () => {

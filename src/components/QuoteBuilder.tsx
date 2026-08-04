@@ -3246,7 +3246,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         )}
                         {dealSearchError && (
                           <div className="px-3 py-2 text-sm text-destructive">
-                            A pesquisa falhou — {dealSearchError}
+                            {dealSearchError}
                           </div>
                         )}
                         {!dealSearchLoading && !dealSearchError && dealSearchResults.length === 0 && (

@@ -34,6 +34,19 @@ export const MIN_SEARCH_TERM_LENGTH = 2;
 
 const DEFAULT_LIMIT_PER_KIND = 25;
 
+/**
+ * Cap on the contact (entity) lookup.
+ *
+ * searchEntityIds hits anew_entities/anew_entity_emails/anew_entity_phones
+ * with a plain ILIKE. RLS on those tables defeats the trigram GIN indexes, so
+ * it can take 6-9s and come back as an HTTP 500 (statement_timeout, 57014) —
+ * documented in EntitySearchInput.tsx as confirmed live against org Nike.
+ * That call used to be awaited BEFORE any other query ran, so a slow contact
+ * lookup stalled even a fast deal-title search. It now runs alongside the
+ * other queries, and this cap stops it hanging the whole search.
+ */
+const ENTITY_MATCH_TIMEOUT_MS = 4000;
+
 /** Sentinel used to force an empty result set when a scope cannot be resolved. */
 const NO_MATCH_ID = "00000000-0000-0000-0000-000000000000";
 
@@ -126,6 +139,14 @@ export interface ScopedSearchBranchError {
 }
 
 /**
+ * Branch name reported when the contact lookup timed out. Results are still
+ * returned, but they only cover deal titles and lead search_text — matches
+ * that depend on a contact's name/email/phone/NIF are missing, and the caller
+ * MUST surface that rather than pass an incomplete list off as the full one.
+ */
+export const ENTITY_MATCH_BRANCH = "contactos";
+
+/**
  * Awaits a query, recording any error rather than swallowing it.
  *
  * The failure is NOT rethrown: one broken branch (say leads) must not take
@@ -164,7 +185,7 @@ const DEAL_COLUMNS =
 
 async function searchDeals(
   term: string,
-  matchedEntityIds: readonly string[],
+  matchedEntityIdsPromise: Promise<string[]>,
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
@@ -191,14 +212,15 @@ async function searchDeals(
   // Two passes: the title itself, and deals whose contact/entity matched the
   // term. A deal called "Remodelação T3" must still be found by typing the
   // client's name, and vice-versa.
+  // The title pass starts NOW; it must not wait on the contact lookup.
   const queries: Promise<any[]>[] = [
     runQuery("deals.title", applyOwnerScope(baseQuery().ilike("title", like), scope), errors),
+    matchedEntityIdsPromise.then((ids) =>
+      ids.length === 0
+        ? []
+        : runQuery("deals.entity", applyOwnerScope(baseQuery().in("entity_id", ids), scope), errors),
+    ),
   ];
-  if (matchedEntityIds.length > 0) {
-    queries.push(
-      runQuery("deals.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope), errors),
-    );
-  }
 
   const responses = await Promise.all(queries);
   const merged = new Map<string, any>();
@@ -225,7 +247,7 @@ async function searchDeals(
 
 async function searchLeads(
   term: string,
-  matchedEntityIds: readonly string[],
+  matchedEntityIdsPromise: Promise<string[]>,
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
@@ -258,18 +280,19 @@ async function searchLeads(
   // Leads list yet invisible to an entity-join search: the lead's identity
   // does not necessarily live in a linked anew_entities row. Matching only by
   // entity id is exactly what made leads go missing from this picker.
+  // search_text starts NOW; it must not wait on the contact lookup either.
   const queries: Promise<any[]>[] = [
     runQuery(
       "leads.search_text",
       applyOwnerScope(baseQuery().ilike("search_text", `%${escapeIlike(term)}%`), scope),
       errors,
     ),
+    matchedEntityIdsPromise.then((ids) =>
+      ids.length === 0
+        ? []
+        : runQuery("leads.entity", applyOwnerScope(baseQuery().in("entity_id", ids), scope), errors),
+    ),
   ];
-  if (matchedEntityIds.length > 0) {
-    queries.push(
-      runQuery("leads.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope), errors),
-    );
-  }
 
   const responses = await Promise.all(queries);
   const merged = new Map<string, any>();
@@ -305,16 +328,19 @@ async function searchLeads(
 }
 
 async function searchClients(
-  matchedEntityIds: readonly string[],
+  matchedEntityIdsPromise: Promise<string[]>,
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
   errors: ScopedSearchBranchError[],
 ): Promise<ScopedSearchResult[]> {
-  if (matchedEntityIds.length === 0) return [];
-
   const scope = resolveBranchScope(viewer, "clients.view");
   if (scope.level === "NONE") return [];
+
+  // Clients have no text column of their own, so this branch genuinely
+  // depends on the contact lookup and can only start once it resolves.
+  const matchedEntityIds = await matchedEntityIdsPromise;
+  if (matchedEntityIds.length === 0) return [];
 
   const query = applyOwnerScope(
     (supabase as any)
@@ -402,21 +428,50 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
   const { viewer, restrictToEntityId } = params;
   const branchErrors: ScopedSearchBranchError[] = [];
 
-  const { ids: allMatchedEntityIds } = await searchEntityIds(term);
-  // Intersect rather than replace, so the restriction can only ever narrow.
-  const matchedEntityIds = restrictToEntityId
-    ? allMatchedEntityIds.filter((id) => id === restrictToEntityId)
-    : allMatchedEntityIds;
+  // Started, NOT awaited: the deal-title and lead-search_text passes run
+  // against it concurrently instead of queueing behind it.
+  const matchedEntityIdsPromise = (async (): Promise<string[]> => {
+    const timeout = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), ENTITY_MATCH_TIMEOUT_MS),
+    );
+    let outcome: { ids: string[] } | null;
+    try {
+      outcome = await Promise.race([searchEntityIds(term), timeout]);
+    } catch (error) {
+      console.error("[scopedEntitySearch] contact lookup failed:", error);
+      branchErrors.push({
+        branch: ENTITY_MATCH_BRANCH,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+
+    if (outcome === null) {
+      // Degraded, not silently truncated: the caller is told so it can warn
+      // the user that name/email/phone/NIF matches are missing from this run.
+      console.warn(`[scopedEntitySearch] contact lookup exceeded ${ENTITY_MATCH_TIMEOUT_MS}ms`);
+      branchErrors.push({
+        branch: ENTITY_MATCH_BRANCH,
+        message: "demorou demasiado, resultados por nome/email/telefone podem faltar",
+      });
+      return [];
+    }
+
+    // Intersect rather than replace, so the restriction can only ever narrow.
+    return restrictToEntityId
+      ? outcome.ids.filter((id) => id === restrictToEntityId)
+      : outcome.ids;
+  })();
 
   const [deals, leads, clients] = await Promise.all([
     kinds.includes("deal")
-      ? searchDeals(term, matchedEntityIds, orgIds, viewer, limit, branchErrors, restrictToEntityId)
+      ? searchDeals(term, matchedEntityIdsPromise, orgIds, viewer, limit, branchErrors, restrictToEntityId)
       : Promise.resolve([]),
     kinds.includes("lead")
-      ? searchLeads(term, matchedEntityIds, orgIds, viewer, limit, branchErrors, restrictToEntityId)
+      ? searchLeads(term, matchedEntityIdsPromise, orgIds, viewer, limit, branchErrors, restrictToEntityId)
       : Promise.resolve([]),
     kinds.includes("client")
-      ? searchClients(matchedEntityIds, orgIds, viewer, limit, branchErrors)
+      ? searchClients(matchedEntityIdsPromise, orgIds, viewer, limit, branchErrors)
       : Promise.resolve([]),
   ]);
 

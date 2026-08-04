@@ -120,7 +120,9 @@ export function useScopedEntitySearch(
         setResults(found);
         setError(
           branchFailures.length > 0
-            ? `Falhou: ${branchFailures.map((f) => `${f.branch} (${f.message})`).join("; ")}`
+            ? `Pesquisa incompleta — ${branchFailures
+                .map((f) => `${f.branch}: ${f.message}`)
+                .join("; ")}`
             : null,
         );
       } catch (err) {
