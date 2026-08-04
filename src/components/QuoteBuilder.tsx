@@ -32,6 +32,7 @@ import { formatCurrency } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
+import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { QuoteBuilderSidebar } from "@/components/quote/QuoteBuilderSidebar";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { downloadBlob } from "@/utils/generateProposalPdfBlob";
@@ -288,7 +289,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     error: dealSearchError,
     search: runDealSearch,
     clear: clearDealSearch,
-  } = useScopedEntitySearch();
+  } = useScopedEntitySearch({ kinds: ["deal"] });
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
@@ -3197,9 +3198,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               <CardTitle className="flex items-center gap-2">📋 Detalhes do Orçamento</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Deal / Lead / Client Search */}
+              {/* Pedido. The Proposals dialog splits this into a dedicated deal
+                  box plus the shared EntitySearchInput for lead/client; the
+                  quote builder now does the same and reuses that exact
+                  component, so both screens find leads the same way. */}
               <div className="space-y-2">
-                <Label>Pedido / Lead / Cliente</Label>
+                <Label>Pedido</Label>
                 {selectedDeal ? (
                   <QuoteDealCard
                     deal={{
@@ -3217,37 +3221,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       setInlineQuotes([]);
                     }}
                   />
-                ) : selectedSource ? (
-                  <div className="space-y-3">
-                    <div className="border rounded-lg p-4 bg-muted/20 flex items-start gap-3">
-                      <div className="p-2 bg-primary/10 rounded-lg shrink-0">
-                        <FileText className="h-5 w-5 text-primary" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-sm text-primary truncate">{selectedSource.name}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Lead"} ligado ao orçamento</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <Badge variant="default" className="bg-green-600 text-xs">✅ Ligado</Badge>
-                        <Button variant="ghost" size="sm" className="text-destructive h-7 px-2 text-xs"
-                          onClick={() => {
-                            setSelectedSource(null);
-                            setFormData({ ...formData, cliente_id: "", organization_id: "", assigned_to: "", title: "" });
-                            setAssignedToTouched(false);
-                            setSelectedFees(new Set());
-                            setLines([]);
-                            setInlineQuotes([]);
-                          }}>
-                          <X className="h-3 w-3 mr-1" /> Desligar
-                        </Button>
-                      </div>
-                    </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} />
-                  </div>
                 ) : (
                   <div className="relative">
                     <Input
-                      placeholder="Pesquisar pedidos, leads ou clientes..."
+                      placeholder="Pesquisar pedidos..."
                       value={dealSearch}
                       onChange={(e) => {
                         const value = e.target.value;
@@ -3341,11 +3318,84 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Escreva pelo menos 2 caracteres para pesquisar pedidos, leads e clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Escreva pelo menos 2 caracteres para pesquisar pedidos</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
               </div>
+
+              {/* Lead ou Cliente — hidden once a Pedido is chosen, since the
+                  deal already carries its own contact. Same arrangement, and
+                  the same picker, as the Proposals dialog. */}
+              {!selectedDeal && (
+                <div className="space-y-2">
+                  <Label>Lead ou Cliente</Label>
+                  {selectedSource ? (
+                  <div className="space-y-3">
+                    <div className="border rounded-lg p-4 bg-muted/20 flex items-start gap-3">
+                      <div className="p-2 bg-primary/10 rounded-lg shrink-0">
+                        <FileText className="h-5 w-5 text-primary" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-primary truncate">{selectedSource.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{selectedSource.kind === "client" ? "Cliente" : "Lead"} ligado ao orçamento</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge variant="default" className="bg-green-600 text-xs">✅ Ligado</Badge>
+                        <Button variant="ghost" size="sm" className="text-destructive h-7 px-2 text-xs"
+                          onClick={() => {
+                            setSelectedSource(null);
+                            setFormData({ ...formData, cliente_id: "", organization_id: "", assigned_to: "", title: "" });
+                            setAssignedToTouched(false);
+                            setSelectedFees(new Set());
+                            setLines([]);
+                            setInlineQuotes([]);
+                          }}>
+                          <X className="h-3 w-3 mr-1" /> Desligar
+                        </Button>
+                      </div>
+                    </div>
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} />
+                  </div>
+                  ) : (
+                    <EntitySearchInput
+                      value={null}
+                      onChange={async (entity) => {
+                        if (!entity) { setSelectedSource(null); return; }
+                        const sourceOrgId = activeCompany?.id || null;
+                        setSelectedSource({
+                          kind: entity.type,
+                          id: entity.id,
+                          name: entity.name,
+                          entity_id: entity.entityId ?? null,
+                          organization_id: sourceOrgId,
+                        });
+                        setSelectedDeal(null);
+                        // Canonical ownership chain (entity -> client -> contact -> lead)
+                        const inherited = await resolveQuoteAssignedTo({
+                          supabase: supabase as any,
+                          clienteId: entity.type === "client" ? entity.id : null,
+                          entityId: entity.entityId ?? null,
+                          organizationId: sourceOrgId,
+                          fallbackUserId: null,
+                        });
+                        setFormData(prev => ({
+                          ...prev,
+                          deal_id: "",
+                          organization_id: sourceOrgId || prev.organization_id,
+                          // Only a real client row may fill cliente_id; a lead
+                          // has no client record yet and rides on entity_id.
+                          cliente_id: entity.type === "client" ? entity.id : prev.cliente_id,
+                          title: prev.title || entity.name,
+                          assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to),
+                        }));
+                      }}
+                      searchTypes={["lead", "client"]}
+                      placeholder="Pesquisar lead ou cliente..."
+                    />
+                  )}
+                </div>
+              )}
 
               {/* Title + Reference */}
               <div className="grid gap-4 md:grid-cols-2">
