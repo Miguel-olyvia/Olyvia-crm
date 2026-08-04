@@ -7,6 +7,7 @@ import {
   MIN_SEARCH_TERM_LENGTH,
   normalizeSearchTerm,
   searchDealsLeadsClients,
+  type ScopedSearchBranchError,
   type ScopedSearchKind,
   type ScopedSearchResult,
 } from "@/lib/search/scopedEntitySearch";
@@ -24,6 +25,8 @@ export interface UseScopedEntitySearchOptions {
 export interface UseScopedEntitySearchResult {
   results: ScopedSearchResult[];
   loading: boolean;
+  /** Human-readable reason the last search failed, if any branch did. */
+  error: string | null;
   /** True once both the org subtree and the permission scope have resolved. */
   ready: boolean;
   /** Debounced. Safe to call on every keystroke. */
@@ -67,6 +70,7 @@ export function useScopedEntitySearch(
 
   const [results, setResults] = useState<ScopedSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const latestRequestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -85,6 +89,7 @@ export function useScopedEntitySearch(
 
       if (term.length < MIN_SEARCH_TERM_LENGTH) {
         setResults([]);
+        setError(null);
         setLoading(false);
         return;
       }
@@ -98,6 +103,7 @@ export function useScopedEntitySearch(
       }
 
       setLoading(true);
+      let branchFailures: ScopedSearchBranchError[] = [];
       try {
         const found = await searchDealsLeadsClients({
           term,
@@ -106,13 +112,22 @@ export function useScopedEntitySearch(
           limitPerKind,
           restrictToEntityId,
           viewer: { isSystemAdmin, anewUserId, authUserId, teamMemberIds, getPermissionScope },
+          onBranchErrors: (failures) => {
+            branchFailures = failures;
+          },
         });
         if (requestId !== latestRequestIdRef.current) return;
         setResults(found);
-      } catch (error) {
+        setError(
+          branchFailures.length > 0
+            ? `Falhou: ${branchFailures.map((f) => `${f.branch} (${f.message})`).join("; ")}`
+            : null,
+        );
+      } catch (err) {
         if (requestId !== latestRequestIdRef.current) return;
-        console.error("[useScopedEntitySearch] search failed:", error);
+        console.error("[useScopedEntitySearch] search failed:", err);
         setResults([]);
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (requestId === latestRequestIdRef.current) setLoading(false);
       }
@@ -140,6 +155,7 @@ export function useScopedEntitySearch(
       if (normalizeSearchTerm(term).length < MIN_SEARCH_TERM_LENGTH) {
         latestRequestIdRef.current++;
         setResults([]);
+        setError(null);
         setLoading(false);
         return;
       }
@@ -152,6 +168,7 @@ export function useScopedEntitySearch(
     if (debounceRef.current) clearTimeout(debounceRef.current);
     latestRequestIdRef.current++;
     setResults([]);
+    setError(null);
     setLoading(false);
   }, []);
 
@@ -161,5 +178,5 @@ export function useScopedEntitySearch(
     };
   }, []);
 
-  return { results, loading, ready, search, clear };
+  return { results, loading, error, ready, search, clear };
 }

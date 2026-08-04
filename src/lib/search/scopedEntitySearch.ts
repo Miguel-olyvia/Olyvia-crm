@@ -91,6 +91,8 @@ export interface ScopedSearchParams {
    * and scope filters.
    */
   restrictToEntityId?: string | null;
+  /** Called with the branches that failed, so the UI can report them. */
+  onBranchErrors?: (errors: ScopedSearchBranchError[]) => void;
 }
 
 /**
@@ -117,17 +119,26 @@ function resolveBranchScope(viewer: ScopedSearchViewer, permissionCode: string):
   };
 }
 
+/** A branch that failed, so the caller can tell the user instead of showing "no results". */
+export interface ScopedSearchBranchError {
+  branch: string;
+  message: string;
+}
+
 /**
- * Awaits a query and surfaces its error instead of silently yielding [].
+ * Awaits a query, recording any error rather than swallowing it.
  *
- * Every branch here used to destructure only `data`, so a failing query was
- * indistinguishable from "no matches" — the search box simply stopped
- * reacting, with nothing in the console to explain it.
+ * The failure is NOT rethrown: one broken branch (say leads) must not take
+ * down the branches that still work (deals, clients). But it is reported, so
+ * the UI can say "a pesquisa de leads falhou" instead of "sem resultados" —
+ * previously a failed query was indistinguishable from an empty one, which is
+ * what made the box look like it had simply stopped reacting.
  */
-async function runQuery(label: string, query: any): Promise<any[]> {
+async function runQuery(label: string, query: any, errors: ScopedSearchBranchError[]): Promise<any[]> {
   const { data, error } = await query;
   if (error) {
     console.error(`[scopedEntitySearch] ${label} query failed:`, error);
+    errors.push({ branch: label, message: error.message || String(error) });
     return [];
   }
   return data || [];
@@ -157,6 +168,7 @@ async function searchDeals(
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
+  errors: ScopedSearchBranchError[],
   restrictToEntityId?: string | null,
 ): Promise<ScopedSearchResult[]> {
   const scope = resolveBranchScope(viewer, "deals.view");
@@ -180,11 +192,11 @@ async function searchDeals(
   // term. A deal called "Remodelação T3" must still be found by typing the
   // client's name, and vice-versa.
   const queries: Promise<any[]>[] = [
-    runQuery("deals.title", applyOwnerScope(baseQuery().ilike("title", like), scope)),
+    runQuery("deals.title", applyOwnerScope(baseQuery().ilike("title", like), scope), errors),
   ];
   if (matchedEntityIds.length > 0) {
     queries.push(
-      runQuery("deals.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope)),
+      runQuery("deals.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope), errors),
     );
   }
 
@@ -217,6 +229,7 @@ async function searchLeads(
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
+  errors: ScopedSearchBranchError[],
   restrictToEntityId?: string | null,
 ): Promise<ScopedSearchResult[]> {
   const scope = resolveBranchScope(viewer, "leads.view");
@@ -249,11 +262,12 @@ async function searchLeads(
     runQuery(
       "leads.search_text",
       applyOwnerScope(baseQuery().ilike("search_text", `%${escapeIlike(term)}%`), scope),
+      errors,
     ),
   ];
   if (matchedEntityIds.length > 0) {
     queries.push(
-      runQuery("leads.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope)),
+      runQuery("leads.entity", applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope), errors),
     );
   }
 
@@ -295,6 +309,7 @@ async function searchClients(
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
+  errors: ScopedSearchBranchError[],
 ): Promise<ScopedSearchResult[]> {
   if (matchedEntityIds.length === 0) return [];
 
@@ -312,7 +327,7 @@ async function searchClients(
     scope,
   );
 
-  const data = await runQuery("clients.entity", query);
+  const data = await runQuery("clients.entity", query, errors);
   return data.map((row: any) => ({
     kind: "client" as const,
     id: row.id,
@@ -385,6 +400,7 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
   const kinds = params.kinds ?? ALL_SCOPED_SEARCH_KINDS;
   const limit = params.limitPerKind ?? DEFAULT_LIMIT_PER_KIND;
   const { viewer, restrictToEntityId } = params;
+  const branchErrors: ScopedSearchBranchError[] = [];
 
   const { ids: allMatchedEntityIds } = await searchEntityIds(term);
   // Intersect rather than replace, so the restriction can only ever narrow.
@@ -394,12 +410,14 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
 
   const [deals, leads, clients] = await Promise.all([
     kinds.includes("deal")
-      ? searchDeals(term, matchedEntityIds, orgIds, viewer, limit, restrictToEntityId)
+      ? searchDeals(term, matchedEntityIds, orgIds, viewer, limit, branchErrors, restrictToEntityId)
       : Promise.resolve([]),
     kinds.includes("lead")
-      ? searchLeads(term, matchedEntityIds, orgIds, viewer, limit, restrictToEntityId)
+      ? searchLeads(term, matchedEntityIds, orgIds, viewer, limit, branchErrors, restrictToEntityId)
       : Promise.resolve([]),
-    kinds.includes("client") ? searchClients(matchedEntityIds, orgIds, viewer, limit) : Promise.resolve([]),
+    kinds.includes("client")
+      ? searchClients(matchedEntityIds, orgIds, viewer, limit, branchErrors)
+      : Promise.resolve([]),
   ]);
 
   const rows: ScopedSearchResult[] = [...deals, ...leads, ...clients];
@@ -407,6 +425,8 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
     new Set(rows.map((row) => row.entityId).filter(Boolean) as string[]),
   );
   const entityDetails = await loadEntityDetails(entityIds);
+
+  if (branchErrors.length > 0) params.onBranchErrors?.(branchErrors);
 
   return rows.map((row) => {
     const details = row.entityId ? entityDetails.get(row.entityId) : undefined;

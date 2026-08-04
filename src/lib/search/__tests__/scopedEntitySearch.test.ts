@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 /**
  * These tests pin the two security invariants of the shared picker search:
@@ -13,6 +13,7 @@ interface RecordedQuery {
 
 let recorded: RecordedQuery[] = [];
 let tableRows: Record<string, any[]> = {};
+let tableErrors: Record<string, { message: string }> = {};
 
 function makeQuery(table: string) {
   const entry: RecordedQuery = { table, calls: [] };
@@ -27,8 +28,12 @@ function makeQuery(table: string) {
     };
   });
   // The production code `await`s the builder directly, so a thenable is enough.
-  query.then = (resolve: (value: { data: any[]; error: null }) => unknown) =>
-    resolve({ data: tableRows[table] ?? [], error: null });
+  query.then = (resolve: (value: { data: any[] | null; error: unknown }) => unknown) =>
+    resolve(
+      tableErrors[table]
+        ? { data: null, error: tableErrors[table] }
+        : { data: tableRows[table] ?? [], error: null },
+    );
   return query;
 }
 
@@ -70,7 +75,59 @@ const ALL_ORG: ScopeMap = { "deals.view": "ORG", "leads.view": "ORG", "clients.v
 beforeEach(() => {
   recorded = [];
   tableRows = {};
+  tableErrors = {};
   matchedEntityIds = [];
+  vi.spyOn(console, "error").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("searchDealsLeadsClients — failing branches", () => {
+  it("reports a failed branch instead of passing it off as no matches", async () => {
+    tableErrors = { anew_leads: { message: 'column "search_text" does not exist' } };
+    const onBranchErrors = vi.fn();
+
+    await searchDealsLeadsClients({
+      term: "carva",
+      orgIds: ["org-1"],
+      viewer: viewerWith(ALL_ORG),
+      onBranchErrors,
+    });
+
+    expect(onBranchErrors).toHaveBeenCalledTimes(1);
+    const [reported] = onBranchErrors.mock.calls[0] as [Array<{ branch: string; message: string }>];
+    expect(reported.map((e) => e.branch)).toContain("leads.search_text");
+    expect(reported[0].message).toContain("search_text");
+  });
+
+  it("keeps the working branches alive when one branch fails", async () => {
+    tableErrors = { anew_leads: { message: "boom" } };
+    tableRows = {
+      deals: [{ id: "deal-1", title: "Remodelação", organization_id: "org-1", entity_id: null }],
+    };
+
+    const results = await searchDealsLeadsClients({
+      term: "remodela",
+      orgIds: ["org-1"],
+      viewer: viewerWith(ALL_ORG),
+    });
+
+    // A broken leads branch must not take the deals branch down with it.
+    expect(results.map((r) => r.kind)).toEqual(["deal"]);
+  });
+
+  it("does not report anything when every branch succeeds", async () => {
+    const onBranchErrors = vi.fn();
+    await searchDealsLeadsClients({
+      term: "carva",
+      orgIds: ["org-1"],
+      viewer: viewerWith(ALL_ORG),
+      onBranchErrors,
+    });
+    expect(onBranchErrors).not.toHaveBeenCalled();
+  });
 });
 
 describe("searchDealsLeadsClients — organization isolation", () => {

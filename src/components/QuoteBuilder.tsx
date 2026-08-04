@@ -285,6 +285,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const {
     results: dealSearchResults,
     loading: dealSearchLoading,
+    error: dealSearchError,
     search: runDealSearch,
     clear: clearDealSearch,
   } = useScopedEntitySearch();
@@ -3266,7 +3267,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         {dealSearchLoading && dealSearchResults.length === 0 && (
                           <div className="px-3 py-2 text-sm text-muted-foreground">A pesquisar…</div>
                         )}
-                        {!dealSearchLoading && dealSearchResults.length === 0 && (
+                        {dealSearchError && (
+                          <div className="px-3 py-2 text-sm text-destructive">
+                            A pesquisa falhou — {dealSearchError}
+                          </div>
+                        )}
+                        {!dealSearchLoading && !dealSearchError && dealSearchResults.length === 0 && (
                           <div className="px-3 py-2 text-sm text-muted-foreground">Sem resultados</div>
                         )}
                         {dealSearchResults.map((r) => (
