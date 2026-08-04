@@ -68,20 +68,21 @@ export function safeSmtpMetadata(smtp: any, source: SmtpSource, extra: Record<st
 
 // smtp_password no longer exists as a plaintext column (see
 // 20261110750000_encrypt_smtp_passwords_with_vault.sql) — every row only
-// carries a smtp_password_secret_id. This decrypts it via
-// vault.decrypted_secrets, which requires a service-role client; the caller
-// is responsible for passing one (RLS-bound clients get no rows back here,
-// since authenticated/anon have no grant on that view).
+// carries a smtp_password_secret_id. This decrypts it via the
+// rpc_decrypt_vault_secret RPC (service-role only), not a direct PostgREST
+// read against `vault.decrypted_secrets` — that schema isn't in this
+// project's PostgREST exposed-schemas list, so a `.schema("vault")` read
+// fails every time regardless of the client's role (confirmed live: it
+// silently returned no row, leaving smtp_password undefined and causing
+// every real send to fail SMTP auth even with a verified-correct password).
 async function attachDecryptedPassword(supabase: any, row: any): Promise<any> {
   if (!row || !row.smtp_password_secret_id) return row;
-  const { data, error } = await supabase
-    .schema("vault")
-    .from("decrypted_secrets")
-    .select("decrypted_secret")
-    .eq("id", row.smtp_password_secret_id)
-    .maybeSingle();
-  if (error || !data) return row;
-  return { ...row, smtp_password: data.decrypted_secret };
+  const { data, error } = await supabase.rpc("rpc_decrypt_vault_secret", { p_secret_id: row.smtp_password_secret_id });
+  if (error) {
+    console.error("[smtp] failed to decrypt SMTP password:", error);
+    return row;
+  }
+  return { ...row, smtp_password: data };
 }
 
 async function getActiveUserSmtp(supabase: any, authUserId?: string | null, organizationId?: string | null) {
