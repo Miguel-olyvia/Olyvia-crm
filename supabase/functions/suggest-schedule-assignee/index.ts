@@ -5,11 +5,11 @@ import { z } from "npm:zod";
 
 const requestSchema = z.object({
   organization_id: z.string(),
-  campaign_id: z.string().optional(),
+  campaign_id: z.string().nullable().optional(),
   requested_date: z.string(),
-  requested_time: z.string().optional(),
-  duration_minutes: z.number().optional(),
-  lead_postal_code: z.string().optional(),
+  requested_time: z.string().nullable().optional(),
+  duration_minutes: z.number().nullable().optional(),
+  lead_postal_code: z.string().nullable().optional(),
 });
 
 import { getCorsHeaders } from "../_shared/cors.ts";
