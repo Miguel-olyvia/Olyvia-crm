@@ -156,6 +156,7 @@ const handler = async (req: Request): Promise<Response> => {
         .eq("user_id", callerAnewUserId)
         .eq("organization_id", effectiveOrgIdForScopeCheck)
         .eq("status", "active")
+        .limit(1)
         .maybeSingle();
 
       if (!membership) {
@@ -172,6 +173,7 @@ const handler = async (req: Request): Promise<Response> => {
           .select("id")
           .eq("child_org_id", effectiveOrgIdForScopeCheck)
           .in("parent_org_id", userOrgIds)
+          .limit(1)
           .maybeSingle();
 
         if (!hierarchyMatch) {
