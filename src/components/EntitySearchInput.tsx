@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { X, Search, Building, Crosshair, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
@@ -40,6 +41,9 @@ const typeConfig = {
 
 const getTypeConfig = (type: string) => typeConfig[type as keyof typeof typeConfig] || typeConfig.lead;
 
+/** Results fetched per page. "Mostrar mais" raises the cap by this much. */
+const RESULT_PAGE_SIZE = 50;
+
 export function EntitySearchInput({
   value,
   onChange,
@@ -50,6 +54,7 @@ export function EntitySearchInput({
 }: EntitySearchInputProps) {
   const { t } = useTranslation();
   const { activeCompany } = useCompany();
+  const { orgIds: descendantOrgIds } = useDescendantOrgIds();
   const {
     getPermissionScope,
     anewUserId: scopeAnewUserId,
@@ -61,6 +66,9 @@ export function EntitySearchInput({
   const [results, setResults] = useState<EntitySearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  // The list used to be hard-capped at 50 with no way to see past it. The cap
+  // now grows on demand; it resets whenever the term changes.
+  const [resultLimit, setResultLimit] = useState(RESULT_PAGE_SIZE);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -113,7 +121,6 @@ export function EntitySearchInput({
       const allResults: EntitySearchResult[] = [];
 
       try {
-        const { data: { user } } = await supabase.auth.getUser();
         const orgId = activeCompany?.id;
 
         // SECURITY: these must mirror the exact same leads.view / clients.view
@@ -151,7 +158,7 @@ export function EntitySearchInput({
           rpcEntityTypes.length > 0 && orgId
             ? (supabase as any).rpc("search_proposal_entities", {
                 p_search: term,
-                p_limit: 50,
+                p_limit: resultLimit,
                 p_organization_id: orgId,
               })
             : Promise.resolve({ data: null, error: null }),
@@ -217,7 +224,7 @@ export function EntitySearchInput({
             seenFast.add(key);
             return true;
           });
-          setResults(fastResults.slice(0, 50));
+          setResults(fastResults.slice(0, resultLimit));
           setOpen(true);
         }
 
@@ -238,9 +245,16 @@ export function EntitySearchInput({
         // bubble up and discard the RPC results already painted above.
         try {
           if (needsLeads || needsClientFallback) {
-            if (needsLeads && user?.id) {
-              const { data: visibleOrgIds } = await (supabase as any).rpc("get_user_visible_org_ids", { _auth_uid: user.id });
-              orgIds = Array.from(new Set([...(orgIds || []), ...((visibleOrgIds || []) as string[])]));
+            // ORG ISOLATION: this used to union get_user_visible_org_ids() on
+            // top of the active company, which searched EVERY organization the
+            // caller could see — for a super_admin, all of them. Confirmed
+            // live: searching from org "nike" listed leads belonging to other
+            // organizations. The picker must stay inside the ACTIVE company
+            // and its hierarchy subtree, like every other query on the page.
+            orgIds = descendantOrgIds.length > 0 ? descendantOrgIds : (orgId ? [orgId] : []);
+            if (orgIds.length === 0) {
+              // No resolved organization: fail closed rather than search wide.
+              return;
             }
             const like = `%${term.trim()}%`;
             let leadEntityIds: string[] = [];
@@ -351,7 +365,7 @@ export function EntitySearchInput({
 
           // ── Search Leads ──
           if (searchTypes.includes("lead") && matchedEntityIds.length > 0 && leadsScope !== "NONE") {
-            let q = (supabase.from("anew_leads") as any).select("id, entity_id, assigned_to, status").in("entity_id", matchedEntityIds).is("deleted_at", null).limit(50);
+            let q = (supabase.from("anew_leads") as any).select("id, entity_id, assigned_to, status").in("entity_id", matchedEntityIds).is("deleted_at", null).limit(resultLimit);
             if (orgIds.length > 0) q = q.in("organization_id", orgIds);
             if (leadsScope !== "ORG") {
               if (leadScopeUserIds.length === 0) {
@@ -382,7 +396,7 @@ export function EntitySearchInput({
               .is("deleted_at", null)
               .eq("status", "active")
               .eq("organization_id", orgId)
-              .limit(50);
+              .limit(resultLimit);
             if (clientsScope !== "ORG") {
               const orFilter = buildContactScopeOrFilter(clientsScope, clientScopeUserIds);
               if (!orFilter) {
@@ -422,7 +436,7 @@ export function EntitySearchInput({
         // old search term could overwrite the correct, already-rendered
         // results for the current term.
         if (requestId !== latestRequestIdRef.current) return;
-        setResults(deduped.slice(0, 50));
+        setResults(deduped.slice(0, resultLimit));
         setOpen(true);
 
       } catch (err) {
@@ -443,6 +457,8 @@ export function EntitySearchInput({
     },
     [
       activeCompany?.id,
+      descendantOrgIds,
+      resultLimit,
       searchTypes,
       scopeLoading,
       getPermissionScope,
@@ -454,9 +470,28 @@ export function EntitySearchInput({
 
   const handleInputChange = (val: string) => {
     setQuery(val);
+    // A new term starts a new result set, so the page cap goes back to one page.
+    setResultLimit(RESULT_PAGE_SIZE);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => search(val), 300);
   };
+
+  // Re-run the search after "Mostrar mais" raises the cap. Skipped on the
+  // initial render and whenever the cap is back at its default, so this never
+  // duplicates the debounced search triggered by typing.
+  const isFirstLimitEffect = useRef(true);
+  useEffect(() => {
+    if (isFirstLimitEffect.current) {
+      isFirstLimitEffect.current = false;
+      return;
+    }
+    if (resultLimit === RESULT_PAGE_SIZE) return;
+    if (query.trim().length < 2) return;
+    search(query);
+    // `search` is intentionally omitted: it is recreated whenever resultLimit
+    // changes, which would make this effect re-enter itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultLimit]);
 
   const handleSelect = (entity: EntitySearchResult) => {
     onChange(entity);
@@ -565,6 +600,24 @@ export function EntitySearchInput({
             {results.length === 0 && query.length >= 2 && !loading && (
               <div className="p-4 text-center text-sm text-muted-foreground">
                 {t("common.noResults") || "Sem resultados"}
+              </div>
+            )}
+            {results.length >= resultLimit && (
+              <div className="border-t p-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs"
+                  disabled={loading}
+                  onClick={() => setResultLimit((current) => current + RESULT_PAGE_SIZE)}
+                >
+                  {loading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    `Mostrar mais (${results.length})`
+                  )}
+                </Button>
               </div>
             )}
           </div>

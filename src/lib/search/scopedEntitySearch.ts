@@ -54,6 +54,10 @@ export interface ScopedSearchResult {
   organizationId: string | null;
   assignedTo: string | null;
   status?: string | null;
+  /** Labels taken from the record itself, used when its entity is unreadable. */
+  fallbackName?: string | null;
+  fallbackEmail?: string | null;
+  fallbackPhone?: string | null;
   /** Deal-only: the records the deal already points at, used to inherit ownership. */
   dealClientId?: string | null;
   dealLeadId?: string | null;
@@ -190,40 +194,77 @@ async function searchDeals(
 }
 
 async function searchLeads(
+  term: string,
   matchedEntityIds: readonly string[],
   orgIds: readonly string[],
   viewer: ScopedSearchViewer,
   limit: number,
+  restrictToEntityId?: string | null,
 ): Promise<ScopedSearchResult[]> {
-  // Leads carry no searchable title of their own — they are only reachable
-  // through the entity (name / email / phone / NIF) that matched.
-  if (matchedEntityIds.length === 0) return [];
-
   const scope = resolveBranchScope(viewer, "leads.view");
   if (scope.level === "NONE") return [];
 
-  const query = applyOwnerScope(
-    (supabase as any)
+  const baseQuery = () => {
+    let query = (supabase as any)
       .from("anew_leads")
-      .select("id, entity_id, organization_id, assigned_to, status")
+      // field_values is selected so the lead can be labelled from its OWN data:
+      // RLS on anew_entities can hide the linked entity even when the lead
+      // itself is visible, and falling back to "Lead #abc12345" in that case
+      // makes the result useless to pick from.
+      .select("id, entity_id, organization_id, assigned_to, status, field_values")
       .in("organization_id", orgIds)
-      .in("entity_id", matchedEntityIds)
       .is("deleted_at", null)
-      .not("status", "eq", "converted")
-      .limit(limit),
-    scope,
-  );
+      .limit(limit);
+    if (restrictToEntityId) query = query.eq("entity_id", restrictToEntityId);
+    return query;
+  };
 
-  const { data } = await query;
-  return (data || []).map((row: any) => ({
-    kind: "lead" as const,
-    id: row.id,
-    name: "",
-    entityId: row.entity_id ?? null,
-    organizationId: row.organization_id ?? null,
-    assignedTo: row.assigned_to ?? null,
-    status: row.status ?? null,
-  }));
+  // Two passes, mirroring how the Leads page itself searches.
+  //
+  // `search_text` is a denormalized column on anew_leads holding the lead's
+  // own name/email/phone. It is the ONLY thing AnewLeads.tsx matches on
+  // (applyLeadsServerFilters), and it is why a lead can be visible in the
+  // Leads list yet invisible to an entity-join search: the lead's identity
+  // does not necessarily live in a linked anew_entities row. Matching only by
+  // entity id is exactly what made leads go missing from this picker.
+  const queries: Promise<{ data: any[] | null }>[] = [
+    applyOwnerScope(baseQuery().ilike("search_text", `%${escapeIlike(term)}%`), scope),
+  ];
+  if (matchedEntityIds.length > 0) {
+    queries.push(applyOwnerScope(baseQuery().in("entity_id", matchedEntityIds), scope));
+  }
+
+  const responses = await Promise.all(queries);
+  const merged = new Map<string, any>();
+  responses.forEach((response) => {
+    (response.data || []).forEach((row: any) => merged.set(row.id, row));
+  });
+
+  return Array.from(merged.values()).map((row: any) => {
+    const fields = (row.field_values ?? {}) as Record<string, unknown>;
+    const asText = (key: string) => {
+      const value = fields[key];
+      return typeof value === "string" && value.trim() ? value.trim() : null;
+    };
+    const fallbackName =
+      asText("display_name") ||
+      asText("name") ||
+      [asText("first_name"), asText("last_name")].filter(Boolean).join(" ").trim() ||
+      null;
+
+    return {
+      kind: "lead" as const,
+      id: row.id,
+      name: "",
+      fallbackName,
+      fallbackEmail: asText("email"),
+      fallbackPhone: asText("phone") || asText("mobile"),
+      entityId: row.entity_id ?? null,
+      organizationId: row.organization_id ?? null,
+      assignedTo: row.assigned_to ?? null,
+      status: row.status ?? null,
+    };
+  });
 }
 
 async function searchClients(
@@ -332,7 +373,9 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
     kinds.includes("deal")
       ? searchDeals(term, matchedEntityIds, orgIds, viewer, limit, restrictToEntityId)
       : Promise.resolve([]),
-    kinds.includes("lead") ? searchLeads(matchedEntityIds, orgIds, viewer, limit) : Promise.resolve([]),
+    kinds.includes("lead")
+      ? searchLeads(term, matchedEntityIds, orgIds, viewer, limit, restrictToEntityId)
+      : Promise.resolve([]),
     kinds.includes("client") ? searchClients(matchedEntityIds, orgIds, viewer, limit) : Promise.resolve([]),
   ]);
 
@@ -345,15 +388,19 @@ export async function searchDealsLeadsClients(params: ScopedSearchParams): Promi
   return rows.map((row) => {
     const details = row.entityId ? entityDetails.get(row.entityId) : undefined;
     const entityName = details?.name ?? null;
+    // Prefer the entity's name, then the record's own fields, and only then a
+    // bare id — so a row whose entity is hidden by RLS is still identifiable.
+    const resolvedName =
+      row.kind === "deal"
+        ? row.name
+        : entityName || row.fallbackName || `${FALLBACK_LABEL[row.kind]} #${row.id.slice(0, 8)}`;
+
     return {
       ...row,
-      name:
-        row.kind === "deal"
-          ? row.name
-          : entityName || `${FALLBACK_LABEL[row.kind]} #${row.id.slice(0, 8)}`,
-      contactName: row.kind === "deal" ? entityName ?? undefined : undefined,
-      email: details?.email,
-      phone: details?.phone,
+      name: resolvedName,
+      contactName: row.kind === "deal" ? entityName ?? row.fallbackName ?? undefined : undefined,
+      email: details?.email ?? row.fallbackEmail ?? undefined,
+      phone: details?.phone ?? row.fallbackPhone ?? undefined,
     };
   });
 }

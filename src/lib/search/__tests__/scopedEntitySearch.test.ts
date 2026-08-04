@@ -245,30 +245,48 @@ describe("searchDealsLeadsClients — coverage of the three kinds", () => {
     expect(results.find((r) => r.kind === "client")!.email).toBe("maria@example.test");
   });
 
-  it("excludes converted leads", async () => {
+  it("matches leads on search_text, like the Leads page does", async () => {
     matchedEntityIds = ["ent-1"];
     await searchDealsLeadsClients({
-      term: "silva",
+      term: "carva",
       orgIds: ["org-1"],
       viewer: viewerWith(ALL_ORG),
     });
 
-    const leadQuery = queriesFor("anew_leads")[0];
-    expect(argsOf(leadQuery, "not")).toContainEqual(["status", "eq", "converted"]);
+    const ilikeArgs = queriesFor("anew_leads").flatMap((q) => argsOf(q, "ilike"));
+    expect(ilikeArgs).toContainEqual(["search_text", "%carva%"]);
   });
 
-  it("skips lead and client branches when no entity matched the term", async () => {
+  it("still finds leads when no entity matched the term", async () => {
+    // Regression: a lead whose linked entity is unreadable (or absent) was
+    // invisible here while still listed on the Leads page.
     matchedEntityIds = [];
-    await searchDealsLeadsClients({
-      term: "remodelacao",
+    tableRows = {
+      anew_leads: [
+        {
+          id: "lead-1",
+          organization_id: "org-1",
+          entity_id: null,
+          field_values: { first_name: "Carvalho", last_name: "Carvalho" },
+        },
+      ],
+    };
+
+    const results = await searchDealsLeadsClients({
+      term: "carva",
       orgIds: ["org-1"],
       viewer: viewerWith(ALL_ORG),
     });
 
-    expect(queriesFor("anew_leads")).toHaveLength(0);
+    expect(queriesFor("anew_leads")).toHaveLength(1);
+    // Clients have no text column of their own, so that branch still needs a
+    // matched entity and is correctly skipped.
     expect(queriesFor("anew_clients")).toHaveLength(0);
-    // Deals are still searched by title.
-    expect(queriesFor("deals")).toHaveLength(1);
+
+    const lead = results.find((r) => r.kind === "lead");
+    expect(lead).toBeDefined();
+    // Labelled from the lead's own fields, not "Lead #abc12345".
+    expect(lead!.name).toBe("Carvalho Carvalho");
   });
 
   it("honours the requested kinds", async () => {
