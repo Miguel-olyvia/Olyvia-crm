@@ -143,12 +143,12 @@ export interface LeadContactDialogUpdate {
 
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
-export function AnewLeadContactDialog({ 
-  open, 
-  onOpenChange, 
-  lead, 
+export function AnewLeadContactDialog({
+  open,
+  onOpenChange,
+  lead,
   companyId,
-  onLeadUpdated 
+  onLeadUpdated,
 }: LeadContactDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
@@ -218,7 +218,7 @@ export function AnewLeadContactDialog({
       setVisitDate("");
       setVisitTime("");
       setVisitDuration("60");
-      
+
       loadContactHistory();
       loadUsers();
       loadContactResults();

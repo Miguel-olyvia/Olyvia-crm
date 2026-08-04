@@ -20,6 +20,7 @@ interface ResolvedStageResponse {
   resolved_stage_id: string | null;
   resolved_stage: LeadStage | null;
   stages: LeadStage[];
+  is_lost: boolean;
   furthest_progress_stage_id: string | null;
   furthest_progress_stage: LeadStage | null;
 }
@@ -58,7 +59,7 @@ export function LeadJourneyTab({
 
     setStagesLoading(true);
     supabase
-      .rpc("get_lead_resolved_stage", { p_lead_id: lead.id })
+      .rpc("get_lead_journey_stage", { p_lead_id: lead.id })
       .then(({ data, error }) => {
         if (isCancelled) return;
         if (error) {
@@ -81,7 +82,7 @@ export function LeadJourneyTab({
   const isNegotiatingOrLater = lead.status === "negotiation" || lead.status === "converted";
 
   const stages = resolvedStages?.stages ?? [];
-  const isLost = resolvedStages?.resolved_stage?.counts_as_lost === true;
+  const isLost = resolvedStages?.is_lost === true;
   // For a lost/rejected lead, the fill threshold is the furthest genuinely
   // reached stage (reconstructed from audit history), not the rejection
   // stage's own order — otherwise every stage would render as "completed"

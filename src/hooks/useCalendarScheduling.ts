@@ -289,9 +289,15 @@ export function useCalendarScheduling(companyId?: string) {
     }
   }, [companyId, ensureVisitsBoard, t]);
 
-  // Create a visit (schedule_item in Visitas board)
+  // Create a visit (schedule_item in Visitas board). Pass either contact_id
+  // (existing Contacts flow) or lead_id (Leads' "Agendar Visita" quick
+  // action) -- lead_id is stored in metadata (schedule_items has no lead_id
+  // column, same convention fetchVisits already reads from) and, on success,
+  // links the visit back via anew_leads.scheduled_visit_id so has_visit_done
+  // (evaluate_lead_signals_v2) can see it once someone marks it completed.
   const createVisit = useCallback(async (visitData: {
-    contact_id: string;
+    contact_id?: string;
+    lead_id?: string;
     title: string;
     description?: string;
     visit_type: string;
@@ -325,9 +331,11 @@ export function useCalendarScheduling(companyId?: string) {
                   visitData.status === 'completed' ? 'completed' :
                   visitData.status === 'cancelled' ? 'cancelled' : 'scheduled',
           origin: 'manual',
-          contact_id: visitData.contact_id,
+          contact_id: visitData.contact_id || null,
           notes: visitData.notes,
-          metadata: { visit_type: visitData.visit_type },
+          metadata: visitData.lead_id
+            ? { visit_type: visitData.visit_type, lead_id: visitData.lead_id }
+            : { visit_type: visitData.visit_type },
           organization_id: companyId,
           created_by: businessUserId,
         })
@@ -335,6 +343,14 @@ export function useCalendarScheduling(companyId?: string) {
         .single();
 
       if (itemError) throw itemError;
+
+      if (visitData.lead_id && item) {
+        const { error: leadLinkError } = await supabase
+          .from('anew_leads')
+          .update({ scheduled_visit_id: item.id })
+          .eq('id', visitData.lead_id);
+        if (leadLinkError) console.warn('[useCalendarScheduling] Failed to link scheduled_visit_id to lead', leadLinkError);
+      }
 
       // Find or create resource for assigned user and add as assignee
       // assignedUserId should be anew_users.id (internal id) since schedule_resources.user_id references anew_users

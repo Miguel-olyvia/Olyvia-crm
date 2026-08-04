@@ -15317,6 +15317,7 @@ export type Database = {
           quote_value_with_iva: number
         }[]
       }
+      get_lead_journey_stage: { Args: { p_lead_id: string }; Returns: Json }
       get_lead_resolved_stage: { Args: { p_lead_id: string }; Returns: Json }
       get_lead_source_options: {
         Args: { p_is_root?: boolean; p_org_id: string; p_scope?: string }

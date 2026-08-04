@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import {
@@ -72,6 +72,7 @@ import { Switch } from "@/components/ui/switch";
 import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkflowConfig";
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
+import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
 import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
@@ -367,6 +368,7 @@ export default function AnewLeads() {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
   const { resolveEntities, getIdentity } = useEntityIdentity();
+  const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
   const CONTACT_FIELDS = useMemo(() => CONTACT_FIELD_KEYS.map(f => ({ value: f.value, label: t(f.labelKey) })), [t]);
@@ -647,6 +649,11 @@ export default function AnewLeads() {
   // TOP of the lead detail dialog (not replace it) and stays a lightweight
   // activity log rather than the full contact/workflow flow.
   const [showRegisterActivityDialog, setShowRegisterActivityDialog] = useState(false);
+
+  // Dedicated lightweight "Agendar Visita" dialog (ScheduleLeadVisitDialog) —
+  // kept separate from AnewLeadContactDialog, which is the full contact/
+  // workflow-logging flow and shouldn't open just to book a visit.
+  const [showScheduleVisitDialog, setShowScheduleVisitDialog] = useState(false);
 
   const openContactDialogForLead = useCallback((lead: Lead) => {
     setSelectedLead(lead);
@@ -1599,12 +1606,11 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Only fetch the resolved-stage RPC when the selected lead currently sits
-  // in a rejection stage — for every other status the pipeline bar keeps
-  // using the plain currentStatus-based rendering, so this stays a no-op.
-  const selectedLeadIsRejected = !!selectedLead &&
-    workflowStages.find(s => s.name === selectedLead.status)?.is_rejection === true;
-
+  // Drives the Funil's "current stage" highlight via the same rule engine
+  // (reached_when/matching_statuses) the Percurso tab already uses, instead
+  // of a plain literal comparison against the lead's raw status text — so a
+  // stage reached only through a configured rule (e.g. "has an active
+  // proposal") lights up on the Funil too, not just the Percurso.
   const { data: selectedLeadResolvedStage } = useQuery({
     queryKey: ["lead-resolved-stage", selectedLead?.id],
     queryFn: async () => {
@@ -1612,9 +1618,9 @@ export default function AnewLeads() {
         p_lead_id: selectedLead!.id,
       });
       if (error) return null;
-      return data as { furthest_progress_stage_id: string | null } | null;
+      return data as { resolved_stage_id: string | null; furthest_progress_stage_id: string | null } | null;
     },
-    enabled: selectedLeadIsRejected && !!selectedLead?.id,
+    enabled: !!selectedLead?.id,
     staleTime: 60 * 1000,
   });
 
@@ -2319,12 +2325,19 @@ export default function AnewLeads() {
     setSelectedLead((previous) => previous?.id === leadId ? mapped : previous);
     // Refresh status counts since the lead's status may have changed
     loadStatusCounts();
+    // The Funil's current-stage highlight is cached separately (react-query,
+    // staleTime 60s) and keyed only by leadId — it won't pick up a rule-engine
+    // change (e.g. a newly-filled field satisfying a reached_when condition)
+    // on its own since the lead's row data changing doesn't touch that
+    // queryKey. Force it fresh on every refresh, same as Percurso already is.
+    queryClient.invalidateQueries({ queryKey: ["lead-resolved-stage", leadId] });
     return mapped;
   }, [
     activeCompanyId,
     getPermissionScope,
     loadStatusCounts,
     onlyMine,
+    queryClient,
     scopeAnewUserId,
     scopeAuthUserId,
     selectedLead,
@@ -5635,6 +5648,7 @@ export default function AnewLeads() {
                   {/* PIPELINE BAR */}
                   <LeadPipelineBar
                     currentStatus={selectedLead.status}
+                    currentStageId={selectedLeadResolvedStage?.resolved_stage_id ?? null}
                     workflowStages={workflowStages}
                     furthestProgressStageId={selectedLeadResolvedStage?.furthest_progress_stage_id ?? null}
                   />
@@ -6028,9 +6042,7 @@ export default function AnewLeads() {
                       <Button size="sm" variant="outline" onClick={() => setDetailTab("notes")}>
                         <StickyNote className="w-3.5 h-3.5 mr-1" /> Nota
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => {
-                        // TODO: Schedule visit
-                      }}>
+                      <Button size="sm" variant="outline" onClick={() => setShowScheduleVisitDialog(true)}>
                         <CalendarIcon className="w-3.5 h-3.5 mr-1" /> Agendar Visita
                       </Button>
                       <PermissionGate permission="deals.create">
@@ -6808,6 +6820,15 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           companyId={activeCompanyId || null}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+        />
+
+        <ScheduleLeadVisitDialog
+          open={showScheduleVisitDialog}
+          onOpenChange={setShowScheduleVisitDialog}
+          lead={selectedLead as any}
+          leadName={selectedLead ? (getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name || "Lead") : ""}
+          companyId={activeCompanyId || null}
+          onScheduled={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
         />
 
         {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline
