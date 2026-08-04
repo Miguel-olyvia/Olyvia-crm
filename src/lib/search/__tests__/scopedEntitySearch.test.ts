@@ -148,8 +148,8 @@ describe("searchDealsLeadsClients — failing branches", () => {
       expect(results.map((r) => r.kind)).toEqual(["deal"]);
       expect(onBranchErrors).toHaveBeenCalledTimes(1);
       const [reported] = onBranchErrors.mock.calls[0] as [Array<{ branch: string }>];
-      expect(reported.map((e) => e.branch)).toContain("contactos");
-      // The client branch depends on contacts, so it never ran.
+      expect(reported.map((e) => e.branch)).toContain("procura por nome/email/telefone");
+      // The client branch depends on that lookup, so it never ran.
       expect(queriesFor("anew_clients")).toHaveLength(0);
     } finally {
       vi.useRealTimers();

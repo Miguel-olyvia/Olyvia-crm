@@ -139,12 +139,19 @@ export interface ScopedSearchBranchError {
 }
 
 /**
- * Branch name reported when the contact lookup timed out. Results are still
- * returned, but they only cover deal titles and lead search_text — matches
- * that depend on a contact's name/email/phone/NIF are missing, and the caller
- * MUST surface that rather than pass an incomplete list off as the full one.
+ * Branch name reported when the identity lookup timed out.
+ *
+ * NOT the anew_contacts module — this is the anew_entities record (plus its
+ * emails/phones) that every lead and client points at through entity_id. It
+ * is the person behind the record, which is why a failure here costs matches
+ * by name/email/phone/NIF across BOTH leads and clients. The label is worded
+ * for the user, who has no reason to know the table names.
+ *
+ * Results are still returned when it times out, but they only cover deal
+ * titles and lead search_text, and the caller MUST surface that rather than
+ * pass an incomplete list off as the full one.
  */
-export const ENTITY_MATCH_BRANCH = "contactos";
+export const ENTITY_MATCH_BRANCH = "procura por nome/email/telefone";
 
 /**
  * Awaits a query, recording any error rather than swallowing it.
