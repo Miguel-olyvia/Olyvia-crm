@@ -81,7 +81,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS } from "@/constants/fieldMappings";
+import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS, LEAD_FORM_BASE_FIELDS } from "@/constants/fieldMappings";
 import { IconGallery, LucideIcon, normalizeLucideIconName } from "@/components/campaigns/IconGallery";
 import { formBuilderFieldSchema, formBuilderStepTitleSchema } from "@/lib/validations";
 
@@ -1248,6 +1248,17 @@ export function FormBuilder({
     }
   };
 
+  // Base lead fields (first_name/last_name/email/phone) are auto-seeded on
+  // every new lead form (see Forms.tsx) and always represent the same
+  // underlying anew_leads identity data — they must stay a single field per
+  // form, never a deletable/re-mappable one. Only placeholder text and
+  // position (drag order / step) may be edited on them.
+  const isLockedBaseField = !!(
+    formType === "lead" &&
+    selectedField?.contact_field_mapping &&
+    LEAD_FORM_BASE_FIELDS.some((f) => f.contact_field_mapping === selectedField.contact_field_mapping)
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[95vw] w-full h-[90vh] p-0 flex flex-col">
@@ -1788,6 +1799,7 @@ export function FormBuilder({
                       onChange={(e) => void handleUpdateFieldText(selectedField.id, "field_label", e.target.value)}
                       placeholder={isDefaultLocale ? "" : getBaseTextPlaceholder(selectedField, "field_label")}
                       className="h-8 text-sm"
+                      disabled={isLockedBaseField}
                     />
                   </div>
                   
@@ -1796,6 +1808,7 @@ export function FormBuilder({
                     <Select
                       value={selectedField.field_type}
                       onValueChange={(v) => handleUpdateField(selectedField.id, { field_type: v })}
+                      disabled={isLockedBaseField}
                     >
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue />
@@ -1951,6 +1964,7 @@ export function FormBuilder({
                         }
                         handleUpdateField(selectedField.id, { contact_field_mapping: val });
                       }}
+                      disabled={isLockedBaseField}
                     >
                       <SelectTrigger className="h-8 text-sm">
                         <SelectValue placeholder="Sem mapeamento" />
@@ -2020,17 +2034,19 @@ export function FormBuilder({
                       }
                       rows={2}
                       className="text-sm"
+                      disabled={isLockedBaseField}
                     />
                   </div>
 
                   <Separator />
-                  
+
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <Label className="text-xs">Obrigatório</Label>
                       <Switch
                         checked={selectedField.is_required}
                         onCheckedChange={(v) => handleUpdateField(selectedField.id, { is_required: v })}
+                        disabled={isLockedBaseField}
                       />
                     </div>
                     <div className="flex items-center justify-between">
@@ -2038,16 +2054,25 @@ export function FormBuilder({
                       <Switch
                         checked={selectedField.is_unique}
                         onCheckedChange={(v) => handleUpdateField(selectedField.id, { is_unique: v })}
+                        disabled={isLockedBaseField}
                       />
                     </div>
                   </div>
 
                   <Separator />
-                  
-                  <Button variant="destructive" size="sm" className="w-full" onClick={() => handleDeleteField(selectedField.id)}>
-                    <Trash2 className="h-3 w-3 mr-2" />
-                    Eliminar Campo
-                  </Button>
+
+                  {isLockedBaseField ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Este é um campo base do lead — não pode ser eliminado nem
+                      remapeado. Só o texto de placeholder e a posição podem
+                      ser alterados.
+                    </p>
+                  ) : (
+                    <Button variant="destructive" size="sm" className="w-full" onClick={() => handleDeleteField(selectedField.id)}>
+                      <Trash2 className="h-3 w-3 mr-2" />
+                      Eliminar Campo
+                    </Button>
+                  )}
                 </div>
               </ScrollArea>
             </div>

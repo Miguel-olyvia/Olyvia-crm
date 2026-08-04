@@ -38,15 +38,7 @@ export async function findEntityMatches(params: {
   // find_entity_matches — the plaintext nif never reaches Postgres.
   const { data, error } = await supabase.functions.invoke<{
     success: boolean;
-    data?: Array<{
-      entity_id: string;
-      scope: EntityMatchScope;
-      primary_org_id: string | null;
-      primary_org_name: string | null;
-      owner_org_accessible: boolean;
-      match_field: "email" | "phone" | "nif";
-      display_name: string | null;
-    }>;
+    data?: EntityMatchResult[];
     error?: string;
     code?: string;
   }>("find-entity-matches-proxy", {
@@ -66,15 +58,12 @@ export async function findEntityMatches(params: {
     throw new Error(await getFriendlyErrorMessage(data?.error ?? null));
   }
 
-  return (data.data ?? []).map((r) => ({
-    entityId: r.entity_id,
-    scope: r.scope,
-    primaryOrgId: r.primary_org_id ?? null,
-    primaryOrgName: r.primary_org_name ?? null,
-    ownerOrgAccessible: !!r.owner_org_accessible,
-    matchField: r.match_field,
-    displayName: r.display_name ?? null,
-  }));
+  // The edge function's handler.ts already maps its RPC rows into this exact
+  // (camelCase) shape — this used to re-map from snake_case field names the
+  // wire response never had, so entityId/matchField/etc. were silently
+  // undefined on every match and the strict-duplicate-blocking rule never
+  // saw a real matchField to block on.
+  return data.data ?? [];
 }
 
 /**

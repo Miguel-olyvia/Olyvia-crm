@@ -3060,15 +3060,13 @@ export default function AnewLeads() {
                   .order("created_at", { ascending: false });
                 return data || [];
               },
-              findContactsByEntityIds: async (ids, orgId) => {
-                const { data } = await supabase
-                  .from("anew_contacts")
-                  .select("id, entity_id, status, created_at, assigned_to")
-                  .in("entity_id", ids)
-                  .eq("organization_id", orgId)
-                  .not("status", "eq", "inactive");
-                return data || [];
-              },
+              // Contacts were merged into leads (Fase 1 migration, 2026-07-15):
+              // every anew_contacts row already has a mirrored anew_leads row
+              // for the same entity_id, and nothing creates new contact rows
+              // anymore. Querying anew_contacts here only re-surfaces the
+              // same person as a second, redundant "Contacto" match next to
+              // the "Lead" match the query above already finds.
+              findContactsByEntityIds: async () => [],
               findClientsByEntityIds: async (ids, orgId) => {
                 const { data } = await supabase
                   .from("anew_clients")
@@ -3085,7 +3083,6 @@ export default function AnewLeads() {
             // Open dialog WITHOUT having created any entity — nothing to clean up.
             const allRawMatches = [
               ...preCheck.leads.map((el: any) => ({ ...el, _type: "lead" as const })),
-              ...preCheck.contacts.map((ec: any) => ({ ...ec, _type: "contact" as const })),
               ...preCheck.clients.map((ec: any) => ({ ...ec, _type: "client" as const })),
             ];
             const matchEntityIds = [...new Set(allRawMatches.map((m: any) => m.entity_id).filter(Boolean))];
@@ -3247,12 +3244,6 @@ export default function AnewLeads() {
             .not("status", "in", '("converted","lost","rejected")')
             .order("created_at", { ascending: false }),
           supabase
-            .from("anew_contacts")
-            .select("id, entity_id, status, created_at, assigned_to")
-            .eq("entity_id", entityIdForCheck)
-            .eq("organization_id", activeCompanyId)
-            .not("status", "eq", "inactive"),
-          supabase
             .from("anew_clients")
             .select("id, entity_id, status, created_at, assigned_to")
             .eq("entity_id", entityIdForCheck)
@@ -3271,16 +3262,15 @@ export default function AnewLeads() {
           : Promise.resolve({ data: [] as any[] });
 
         const [entityIdResults, nameEntities] = await Promise.all([entityIdQueries, nameBasedQuery]);
-        const [{ data: existingLeads }, { data: existingContacts }, { data: existingClients }] = entityIdResults;
+        const [{ data: existingLeads }, { data: existingClients }] = entityIdResults;
 
         let nameMatchedLeads: any[] = [];
-        let nameMatchedContacts: any[] = [];
         let nameMatchedClients: any[] = [];
 
-        if (!(existingLeads?.length || existingContacts?.length || existingClients?.length)) {
+        if (!(existingLeads?.length || existingClients?.length)) {
           const nameEntityIds = ((nameEntities as any)?.data || []).map((e: any) => e.id).filter(Boolean);
           if (nameEntityIds.length > 0) {
-            const [nlRes, ncRes, nclRes] = await Promise.all([
+            const [nlRes, nclRes] = await Promise.all([
               (supabase as any)
                 .from("anew_leads")
                 .select("id, status, entity_id, created_at, campaign_id, assigned_to, field_values, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)")
@@ -3289,12 +3279,6 @@ export default function AnewLeads() {
                 .not("status", "in", '("converted","lost","rejected")')
                 .order("created_at", { ascending: false }),
               supabase
-                .from("anew_contacts")
-                .select("id, entity_id, status, created_at, assigned_to")
-                .in("entity_id", nameEntityIds)
-                .eq("organization_id", activeCompanyId)
-                .not("status", "eq", "inactive"),
-              supabase
                 .from("anew_clients")
                 .select("id, entity_id, status, created_at, assigned_to")
                 .in("entity_id", nameEntityIds)
@@ -3302,17 +3286,14 @@ export default function AnewLeads() {
                 .not("status", "eq", "inactive"),
             ]);
             nameMatchedLeads = nlRes.data || [];
-            nameMatchedContacts = ncRes.data || [];
             nameMatchedClients = nclRes.data || [];
           }
         }
 
         const allRawMatches = [
           ...(existingLeads || []).map((el: any) => ({ ...el, _type: "lead" as const })),
-          ...(existingContacts || []).map((ec: any) => ({ ...ec, _type: "contact" as const })),
           ...(existingClients || []).map((ec: any) => ({ ...ec, _type: "client" as const })),
           ...nameMatchedLeads.map((el: any) => ({ ...el, _type: "lead" as const })),
-          ...nameMatchedContacts.map((ec: any) => ({ ...ec, _type: "contact" as const })),
           ...nameMatchedClients.map((ec: any) => ({ ...ec, _type: "client" as const })),
         ];
 
