@@ -274,15 +274,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [showReplaceBundleComponentDialog, setShowReplaceBundleComponentDialog] = useState(false);
   const [replaceBundleComponentTarget, setReplaceBundleComponentTarget] = useState<{ lineIndex: number; componentIndex: number; type: "product" | "service" } | null>(null);
   
-  // Deal/contact/client search with @
+  // Deal/contact/client/lead search with @
   type SearchResult =
     | { kind: "deal"; id: string; title: string; client_id: string | null; lead_id: string | null; contact_id?: string | null; organization_id: string | null; entity_id?: string | null; assigned_to?: string | null; entity_name?: string | null }
-    | { kind: "client"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null };
+    | { kind: "client"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null }
+    | { kind: "lead"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null };
   const [dealSearch, setDealSearch] = useState("");
   const [dealSearchResults, setDealSearchResults] = useState<SearchResult[]>([]);
   const [showDealDropdown, setShowDealDropdown] = useState(false);
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
+  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -1650,14 +1651,22 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         const qEntityId = (quote as any).entity_id as string;
         const qOrgId = (quote as any).organization_id as string | null;
         try {
-          let resolved: { kind: "contact" | "client"; id: string; name: string; entity_id: string; organization_id: string | null } | null = null;
+          let resolved: { kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string; organization_id: string | null } | null = null;
 
           let clientQ = supabase.from("anew_clients").select("id, organization_id").eq("entity_id", qEntityId);
           if (qOrgId) clientQ = clientQ.eq("organization_id", qOrgId);
           const { data: clientRow } = await clientQ.maybeSingle();
 
-          let contactRow: any = null;
+          let leadRow: any = null;
           if (!clientRow) {
+            let leadQ = (supabase as any).from("anew_leads").select("id, organization_id").eq("entity_id", qEntityId);
+            if (qOrgId) leadQ = leadQ.eq("organization_id", qOrgId);
+            const { data } = await leadQ.maybeSingle();
+            leadRow = data;
+          }
+
+          let contactRow: any = null;
+          if (!clientRow && !leadRow) {
             let contactQ = supabase.from("anew_contacts").select("id, organization_id").eq("entity_id", qEntityId);
             if (qOrgId) contactQ = contactQ.eq("organization_id", qOrgId);
             const { data } = await contactQ.maybeSingle();
@@ -1673,6 +1682,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
           if (clientRow) {
             resolved = { kind: "client", id: (clientRow as any).id, name: displayName, entity_id: qEntityId, organization_id: (clientRow as any).organization_id || qOrgId };
+          } else if (leadRow) {
+            resolved = { kind: "lead", id: leadRow.id, name: displayName, entity_id: qEntityId, organization_id: leadRow.organization_id || qOrgId };
           } else if (contactRow) {
             resolved = { kind: "contact", id: contactRow.id, name: displayName, entity_id: qEntityId, organization_id: contactRow.organization_id || qOrgId };
           } else {
@@ -3334,10 +3345,24 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                           clientsData = data || [];
                         }
 
+                        // --- Search leads ---
+                        let leadsData: any[] = [];
+                        if (matchingEntityIds.length > 0) {
+                          const { data } = await (supabase as any)
+                            .from("anew_leads")
+                            .select("id, entity_id, organization_id, assigned_to")
+                            .in("organization_id", orgIds)
+                            .in("entity_id", matchingEntityIds)
+                            .is("deleted_at", null)
+                            .limit(25);
+                          leadsData = data || [];
+                        }
+
                         // Build entity name map
                         const allEntityIds = new Set<string>();
                         dealsData.forEach((d: any) => d.entity_id && allEntityIds.add(d.entity_id));
                         clientsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
+                        leadsData.forEach((l: any) => l.entity_id && allEntityIds.add(l.entity_id));
                         const entityMap: Record<string, any> = {};
                         if (allEntityIds.size > 0) {
                           const { data: entities } = await (supabase as any)
@@ -3362,6 +3387,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             entity_id: c.entity_id,
                             organization_id: c.organization_id,
                             assigned_to: c.assigned_to,
+                          })),
+                          ...leadsData.map((l: any) => ({
+                            kind: "lead" as const,
+                            id: l.id,
+                            name: entityMap[l.entity_id]?.display_name || "Lead",
+                            entity_id: l.entity_id,
+                            organization_id: l.organization_id,
+                            assigned_to: l.assigned_to,
                           })),
                         ];
 
@@ -3423,7 +3456,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                               setDealSearch(""); setShowDealDropdown(false); setDealSearchResults([]);
                             }}>
                             <Badge variant="secondary" className="text-xs">
-                              {r.kind === "deal" ? "Pedido" : "Cliente"}
+                              {r.kind === "deal" ? "Pedido" : r.kind === "client" ? "Cliente" : "Lead"}
                             </Badge>
                             <div className="flex flex-col min-w-0">
                               <span className="text-sm truncate">{r.kind === "deal" ? r.title : r.name}</span>
@@ -3435,7 +3468,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta ou clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta, leads ou clientes</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
