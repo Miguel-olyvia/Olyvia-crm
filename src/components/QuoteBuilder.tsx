@@ -20,7 +20,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
-import { searchEntityIds } from "@/lib/clientSearch";
+import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
+import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
+import { MIN_SEARCH_TERM_LENGTH, normalizeSearchTerm } from "@/lib/search/scopedEntitySearch";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
@@ -274,15 +276,20 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [showReplaceBundleComponentDialog, setShowReplaceBundleComponentDialog] = useState(false);
   const [replaceBundleComponentTarget, setReplaceBundleComponentTarget] = useState<{ lineIndex: number; componentIndex: number; type: "product" | "service" } | null>(null);
   
-  // Deal/contact/client search with @
-  type SearchResult =
-    | { kind: "deal"; id: string; title: string; client_id: string | null; lead_id: string | null; contact_id?: string | null; organization_id: string | null; entity_id?: string | null; assigned_to?: string | null; entity_name?: string | null }
-    | { kind: "client"; id: string; name: string; organization_id: string | null; entity_id: string | null; assigned_to: string | null };
+  // Pedido / lead / client picker. The query itself lives in
+  // useScopedEntitySearch → searchDealsLeadsClients, which is what guarantees
+  // the results stay inside the active company's org subtree and inside the
+  // viewer's deals.view / leads.view / clients.view scope.
   const [dealSearch, setDealSearch] = useState("");
-  const [dealSearchResults, setDealSearchResults] = useState<SearchResult[]>([]);
   const [showDealDropdown, setShowDealDropdown] = useState(false);
+  const {
+    results: dealSearchResults,
+    loading: dealSearchLoading,
+    search: runDealSearch,
+    clear: clearDealSearch,
+  } = useScopedEntitySearch();
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
-  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
+  const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -296,26 +303,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   });
   
 
-  // Resolve descendant org IDs for the active company subtree
-  const [descendantOrgIds, setDescendantOrgIds] = useState<string[]>([]);
-  useEffect(() => {
-    if (!activeCompany?.id) { setDescendantOrgIds([]); return; }
-    (async () => {
-      const ids = [activeCompany.id];
-      const queue = [activeCompany.id];
-      while (queue.length > 0) {
-        const parentId = queue.shift()!;
-        const { data } = await (supabase as any)
-          .from("anew_hierarchy").select("child_org_id").eq("parent_org_id", parentId);
-        if (data) {
-          for (const row of data) {
-            if (!ids.includes(row.child_org_id)) { ids.push(row.child_org_id); queue.push(row.child_org_id); }
-          }
-        }
-      }
-      setDescendantOrgIds(ids);
-    })();
-  }, [activeCompany?.id]);
+  // Descendant org IDs for the active company subtree (shared traversal).
+  const { orgIds: descendantOrgIds } = useDescendantOrgIds();
 
   const [formData, setFormData] = useState({
     deal_id: "",
@@ -3257,185 +3246,96 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 ) : (
                   <div className="relative">
                     <Input
-                      placeholder="Digite @ para pesquisar pedidos, leads ou clientes..."
+                      placeholder="Pesquisar pedidos, leads ou clientes..."
                       value={dealSearch}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const value = e.target.value;
                         setDealSearch(value);
-
-                        if (!value.startsWith('@')) {
-                          setDealSearchResults([]); setShowDealDropdown(false); return;
-                        }
-                        const searchTerm = value.slice(1).toLowerCase().trim();
-                        // Require at least 2 chars to avoid heavy/timing-out queries on single letters
-                        if (searchTerm.length < 2) {
-                          setDealSearchResults([]); setShowDealDropdown(false); return;
-                        }
-                        const orgIds = descendantOrgIds.length > 0 ? descendantOrgIds : (activeCompany?.id ? [activeCompany.id] : []);
-                        if (orgIds.length === 0) { setDealSearchResults([]); setShowDealDropdown(false); return; }
-
-                        // Match entity ids by display_name
-                        let matchingEntityIds: string[] = [];
-                        if (searchTerm.length > 0) {
-                          const { ids } = await searchEntityIds(searchTerm);
-                          matchingEntityIds = ids;
-                        }
-
-
-                        const scope = getPermissionScope("deals.view");
-                        const isFullScope = isSystemAdmin || scope === "ORG";
-                        let ownershipFilter: string | null = null;
-                        if (!isFullScope) {
-                          if (scope === "NONE" || !scopeAnewUserId) {
-                            setDealSearchResults([]); setShowDealDropdown(false); return;
-                          }
-                          const allowedIds = new Set<string>([scopeAnewUserId]);
-                          if (scope === "TEAM") teamMemberIds.forEach(id => allowedIds.add(id));
-                          const allowedList = Array.from(allowedIds);
-                          ownershipFilter = `assigned_to.in.(${allowedList.join(',')}),created_by.in.(${allowedList.join(',')})`;
-                        }
-
-                        // --- Search deals ---
-                        let dealsData: any[] = [];
-                        let qTitle = (supabase as any)
-                          .from("deals")
-                          .select("id, title, client_id, lead_id, contact_id, organization_id, entity_id, assigned_to, created_by")
-                          .in("organization_id", orgIds)
-                          .ilike("title", `%${searchTerm}%`)
-                          .is("deleted_at", null)
-                          .limit(25);
-                        if (ownershipFilter) qTitle = qTitle.or(ownershipFilter);
-                        const { data: byTitle } = await qTitle;
-                        dealsData = byTitle || [];
-                        if (matchingEntityIds.length > 0) {
-                          let qEntity = (supabase as any)
-                            .from("deals")
-                            .select("id, title, client_id, lead_id, contact_id, organization_id, entity_id, assigned_to, created_by")
-                            .in("organization_id", orgIds)
-                            .in("entity_id", matchingEntityIds)
-                            .is("deleted_at", null)
-                            .limit(25);
-                          if (ownershipFilter) qEntity = qEntity.or(ownershipFilter);
-                          const { data: byEntity } = await qEntity;
-                          const seenIds = new Set(dealsData.map((d: any) => d.id));
-                          (byEntity || []).forEach((d: any) => { if (!seenIds.has(d.id)) dealsData.push(d); });
-                        }
-
-                        // --- Search clients ---
-                        let clientsData: any[] = [];
-                        if (matchingEntityIds.length > 0) {
-                          const { data } = await (supabase as any)
-                            .from("anew_clients")
-                            .select("id, entity_id, organization_id, assigned_to")
-                            .in("organization_id", orgIds)
-                            .in("entity_id", matchingEntityIds)
-                            .is("deleted_at", null)
-                            .limit(25);
-                          clientsData = data || [];
-                        }
-
-                        // Build entity name map
-                        const allEntityIds = new Set<string>();
-                        dealsData.forEach((d: any) => d.entity_id && allEntityIds.add(d.entity_id));
-                        clientsData.forEach((c: any) => c.entity_id && allEntityIds.add(c.entity_id));
-                        const entityMap: Record<string, any> = {};
-                        if (allEntityIds.size > 0) {
-                          const { data: entities } = await (supabase as any)
-                            .from("anew_entities").select("id, display_name")
-                            .in("id", Array.from(allEntityIds));
-                          (entities || []).forEach((e: any) => { entityMap[e.id] = e; });
-                        }
-
-                        const results: SearchResult[] = [
-                          ...dealsData.map((d: any) => ({
-                            kind: "deal" as const,
-                            id: d.id, title: d.title,
-                            client_id: d.client_id, lead_id: d.lead_id, contact_id: d.contact_id,
-                            organization_id: d.organization_id, entity_id: d.entity_id,
-                            assigned_to: d.assigned_to,
-                            entity_name: d.entity_id ? entityMap[d.entity_id]?.display_name || null : null,
-                          })),
-                          ...clientsData.map((c: any) => ({
-                            kind: "client" as const,
-                            id: c.id,
-                            name: entityMap[c.entity_id]?.display_name || "Cliente",
-                            entity_id: c.entity_id,
-                            organization_id: c.organization_id,
-                            assigned_to: c.assigned_to,
-                          })),
-                        ];
-
-                        setDealSearchResults(results);
-                        setShowDealDropdown(results.length > 0);
+                        // The `@` prefix is still accepted (normalizeSearchTerm
+                        // strips it) but is no longer required — requiring it
+                        // was why this box appeared to return nothing.
+                        runDealSearch(value);
+                        setShowDealDropdown(normalizeSearchTerm(value).length >= MIN_SEARCH_TERM_LENGTH);
                       }}
                       onFocus={() => { if (dealSearchResults.length > 0) setShowDealDropdown(true); }}
                       onBlur={() => { setTimeout(() => setShowDealDropdown(false), 200); }}
                       className={fieldErrors.deal_id ? "border-destructive" : ""}
                     />
-                    {showDealDropdown && dealSearchResults.length > 0 && (
+                    {showDealDropdown && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[260px] overflow-y-auto">
+                        {dealSearchLoading && dealSearchResults.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">A pesquisar…</div>
+                        )}
+                        {!dealSearchLoading && dealSearchResults.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-muted-foreground">Sem resultados</div>
+                        )}
                         {dealSearchResults.map((r) => (
                           <button key={`${r.kind}-${r.id}`} type="button" className="w-full px-3 py-2 text-left hover:bg-muted flex items-center gap-2"
                             onClick={async () => {
                               if (r.kind === "deal") {
                                 setSelectedDeal({
-                                  id: r.id, title: r.title, client_id: r.client_id, lead_id: r.lead_id,
-                                  organization_id: r.organization_id, entity_id: r.entity_id,
-                                  lead_name: r.entity_name || null, lead_phone: null,
+                                  id: r.id, title: r.name, client_id: r.dealClientId ?? null, lead_id: r.dealLeadId ?? null,
+                                  organization_id: r.organizationId, entity_id: r.entityId,
+                                  lead_name: r.contactName || null, lead_phone: r.phone || null,
                                 } as Deal);
                                 setSelectedSource(null);
                                 let inherited: string | null = null;
-                                if (r.lead_id) {
-                                  const { data: l } = await (supabase as any).from("anew_leads").select("assigned_to").eq("id", r.lead_id).maybeSingle();
+                                if (r.dealLeadId) {
+                                  const { data: l } = await (supabase as any).from("anew_leads").select("assigned_to").eq("id", r.dealLeadId).maybeSingle();
                                   inherited = l?.assigned_to || null;
                                 }
-                                if (!inherited && r.contact_id) {
-                                  const { data: c } = await (supabase as any).from("anew_contacts").select("assigned_to").eq("id", r.contact_id).maybeSingle();
+                                if (!inherited && r.dealContactId) {
+                                  const { data: c } = await (supabase as any).from("anew_contacts").select("assigned_to").eq("id", r.dealContactId).maybeSingle();
                                   inherited = c?.assigned_to || null;
                                 }
-                                if (!inherited && r.client_id) {
-                                  const { data: cl } = await (supabase as any).from("anew_clients").select("assigned_to").eq("id", r.client_id).maybeSingle();
+                                if (!inherited && r.dealClientId) {
+                                  const { data: cl } = await (supabase as any).from("anew_clients").select("assigned_to").eq("id", r.dealClientId).maybeSingle();
                                   inherited = cl?.assigned_to || null;
                                 }
-                                if (!inherited) inherited = r.assigned_to || null;
-                                setFormData(prev => ({ ...prev, deal_id: r.id, organization_id: r.organization_id || "", cliente_id: r.client_id || "", title: prev.title || r.title || "", assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to) }));
+                                if (!inherited) inherited = r.assignedTo || null;
+                                setFormData(prev => ({ ...prev, deal_id: r.id, organization_id: r.organizationId || "", cliente_id: r.dealClientId || "", title: prev.title || r.name || "", assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to) }));
                                 if (lines.length === 0) loadDealItems(r.id);
                               } else {
-                                setSelectedSource({ kind: r.kind, id: r.id, name: r.name, entity_id: r.entity_id, organization_id: r.organization_id });
+                                setSelectedSource({ kind: r.kind, id: r.id, name: r.name, entity_id: r.entityId, organization_id: r.organizationId });
                                 setSelectedDeal(null);
                                 // Resolve via canonical chain (entity → client → contact → lead)
                                 const inheritedEntity = await resolveQuoteAssignedTo({
                                   supabase: supabase as any,
                                   clienteId: r.kind === "client" ? r.id : null,
-                                  entityId: r.entity_id,
-                                  organizationId: r.organization_id,
-                                  fallbackUserId: r.assigned_to || null,
+                                  entityId: r.entityId,
+                                  organizationId: r.organizationId,
+                                  fallbackUserId: r.assignedTo || null,
                                 });
                                 setFormData(prev => ({
                                   ...prev,
                                   deal_id: "",
-                                  organization_id: r.organization_id || prev.organization_id,
+                                  organization_id: r.organizationId || prev.organization_id,
+                                  // Only a real client row may fill cliente_id; a
+                                  // lead has no client record yet and is carried
+                                  // by entity_id alone.
                                   cliente_id: r.kind === "client" ? r.id : prev.cliente_id,
                                   title: prev.title || r.name,
                                   assigned_to: assignedToTouched ? prev.assigned_to : (inheritedEntity ?? prev.assigned_to),
                                 }));
                               }
-                              setDealSearch(""); setShowDealDropdown(false); setDealSearchResults([]);
+                              setDealSearch(""); setShowDealDropdown(false); clearDealSearch();
                             }}>
                             <Badge variant="secondary" className="text-xs">
-                              {r.kind === "deal" ? "Pedido" : "Cliente"}
+                              {r.kind === "deal" ? "Pedido" : r.kind === "lead" ? "Lead" : "Cliente"}
                             </Badge>
                             <div className="flex flex-col min-w-0">
-                              <span className="text-sm truncate">{r.kind === "deal" ? r.title : r.name}</span>
-                              {r.kind === "deal" && r.entity_name && (
-                                <span className="text-xs text-muted-foreground truncate">{r.entity_name}</span>
+                              <span className="text-sm truncate">{r.name}</span>
+                              {[r.contactName, r.email, r.phone].filter(Boolean).length > 0 && (
+                                <span className="text-xs text-muted-foreground truncate">
+                                  {[r.contactName, r.email, r.phone].filter(Boolean).join(" · ")}
+                                </span>
                               )}
                             </div>
                           </button>
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground mt-1">Digite @ para pesquisar pedidos de proposta ou clientes</p>
+                    <p className="text-xs text-muted-foreground mt-1">Escreva pelo menos 2 caracteres para pesquisar pedidos, leads e clientes</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
