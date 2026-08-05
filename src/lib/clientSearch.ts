@@ -13,7 +13,12 @@ interface SearchEntitiesResponse {
   error?: string;
 }
 
-function escapeIlike(s: string): string {
+/**
+ * Escapes the PostgREST `ilike` wildcards so a user-typed term is matched
+ * literally. Exported because every caller that builds its own `.ilike(...)`
+ * pattern (deal titles, quote numbers, ...) needs the exact same escaping.
+ */
+export function escapeIlike(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
