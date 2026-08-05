@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { formatCurrency } from "@/lib/utils";
+import { getEffectiveContractValue } from "@/utils/contractValue";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -98,17 +99,6 @@ const statusColors: Record<string, string> = {
 const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
-
-/** Devolve o valor efectivo do contrato: prefere `quote.total` (inclui desconto global)
- *  em vez de `contract.total_value` que pode ter sido guardado sem desconto aplicado. */
-function getEffectiveContractValue(contract: any): number {
-  if (contract.quote_id) {
-    const proposalQuotes: any[] = (contract.proposals as any)?.quotes ?? [];
-    const linked = proposalQuotes.find((q: any) => q.id === contract.quote_id);
-    if (linked?.total != null) return Number(linked.total);
-  }
-  return Number(contract.total_value) || 0;
-}
 
 const ClientContracts = () => {
   const { t, language } = useTranslation();
@@ -761,7 +751,7 @@ const ClientContracts = () => {
       signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
       expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
     };
-  }, [filteredContracts, getEffectiveContractValue]);
+  }, [filteredContracts]);
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {

@@ -97,6 +97,16 @@ export function LeadQualificationCard({
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">{QUALIFICATION_COPY[confirmedType].description}</p>
           </div>
+          {confirmedType === "mql" && (
+            <Button
+              size="sm"
+              className="h-7 px-2 text-[11px] shrink-0"
+              disabled={saving !== null}
+              onClick={() => handleClassify("sql")}
+            >
+              {saving === "sql" ? "A promover..." : "Promover a SQL"}
+            </Button>
+          )}
         </CardContent>
       </Card>
     );
