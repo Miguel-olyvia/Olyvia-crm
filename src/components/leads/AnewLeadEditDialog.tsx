@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -100,8 +100,41 @@ const normalizeFieldKey = (key: string) => key.toLowerCase().trim();
 const isNotesFieldKey = (key: string) => NOTES_FIELD_KEYS.includes(normalizeFieldKey(key));
 const isGeneralFieldKey = (key: string) => Object.values(GENERAL_FIELD_ALIASES).some((aliases) => aliases.includes(normalizeFieldKey(key)));
 
-const getGeneralFieldValue = (values: Record<string, any>, key: string) => {
-  const aliases = GENERAL_FIELD_ALIASES[key] || [key];
+const GENERAL_FIELD_KEYS = GENERAL_FIELDS.map((f) => f.key);
+
+/**
+ * Maps each base lead field to the form field key that actually holds its
+ * value, using the form's own `contact_field_mapping`.
+ *
+ * The form is the authority here, not the key's spelling. A campaign field
+ * keyed `po_email` and mapped to `email` IS the lead's email; guessing from
+ * the key alone (the previous behaviour) failed for every prefixed form, so
+ * the base "Email" box rendered empty while the same value showed again
+ * further down under "Campos do Formulário".
+ */
+const buildGeneralKeyToFormKey = (
+  defs: readonly { field_key: string; contact_field_mapping?: string | null }[],
+): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const def of defs) {
+    const mapped = def.contact_field_mapping;
+    if (!mapped || !GENERAL_FIELD_KEYS.includes(mapped)) continue;
+    if (!out[mapped]) out[mapped] = def.field_key;
+  }
+  return out;
+};
+
+/** True when the form itself declares this field as one of the base fields. */
+const isMappedGeneralField = (def: { contact_field_mapping?: string | null }) =>
+  !!def.contact_field_mapping && GENERAL_FIELD_KEYS.includes(def.contact_field_mapping);
+
+const getGeneralFieldValue = (
+  values: Record<string, any>,
+  key: string,
+  mappedKeys: Record<string, string> = {},
+) => {
+  // The mapped form key wins over the alias guesses.
+  const aliases = [mappedKeys[key], ...(GENERAL_FIELD_ALIASES[key] || [key])].filter(Boolean) as string[];
   for (const alias of aliases) {
     const rawValue = values?.[alias];
     if (rawValue === null || rawValue === undefined || rawValue === "") continue;
@@ -183,13 +216,23 @@ export function AnewLeadEditDialog({
     setFieldErrors({});
   };
 
+  const generalKeyToFormKey = useMemo(() => buildGeneralKeyToFormKey(fieldDefs), [fieldDefs]);
+
+  const readGeneralField = (key: string, values: Record<string, any> = fieldValues) =>
+    getGeneralFieldValue(values, key, generalKeyToFormKey);
+
   const handleFieldChange = (key: string, value: any) => {
     setFieldValues(prev => ({ ...prev, [key]: value }));
   };
 
   const handleGeneralFieldChange = (generalKey: string, value: string) => {
+    // Write back to the SAME key the value was read from, or editing the base
+    // box would create a second copy under a different key.
     const aliases = GENERAL_FIELD_ALIASES[generalKey] || [generalKey];
-    const existingAlias = aliases.find((alias) => Object.prototype.hasOwnProperty.call(fieldValues, alias)) || aliases[0];
+    const existingAlias =
+      generalKeyToFormKey[generalKey] ||
+      aliases.find((alias) => Object.prototype.hasOwnProperty.call(fieldValues, alias)) ||
+      aliases[0];
     handleFieldChange(existingAlias, value);
     if (fieldErrors[generalKey]) {
       setFieldErrors(prev => {
@@ -209,15 +252,15 @@ export function AnewLeadEditDialog({
    */
   const validateForm = (): boolean => {
     const generalValues = {
-      first_name: getGeneralFieldValue(fieldValues, "first_name"),
-      last_name: getGeneralFieldValue(fieldValues, "last_name"),
-      email: getGeneralFieldValue(fieldValues, "email"),
-      phone: getGeneralFieldValue(fieldValues, "phone"),
-      company_name: getGeneralFieldValue(fieldValues, "company_name"),
-      address: getGeneralFieldValue(fieldValues, "address"),
-      postal_code: getGeneralFieldValue(fieldValues, "postal_code"),
-      city: getGeneralFieldValue(fieldValues, "city"),
-      vat: getGeneralFieldValue(fieldValues, "vat"),
+      first_name: readGeneralField("first_name"),
+      last_name: readGeneralField("last_name"),
+      email: readGeneralField("email"),
+      phone: readGeneralField("phone"),
+      company_name: readGeneralField("company_name"),
+      address: readGeneralField("address"),
+      postal_code: readGeneralField("postal_code"),
+      city: readGeneralField("city"),
+      vat: readGeneralField("vat"),
     };
 
     const generalResult = leadEditGeneralFieldsSchema.safeParse(generalValues);
@@ -290,9 +333,9 @@ export function AnewLeadEditDialog({
       let entityFirstName: string | undefined;
       let entityLastName: string | undefined;
       if (lead.entity_id) {
-        const firstName = getGeneralFieldValue(updatedFieldValues, "first_name");
-        const lastName = getGeneralFieldValue(updatedFieldValues, "last_name");
-        const companyName = getGeneralFieldValue(updatedFieldValues, "company_name");
+        const firstName = readGeneralField("first_name", updatedFieldValues);
+        const lastName = readGeneralField("last_name", updatedFieldValues);
+        const companyName = readGeneralField("company_name", updatedFieldValues);
         const newDisplayName = companyName || [firstName, lastName].filter(Boolean).join(" ") || undefined;
 
         if (newDisplayName) {
@@ -306,7 +349,7 @@ export function AnewLeadEditDialog({
       // on lead creation (AnewLeads.tsx passes `vat` through the duplicate
       // ladder). Runs BEFORE any write, so a clash leaves the lead untouched
       // rather than half-saved with the NIF link rejected afterwards.
-      const vatToSave = getGeneralFieldValue(updatedFieldValues, "vat");
+      const vatToSave = readGeneralField("vat", updatedFieldValues);
       if (vatToSave && companyId) {
         const { collisions, error: nifCheckError } = await checkNifCollisionOnEdit({
           orgId: companyId,
@@ -548,7 +591,7 @@ export function AnewLeadEditDialog({
                   <div key={field.key} className="space-y-2">
                     <Label>{field.label}</Label>
                     <Input
-                      value={getGeneralFieldValue(fieldValues, field.key)}
+                      value={readGeneralField(field.key)}
                       onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
                       aria-invalid={!!fieldErrors[field.key]}
                     />
@@ -561,12 +604,12 @@ export function AnewLeadEditDialog({
             </div>
 
             {/* Dynamic Fields from Campaign/Company */}
-            {fieldDefs.filter((field) => !isNotesFieldKey(field.field_key) && !isGeneralFieldKey(field.field_key)).length > 0 && (
+            {fieldDefs.filter((field) => !isNotesFieldKey(field.field_key) && !isGeneralFieldKey(field.field_key) && !isMappedGeneralField(field)).length > 0 && (
               <div className="space-y-4">
                 <h4 className="text-sm font-semibold border-b pb-2">Campos do Formulário</h4>
                 <div className="grid grid-cols-2 gap-4">
                   {fieldDefs
-                    .filter((field) => !isNotesFieldKey(field.field_key) && !isGeneralFieldKey(field.field_key))
+                    .filter((field) => !isNotesFieldKey(field.field_key) && !isGeneralFieldKey(field.field_key) && !isMappedGeneralField(field))
                     .map(field => (
                       <DynamicFormField
                         key={field.id}
