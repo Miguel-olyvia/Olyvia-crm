@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -133,8 +133,10 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
     relationship_field: "",
   });
 
+  const hasLoadedOnceRef = useRef(false);
+
   const loadRules = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       // Load automation rules
       const { data: rulesData, error } = await supabase
@@ -190,6 +192,7 @@ export function WorkflowAutomationRules({ companyId, sourceEntity, workflowStage
         variant: "destructive",
       });
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, [companyId, sourceEntity, toast]);

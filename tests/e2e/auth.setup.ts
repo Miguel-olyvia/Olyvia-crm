@@ -1,7 +1,11 @@
 import { test as setup } from '@playwright/test'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
-const authFile = path.join(__dirname, '../.auth/user.json')
+// package.json declares "type": "module", so __dirname does not exist here —
+// the whole suite failed to load before reaching a single test.
+const currentDir = path.dirname(fileURLToPath(import.meta.url))
+const authFile = path.join(currentDir, '../.auth/user.json')
 
 setup('autenticar utilizador', async ({ page }) => {
   await page.goto('/auth')

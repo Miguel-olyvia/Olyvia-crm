@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -329,8 +329,10 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const [searchingItems, setSearchingItems] = useState(false);
 
   // ─── Load data ──────────────────────────────────────────
+  const hasLoadedOnceRef = useRef(false);
+
   const loadData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       const [needsRes, fieldsRes, templatesRes, settingsRes] = await Promise.all([
         supabase.from("deal_needs").select("id, deal_id, title, description, priority, status, internal_notes, initial_estimate, estimate_min, estimate_max, attachments, custom_fields, measurement_values, template_id, sort_order, created_at, category_id, category_name, technical_notes, measurements, checklist").eq("deal_id", dealId).order("sort_order"),
@@ -417,6 +419,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     } catch (err: any) {
       console.error("Error loading deal needs:", err);
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, [dealId, organizationId]);
