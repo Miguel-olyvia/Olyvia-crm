@@ -410,12 +410,20 @@ export function RegisterCallDialog({
                       <Button
                         key={ch.value}
                         type="button"
-                        variant="outline"
+                        // Was hardcoded "outline", so the picked channel never
+                        // looked picked — unlike the Sentimento buttons above.
+                        variant={nextActionChannel === ch.value ? "default" : "outline"}
                         size="sm"
-                        onClick={() => {
-                          setNextActionChannel(ch.value);
-                          openChannel(ch.value);
-                        }}
+                        // Selecting a channel must only select it. This used to
+                        // also call openChannel(), which generates the PDF and
+                        // opens WhatsApp/Email straight away — before the
+                        // activity was even registered, and with no visible
+                        // feedback while it worked (channelOpening only blocks
+                        // the dialog from closing). handleSave already calls
+                        // openChannel with the chosen channel after saving.
+                        onClick={() =>
+                          setNextActionChannel(nextActionChannel === ch.value ? null : ch.value)
+                        }
                         className="flex-1"
                       >
                         <span className="mr-1">{ch.emoji}</span> {ch.label}
