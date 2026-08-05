@@ -579,12 +579,14 @@ const Deals = () => {
   // older in-flight one (e.g. rapid filter/search changes) — acts as a logical abort.
   const loadDataRequestIdRef = useRef(0);
 
+  const hasLoadedOnceRef = useRef(false);
+
   const loadData = useCallback(async (append = false) => {
     const requestId = ++loadDataRequestIdRef.current;
     if (append) {
       setLoadingMore(true);
     } else {
-      setLoading(true);
+      if (!hasLoadedOnceRef.current) setLoading(true);
       currentPageRef.current = 0;
     }
 
@@ -858,6 +860,9 @@ const Deals = () => {
       });
     } finally {
       if (requestId === loadDataRequestIdRef.current) {
+        // Only the winning request marks the page as loaded, so a superseded
+        // one cannot suppress the loader for the first real paint.
+        hasLoadedOnceRef.current = true;
         setLoading(false);
         setLoadingMore(false);
       }

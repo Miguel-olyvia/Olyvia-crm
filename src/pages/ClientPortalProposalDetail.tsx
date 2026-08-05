@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Paperclip, Download, FileText, Image as ImageIcon, File as FileIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -61,12 +61,15 @@ const ClientPortalProposalDetail = () => {
   const [maskedPhone, setMaskedPhone] = useState("");
   const [otpError, setOtpError] = useState("");
 
+  const hasLoadedOnceRef = useRef(false);
+
   const reloadPortalData = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     const data = await loadProposalPortalData(id);
     setPortalData(data);
-    setLoading(false);
+    hasLoadedOnceRef.current = true;
+      setLoading(false);
   }, [id]);
 
   const loadAttachments = useCallback(async () => {
