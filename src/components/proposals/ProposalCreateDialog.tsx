@@ -2,6 +2,8 @@
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
+import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
+import { MIN_SEARCH_TERM_LENGTH, normalizeSearchTerm } from "@/lib/search/scopedEntitySearch";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
@@ -128,7 +130,6 @@ export function ProposalCreateDialog({
   const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
   const [originalStageId, setOriginalStageId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [descendantOrgIds, setDescendantOrgIds] = useState<string[]>([]);
 
   const [formData, setFormData] = useState({
     title: "", description: "", value: "", deal_id: "", valid_until: "", notes: "", stage_id: "", template_id: "",
@@ -152,22 +153,33 @@ export function ProposalCreateDialog({
   const [proposalItems, setProposalItems] = useState<ProposalItem[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
 
-  // Resolve descendant org subtree
+  // Deal lookup. Routed through the shared scoped search so it applies
+  // deals.view (not proposals.view) and can reach deals the user owns
+  // directly, instead of only those hanging off a lead assigned to them.
+  const {
+    results: scopedDealResults,
+    search: runDealSearch,
+  } = useScopedEntitySearch({
+    kinds: ["deal"],
+    limitPerKind: 50,
+    restrictToEntityId: presetEntityId ?? null,
+  });
   useEffect(() => {
-    if (!activeCompany?.id) { setDescendantOrgIds([]); return; }
-    (async () => {
-      const ids = [activeCompany.id];
-      const queue = [activeCompany.id];
-      while (queue.length > 0) {
-        const parentId = queue.shift()!;
-        const { data } = await (supabase as any).from("anew_hierarchy").select("child_org_id").eq("parent_org_id", parentId);
-        if (data) for (const row of data) {
-          if (!ids.includes(row.child_org_id)) { ids.push(row.child_org_id); queue.push(row.child_org_id); }
-        }
-      }
-      setDescendantOrgIds(ids);
-    })();
-  }, [activeCompany?.id]);
+    setDealSearchResults(
+      scopedDealResults.map((r) => ({
+        id: r.id,
+        title: r.name,
+        probability: r.dealProbability ?? null,
+        entity_id: r.entityId,
+        lead_name: r.contactName ?? null,
+        lead_phone: r.phone ?? null,
+        lead_email: r.email ?? null,
+        value: r.dealValue ?? null,
+        stage_name: r.dealStageName ?? null,
+        expected_close_date: r.dealExpectedCloseDate ?? null,
+      })),
+    );
+  }, [scopedDealResults]);
 
   // Load workflow stages + templates
   const loadStagesAndTemplates = useCallback(async () => {
@@ -531,74 +543,11 @@ export function ProposalCreateDialog({
     }
   };
 
-  const handleDealSearch = async (value: string) => {
+  const handleDealSearch = (value: string) => {
     setDealSearch(value);
-    if (value.trim().length < 1) { setDealSearchResults([]); setShowDealDropdown(false); return; }
-    const searchTerm = value.trim().replace(/^@/, '').toLowerCase();
-    const { data: { user } } = await supabase.auth.getUser();
-    const dealScope = getPermissionScope("proposals.view");
-    let dealsData: any[] = [];
-    const orgIds = descendantOrgIds.length > 0 ? descendantOrgIds : (activeCompany?.id ? [activeCompany.id] : []);
-
-    // Also resolve matching entity IDs (by name/email/phone/NIF) for cross-field search.
-    const { ids: matchingEntityIds } = await searchEntityIds(searchTerm);
-
-    const baseSelect = "id, title, probability, value, description, expected_close_date, entity_id, deal_stages(name)";
-    const dedupe = (arr: any[]) => {
-      const seen = new Set<string>();
-      const out: any[] = [];
-      for (const d of arr) { if (!seen.has(d.id)) { seen.add(d.id); out.push(d); } }
-      return out;
-    };
-
-    if (dealScope === "ORG" || isSystemAdmin) {
-      let q = supabase.from("deals").select(baseSelect).in("organization_id", orgIds).ilike("title", `%${searchTerm}%`).limit(50);
-      if (presetEntityId) q = q.eq("entity_id", presetEntityId);
-      const { data } = await q;
-      dealsData = data || [];
-      if (matchingEntityIds.length > 0) {
-        let q2 = supabase.from("deals").select(baseSelect).in("organization_id", orgIds).in("entity_id", matchingEntityIds).limit(50);
-        if (presetEntityId) q2 = q2.eq("entity_id", presetEntityId);
-        const { data: data2 } = await q2;
-        dealsData = dedupe([...dealsData, ...(data2 || [])]);
-      }
-    } else if (user?.id) {
-      const allowedIds = new Set<string>();
-      if (scopeAnewUserId) allowedIds.add(scopeAnewUserId);
-      if (dealScope === "TEAM" && teamMemberIds.length > 0) teamMemberIds.forEach(id => allowedIds.add(id));
-      const { data: userLeads } = await (supabase.from("anew_leads") as any).select("id").in("organization_id", orgIds).in("assigned_to", Array.from(allowedIds));
-      const leadIds = (userLeads || []).map((l: any) => l.id);
-      if (leadIds.length > 0) {
-        let q = supabase.from("deals").select(baseSelect).in("organization_id", orgIds).in("lead_id", leadIds).ilike("title", `%${searchTerm}%`).limit(50);
-        if (presetEntityId) q = q.eq("entity_id", presetEntityId);
-        const { data } = await q;
-        dealsData = data || [];
-        if (matchingEntityIds.length > 0) {
-          let q2 = supabase.from("deals").select(baseSelect).in("organization_id", orgIds).in("lead_id", leadIds).in("entity_id", matchingEntityIds).limit(50);
-          if (presetEntityId) q2 = q2.eq("entity_id", presetEntityId);
-          const { data: data2 } = await q2;
-          dealsData = dedupe([...dealsData, ...(data2 || [])]);
-        }
-      }
-    }
-
-    const entityIds = dealsData.map((d: any) => d.entity_id).filter(Boolean);
-    const entityMap: Record<string, any> = {};
-    if (entityIds.length > 0) {
-      const [entRes, emailRes, phoneRes] = await Promise.all([
-        supabase.from("anew_entities").select("id, display_name").in("id", entityIds),
-        supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", entityIds).eq("is_primary", true),
-        supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", entityIds).eq("is_primary", true),
-      ]);
-      (entRes.data || []).forEach((e: any) => { entityMap[e.id] = { name: e.display_name }; });
-      (emailRes.data || []).forEach((e: any) => { if (entityMap[e.entity_id]) entityMap[e.entity_id].email = e.email; });
-      (phoneRes.data || []).forEach((p: any) => { if (entityMap[p.entity_id]) entityMap[p.entity_id].phone = p.phone_number; });
-    }
-    setDealSearchResults(dealsData.map((d: any) => {
-      const ent = entityMap[d.entity_id] || {};
-      return { id: d.id, title: d.title, probability: d.probability, entity_id: d.entity_id || null, value: d.value, expected_close_date: d.expected_close_date, stage_name: d.deal_stages?.name || null, lead_name: ent.name || null, lead_phone: ent.phone || null, lead_email: ent.email || null };
-    }));
-    setShowDealDropdown(dealsData.length > 0);
+    // Org + deals.view scoping happens inside the shared search.
+    runDealSearch(value);
+    setShowDealDropdown(normalizeSearchTerm(value).length >= MIN_SEARCH_TERM_LENGTH);
   };
 
   const handleContactSearch = async (value: string) => {
