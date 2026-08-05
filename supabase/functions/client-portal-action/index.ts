@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { withRetryResult } from "../_shared/retry.ts";
+import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -465,6 +466,8 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
+        const { data: proposalOrgForAccept } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
+        const acceptedStageId = await resolveProposalStageId(supabase, proposalOrgForAccept?.organization_id ?? null, ["accepted", "aceite"]);
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "accepted",
@@ -472,6 +475,7 @@ serve(async (req) => {
           signature_image,
           acceptance_ip: detectedIp,
           acceptance_user_agent: req.headers.get("user-agent") || null,
+          ...(acceptedStageId ? { stage_id: acceptedStageId } : {}),
         }).eq("id", proposal_id));
 
         // Freeze the decided snapshot for later change detection — fail-soft,
@@ -621,12 +625,15 @@ serve(async (req) => {
         }
 
         const now = new Date().toISOString();
+        const { data: proposalOrgForReject } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
+        const rejectedStageId = await resolveProposalStageId(supabase, proposalOrgForReject?.organization_id ?? null, ["rejected", "rejeitada"]);
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "rejected",
           rejected_at: now,
           rejection_reason_code: reason_code || null,
           rejection_notes: safeReasonText,
+          ...(rejectedStageId ? { stage_id: rejectedStageId } : {}),
         }).eq("id", proposal_id));
 
         // Freeze the decided snapshot for later change detection — fail-soft,
