@@ -629,15 +629,15 @@ serve(async (req: Request) => {
     }
 
     // Publish document visibility for portal (required by RLS portal_user_can_see_document)
-    if (portalUserId) {
+    async function publishPortalDocument(docType: "proposal" | "quote" | "contract", docId: string) {
       try {
         // Re-activate if previously revoked, or insert fresh
         const { data: existingDoc } = await supabase
           .from("client_portal_documents")
           .select("id")
           .eq("portal_user_id", portalUserId)
-          .eq("document_type", document_type)
-          .eq("document_id", document_id)
+          .eq("document_type", docType)
+          .eq("document_id", docId)
           .maybeSingle();
 
         if (existingDoc) {
@@ -657,14 +657,52 @@ serve(async (req: Request) => {
             portal_user_id: portalUserId,
             organization_id,
             entity_id: entityId,
-            document_type,
-            document_id,
+            document_type: docType,
+            document_id: docId,
             is_visible: true,
             published_by: callerAnew?.id || null,
           });
         }
       } catch (e) {
         console.error("Error publishing document to portal:", e);
+      }
+    }
+
+    if (portalUserId) {
+      await publishPortalDocument(document_type, document_id);
+
+      // A proposal's quotes are rendered inline in the portal (subtotal/IVA/total
+      // per orçamento), but RLS on quotes/quote_lines/quote_fees is gated by their
+      // OWN client_portal_documents row (portal_user_can_see_document('quote', id)),
+      // not by the parent proposal's row. Without publishing each linked quote here
+      // too, the client's authenticated session reads 0 rows (RLS-filtered, no
+      // error) and the Orçamento section silently disappears from the real portal —
+      // while the CRM preview keeps working because CRM users hit a different,
+      // org-membership-based RLS policy on quotes.
+      if (document_type === "proposal") {
+        try {
+          const { data: directQuotes } = await supabase
+            .from("quotes")
+            .select("id")
+            .eq("proposal_id", document_id);
+
+          let quoteIds = (directQuotes || []).map((q: any) => q.id);
+
+          if (quoteIds.length === 0) {
+            const { data: pLinks } = await supabase
+              .from("pipeline_links")
+              .select("quote_id")
+              .eq("proposal_id", document_id)
+              .not("quote_id", "is", null);
+            quoteIds = (pLinks || []).map((pl: any) => pl.quote_id).filter(Boolean);
+          }
+
+          for (const quoteId of quoteIds) {
+            await publishPortalDocument("quote", quoteId);
+          }
+        } catch (e) {
+          console.error("Error publishing proposal's quotes to portal:", e);
+        }
       }
     }
 
