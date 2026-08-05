@@ -32,6 +32,7 @@ import {
 } from "@/lib/leads/fieldDefinitions";
 import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validations";
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
+import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
 
 interface Lead {
   id: string;
@@ -301,6 +302,45 @@ export function AnewLeadEditDialog({
         }
       }
 
+      // One NIF per entity, per organization — the same rule already enforced
+      // on lead creation (AnewLeads.tsx passes `vat` through the duplicate
+      // ladder). Runs BEFORE any write, so a clash leaves the lead untouched
+      // rather than half-saved with the NIF link rejected afterwards.
+      const vatToSave = getGeneralFieldValue(updatedFieldValues, "vat");
+      if (vatToSave && companyId) {
+        const { collisions, error: nifCheckError } = await checkNifCollisionOnEdit({
+          orgId: companyId,
+          nif: vatToSave,
+          ownEntityId: lead.entity_id ?? null,
+        });
+
+        if (nifCheckError) {
+          // Fails closed: an unverifiable NIF must not be written.
+          toast({
+            title: "Não foi possível verificar o NIF",
+            description:
+              "A verificação de NIF duplicado falhou, por isso a lead não foi guardada. Tente novamente.",
+            variant: "destructive",
+          });
+          return; // the enclosing finally clears `saving`
+        }
+
+        if (collisions.length > 0) {
+          const names = collisions
+            .map((c) => c.displayName)
+            .filter(Boolean)
+            .join(", ");
+          toast({
+            title: "NIF já utilizado nesta organização",
+            description: names
+              ? `Este NIF já pertence a: ${names}. Não podem existir duas entidades com o mesmo NIF na mesma organização.`
+              : "Este NIF já pertence a outra entidade desta organização.",
+            variant: "destructive",
+          });
+          return; // the enclosing finally clears `saving`
+        }
+      }
+
       await withAuditContext(supabase, userId, async () => {
         const { error } = await supabase.rpc("rpc_update_lead", {
           p_lead_id: lead.id,
@@ -328,7 +368,7 @@ export function AnewLeadEditDialog({
       // entity_id; best-effort — a failed/invalid NIF resolve must never
       // block saving the lead's core data, which already succeeded above.
       if (lead.entity_id) {
-        const vatValue = getGeneralFieldValue(updatedFieldValues, "vat");
+        const vatValue = vatToSave;
         if (vatValue) {
           try {
             await linkEntityFiscalEntity(lead.entity_id, vatValue, displayName ?? null, "PT", userId);
