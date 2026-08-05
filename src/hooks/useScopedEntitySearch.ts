@@ -13,9 +13,11 @@ import {
 } from "@/lib/search/scopedEntitySearch";
 
 const DEFAULT_DEBOUNCE_MS = 300;
+const DEFAULT_PAGE_SIZE = 25;
 
 export interface UseScopedEntitySearchOptions {
   kinds?: readonly ScopedSearchKind[];
+  /** Rows fetched per kind, per page. Scrolling to the end asks for one more. */
   limitPerKind?: number;
   debounceMs?: number;
   /** Narrows results to a single contact/entity; never widens them. */
@@ -32,6 +34,10 @@ export interface UseScopedEntitySearchResult {
   /** Debounced. Safe to call on every keystroke. */
   search: (term: string) => void;
   clear: () => void;
+  /** True while another page may exist, i.e. the last page came back full. */
+  hasMore: boolean;
+  /** Fetches one more page. No-op while loading or when nothing more is expected. */
+  loadMore: () => void;
 }
 
 /**
@@ -53,7 +59,7 @@ export function useScopedEntitySearch(
 ): UseScopedEntitySearchResult {
   const {
     kinds = ALL_SCOPED_SEARCH_KINDS,
-    limitPerKind,
+    limitPerKind = DEFAULT_PAGE_SIZE,
     debounceMs = DEFAULT_DEBOUNCE_MS,
     restrictToEntityId = null,
   } = options;
@@ -71,6 +77,12 @@ export function useScopedEntitySearch(
   const [results, setResults] = useState<ScopedSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Grows a page at a time as the user scrolls; reset on every new term.
+  const [limit, setLimit] = useState(limitPerKind);
+  const [hasMore, setHasMore] = useState(false);
+  // The term the current results belong to, so loadMore can re-query it
+  // without the caller having to hand it back.
+  const activeTermRef = useRef("");
 
   const latestRequestIdRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -109,7 +121,7 @@ export function useScopedEntitySearch(
           term,
           orgIds,
           kinds: stableKinds,
-          limitPerKind,
+          limitPerKind: limit,
           restrictToEntityId,
           viewer: { isSystemAdmin, anewUserId, authUserId, teamMemberIds, getPermissionScope },
           onBranchErrors: (failures) => {
@@ -118,6 +130,9 @@ export function useScopedEntitySearch(
         });
         if (requestId !== latestRequestIdRef.current) return;
         setResults(found);
+        // A short page means the source is exhausted. A full one only means
+        // "maybe more", which is the best any offset pager can say.
+        setHasMore(found.length >= limit);
         setError(
           branchFailures.length > 0
             ? `Pesquisa incompleta — ${branchFailures
@@ -139,7 +154,7 @@ export function useScopedEntitySearch(
       orgLoading,
       orgIds,
       stableKinds,
-      limitPerKind,
+      limit,
       restrictToEntityId,
       isSystemAdmin,
       anewUserId,
@@ -154,25 +169,58 @@ export function useScopedEntitySearch(
       if (debounceRef.current) clearTimeout(debounceRef.current);
       // Clear immediately on a term that is too short, so stale results from a
       // longer previous term don't linger under an emptied input.
-      if (normalizeSearchTerm(term).length < MIN_SEARCH_TERM_LENGTH) {
+      const normalized = normalizeSearchTerm(term);
+      if (normalized.length < MIN_SEARCH_TERM_LENGTH) {
         latestRequestIdRef.current++;
+        activeTermRef.current = "";
         setResults([]);
         setError(null);
+        setHasMore(false);
         setLoading(false);
         return;
       }
+      // A new term starts a new result set, so paging goes back to page one.
+      if (normalized !== activeTermRef.current) {
+        activeTermRef.current = normalized;
+        setLimit(limitPerKind);
+      }
       debounceRef.current = setTimeout(() => runSearch(term), debounceMs);
     },
-    [runSearch, debounceMs],
+    [runSearch, debounceMs, limitPerKind],
   );
+
+  const loadMore = useCallback(() => {
+    if (loading || !hasMore) return;
+    setLimit((current) => current + limitPerKind);
+  }, [loading, hasMore, limitPerKind]);
+
+  // Re-query when scrolling raised the page cap. Skipped on the first render
+  // and while the cap is still at page one, so it never duplicates the
+  // debounced search that typing already triggers.
+  const isFirstLimitRun = useRef(true);
+  useEffect(() => {
+    if (isFirstLimitRun.current) {
+      isFirstLimitRun.current = false;
+      return;
+    }
+    if (limit === limitPerKind) return;
+    if (activeTermRef.current.length < MIN_SEARCH_TERM_LENGTH) return;
+    runSearch(activeTermRef.current);
+    // runSearch is deliberately omitted: it is recreated whenever `limit`
+    // changes, which would make this effect re-enter itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [limit]);
 
   const clear = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     latestRequestIdRef.current++;
+    activeTermRef.current = "";
     setResults([]);
     setError(null);
+    setHasMore(false);
     setLoading(false);
-  }, []);
+    setLimit(limitPerKind);
+  }, [limitPerKind]);
 
   useEffect(() => {
     return () => {
@@ -180,5 +228,5 @@ export function useScopedEntitySearch(
     };
   }, []);
 
-  return { results, loading, error, ready, search, clear };
+  return { results, loading, error, ready, search, clear, hasMore, loadMore };
 }
