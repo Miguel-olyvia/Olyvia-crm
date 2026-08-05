@@ -701,6 +701,30 @@ serve(async (req) => {
           .eq("auth_user_id", user.id)
           .eq("contract_id", contract_id));
 
+        // Trigger the same workflow the CRM's manual "sign" action uses
+        // (pipeline-automation's finalize_contract → execute-workflow) so a
+        // client signature converts the linked contact into a client too —
+        // without this, only signatures done manually inside the CRM did.
+        try {
+          const wfResp = await fetch(`${supabaseUrl}/functions/v1/execute-workflow`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${serviceRoleKey}`,
+            },
+            body: JSON.stringify({
+              source_entity: "contract",
+              entity_id: contract_id,
+              new_stage_id: "signed",
+              triggered_by: null,
+            }),
+          });
+          const wfData = await wfResp.json();
+          console.log("[client-portal-action] sign_contract execute-workflow response:", wfData);
+        } catch (wfErr) {
+          console.error("[client-portal-action] Error triggering execute-workflow for signed contract:", wfErr);
+        }
+
         const { data: signedContract } = await supabase.from("client_contracts").select("contract_number").eq("id", contract_id).maybeSingle();
         await maybeNotify("client_signed_contract", {
           title: "🎉 Contrato assinado no portal!",
