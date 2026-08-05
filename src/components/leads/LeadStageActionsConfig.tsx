@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -91,9 +91,11 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
     })();
   }, [stages]);
 
+  const hasLoadedOnceRef = useRef(false);
+
   const loadActions = useCallback(async () => {
     if (!companyId) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     const { data, error } = await (supabase
       .from("lead_stage_actions") as any)
       .select("*")
@@ -108,7 +110,8 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
         }))
       );
     }
-    setLoading(false);
+    hasLoadedOnceRef.current = true;
+      setLoading(false);
   }, [companyId]);
 
   useEffect(() => {
