@@ -31,6 +31,7 @@ import {
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
 import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validations";
+import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
 
 interface Lead {
   id: string;
@@ -79,6 +80,7 @@ const GENERAL_FIELD_ALIASES: Record<string, string[]> = {
   address: ["address", "morada", "endereco", "endereço", "rua", "address_line1"],
   postal_code: ["postal_code", "codigo_postal", "código_postal", "cp", "cep", "zip", "zipcode"],
   city: ["city", "cidade", "localidade"],
+  vat: ["vat", "nif", "contribuinte", "fiscal", "tax_id", "taxid", "numero_contribuinte"],
 };
 
 const GENERAL_FIELDS = [
@@ -87,8 +89,10 @@ const GENERAL_FIELDS = [
   { key: "email", label: "Email" },
   { key: "phone", label: "Telefone" },
   { key: "company_name", label: "Empresa" },
-  // address, postal_code e city removidos por RGPD (minimização de dados):
-  // morada só deve aparecer no fluxo de cliente/faturação, não na ficha de lead.
+  { key: "address", label: "Morada" },
+  { key: "postal_code", label: "Código Postal" },
+  { key: "city", label: "Localidade" },
+  { key: "vat", label: "NIF" },
 ];
 
 const normalizeFieldKey = (key: string) => key.toLowerCase().trim();
@@ -209,6 +213,10 @@ export function AnewLeadEditDialog({
       email: getGeneralFieldValue(fieldValues, "email"),
       phone: getGeneralFieldValue(fieldValues, "phone"),
       company_name: getGeneralFieldValue(fieldValues, "company_name"),
+      address: getGeneralFieldValue(fieldValues, "address"),
+      postal_code: getGeneralFieldValue(fieldValues, "postal_code"),
+      city: getGeneralFieldValue(fieldValues, "city"),
+      vat: getGeneralFieldValue(fieldValues, "vat"),
     };
 
     const generalResult = leadEditGeneralFieldsSchema.safeParse(generalValues);
@@ -313,6 +321,28 @@ export function AnewLeadEditDialog({
 
         if (error) throw error;
       });
+
+      // Link the lead's NIF (if any) to the shared, encrypted fiscal-entities
+      // system — same resolve/link mechanism already used for organizations
+      // (src/utils/orgFiscalEntity.ts). Requires the lead to already have an
+      // entity_id; best-effort — a failed/invalid NIF resolve must never
+      // block saving the lead's core data, which already succeeded above.
+      if (lead.entity_id) {
+        const vatValue = getGeneralFieldValue(updatedFieldValues, "vat");
+        if (vatValue) {
+          try {
+            await linkEntityFiscalEntity(lead.entity_id, vatValue, displayName ?? null, "PT", userId);
+          } catch (fiscalError) {
+            console.error("Error linking lead's fiscal entity:", fiscalError);
+            const description = await getFriendlyErrorMessage(fiscalError);
+            toast({
+              title: "Lead guardada, mas o NIF não foi validado",
+              description,
+              variant: "destructive",
+            });
+          }
+        }
+      }
 
       let workflowFailed = false;
       if (statusChanged && workflowStageId) {

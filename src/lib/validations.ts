@@ -102,6 +102,10 @@ export const leadEditGeneralFieldsSchema = z.object({
   email: z.string().trim().email("Invalid email format").max(255, "Email must be less than 255 characters").optional().or(z.literal("")),
   phone: z.string().trim().max(20, "Phone must be less than 20 characters").optional().or(z.literal("")),
   company_name: z.string().trim().max(200, "Company name must be less than 200 characters").optional().or(z.literal("")),
+  address: z.string().trim().max(255, "Address must be less than 255 characters").optional().or(z.literal("")),
+  postal_code: z.string().trim().max(20, "Postal code must be less than 20 characters").optional().or(z.literal("")),
+  city: z.string().trim().max(100, "City must be less than 100 characters").optional().or(z.literal("")),
+  vat: z.string().trim().max(30, "VAT/NIF must be less than 30 characters").optional().or(z.literal("")),
 });
 
 export const leadEditNotesSchema = z.object({
