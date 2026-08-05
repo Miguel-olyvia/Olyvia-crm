@@ -3,12 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatCurrency } from "@/lib/utils";
+import { getEffectiveContractValue } from "@/utils/contractValue";
 
 interface Contract {
   id: string;
   status: string;
   contract_number?: string;
   total_value?: number;
+  quote_id?: string | null;
+  proposals?: { quotes?: { id: string; total?: number }[] } | null;
   start_date?: string;
   end_date?: string;
   created_at: string;
@@ -51,7 +54,7 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
         s = map.outro;
       }
       s.count++;
-      s.value += c.total_value || 0;
+      s.value += getEffectiveContractValue(c);
     });
     return map;
   }, [contracts]);
@@ -61,7 +64,7 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
     contracts.forEach(c => {
       const d = new Date(c.start_date || c.created_at);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      months[key] = (months[key] || 0) + (c.total_value || 0);
+      months[key] = (months[key] || 0) + getEffectiveContractValue(c);
     });
     return Object.entries(months).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
   }, [contracts]);
@@ -74,7 +77,7 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
       const name = c.assigned_to_name || "Não atribuído";
       if (!map[name]) map[name] = { count: 0, value: 0, signed: 0 };
       map[name].count++;
-      map[name].value += c.total_value || 0;
+      map[name].value += getEffectiveContractValue(c);
       if (c.status === "signed" || c.status === "active") map[name].signed++;
     });
     return Object.entries(map).sort((a, b) => b[1].value - a[1].value);
@@ -194,7 +197,7 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
                       >
                         {daysLeft}d
                       </Badge>
-                      <span className="text-sm font-medium">{formatCurrency(c.total_value || 0)}</span>
+                      <span className="text-sm font-medium">{formatCurrency(getEffectiveContractValue(c))}</span>
                     </div>
                   );
                 })}
