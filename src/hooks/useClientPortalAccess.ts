@@ -89,19 +89,21 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
       //   C) no temp_password, no smtp_warning   -> normal success (includes reopen/republish cases)
       if (data.temp_password && data.smtp_warning) {
         // Case A: SMTP failure with credentials available
+        const reason = data.smtp_error_safe ? `Motivo: ${data.smtp_error_safe}\n\n` : "";
         sonnerToast.warning(`Falha no envio de email — entrega manual necessária`, {
           description: `Email: ${data.email}
 Password: ${data.temp_password}
 
-O email não foi enviado (erro SMTP). Entregue as credenciais ao cliente por um canal seguro (ex: telefone ou mensagem cifrada).
+${reason}O email não foi enviado (erro SMTP). Entregue as credenciais ao cliente por um canal seguro (ex: telefone ou mensagem cifrada).
 
 Apenas o link de login foi copiado para a área de transferência.`,
           duration: 15000,
         });
       } else if (data.smtp_warning) {
         // Case B: SMTP failure without credentials in response
+        const reason = data.smtp_error_safe ? ` Motivo: ${data.smtp_error_safe}.` : "";
         sonnerToast.warning(`Falha no envio de email`, {
-          description: `O email não foi enviado (erro SMTP). Contacte o cliente (${data.email ?? "email desconhecido"}) por outro canal para lhe fornecer as credenciais de acesso ao portal.`,
+          description: `O email não foi enviado (erro SMTP).${reason} Contacte o cliente (${data.email ?? "email desconhecido"}) por outro canal para lhe fornecer as credenciais de acesso ao portal.`,
           duration: 12000,
         });
       } else {
