@@ -596,6 +596,10 @@ const Proposals = () => {
     setProposalTemplates(data || []);
   }, [activeCompany?.id]);
 
+  // True once the first successful page load has painted; keeps later
+  // refreshes from re-triggering the full-page loader.
+  const hasLoadedOnceRef = useRef(false);
+
   const loadData = useCallback(async () => {
     if (!activeCompany?.id || permissionsLoading || scopeLoading) {
       if (!activeCompany?.id) {
@@ -605,7 +609,12 @@ const Proposals = () => {
       setLoading(!!activeCompany?.id);
       return;
     }
-    setLoading(true);
+    // Only the FIRST load may take over the screen. `loadData` runs again
+    // after every edit/confirm/delete (18 call sites), and `loading` drives a
+    // full-page early return further down — so each action was unmounting the
+    // whole page and remounting it, losing scroll position and flashing the
+    // loader. Subsequent refreshes now update the data in place.
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       await Promise.all([loadWorkflowStages(), loadProposalTemplates()]);
 
@@ -813,6 +822,7 @@ const Proposals = () => {
         variant: "destructive",
       });
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   }, [
