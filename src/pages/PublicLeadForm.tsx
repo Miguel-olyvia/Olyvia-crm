@@ -576,6 +576,62 @@ interface FormData {
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+/**
+ * Resolves {{name}}-style placeholders in the success screen copy.
+ *
+ * The stored copy uses generic tokens, but field keys differ from form to
+ * form — this one submits `first_name`/`last_name`/`po_email`, others use
+ * `nome`/`email`. So each token is matched against the submitted values by
+ * key first, then by shape: whatever value contains "@" is the email, no
+ * matter what the field was named. Unknown tokens resolve to an empty
+ * string, because a visitor seeing a literal "{{email}}" is worse than
+ * seeing nothing.
+ */
+function fillPlaceholders(text: string, values: Record<string, any>): string {
+  if (!text || !text.includes("{{")) return text;
+
+  const byKey = (...keys: string[]): string => {
+    for (const key of keys) {
+      const value = values[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+
+  const byShape = (matches: (value: string) => boolean): string => {
+    for (const value of Object.values(values)) {
+      if (typeof value === "string" && value.trim() && matches(value)) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+
+  const firstName = byKey("first_name", "primeiro_nome", "nome", "name");
+  const lastName = byKey("last_name", "apelido", "sobrenome", "ultimo_nome");
+  const fullName =
+    [firstName, lastName].filter(Boolean).join(" ") ||
+    byKey("full_name", "nome_completo");
+
+  const tokens: Record<string, string> = {
+    name: fullName,
+    full_name: fullName,
+    first_name: firstName,
+    last_name: lastName,
+    email:
+      byKey("po_email", "email", "e_mail") ||
+      byShape((value) => value.includes("@")),
+    phone: byKey("po_telefone", "telefone", "telemovel", "phone", "contacto"),
+  };
+
+  return text
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_, token: string) => tokens[token.toLowerCase()] ?? "")
+    // Collapse the gaps a missing value leaves behind ("Obrigado, !").
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export default function PublicLeadForm() {
   const { formId: routeFormId, campaignId: routeCampaignId } = useParams<{ formId?: string; campaignId?: string }>();
   const [searchParams] = useSearchParams();
@@ -1988,9 +2044,14 @@ export default function PublicLeadForm() {
             >
               <Check className="h-8 w-8" style={{ color: primaryColor }} />
             </div>
-            <CardTitle style={headingStyle}>{branding?.success_title || "Obrigado!"}</CardTitle>
+            <CardTitle style={headingStyle}>
+              {fillPlaceholders(branding?.success_title || "Obrigado!", formValues)}
+            </CardTitle>
             <CardDescription style={{ color: branding?.text_color }}>
-              {branding?.success_message || "O seu pedido foi submetido com sucesso. Entraremos em contacto consigo brevemente."}
+              {fillPlaceholders(
+                branding?.success_message || "O seu pedido foi submetido com sucesso. Entraremos em contacto consigo brevemente.",
+                formValues,
+              )}
             </CardDescription>
             {branding?.success_redirect_url && (
               <p className="text-sm text-muted-foreground mt-4">
