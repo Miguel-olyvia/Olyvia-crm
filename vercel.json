@@ -1,13 +1,10 @@
 {
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
+    { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
     {
-      "source": "/((?!form$|form/|lead-form/).*)",
+      "source": "/(.*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -20,56 +17,6 @@
         {
           "key": "X-Frame-Options",
           "value": "DENY"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
-        {
-          "key": "Strict-Transport-Security",
-          "value": "max-age=31536000; includeSubDomains; preload"
-        },
-        {
-          "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=()"
-        }
-      ]
-    },
-    {
-      "source": "/(form|lead-form)/:path*",
-      "headers": [
-        {
-          "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://www.google-analytics.com https://stats.g.doubleclick.net https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors https://www.mudelar.pt https://mudelar.pt;"
-        },
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
-        },
-        {
-          "key": "Referrer-Policy",
-          "value": "strict-origin-when-cross-origin"
-        },
-        {
-          "key": "Strict-Transport-Security",
-          "value": "max-age=31536000; includeSubDomains; preload"
-        },
-        {
-          "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=()"
-        }
-      ]
-    },
-    {
-      "source": "/form",
-      "headers": [
-        {
-          "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://www.google-analytics.com https://stats.g.doubleclick.net https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors https://www.mudelar.pt https://mudelar.pt;"
-        },
-        {
-          "key": "X-Content-Type-Options",
-          "value": "nosniff"
         },
         {
           "key": "Referrer-Policy",
