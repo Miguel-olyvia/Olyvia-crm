@@ -375,6 +375,8 @@ const getFieldTypeIcon = (fieldType: string, fieldKey: string, fieldLabel?: stri
 
 interface FormField {
   field_key: string;
+  /** Canonical contact field this one feeds ("email", "first_name", ...). */
+  contact_field_mapping?: string | null;
   field_label: string;
   field_type: string;
   is_required: boolean;
@@ -579,24 +581,22 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 /**
  * Resolves {{name}}-style placeholders in the success screen copy.
  *
- * The stored copy uses generic tokens, but field keys differ from form to
- * form — this one submits `first_name`/`last_name`/`po_email`, others use
- * `nome`/`email`. So each token is matched against the submitted values by
- * key first, then by shape: whatever value contains "@" is the email, no
- * matter what the field was named. Unknown tokens resolve to an empty
- * string, because a visitor seeing a literal "{{email}}" is worse than
- * seeing nothing.
+ * The stored copy uses generic tokens, but field keys are chosen freely per
+ * form — one submits `po_email`, another `email`, another something else
+ * entirely. Guessing key names would silently break the moment someone
+ * renames a field, so tokens are resolved through each field's declared
+ * `contact_field_mapping`, which is what already links a form field to a
+ * canonical contact field everywhere else in the system.
+ *
+ * Unknown tokens resolve to an empty string, because a visitor seeing a
+ * literal "{{email}}" is worse than seeing nothing.
  */
-function fillPlaceholders(text: string, values: Record<string, any>): string {
+function fillPlaceholders(
+  text: string,
+  values: Record<string, any>,
+  fields: Array<{ field_key: string; contact_field_mapping?: string | null }>,
+): string {
   if (!text || !text.includes("{{")) return text;
-
-  const byKey = (...keys: string[]): string => {
-    for (const key of keys) {
-      const value = values[key];
-      if (typeof value === "string" && value.trim()) return value.trim();
-    }
-    return "";
-  };
 
   const byShape = (matches: (value: string) => boolean): string => {
     for (const value of Object.values(values)) {
@@ -607,21 +607,32 @@ function fillPlaceholders(text: string, values: Record<string, any>): string {
     return "";
   };
 
-  const firstName = byKey("first_name", "primeiro_nome", "nome", "name");
-  const lastName = byKey("last_name", "apelido", "sobrenome", "ultimo_nome");
+  // Each field declares which canonical contact field it feeds, via
+  // contact_field_mapping ("po_email" -> "email"). That mapping is the only
+  // reliable link: field keys are chosen freely per form, so the same token
+  // must never be tied to a particular key name.
+  const byMapping = (canonical: string): string => {
+    for (const field of fields) {
+      if (field?.contact_field_mapping !== canonical) continue;
+      const value = values[field.field_key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+
+  const firstName = byMapping("first_name");
+  const lastName = byMapping("last_name");
   const fullName =
-    [firstName, lastName].filter(Boolean).join(" ") ||
-    byKey("full_name", "nome_completo");
+    [firstName, lastName].filter(Boolean).join(" ") || byMapping("full_name");
 
   const tokens: Record<string, string> = {
     name: fullName,
     full_name: fullName,
     first_name: firstName,
     last_name: lastName,
-    email:
-      byKey("po_email", "email", "e_mail") ||
-      byShape((value) => value.includes("@")),
-    phone: byKey("po_telefone", "telefone", "telemovel", "phone", "contacto"),
+    // Fall back only for forms that predate the mapping and have none set.
+    email: byMapping("email") || byShape((value) => value.includes("@")),
+    phone: byMapping("phone"),
   };
 
   return text
@@ -685,6 +696,13 @@ export default function PublicLeadForm() {
     setCurrentStep(num);
   };
   const [formValues, setFormValues] = useState<Record<string, any>>({});
+  // Every field across every step, so the success copy can resolve its
+  // placeholders through contact_field_mapping regardless of which step the
+  // name or email was answered on.
+  const submittedFields = useMemo(
+    () => (formConfig?.steps || []).flatMap((step) => step.fields || []),
+    [formConfig],
+  );
   const [leadId, setLeadId] = useState<string | null>(null);
   // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
   // "lead" when only an older lead_id-only response shape is ever received.
@@ -2045,12 +2063,13 @@ export default function PublicLeadForm() {
               <Check className="h-8 w-8" style={{ color: primaryColor }} />
             </div>
             <CardTitle style={headingStyle}>
-              {fillPlaceholders(branding?.success_title || "Obrigado!", formValues)}
+              {fillPlaceholders(branding?.success_title || "Obrigado!", formValues, submittedFields)}
             </CardTitle>
             <CardDescription style={{ color: branding?.text_color }}>
               {fillPlaceholders(
                 branding?.success_message || "O seu pedido foi submetido com sucesso. Entraremos em contacto consigo brevemente.",
                 formValues,
+                submittedFields,
               )}
             </CardDescription>
             {branding?.success_redirect_url && (
