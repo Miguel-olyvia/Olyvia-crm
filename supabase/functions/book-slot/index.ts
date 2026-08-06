@@ -512,6 +512,22 @@ Deno.serve(async (req: Request) => {
     }
 
     // Update lead with scheduled_visit_id
+    // The lead's owner must be whoever is actually doing the visit. Until now
+    // assignedToAnewId was picked before the resource was known — the first
+    // active membership of the organization, effectively at random — and the
+    // later fallbacks used `||`, so that arbitrary value always won and the
+    // assigned technician's user was never used. Resolve it from the resource
+    // that ended up with the booking, and let it override.
+    const { data: assignedResource } = await supabase
+      .from('schedule_resources')
+      .select('user_id')
+      .eq('id', assignedResourceId)
+      .maybeSingle();
+
+    if (assignedResource?.user_id) {
+      assignedToAnewId = assignedResource.user_id; // anew_users.id
+    }
+
     const leadUpdate: Record<string, any> = {
       scheduled_visit_id: scheduleItem.id,
       callback_scheduled_at: slot_start,
