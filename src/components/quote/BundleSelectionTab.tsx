@@ -119,7 +119,11 @@ interface Props {
   viewMode: "grid" | "list";
 }
 
-const PAGE_SIZE = 50;
+// Reduzido de 50 para 20: com RLS, cada bundle da página custa ~90ms devido
+// à reavaliação de get_user_visible_org_ids em cada componente/produto/serviço,
+// o que fazia o pedido REST completo (50 bundles) demorar 8,0-8,4s — acima do
+// statement_timeout de 8s do role authenticated, causando falhas intermitentes.
+const PAGE_SIZE = 20;
 
 // Extrai uma descrição legível de um erro desconhecido (Error nativo ou erro
 // do Supabase/PostgREST com message/details/hint/code) para mostrar no toast.
@@ -219,6 +223,12 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         .eq("is_active", true)
         .eq("status", "active")
         .is("deleted_at", null)
+        // Filtrar price_type='retail' dentro dos embeds: sem isto, o preço de
+        // compra (purchase) também era trazido, duplicando o fan-out de
+        // bundle_components -> products/services -> product_prices/service_prices
+        // e contribuindo para o timeout de 8s do statement_timeout.
+        .eq("bundle_components.products.product_prices.price_type", "retail")
+        .eq("bundle_components.services.service_prices.price_type", "retail")
         .order("name")
         .range(from, to);
 
