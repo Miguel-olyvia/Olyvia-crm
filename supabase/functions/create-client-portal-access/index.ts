@@ -134,10 +134,15 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Sem permissão para aceder a esta organização" }), { status: 403, headers: corsHeaders });
     }
 
-    // ── RBAC gate: caller must hold portal.manage OR client_contracts.edit ──
+    // ── RBAC gate: caller must hold portal.manage OR the type-specific "send" permission.
+    // Contracts use client_contracts.send_signature (NOT client_contracts.edit — a role can
+    // be allowed to edit a contract's fields without being allowed to send it anywhere,
+    // e.g. Sales Technician; the roles screen exposes these as two separate checkboxes).
     const hasPermission =
       await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id) ||
-      await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id);
+      (document_type === "contract"
+        ? await checkUserPermission(supabase, callerAnew.id, "client_contracts.send_signature", organization_id)
+        : await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id));
     if (!hasPermission) {
       return new Response(
         JSON.stringify({ error: "Sem permissão para gerir acessos ao portal de clientes" }),

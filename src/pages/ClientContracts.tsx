@@ -766,7 +766,7 @@ const ClientContracts = () => {
     if (drafts.length > 0) {
       const d = drafts[0];
       parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(getEffectiveContractValue(d))}) foi criado automaticamente pelo workflow mas está em Draft. Contratos não enviados em 48h têm 25% menos probabilidade de serem assinados. Sugerimos enviar para assinatura agora.`);
-      actions.push({ label: `Enviar ${(d._clientName || "").split(" ")[0]}`, action: "send_signature", contract: d });
+      if (canSendSignature) actions.push({ label: `Enviar ${(d._clientName || "").split(" ")[0]}`, action: "send_signature", contract: d });
     }
     const sentOld = contracts.filter(c => {
       if (c.status !== "pending_signature") return false;
@@ -785,7 +785,7 @@ const ClientContracts = () => {
     }
 
     return { text: parts.join(" "), actions };
-  }, [contracts]);
+  }, [contracts, canSendSignature]);
 
   const applyPromptValues = (html: string, promptValues?: Record<string, string>): string => {
     if (!promptValues) return html;
@@ -1897,23 +1897,31 @@ const ClientContracts = () => {
                             <DropdownMenuContent align="end" className="w-56">
                               {contract.status === "draft" && (
                                 <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
+                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                    </>
+                                  )}
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                     <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
                                   </DropdownMenuItem>
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
@@ -1942,14 +1950,18 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
@@ -1976,15 +1988,19 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>}
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
@@ -1999,8 +2015,8 @@ const ClientContracts = () => {
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>}
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>}
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
