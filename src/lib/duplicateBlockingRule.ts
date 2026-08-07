@@ -206,3 +206,80 @@ export async function revalidateStrongDuplicatesBeforeWrite(params: {
   const { shouldBlock } = computeStrictShouldBlock(matches);
   return { shouldBlock, matches };
 }
+
+/** An entity in the SAME organization that already holds the given NIF. */
+export interface NifCollision {
+  entityId: string;
+  displayName: string | null;
+}
+
+/**
+ * Picks, out of a findEntityMatches result, the same-org entities that clash
+ * on NIF — excluding the record being edited.
+ *
+ * Split out as a pure function so the rule can be tested without the Edge
+ * Function: the exclusion of `ownEntityId` is the part that matters, because
+ * without it every edit that merely re-saves an unchanged NIF would report
+ * the record as a duplicate of itself.
+ */
+export function findSameOrgNifCollisions(
+  matches: readonly {
+    entityId: string;
+    scope: string;
+    matchField: string;
+    displayName?: string | null;
+  }[],
+  ownEntityId: string | null,
+): NifCollision[] {
+  const seen = new Set<string>();
+  const out: NifCollision[] = [];
+  for (const match of matches) {
+    if (match.scope !== "same_org") continue;
+    if (match.matchField !== "nif") continue;
+    if (ownEntityId && match.entityId === ownEntityId) continue;
+    if (seen.has(match.entityId)) continue;
+    seen.add(match.entityId);
+    out.push({ entityId: match.entityId, displayName: match.displayName ?? null });
+  }
+  return out;
+}
+
+/**
+ * Guards the "one NIF per entity, per organization" invariant on an EDIT.
+ *
+ * Creating a lead already runs the full duplicate ladder in AnewLeads.tsx
+ * (findEntityMatches + revalidateStrongDuplicatesBeforeWrite, both passing
+ * `vat`), so a NIF collision is caught there. Editing had no such check: the
+ * NIF could be changed to one that already belonged to another entity in the
+ * same organization.
+ *
+ * Fails CLOSED. If the lookup itself errors we cannot tell a free NIF from a
+ * taken one, and letting the write through would silently break the very
+ * invariant this exists to protect. The caller must surface `error` so the
+ * user knows the save was refused for lack of verification, not for a real
+ * duplicate.
+ */
+export async function checkNifCollisionOnEdit(params: {
+  orgId: string;
+  nif: string | null | undefined;
+  ownEntityId: string | null;
+  countryCode?: string;
+}): Promise<{ collisions: NifCollision[]; error: unknown | null }> {
+  const { orgId, nif, ownEntityId, countryCode = "PT" } = params;
+  const trimmed = (nif ?? "").trim();
+  if (!orgId || !trimmed) return { collisions: [], error: null };
+
+  try {
+    const matches = await findEntityMatches({
+      orgId,
+      email: null,
+      phone: null,
+      nif: trimmed,
+      countryCode,
+    });
+    return { collisions: findSameOrgNifCollisions(matches, ownEntityId), error: null };
+  } catch (err) {
+    console.error("[duplicate-blocking] NIF collision check failed", err);
+    return { collisions: [], error: err };
+  }
+}

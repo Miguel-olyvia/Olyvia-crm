@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { useToast } from "@/hooks/use-toast";
@@ -82,9 +82,11 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
   const [taskTitle, setTaskTitle] = useState("");
   const [taskType, setTaskType] = useState("follow_up");
 
+  const hasLoadedOnceRef = useRef(false);
+
   const loadActions = useCallback(async () => {
     if (!companyId) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     const { data, error } = await supabase
       .from("proposal_stage_actions" as any)
       .select("*")
@@ -99,7 +101,8 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
         }))
       );
     }
-    setLoading(false);
+    hasLoadedOnceRef.current = true;
+      setLoading(false);
   }, [companyId]);
 
   useEffect(() => {

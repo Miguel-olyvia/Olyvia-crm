@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -148,9 +148,11 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
   const tableName = TABLE_MAP[module];
   const actionLabels = getActionsForModule(module, pipelineOrder);
 
+  const hasLoadedOnceRef = useRef(false);
+
   const loadActions = useCallback(async () => {
     if (!companyId) return;
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     const { data, error } = await (supabase.from(tableName as any) as any)
       .select("*")
       .eq("organization_id", companyId)
@@ -164,7 +166,8 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
         }))
       );
     }
-    setLoading(false);
+    hasLoadedOnceRef.current = true;
+      setLoading(false);
   }, [companyId, tableName]);
 
   useEffect(() => {

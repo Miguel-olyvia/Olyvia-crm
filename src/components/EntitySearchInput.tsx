@@ -558,7 +558,21 @@ export function EntitySearchInput({
 
       {open && (
         <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-lg shadow-xl z-50 animate-in fade-in-0 zoom-in-95 duration-150">
-          <div className="max-h-[320px] overflow-y-auto">
+          <div
+            className="max-h-[320px] overflow-y-auto"
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              // Auto-load the next page shortly before the end, replacing the
+              // "Mostrar mais" button: scrolling used to just stop at 50.
+              if (
+                !loading &&
+                results.length >= resultLimit &&
+                el.scrollHeight - el.scrollTop - el.clientHeight < 80
+              ) {
+                setResultLimit((current) => current + RESULT_PAGE_SIZE);
+              }
+            }}
+          >
             {Object.entries(grouped).map(([type, items]) => {
               const cfg = getTypeConfig(type);
               const Icon = cfg.icon;
@@ -602,22 +616,15 @@ export function EntitySearchInput({
                 {t("common.noResults") || "Sem resultados"}
               </div>
             )}
-            {results.length >= resultLimit && (
-              <div className="border-t p-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="w-full text-xs"
-                  disabled={loading}
-                  onClick={() => setResultLimit((current) => current + RESULT_PAGE_SIZE)}
-                >
-                  {loading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    `Mostrar mais (${results.length})`
-                  )}
-                </Button>
+            {loading && results.length > 0 && (
+              <div className="flex items-center justify-center gap-2 border-t p-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                A carregar mais…
+              </div>
+            )}
+            {!loading && results.length > 0 && results.length < resultLimit && (
+              <div className="border-t p-2 text-center text-xs text-muted-foreground">
+                Fim dos resultados ({results.length})
               </div>
             )}
           </div>

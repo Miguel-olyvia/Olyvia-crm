@@ -9,7 +9,10 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { Plus } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -38,6 +41,20 @@ interface ProposalRejectReasonDialogProps {
   onConfirm: (decision: ProposalRejectionDecision) => Promise<void> | void;
 }
 
+/**
+ * Builds the NOT NULL `code` from the user-visible label. The table requires a
+ * code but nothing in the UI ever exposed one, so it is derived rather than
+ * asked for.
+ */
+const slugifyReasonCode = (label: string): string =>
+  label
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40) || "motivo";
+
 interface RejectionReasonRow {
   id: string;
   code: string;
@@ -56,11 +73,17 @@ export function ProposalRejectReasonDialog({
   const [notes, setNotes] = useState("");
   const [loadingReasons, setLoadingReasons] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [savingNew, setSavingNew] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!open) {
       setSelectedReasonId("");
       setNotes("");
+      setCreating(false);
+      setNewLabel("");
       return;
     }
     if (!organizationId) {
@@ -86,6 +109,66 @@ export function ProposalRejectReasonDialog({
   }, [open, organizationId]);
 
   const selectedReason = reasons.find((reason) => reason.id === selectedReasonId);
+
+  /**
+   * Creates a reason for the ACTIVE organization and selects it.
+   *
+   * There is no settings screen for this table anywhere in the app — the
+   * dialog only ever read it — so an organization with no rows (a brand new
+   * one) could never reject a proposal at all. Creating inline is the only
+   * way out of that dead end without a DB edit.
+   */
+  const handleCreateReason = async () => {
+    const label = newLabel.trim();
+    if (!label || !organizationId) return;
+
+    setSavingNew(true);
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      const baseCode = slugifyReasonCode(label);
+      let created: RejectionReasonRow | null = null;
+      let lastError: any = null;
+
+      // `code` may collide with an existing (possibly inactive) row, so retry
+      // with a suffix instead of failing in the user's face.
+      for (let attempt = 0; attempt < 5 && !created; attempt++) {
+        const code = attempt === 0 ? baseCode : `${baseCode}_${attempt + 1}`;
+        const { data, error } = await (supabase.from("proposal_rejection_reasons") as any)
+          .insert({
+            organization_id: organizationId,
+            code,
+            label,
+            is_active: true,
+            sort_order: reasons.length,
+            created_by: auth?.user?.id ?? null,
+          })
+          .select("id, code, label, description")
+          .single();
+
+        if (!error) {
+          created = data as RejectionReasonRow;
+          break;
+        }
+        lastError = error;
+        if (error.code !== "23505") break; // not a duplicate — no point retrying
+      }
+
+      if (!created) throw lastError ?? new Error("Não foi possível criar o motivo.");
+
+      setReasons((prev) => [...prev, created!]);
+      setSelectedReasonId(created.id);
+      setNewLabel("");
+      setCreating(false);
+    } catch (err: any) {
+      toast({
+        title: "Não foi possível criar o motivo",
+        description: err?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingNew(false);
+    }
+  };
 
   const handleConfirm = async () => {
     if (!selectedReason) return;
@@ -128,6 +211,64 @@ export function ProposalRejectReasonDialog({
             </Select>
             {selectedReason?.description && (
               <p className="text-xs text-muted-foreground">{selectedReason.description}</p>
+            )}
+
+            {!loadingReasons && reasons.length === 0 && !creating && (
+              <p className="text-xs text-muted-foreground">
+                Esta organização ainda não tem motivos de rejeição configurados.
+              </p>
+            )}
+
+            {creating ? (
+              <div className="space-y-2 rounded-md border p-2">
+                <Label className="text-xs">Novo motivo</Label>
+                <Input
+                  autoFocus
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="Ex.: Preço acima do orçamento"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleCreateReason();
+                    }
+                  }}
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setCreating(false);
+                      setNewLabel("");
+                    }}
+                    disabled={savingNew}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleCreateReason}
+                    disabled={savingNew || !newLabel.trim()}
+                  >
+                    {savingNew ? "A criar…" : "Criar e selecionar"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => setCreating(true)}
+                disabled={!organizationId || loadingReasons}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Novo motivo
+              </Button>
             )}
           </div>
 

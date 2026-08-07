@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -87,6 +87,29 @@ export function DynamicFormField({ field, value, onChange, campaignId }: Dynamic
     setDistrictOptions(unique);
   };
 
+  /**
+   * Resolves whatever is stored for a district to the option value the Select
+   * actually renders (the district NAME).
+   *
+   * Stored values come from several eras and sources, so the same district
+   * appears as an administrative_divisions id, as "Lisboa", as "LISBOA", or as
+   * a placeholder "-". Only the exact-name form ever matched the SelectItem
+   * values, so most leads rendered an empty dropdown even with a district set.
+   * Matching happens here, on read; the stored data is left untouched.
+   */
+  const resolvedDistrict = useMemo(() => {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw || raw === '-') return '';
+    const norm = (v: string) =>
+      v.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+    const byId = districtOptions.find((d) => d.id === raw);
+    if (byId) return byId.name;
+    const exact = districtOptions.find((d) => d.name === raw);
+    if (exact) return exact.name;
+    const loose = districtOptions.find((d) => norm(d.name) === norm(raw));
+    return loose ? loose.name : '';
+  }, [value, districtOptions]);
+
   const options = field.options?.options || [];
   const displayStyle = field.display_style || 'dropdown';
 
@@ -153,7 +176,7 @@ export function DynamicFormField({ field, value, onChange, campaignId }: Dynamic
           {field.field_label}
           {field.is_required && <span className="text-red-500 ml-1">*</span>}
         </Label>
-        <Select value={value || ""} onValueChange={onChange}>
+        <Select value={resolvedDistrict} onValueChange={onChange}>
           <SelectTrigger className="mt-1">
             <SelectValue placeholder="Selecionar distrito..." />
           </SelectTrigger>

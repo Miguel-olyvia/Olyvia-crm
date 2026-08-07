@@ -289,6 +289,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     error: dealSearchError,
     search: runDealSearch,
     clear: clearDealSearch,
+    hasMore: dealSearchHasMore,
+    loadMore: loadMoreDeals,
   } = useScopedEntitySearch({ kinds: ["deal"] });
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
@@ -3250,7 +3252,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       className={fieldErrors.deal_id ? "border-destructive" : ""}
                     />
                     {showDealDropdown && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[260px] overflow-y-auto">
+                      <div
+                        className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[260px] overflow-y-auto"
+                        onScroll={(e) => {
+                          const el = e.currentTarget;
+                          // Ask for the next page a little before the end, so
+                          // the list keeps flowing instead of hitting a wall.
+                          if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) loadMoreDeals();
+                        }}
+                      >
                         {dealSearchLoading && dealSearchResults.length === 0 && (
                           <div className="px-3 py-2 text-sm text-muted-foreground">A pesquisar…</div>
                         )}
@@ -3326,6 +3336,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             </div>
                           </button>
                         ))}
+                        {dealSearchLoading && dealSearchResults.length > 0 && (
+                          <div className="px-3 py-2 text-xs text-muted-foreground text-center">A carregar mais…</div>
+                        )}
+                        {!dealSearchLoading && !dealSearchHasMore && dealSearchResults.length > 0 && (
+                          <div className="px-3 py-2 text-xs text-muted-foreground text-center">Fim dos resultados</div>
+                        )}
                       </div>
                     )}
                     <p className="text-xs text-muted-foreground mt-1">Escreva pelo menos 2 caracteres para pesquisar pedidos</p>

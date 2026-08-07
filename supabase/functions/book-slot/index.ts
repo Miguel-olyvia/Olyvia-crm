@@ -398,7 +398,12 @@ Deno.serve(async (req: Request) => {
       .eq('id', assignedResourceId)
       .maybeSingle();
 
-    if (assignedResource?.resource_type === 'user' && assignedResource?.user_id) {
+    // Any resource linked to a user hands the lead to that user. The previous
+    // `resource_type === 'user'` guard meant technicians stored under any other
+    // resource_type were skipped, and the lead fell back to the arbitrary
+    // organization member picked earlier — so the person doing the visit and
+    // the lead's owner were different people.
+    if (assignedResource?.user_id) {
       assignedToAnewId = assignedResource.user_id;
     }
 

@@ -375,6 +375,8 @@ const getFieldTypeIcon = (fieldType: string, fieldKey: string, fieldLabel?: stri
 
 interface FormField {
   field_key: string;
+  /** Canonical contact field this one feeds ("email", "first_name", ...). */
+  contact_field_mapping?: string | null;
   field_label: string;
   field_type: string;
   is_required: boolean;
@@ -576,6 +578,71 @@ interface FormData {
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+/**
+ * Resolves {{name}}-style placeholders in the success screen copy.
+ *
+ * The stored copy uses generic tokens, but field keys are chosen freely per
+ * form — one submits `po_email`, another `email`, another something else
+ * entirely. Guessing key names would silently break the moment someone
+ * renames a field, so tokens are resolved through each field's declared
+ * `contact_field_mapping`, which is what already links a form field to a
+ * canonical contact field everywhere else in the system.
+ *
+ * Unknown tokens resolve to an empty string, because a visitor seeing a
+ * literal "{{email}}" is worse than seeing nothing.
+ */
+function fillPlaceholders(
+  text: string,
+  values: Record<string, any>,
+  fields: Array<{ field_key: string; contact_field_mapping?: string | null }>,
+): string {
+  if (!text || !text.includes("{{")) return text;
+
+  const byShape = (matches: (value: string) => boolean): string => {
+    for (const value of Object.values(values)) {
+      if (typeof value === "string" && value.trim() && matches(value)) {
+        return value.trim();
+      }
+    }
+    return "";
+  };
+
+  // Each field declares which canonical contact field it feeds, via
+  // contact_field_mapping ("po_email" -> "email"). That mapping is the only
+  // reliable link: field keys are chosen freely per form, so the same token
+  // must never be tied to a particular key name.
+  const byMapping = (canonical: string): string => {
+    for (const field of fields) {
+      if (field?.contact_field_mapping !== canonical) continue;
+      const value = values[field.field_key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+    return "";
+  };
+
+  const firstName = byMapping("first_name");
+  const lastName = byMapping("last_name");
+  const fullName =
+    [firstName, lastName].filter(Boolean).join(" ") || byMapping("full_name");
+
+  const tokens: Record<string, string> = {
+    name: fullName,
+    full_name: fullName,
+    first_name: firstName,
+    last_name: lastName,
+    // Fall back only for forms that predate the mapping and have none set.
+    email: byMapping("email") || byShape((value) => value.includes("@")),
+    phone: byMapping("phone"),
+  };
+
+  return text
+    .replace(/\{\{\s*(\w+)\s*\}\}/g, (_, token: string) => tokens[token.toLowerCase()] ?? "")
+    // Collapse the gaps a missing value leaves behind ("Obrigado, !").
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export default function PublicLeadForm() {
   const { formId: routeFormId, campaignId: routeCampaignId } = useParams<{ formId?: string; campaignId?: string }>();
   const [searchParams] = useSearchParams();
@@ -629,6 +696,13 @@ export default function PublicLeadForm() {
     setCurrentStep(num);
   };
   const [formValues, setFormValues] = useState<Record<string, any>>({});
+  // Every field across every step, so the success copy can resolve its
+  // placeholders through contact_field_mapping regardless of which step the
+  // name or email was answered on.
+  const submittedFields = useMemo(
+    () => (formConfig?.steps || []).flatMap((step) => step.fields || []),
+    [formConfig],
+  );
   const [leadId, setLeadId] = useState<string | null>(null);
   // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
   // "lead" when only an older lead_id-only response shape is ever received.
@@ -1153,11 +1227,24 @@ export default function PublicLeadForm() {
         slot_start: schedulingSlot.start,
         slot_end: schedulingSlot.end,
         postal_code: (() => {
-          const pcKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key;
+          const pcKey =
+            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key
+            // Same reasoning as the district below: fall back to the field that
+            // declares itself as the postal code through contact_field_mapping.
+            || submittedFields.find(f => f.contact_field_mapping === 'postal_code')?.field_key;
           return pcKey ? formValues[pcKey] : undefined;
         })(),
         district_id: (() => {
-          const districtKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key;
+          const districtKey =
+            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key
+            // No explicit key configured: find the district field by what it IS,
+            // not by what it is called. ref_district is the structural marker and
+            // survives any rename, whereas hard-coding "po_distrito" would break
+            // the moment someone renames the field or another form uses its own.
+            // Without this the payload carried no district at all, so
+            // find_nearest_resources ran unfiltered and picked an arbitrary
+            // technician regardless of the district the visitor chose.
+            || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
           return districtKey ? formValues[districtKey] : undefined;
         })(),
         field_values: formValues,
@@ -1988,9 +2075,15 @@ export default function PublicLeadForm() {
             >
               <Check className="h-8 w-8" style={{ color: primaryColor }} />
             </div>
-            <CardTitle style={headingStyle}>{branding?.success_title || "Obrigado!"}</CardTitle>
+            <CardTitle style={headingStyle}>
+              {fillPlaceholders(branding?.success_title || "Obrigado!", formValues, submittedFields)}
+            </CardTitle>
             <CardDescription style={{ color: branding?.text_color }}>
-              {branding?.success_message || "O seu pedido foi submetido com sucesso. Entraremos em contacto consigo brevemente."}
+              {fillPlaceholders(
+                branding?.success_message || "O seu pedido foi submetido com sucesso. Entraremos em contacto consigo brevemente.",
+                formValues,
+                submittedFields,
+              )}
             </CardDescription>
             {branding?.success_redirect_url && (
               <p className="text-sm text-muted-foreground mt-4">

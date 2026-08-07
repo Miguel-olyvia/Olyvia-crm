@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { useColumnResize, ColumnWidths } from "@/hooks/useColumnResize";
@@ -423,8 +423,10 @@ export default function UsersNew() {
     fetchData();
   }, [activeCompany?.id, userType]);
 
+  const hasLoadedOnceRef = useRef(false);
+
   const fetchData = async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) setLoading(true);
     try {
       // Get current auth user for "me" detection
       const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -674,6 +676,7 @@ export default function UsersNew() {
       console.error("Error fetching data:", error);
       toast.error(t("common.error"));
     } finally {
+      hasLoadedOnceRef.current = true;
       setLoading(false);
     }
   };

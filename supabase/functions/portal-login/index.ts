@@ -2,7 +2,11 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 
-import { PRODUCTION_ORIGIN, VERCEL_PREVIEW_ORIGIN_PATTERN } from "../_shared/cors.ts";
+import {
+  ADDITIONAL_ALLOWED_ORIGINS,
+  PRODUCTION_ORIGIN,
+  VERCEL_PREVIEW_ORIGIN_PATTERN,
+} from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { withRetry, withRetryResult } from "../_shared/retry.ts";
 
@@ -30,9 +34,15 @@ const LOCAL_DEV_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 
 function buildCorsHeaders(requestOrigin: string | null): Record<string, string> {
   const testOrigin = Deno.env.get("ALLOWED_ORIGIN");
-  const allowed = [PRODUCTION_ORIGIN, testOrigin].filter(
-    (origin): origin is string => Boolean(origin),
-  );
+  // ADDITIONAL_ALLOWED_ORIGINS carries the apex domain (https://olyvia-ai.com).
+  // Omitting it here made every login from the apex fail: the preflight answered
+  // with PRODUCTION_ORIGIN (the www host), the browser rejected the mismatch,
+  // and supabase-js surfaced it as "Failed to send a request to the Edge Function".
+  const allowed = [
+    PRODUCTION_ORIGIN,
+    ...ADDITIONAL_ALLOWED_ORIGINS,
+    testOrigin,
+  ].filter((origin): origin is string => Boolean(origin));
   const matched = requestOrigin &&
       (allowed.includes(requestOrigin) ||
         VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin) ||

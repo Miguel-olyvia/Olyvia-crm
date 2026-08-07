@@ -35,7 +35,16 @@
  * corsHeaders with "Access-Control-Allow-Origin": "*" and do NOT import from here.
  */
 
-export const PRODUCTION_ORIGIN = "https://app.olyvia.pt";
+// The app is served from olyvia-ai.com; app.olyvia.pt is the older domain and
+// is kept so anything still pointing there keeps working. A request whose
+// Origin matches any of these is reflected back; anything else falls back to
+// PRODUCTION_ORIGIN and is therefore rejected by the browser.
+export const PRODUCTION_ORIGIN = "https://www.olyvia-ai.com";
+
+export const ADDITIONAL_ALLOWED_ORIGINS = [
+  "https://olyvia-ai.com",
+  "https://app.olyvia.pt",
+];
 
 // Anchored: matches only this project's own Vercel preview URLs, e.g.
 // https://olyvia-crm-git-development-miguel-bmgest.vercel.app
@@ -72,6 +81,7 @@ function resolveAllowedOrigin(req: Request): {
   const isAllowed =
     requestOrigin !== null &&
     (requestOrigin === PRODUCTION_ORIGIN ||
+      ADDITIONAL_ALLOWED_ORIGINS.includes(requestOrigin) ||
       requestOrigin === explicitAllowedOrigin ||
       VERCEL_PREVIEW_ORIGIN_PATTERN.test(requestOrigin) ||
       LOCAL_DEV_ORIGIN_PATTERN.test(requestOrigin));
