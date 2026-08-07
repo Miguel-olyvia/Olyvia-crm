@@ -1227,11 +1227,24 @@ export default function PublicLeadForm() {
         slot_start: schedulingSlot.start,
         slot_end: schedulingSlot.end,
         postal_code: (() => {
-          const pcKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key;
+          const pcKey =
+            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key
+            // Same reasoning as the district below: fall back to the field that
+            // declares itself as the postal code through contact_field_mapping.
+            || submittedFields.find(f => f.contact_field_mapping === 'postal_code')?.field_key;
           return pcKey ? formValues[pcKey] : undefined;
         })(),
         district_id: (() => {
-          const districtKey = formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key;
+          const districtKey =
+            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key
+            // No explicit key configured: find the district field by what it IS,
+            // not by what it is called. ref_district is the structural marker and
+            // survives any rename, whereas hard-coding "po_distrito" would break
+            // the moment someone renames the field or another form uses its own.
+            // Without this the payload carried no district at all, so
+            // find_nearest_resources ran unfiltered and picked an arbitrary
+            // technician regardless of the district the visitor chose.
+            || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
           return districtKey ? formValues[districtKey] : undefined;
         })(),
         field_values: formValues,
