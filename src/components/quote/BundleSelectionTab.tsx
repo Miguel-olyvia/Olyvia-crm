@@ -121,6 +121,23 @@ interface Props {
 
 const PAGE_SIZE = 50;
 
+// Extrai uma descrição legível de um erro desconhecido (Error nativo ou erro
+// do Supabase/PostgREST com message/details/hint/code) para mostrar no toast.
+function getErrorDescription(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error && typeof error === "object") {
+    const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [supabaseError.message, supabaseError.details, supabaseError.hint, supabaseError.code]
+      .filter((part): part is string => Boolean(part));
+    if (parts.length > 0) {
+      return parts.join(" — ");
+    }
+  }
+  return String(error);
+}
+
 export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMode }: Props) {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -280,7 +297,14 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
       currentPageRef.current += 1;
     } catch (error) {
       console.error("Error loading bundles:", error);
-      toast({ title: t('bundles.toast.errorLoading'), variant: "destructive" });
+      // Mostrar a mensagem real do erro no toast: um toast genérico escondia a
+      // causa (ex.: erro de rede, de parsing ou de RLS) e impedia o diagnóstico
+      // quando a mesma query funcionava corretamente via PostgREST direto.
+      toast({
+        title: t('bundles.toast.errorLoading'),
+        description: getErrorDescription(error),
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
       setLoadingMore(false);
