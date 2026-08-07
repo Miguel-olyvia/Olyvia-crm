@@ -1359,6 +1359,11 @@ const ClientContracts = () => {
       return <span className="text-xs text-green-600 font-medium">✍️ Assinado {date}</span>;
     }
     if (contract.status === "pending_signature") return <span className="text-xs text-yellow-600 font-medium">✍️ A aguardar assinatura</span>;
+    // Draft in the CRM's signature flow, but already published to the portal
+    // (someone used "Enviar para Portal Cliente" without also clicking "Marcar
+    // como Enviado") — reflect that it really was sent, instead of contradicting
+    // the portal status badge with "Não enviado".
+    if (contractPortalStatuses[contract.id]) return <span className="text-xs text-blue-600 font-medium">✍️ Enviado</span>;
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
   };
 
@@ -1801,9 +1806,19 @@ const ClientContracts = () => {
                       <TableCell>{getProgressBar(contract)}</TableCell>
                       <TableCell>{getRenewalBadge(contract)}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className={statusColors[contract.status] || ""}>
-                          {statusEmojis[contract.status]} {getTranslatedStatus(contract.status)}
-                        </Badge>
+                        {(() => {
+                          // Draft but already published to the portal — show it as
+                          // "Enviado" (reuses the pending_signature label/color) so
+                          // this badge doesn't contradict the portal status column.
+                          const displayStatus = contract.status === "draft" && contractPortalStatuses[contract.id]
+                            ? "pending_signature"
+                            : contract.status;
+                          return (
+                            <Badge variant="secondary" className={statusColors[displayStatus] || ""}>
+                              {statusEmojis[displayStatus]} {getTranslatedStatus(displayStatus)}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>{getSignatureBadge(contract)}</TableCell>
                       <TableCell>
