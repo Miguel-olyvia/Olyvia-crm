@@ -7,8 +7,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
-import { 
-  Search, Package, Plus, Check, X, Loader2, ChevronDown, ChevronRight, Layers, Tag
+import {
+  Search, Package, Plus, Check, X, Loader2, ChevronDown, ChevronRight, Layers, Tag, Grid3X3, List
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -117,6 +117,7 @@ interface Props {
   selectedBundles: Map<string, SelectedBundle>;
   onSelectionChange: (bundles: Map<string, SelectedBundle>) => void;
   viewMode: "grid" | "list";
+  onViewModeChange: (mode: "grid" | "list") => void;
 }
 
 // Medido com EXPLAIN ANALYZE (RLS ativo, role authenticated) na Mudelar:
@@ -152,7 +153,7 @@ function escapePostgrestOrTerm(term: string): string {
   return term.replace(/[%,()*]/g, " ").trim();
 }
 
-export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMode }: Props) {
+export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMode, onViewModeChange }: Props) {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -341,10 +342,13 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
       }
     } catch (error) {
       if (generation !== loadGenerationRef.current) return;
-      console.error("Error loading bundles:", error);
-      const description = getErrorDescription(error);
+      // Detalhe técnico (mensagem bruta do PostgREST/Supabase) fica apenas no
+      // console para depuração; o utilizador final vê sempre uma mensagem
+      // normal e traduzida (ver bundles.toast.errorLoadingDescription).
+      console.error("Error loading bundles:", getErrorDescription(error), error);
+      const description = t('bundles.toast.errorLoadingDescription');
       // Um lote falhado não descarta os bundles já carregados: fica visível
-      // o que já chegou e a mensagem de erro real, permitindo repetir o lote.
+      // o que já chegou e a mensagem de erro amigável, permitindo repetir o lote.
       setLoadError(description);
       toast({
         title: t('bundles.toast.errorLoading'),
@@ -836,25 +840,55 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
 
   return (
     <div className="space-y-4">
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t('bundles.searchPlaceholder')}
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10 h-10"
-        />
-        {searchTerm && (
+      <div className="flex gap-3">
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={t('bundles.searchPlaceholder')}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10 h-10"
+          />
+          {searchTerm && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+              onClick={() => setSearchTerm("")}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+
+        {/* View toggle */}
+        <div className="flex border rounded-lg overflow-hidden">
           <Button
-            variant="ghost"
+            variant={viewMode === "grid" ? "secondary" : "ghost"}
             size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
-            onClick={() => setSearchTerm("")}
+            className="rounded-none h-10 w-10"
+            onClick={() => onViewModeChange("grid")}
           >
-            <X className="h-4 w-4" />
+            <Grid3X3 className="h-4 w-4" />
           </Button>
-        )}
+          <Button
+            variant={viewMode === "list" ? "secondary" : "ghost"}
+            size="icon"
+            className="rounded-none h-10 w-10"
+            onClick={() => onViewModeChange("list")}
+          >
+            <List className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Results count */}
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">
+          {t('bundles.resultsFound', { count: bundles.length })}
+          {hasMore && t('bundles.resultsFoundScrollHint')}
+        </span>
       </div>
 
       {/* Results */}

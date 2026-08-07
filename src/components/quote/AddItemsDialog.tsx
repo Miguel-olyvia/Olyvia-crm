@@ -1799,6 +1799,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                   selectedBundles={selectedBundles}
                   onSelectionChange={setSelectedBundles}
                   viewMode={viewMode}
+                  onViewModeChange={setViewMode}
                 />
               </div>
             ) : (
