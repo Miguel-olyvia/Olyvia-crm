@@ -482,7 +482,11 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id && canView && !scopeLoading,
   });
 
-  // Load portal statuses for contracts.
+  // Load portal statuses for contracts — derived per document (document_id) so
+  // "Acedido" never leaks from one contract to another sent to the same client.
+  // `client_portal_users.portal_status` is a single value shared by every
+  // document sent to that portal user, so it can't tell contracts apart; the
+  // per-document tables/log below can.
   // Uses a cancelled flag to prevent a stale async call (triggered by the previous
   // activeCompany) from overwriting state that was already set by the new one.
   useEffect(() => {
@@ -490,42 +494,41 @@ const ClientContracts = () => {
     let cancelled = false;
     const loadPortalStatuses = async () => {
       const contractIds = contracts.map((c: any) => c.id);
-      const { data: portalUsers } = await (supabase as any)
-        .from("client_portal_users")
-        .select("id, contract_id, portal_status")
-        .eq("organization_id", activeCompany.id)
-        .in("contract_id", contractIds);
-      if (cancelled) return;
-      const statusMap: Record<string, string> = {};
-      (portalUsers || []).forEach((pu: any) => {
-        if (pu.contract_id) statusMap[pu.contract_id] = pu.portal_status;
-      });
 
-      // The legacy `client_portal_users.contract_id` column only stores the LAST
-      // contract sent to that portal user — if a second contract is later sent,
-      // the first one silently disappears from portal-status tracking even though
-      // the backend (create-client-portal-access) also recorded it in
-      // `client_portal_documents`. Union both sources so every sent contract keeps
-      // showing a portal status, not just the most recent one.
-      const portalUserIds = (portalUsers || []).map((pu: any) => pu.id).filter(Boolean);
-      if (portalUserIds.length > 0) {
-        const { data: docs } = await (supabase as any)
-          .from("client_portal_documents")
-          .select("portal_user_id, document_id")
-          .in("portal_user_id", portalUserIds)
+      // "sent": this specific contract was published to the portal.
+      const { data: sentDocs } = await (supabase as any)
+        .from("client_portal_documents")
+        .select("document_id")
+        .eq("organization_id", activeCompany.id)
+        .eq("document_type", "contract")
+        .eq("is_visible", true)
+        .in("document_id", contractIds);
+      if (cancelled) return;
+      const sentIds = (sentDocs || []).map((d: any) => d.document_id).filter(Boolean);
+      const sentSet = new Set(sentIds);
+
+      // "viewed": client-portal-action's log_view recorded an actual "viewed"
+      // event for THIS document_id — only counted for contracts already sent.
+      let viewedSet = new Set<string>();
+      if (sentIds.length > 0) {
+        const { data: viewLogs } = await (supabase as any)
+          .from("client_portal_access_log")
+          .select("document_id")
           .eq("document_type", "contract")
-          .eq("is_visible", true);
+          .eq("action", "viewed")
+          .in("document_id", sentIds);
         if (cancelled) return;
-        const portalUserStatusById = new Map(
-          (portalUsers || []).map((pu: any) => [pu.id, pu.portal_status])
-        );
-        (docs || []).forEach((doc: any) => {
-          if (doc.document_id && !statusMap[doc.document_id]) {
-            const status = portalUserStatusById.get(doc.portal_user_id);
-            if (status) statusMap[doc.document_id] = status;
-          }
-        });
+        viewedSet = new Set((viewLogs || []).map((d: any) => d.document_id));
       }
+
+      // "signed": read straight off client_contracts.status — the ground truth
+      // written by sign_contract, so it can't be stale or shared between contracts.
+      const statusMap: Record<string, string> = {};
+      contracts.forEach((c: any) => {
+        if (c.status === "signed" || c.status === "active") statusMap[c.id] = "signed";
+        else if (viewedSet.has(c.id)) statusMap[c.id] = "viewed";
+        else if (sentSet.has(c.id)) statusMap[c.id] = "sent";
+      });
 
       setContractPortalStatuses(statusMap);
     };
