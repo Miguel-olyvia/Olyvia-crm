@@ -264,11 +264,20 @@ export default function TeamHub() {
         })
         .eq("id", editingEntry.id)
         .select()
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error("[TeamHub] update error:", error);
         toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
+        return;
+      }
+      if (!data) {
+        console.error("[TeamHub] update affected 0 rows for entry:", editingEntry.id);
+        toast({
+          title: "Erro ao atualizar",
+          description: "Não tens permissão para editar esta entrada, ou ela já não existe.",
+          variant: "destructive",
+        });
         return;
       }
       // Update local state immediately
