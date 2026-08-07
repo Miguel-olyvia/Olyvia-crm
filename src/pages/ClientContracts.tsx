@@ -482,7 +482,11 @@ const ClientContracts = () => {
     enabled: !!activeCompany?.id && canView && !scopeLoading,
   });
 
-  // Load portal statuses for contracts.
+  // Load portal statuses for contracts — derived per document (document_id) so
+  // "Acedido" never leaks from one contract to another sent to the same client.
+  // `client_portal_users.portal_status` is a single value shared by every
+  // document sent to that portal user, so it can't tell contracts apart; the
+  // per-document tables/log below can.
   // Uses a cancelled flag to prevent a stale async call (triggered by the previous
   // activeCompany) from overwriting state that was already set by the new one.
   useEffect(() => {
@@ -490,42 +494,41 @@ const ClientContracts = () => {
     let cancelled = false;
     const loadPortalStatuses = async () => {
       const contractIds = contracts.map((c: any) => c.id);
-      const { data: portalUsers } = await (supabase as any)
-        .from("client_portal_users")
-        .select("id, contract_id, portal_status")
-        .eq("organization_id", activeCompany.id)
-        .in("contract_id", contractIds);
-      if (cancelled) return;
-      const statusMap: Record<string, string> = {};
-      (portalUsers || []).forEach((pu: any) => {
-        if (pu.contract_id) statusMap[pu.contract_id] = pu.portal_status;
-      });
 
-      // The legacy `client_portal_users.contract_id` column only stores the LAST
-      // contract sent to that portal user — if a second contract is later sent,
-      // the first one silently disappears from portal-status tracking even though
-      // the backend (create-client-portal-access) also recorded it in
-      // `client_portal_documents`. Union both sources so every sent contract keeps
-      // showing a portal status, not just the most recent one.
-      const portalUserIds = (portalUsers || []).map((pu: any) => pu.id).filter(Boolean);
-      if (portalUserIds.length > 0) {
-        const { data: docs } = await (supabase as any)
-          .from("client_portal_documents")
-          .select("portal_user_id, document_id")
-          .in("portal_user_id", portalUserIds)
+      // "sent": this specific contract was published to the portal.
+      const { data: sentDocs } = await (supabase as any)
+        .from("client_portal_documents")
+        .select("document_id")
+        .eq("organization_id", activeCompany.id)
+        .eq("document_type", "contract")
+        .eq("is_visible", true)
+        .in("document_id", contractIds);
+      if (cancelled) return;
+      const sentIds = (sentDocs || []).map((d: any) => d.document_id).filter(Boolean);
+      const sentSet = new Set(sentIds);
+
+      // "viewed": client-portal-action's log_view recorded an actual "viewed"
+      // event for THIS document_id — only counted for contracts already sent.
+      let viewedSet = new Set<string>();
+      if (sentIds.length > 0) {
+        const { data: viewLogs } = await (supabase as any)
+          .from("client_portal_access_log")
+          .select("document_id")
           .eq("document_type", "contract")
-          .eq("is_visible", true);
+          .eq("action", "viewed")
+          .in("document_id", sentIds);
         if (cancelled) return;
-        const portalUserStatusById = new Map(
-          (portalUsers || []).map((pu: any) => [pu.id, pu.portal_status])
-        );
-        (docs || []).forEach((doc: any) => {
-          if (doc.document_id && !statusMap[doc.document_id]) {
-            const status = portalUserStatusById.get(doc.portal_user_id);
-            if (status) statusMap[doc.document_id] = status;
-          }
-        });
+        viewedSet = new Set((viewLogs || []).map((d: any) => d.document_id));
       }
+
+      // "signed": read straight off client_contracts.status — the ground truth
+      // written by sign_contract, so it can't be stale or shared between contracts.
+      const statusMap: Record<string, string> = {};
+      contracts.forEach((c: any) => {
+        if (c.status === "signed" || c.status === "active") statusMap[c.id] = "signed";
+        else if (viewedSet.has(c.id)) statusMap[c.id] = "viewed";
+        else if (sentSet.has(c.id)) statusMap[c.id] = "sent";
+      });
 
       setContractPortalStatuses(statusMap);
     };
@@ -763,7 +766,7 @@ const ClientContracts = () => {
     if (drafts.length > 0) {
       const d = drafts[0];
       parts.push(`O contrato de ${d._clientName || "?"} (${formatCurrency(getEffectiveContractValue(d))}) foi criado automaticamente pelo workflow mas está em Draft. Contratos não enviados em 48h têm 25% menos probabilidade de serem assinados. Sugerimos enviar para assinatura agora.`);
-      actions.push({ label: `Enviar ${(d._clientName || "").split(" ")[0]}`, action: "send_signature", contract: d });
+      if (canSendSignature) actions.push({ label: `Enviar ${(d._clientName || "").split(" ")[0]}`, action: "send_signature", contract: d });
     }
     const sentOld = contracts.filter(c => {
       if (c.status !== "pending_signature") return false;
@@ -782,7 +785,7 @@ const ClientContracts = () => {
     }
 
     return { text: parts.join(" "), actions };
-  }, [contracts]);
+  }, [contracts, canSendSignature]);
 
   const applyPromptValues = (html: string, promptValues?: Record<string, string>): string => {
     if (!promptValues) return html;
@@ -1356,6 +1359,11 @@ const ClientContracts = () => {
       return <span className="text-xs text-green-600 font-medium">✍️ Assinado {date}</span>;
     }
     if (contract.status === "pending_signature") return <span className="text-xs text-yellow-600 font-medium">✍️ A aguardar assinatura</span>;
+    // Draft in the CRM's signature flow, but already published to the portal
+    // (someone used "Enviar para Portal Cliente" without also clicking "Marcar
+    // como Enviado") — reflect that it really was sent, instead of contradicting
+    // the portal status badge with "Não enviado".
+    if (contractPortalStatuses[contract.id]) return <span className="text-xs text-blue-600 font-medium">✍️ Enviado</span>;
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
   };
 
@@ -1798,9 +1806,19 @@ const ClientContracts = () => {
                       <TableCell>{getProgressBar(contract)}</TableCell>
                       <TableCell>{getRenewalBadge(contract)}</TableCell>
                       <TableCell>
-                        <Badge variant="secondary" className={statusColors[contract.status] || ""}>
-                          {statusEmojis[contract.status]} {getTranslatedStatus(contract.status)}
-                        </Badge>
+                        {(() => {
+                          // Draft but already published to the portal — show it as
+                          // "Enviado" (reuses the pending_signature label/color) so
+                          // this badge doesn't contradict the portal status column.
+                          const displayStatus = contract.status === "draft" && contractPortalStatuses[contract.id]
+                            ? "pending_signature"
+                            : contract.status;
+                          return (
+                            <Badge variant="secondary" className={statusColors[displayStatus] || ""}>
+                              {statusEmojis[displayStatus]} {getTranslatedStatus(displayStatus)}
+                            </Badge>
+                          );
+                        })()}
                       </TableCell>
                       <TableCell>{getSignatureBadge(contract)}</TableCell>
                       <TableCell>
@@ -1879,23 +1897,31 @@ const ClientContracts = () => {
                             <DropdownMenuContent align="end" className="w-56">
                               {contract.status === "draft" && (
                                 <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
+                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
+                                      <DropdownMenuSeparator />
+                                    </>
+                                  )}
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                     <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
                                   </DropdownMenuItem>
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
@@ -1924,14 +1950,18 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
@@ -1958,15 +1988,19 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                   <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                     <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                   </DropdownMenuItem>
-                                   <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                     🔗 Copiar link do portal
-                                   </DropdownMenuItem>
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>}
+                                  {canSendSignature && (
+                                    <>
+                                      <DropdownMenuSeparator />
+                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
+                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
+                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
+                                        🔗 Copiar link do portal
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
@@ -1981,8 +2015,8 @@ const ClientContracts = () => {
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>}
+                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>}
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
