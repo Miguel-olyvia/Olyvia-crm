@@ -398,7 +398,12 @@ Deno.serve(async (req: Request) => {
       .eq('id', assignedResourceId)
       .maybeSingle();
 
-    if (assignedResource?.resource_type === 'user' && assignedResource?.user_id) {
+    // Any resource linked to a user hands the lead to that user. The previous
+    // `resource_type === 'user'` guard meant technicians stored under any other
+    // resource_type were skipped, and the lead fell back to the arbitrary
+    // organization member picked earlier — so the person doing the visit and
+    // the lead's owner were different people.
+    if (assignedResource?.user_id) {
       assignedToAnewId = assignedResource.user_id;
     }
 
@@ -512,22 +517,6 @@ Deno.serve(async (req: Request) => {
     }
 
     // Update lead with scheduled_visit_id
-    // The lead's owner must be whoever is actually doing the visit. Until now
-    // assignedToAnewId was picked before the resource was known — the first
-    // active membership of the organization, effectively at random — and the
-    // later fallbacks used `||`, so that arbitrary value always won and the
-    // assigned technician's user was never used. Resolve it from the resource
-    // that ended up with the booking, and let it override.
-    const { data: assignedResource } = await supabase
-      .from('schedule_resources')
-      .select('user_id')
-      .eq('id', assignedResourceId)
-      .maybeSingle();
-
-    if (assignedResource?.user_id) {
-      assignedToAnewId = assignedResource.user_id; // anew_users.id
-    }
-
     const leadUpdate: Record<string, any> = {
       scheduled_visit_id: scheduleItem.id,
       callback_scheduled_at: slot_start,
