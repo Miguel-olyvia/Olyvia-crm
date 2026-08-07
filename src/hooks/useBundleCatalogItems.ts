@@ -4,6 +4,14 @@ import { resolveOrgSubtree } from "@/lib/orgSubtree";
 
 const PAGE_SIZE = 30;
 
+// Escapa caracteres com significado especial no filtro .or() do PostgREST
+// (`,` separa condições, `(`/`)` delimitam grupos, `%`/`*` são wildcards do
+// ilike) para que um termo de pesquisa com esses caracteres não provoque um
+// erro de sintaxe do filtro (ex.: "Cadeira, Mesa (2un)").
+function escapePostgrestOrTerm(term: string): string {
+  return term.replace(/[%,()*]/g, " ").trim();
+}
+
 export interface CatalogItem {
   id: string;
   name: string;
@@ -24,6 +32,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [itemType, setItemType] = useState<'product' | 'service'>('product');
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -31,6 +40,9 @@ export function useBundleCatalogItems(companyId: string | undefined) {
   const cacheRef = useRef<Record<string, CacheEntry>>({});
   const abortControllerRef = useRef<AbortController | null>(null);
   const orgIdsRef = useRef<string[] | null>(null);
+  // Incrementado sempre que tipo/pesquisa/empresa mudam, para que o autoload
+  // em cadeia de um pedido anterior saiba que ficou obsoleto e pare.
+  const loadGenerationRef = useRef(0);
 
   // Resolve descendant orgs once per companyId so we include shared/sub-org items
   useEffect(() => {
@@ -71,6 +83,8 @@ export function useBundleCatalogItems(companyId: string | undefined) {
     }
     abortControllerRef.current = new AbortController();
 
+    const generation = append ? loadGenerationRef.current : ++loadGenerationRef.current;
+
     const cacheKey = getCacheKey(type, search);
 
     // Check cache for initial load
@@ -83,6 +97,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
     }
 
     setLoading(true);
+    if (!append) setLoadError(null);
 
     try {
       const searchLower = search.trim().toLowerCase();
@@ -95,35 +110,53 @@ export function useBundleCatalogItems(companyId: string | undefined) {
         : [companyId];
 
       if (type === 'product') {
+        // Não fazer o embed `product_prices!inner(...)` junto com o filtro de
+        // organização/paginação: medido com EXPLAIN ANALYZE (RLS ativo), esse
+        // JOIN obriga o Postgres a avaliar a política RLS de product_prices
+        // (que reexecuta uma verificação de admin por LINHA) sobre TODOS os
+        // produtos da organização antes de aplicar o LIMIT — 700ms a 3,6s por
+        // pedido, independentemente do tamanho da página. Em vez disso,
+        // paginamos só a lista de produtos e carregamos os preços à parte
+        // para os IDs da página, tal como já era feito para os serviços.
         let query = supabase
           .from("products")
-          .select(`
-            id, name, sku,
-            product_prices!inner(price, price_type)
-          `)
+          .select("id, name, sku")
           .in("organization_id", orgIds)
           .eq("is_active", true)
           .eq("status", "active")
           .is("deleted_at", null)
-          .eq("product_prices.price_type", "retail")
           .order("name")
           .range(offset, offset + PAGE_SIZE - 1);
 
-        if (searchLower) {
-          query = query.or(`name.ilike.%${searchLower}%,sku.ilike.%${searchLower}%`);
+        const safeSearch = escapePostgrestOrTerm(search);
+        if (safeSearch) {
+          query = query.or(`name.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%`);
         }
 
         const { data, error } = await query;
         if (error) throw error;
 
-        fetchedItems = (data || []).map(p => ({
+        const productsData = data || [];
+        const productIds = productsData.map(p => p.id);
+
+        const priceMap = new Map<string, number>();
+        if (productIds.length > 0) {
+          const { data: pricesData } = await supabase
+            .from("product_prices")
+            .select("product_id, price")
+            .in("product_id", productIds)
+            .eq("price_type", "retail");
+          (pricesData || []).forEach(p => priceMap.set(p.product_id, p.price));
+        }
+
+        fetchedItems = productsData.map(p => ({
           id: p.id,
           name: p.name,
           sku: p.sku,
           type: 'product' as const,
-          retail_price: (p.product_prices as any)?.[0]?.price || 0,
+          retail_price: priceMap.get(p.id) || 0,
         }));
-        totalFetched = data?.length || 0;
+        totalFetched = productsData.length;
       } else {
         // Services - fetch services first, then batch load prices
         const servicesQuery = supabase
@@ -188,28 +221,48 @@ export function useBundleCatalogItems(companyId: string | undefined) {
         }
       }
 
+      // Pedido de uma geração anterior (tipo/pesquisa/empresa já mudaram)
+      // chegou tarde: ignora para não misturar lotes de gerações diferentes.
+      if (generation !== loadGenerationRef.current) return;
+
       const newHasMore = totalFetched === PAGE_SIZE;
 
       if (append) {
-        setItems(prev => [...prev, ...fetchedItems]);
+        setItems(prev => {
+          const next = [...prev, ...fetchedItems];
+          // Cacheia a lista acumulada só quando o autoload em cadeia termina
+          // (não há mais lotes), para não guardar resultados parciais.
+          if (!newHasMore) {
+            cacheRef.current[cacheKey] = { items: next, hasMore: newHasMore, timestamp: Date.now() };
+          }
+          return next;
+        });
       } else {
         setItems(fetchedItems);
-        // Update cache for initial loads
-        cacheRef.current[cacheKey] = {
-          items: fetchedItems,
-          hasMore: newHasMore,
-          timestamp: Date.now(),
-        };
+        if (!newHasMore) {
+          cacheRef.current[cacheKey] = { items: fetchedItems, hasMore: newHasMore, timestamp: Date.now() };
+        }
       }
 
       setHasMore(newHasMore);
+      setLoadError(null);
       offsetRef.current = offset + totalFetched;
-    } catch (error: any) {
-      if (error.name !== 'AbortError') {
-        console.error('Error loading catalog items:', error);
+
+      // Autoload em cadeia: continua a pedir lotes sucessivos em segundo
+      // plano (sem depender de scroll/IntersectionObserver) até não haver
+      // mais itens, mostrando-os progressivamente à medida que chegam.
+      if (newHasMore && generation === loadGenerationRef.current) {
+        void loadItems(type, search, offset + totalFetched, true);
       }
+    } catch (error: any) {
+      if (error.name === 'AbortError') return;
+      if (generation !== loadGenerationRef.current) return;
+      console.error('Error loading catalog items:', error);
+      setLoadError(error?.message || String(error));
     } finally {
-      setLoading(false);
+      if (generation === loadGenerationRef.current) {
+        setLoading(false);
+      }
     }
   }, [companyId, getCacheKey, isCacheValid]);
 
@@ -250,6 +303,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
     items,
     loading,
     hasMore,
+    loadError,
     itemType,
     searchTerm,
     loadMore,

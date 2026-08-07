@@ -119,11 +119,13 @@ interface Props {
   viewMode: "grid" | "list";
 }
 
-// Reduzido de 50 para 20: com RLS, cada bundle da página custa ~90ms devido
-// à reavaliação de get_user_visible_org_ids em cada componente/produto/serviço,
-// o que fazia o pedido REST completo (50 bundles) demorar 8,0-8,4s — acima do
-// statement_timeout de 8s do role authenticated, causando falhas intermitentes.
-const PAGE_SIZE = 20;
+// Medido com EXPLAIN ANALYZE (RLS ativo, role authenticated) na Mudelar:
+// 50 bundles = 4,5s de custo de DB (mas o pedido REST completo chegava a
+// 8,0-8,4s, acima do statement_timeout de 8s); 20 = 2,4s; 10 = 1,1s de DB.
+// Em vez de reduzir a página e mostrar menos resultados, carregamos em lotes
+// sucessivos de 10 (ver loadBundles/autoload abaixo) até estarem todos
+// carregados, com folga real face aos 8s mesmo nos lotes mais lentos.
+const PAGE_SIZE = 10;
 
 // Extrai uma descrição legível de um erro desconhecido (Error nativo ou erro
 // do Supabase/PostgREST com message/details/hint/code) para mostrar no toast.
@@ -142,11 +144,21 @@ function getErrorDescription(error: unknown): string {
   return String(error);
 }
 
+// Escapa caracteres que têm significado especial no filtro .or() do PostgREST
+// (`,` separa condições, `(`/`)` delimitam grupos, `%`/`*` são wildcards do
+// ilike) para que um termo de pesquisa com esses caracteres não provoque um
+// erro de sintaxe do filtro (ex.: "Cadeira, Mesa (2un)").
+function escapePostgrestOrTerm(term: string): string {
+  return term.replace(/[%,()*]/g, " ").trim();
+}
+
 export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMode }: Props) {
   const [bundles, setBundles] = useState<Bundle[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [expandedBundle, setExpandedBundle] = useState<string | null>(null);
@@ -165,7 +177,11 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
   
   const currentPageRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  
+  // Incrementado sempre que a empresa ativa ou a pesquisa mudam, para que um
+  // lote em curso de um pedido anterior (autoload em cadeia) saiba que ficou
+  // obsoleto e não continue a acrescentar resultados de uma pesquisa antiga.
+  const loadGenerationRef = useRef(0);
+
   const { t } = useTranslation();
   const { toast } = useToast();
   const { activeCompany } = useCompany();
@@ -180,7 +196,9 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
   const isInitialLoadRef = useRef(true);
   const loadBundles = useCallback(async (append = false) => {
     if (!activeCompany?.id) return;
-    
+
+    const generation = append ? loadGenerationRef.current : ++loadGenerationRef.current;
+
     if (append) {
       setLoadingMore(true);
     } else {
@@ -191,6 +209,7 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         setLoadingMore(true);
       }
       currentPageRef.current = 0;
+      setLoadError(null);
     }
 
     const from = currentPageRef.current * PAGE_SIZE;
@@ -232,11 +251,16 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         .order("name")
         .range(from, to);
 
-      if (debouncedSearch) {
-        query = query.or(`name.ilike.%${debouncedSearch}%,sku.ilike.%${debouncedSearch}%`);
+      const safeSearch = escapePostgrestOrTerm(debouncedSearch);
+      if (safeSearch) {
+        query = query.or(`name.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%`);
       }
 
       const { data, error } = await query;
+
+      // Um pedido anterior (pesquisa/empresa já alterada) chegou tarde: ignora
+      // este resultado para não misturar lotes de gerações diferentes.
+      if (generation !== loadGenerationRef.current) return;
 
       if (error) throw error;
 
@@ -303,27 +327,69 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         setBundles(mappedBundles);
       }
 
-      setHasMore(mappedBundles.length === PAGE_SIZE);
+      const gotFullPage = mappedBundles.length === PAGE_SIZE;
+      setHasMore(gotFullPage);
+      setLoadError(null);
       currentPageRef.current += 1;
+
+      // Autoload em cadeia: em vez de depender do scroll do utilizador para
+      // disparar o próximo lote, continuamos a pedir lotes sucessivos de
+      // PAGE_SIZE em segundo plano, mostrando os bundles à medida que chegam,
+      // até não haver mais (hasMore=false) ou a pesquisa/empresa ter mudado.
+      if (gotFullPage && generation === loadGenerationRef.current) {
+        void loadBundles(true);
+      }
     } catch (error) {
+      if (generation !== loadGenerationRef.current) return;
       console.error("Error loading bundles:", error);
-      // Mostrar a mensagem real do erro no toast: um toast genérico escondia a
-      // causa (ex.: erro de rede, de parsing ou de RLS) e impedia o diagnóstico
-      // quando a mesma query funcionava corretamente via PostgREST direto.
+      const description = getErrorDescription(error);
+      // Um lote falhado não descarta os bundles já carregados: fica visível
+      // o que já chegou e a mensagem de erro real, permitindo repetir o lote.
+      setLoadError(description);
       toast({
         title: t('bundles.toast.errorLoading'),
-        description: getErrorDescription(error),
+        description,
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
-      isInitialLoadRef.current = false;
+      if (generation === loadGenerationRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+        isInitialLoadRef.current = false;
+      }
     }
   }, [activeCompany?.id, debouncedSearch, t, toast]);
 
   useEffect(() => {
     loadBundles(false);
+  }, [activeCompany?.id, debouncedSearch]);
+
+  // Carrega a contagem total de bundles ativos (para o indicador de
+  // progresso "X de Y"); não é crítico, por isso ignora erros silenciosamente.
+  useEffect(() => {
+    if (!activeCompany?.id) {
+      setTotalCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      let query = supabase
+        .from("bundles")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", activeCompany.id)
+        .eq("is_active", true)
+        .eq("status", "active")
+        .is("deleted_at", null);
+      const safeSearch = escapePostgrestOrTerm(debouncedSearch);
+      if (safeSearch) {
+        query = query.or(`name.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%`);
+      }
+      const { count } = await query;
+      if (!cancelled) setTotalCount(count ?? null);
+    })().catch(() => {
+      if (!cancelled) setTotalCount(null);
+    });
+    return () => { cancelled = true; };
   }, [activeCompany?.id, debouncedSearch]);
 
   // Calculate component price based on pricing mode
@@ -1191,10 +1257,22 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
           </div>
         )}
 
-        {loadingMore && (
+        {loadingMore && !loadError && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-primary mr-2" />
-            <span className="text-muted-foreground">A carregar mais...</span>
+            <span className="text-muted-foreground">
+              A carregar bundles...{" "}
+              {totalCount != null ? `${bundles.length} de ${totalCount}` : `${bundles.length} carregados`}
+            </span>
+          </div>
+        )}
+
+        {loadError && (
+          <div className="flex flex-col items-center justify-center gap-2 py-8">
+            <span className="text-sm text-destructive text-center max-w-md">{loadError}</span>
+            <Button variant="outline" size="sm" onClick={() => loadBundles(bundles.length > 0)}>
+              Tentar novamente
+            </Button>
           </div>
         )}
       </div>

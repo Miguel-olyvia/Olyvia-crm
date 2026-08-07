@@ -560,7 +560,7 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
                     </div>
                   ))}
                   
-                  {/* Infinite scroll trigger */}
+                  {/* Infinite scroll trigger — o hook já carrega em lotes sucessivos em segundo plano */}
                   <div ref={loadMoreTriggerRef} className="h-4">
                     {catalog.loading && availableItems.length > 0 && (
                       <div className="flex items-center justify-center py-2">
@@ -568,6 +568,15 @@ export default function BundleComponentsEditor({ bundleId }: BundleComponentsEdi
                       </div>
                     )}
                   </div>
+
+                  {catalog.loadError && (
+                    <div className="flex flex-col items-center gap-2 py-3">
+                      <p className="text-xs text-destructive text-center">{catalog.loadError}</p>
+                      <Button variant="outline" size="sm" onClick={() => catalog.loadMore()}>
+                        {t('common.retry') || 'Tentar novamente'}
+                      </Button>
+                    </div>
+                  )}
                 </>
               )}
             </div>

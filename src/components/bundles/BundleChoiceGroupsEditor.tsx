@@ -658,11 +658,19 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
                         <p className="font-semibold shrink-0">{formatCurrency(item.retail_price)}</p>
                       </div>
                     ))}
-                    {/* Infinite scroll sentinel */}
+                    {/* Infinite scroll sentinel — o hook já carrega em lotes sucessivos em segundo plano */}
                     {catalog.hasMore && (
                       <div ref={loadMoreTriggerRef} className="flex items-center justify-center py-4 text-sm text-muted-foreground gap-2">
                         {catalog.loading && <Loader2 className="h-4 w-4 animate-spin" />}
                         {catalog.loading ? t('common.loading') : ''}
+                      </div>
+                    )}
+                    {catalog.loadError && (
+                      <div className="flex flex-col items-center gap-2 py-3">
+                        <p className="text-xs text-destructive text-center">{catalog.loadError}</p>
+                        <Button variant="outline" size="sm" onClick={() => catalog.loadMore()}>
+                          {t('common.retry') || 'Tentar novamente'}
+                        </Button>
                       </div>
                     )}
                   </>
