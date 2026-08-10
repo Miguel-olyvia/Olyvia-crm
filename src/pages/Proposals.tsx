@@ -3304,7 +3304,7 @@ const Proposals = () => {
                               />
                             </TableCell>
                             <TableCell>
-                              <PortalStatusBadge status={(portalStatuses as any)?.[proposal.id] || null} />
+                              <PortalStatusBadge status={proposal.status === 'accepted' ? 'signed' : ((portalStatuses as any)?.[proposal.id] || null)} />
                             </TableCell>
                             <TableCell className="text-sm text-muted-foreground">
                               {format(new Date(proposal.created_at), "dd/MM/yyyy", { locale: pt })}

@@ -1,178 +1,45 @@
 import { PDFDocument } from 'pdf-lib';
-import { createRoot } from 'react-dom/client';
-import { createElement } from 'react';
-import { toCanvas } from 'html-to-image';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
-import { ProposalPortalDocument } from '@/components/proposals/ProposalPortalDocument';
-import { loadProposalPortalData, type ProposalPortalData } from '@/components/proposals/proposalPortalData';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
-const STATUS_LABELS: Record<string, string> = {
-  sent: 'A aguardar decisão',
-  pending: 'A aguardar decisão',
-  draft: 'Rascunho',
-  accepted: 'Proposta aceite',
-  rejected: 'Proposta rejeitada',
-  expired: 'Proposta expirada',
-};
+// Proposal-type templates ("Templates de Proposta") use a different section
+// layout convention (client_info/company_info as "card"/"inline" blocks)
+// than quote-type templates (`layout: "quote_pdf"`), which is the only
+// convention QuotePDFDocument's items table/bundle rendering actually knows
+// how to lay out correctly. Swapping the whole template object for a
+// proposal-type one breaks that layout (overlapping bundle rows). Instead,
+// keep the quote-compatible template's structure and only patch the visible
+// branding — title, colors, footer/terms/thank-you text — from the
+// proposal's own selected template on top of it.
+function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate: any | null) {
+  if (!proposalTemplate) return structuralTemplate;
+  if (!structuralTemplate) return proposalTemplate;
 
-// Thrown when the DOM-screenshot capture of the portal template comes back
-// blank — lets generateProposalPdfBlob() tell this apart from other failures
-// (data loading, etc.) and fall back to the vectorial quote-based PDF instead
-// of surfacing an error to the user.
-class BlankCaptureError extends Error {}
+  const proposalHeaderTitle = Array.isArray(proposalTemplate.sections)
+    ? proposalTemplate.sections.find((s: any) => s?.type === 'header')?.settings?.customTitle
+    : null;
 
-// 1x1 transparent PNG used as a fallback whenever html-to-image fails to
-// embed a remote image (e.g. logo CORS/404) — without this it silently
-// substitutes an empty string, which can break rasterization downstream.
-const TRANSPARENT_PIXEL =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const sections = Array.isArray(structuralTemplate.sections)
+    ? structuralTemplate.sections.map((s: any) =>
+        s?.type === 'header' && proposalHeaderTitle
+          ? { ...s, settings: { ...s.settings, customTitle: proposalHeaderTitle } }
+          : s
+      )
+    : structuralTemplate.sections;
 
-// html-to-image can "succeed" (canvas.onload fires, no exception) while the
-// foreignObject/SVG failed to rasterize, leaving a uniformly blank canvas.
-// Detect that by sampling a downscaled copy instead of trusting the promise
-// resolving cleanly.
-function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
-  const sampleSize = 64;
-  const sampleCanvas = document.createElement('canvas');
-  sampleCanvas.width = sampleSize;
-  sampleCanvas.height = sampleSize;
-  const ctx = sampleCanvas.getContext('2d');
-  if (!ctx) return false; // can't verify — don't block the download on this
-  ctx.drawImage(canvas, 0, 0, sampleSize, sampleSize);
-  const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
-  const [r0, g0, b0, a0] = data;
-  for (let i = 4; i < data.length; i += 4) {
-    if (data[i] !== r0 || data[i + 1] !== g0 || data[i + 2] !== b0 || data[i + 3] !== a0) {
-      return false; // some variation found — has real content
-    }
-  }
-  return true; // uniform color across the whole sample — treat as blank
-}
-
-async function waitForImages(container: HTMLElement, timeoutMs = 5000): Promise<void> {
-  const imgs = Array.from(container.querySelectorAll('img'));
-  if (imgs.length === 0) return;
-  await Promise.all(
-    imgs.map((img) =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>((resolve) => {
-            const tid = setTimeout(resolve, timeoutMs);
-            img.onload = () => { clearTimeout(tid); resolve(); };
-            img.onerror = () => { clearTimeout(tid); resolve(); };
-          })
-    )
-  );
-}
-
-async function generateFromPortalTemplate(
-  portalData: ProposalPortalData,
-): Promise<{ blob: Blob; fileName: string }> {
-  const { proposal, template, quotes, quoteLines, quoteFees, commercial, company } = portalData;
-  const statusLabel = STATUS_LABELS[proposal.status as string] || (proposal.status as string);
-
-  const container = document.createElement('div');
-  Object.assign(container.style, {
-    position: 'fixed',
-    top: '0',
-    left: '-9999px',
-    width: '900px',
-    background: '#ffffff',
-    zIndex: '-1',
-    overflow: 'visible',
-  });
-  document.body.appendChild(container);
-
-  let root: ReturnType<typeof createRoot> | null = null;
-
-  try {
-    root = createRoot(container);
-    root.render(
-      createElement(ProposalPortalDocument, {
-        proposal,
-        template,
-        quotes,
-        quoteLines,
-        quoteFees,
-        commercial,
-        company,
-        mode: 'preview',
-        statusLabel,
-        canActOnProposal: false,
-      })
-    );
-
-    // Give React a tick to commit, then wait for fonts + images to settle
-    await new Promise<void>((r) => setTimeout(r, 100));
-    await document.fonts.ready;
-    await waitForImages(container);
-    await new Promise<void>((r) => setTimeout(r, 300));
-
-    const fullWidth = 900;
-    const fullHeight = Math.max(container.offsetHeight, 1200);
-
-    const captureOptions = {
-      width: fullWidth,
-      height: fullHeight,
-      pixelRatio: 2,
-      cacheBust: true,
-      imagePlaceholder: TRANSPARENT_PIXEL,
-      fetchRequestInit: { mode: 'cors' as RequestMode, cache: 'no-store' as RequestCache },
-    };
-
-    let canvas = await toCanvas(container, captureOptions);
-
-    if (isCanvasBlank(canvas)) {
-      console.warn('[generateProposalPdfBlob] Captura inicial do PDF saiu em branco — a tentar novamente com pixelRatio reduzido.');
-      canvas = await toCanvas(container, { ...captureOptions, pixelRatio: 1 });
-    }
-
-    if (isCanvasBlank(canvas)) {
-      throw new BlankCaptureError('Captura do template da proposta saiu em branco.');
-    }
-
-    const dataUrl = canvas.toDataURL('image/png');
-
-    // A4 dimensions in PDF points (72 dpi)
-    const A4_W = 595.28;
-    const A4_H = 841.89;
-    const scale = A4_W / fullWidth;
-    const scaledH = fullHeight * scale;
-    const numPages = Math.ceil(scaledH / A4_H);
-
-    const pdfDoc = await PDFDocument.create();
-    const pngImage = await pdfDoc.embedPng(dataUrl);
-
-    for (let i = 0; i < numPages; i++) {
-      const page = pdfDoc.addPage([A4_W, A4_H]);
-      // PDF y-axis: 0=bottom, A4_H=top — shift image so page i shows the correct slice
-      page.drawImage(pngImage, {
-        x: 0,
-        y: A4_H - scaledH + i * A4_H,
-        width: A4_W,
-        height: scaledH,
-      });
-    }
-
-    const bytes = await pdfDoc.save();
-    const ab = bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    ) as ArrayBuffer;
-    const blob = new Blob([ab], { type: 'application/pdf' });
-    const safeNumber = (proposal.proposal_number as string) || (proposal.id as string);
-    const fileName = `Proposta_${safeNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
-
-    return { blob, fileName };
-  } finally {
-    try { root?.unmount(); } catch { /* ignore unmount errors */ }
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
-    }
-  }
+  return {
+    ...structuralTemplate,
+    sections,
+    primary_color: proposalTemplate.primary_color ?? structuralTemplate.primary_color,
+    secondary_color: proposalTemplate.secondary_color ?? structuralTemplate.secondary_color,
+    accent_color: proposalTemplate.accent_color ?? structuralTemplate.accent_color,
+    logo_url: proposalTemplate.logo_url ?? structuralTemplate.logo_url,
+    footer_text: proposalTemplate.footer_text ?? structuralTemplate.footer_text,
+    terms_conditions: proposalTemplate.terms_conditions ?? structuralTemplate.terms_conditions,
+    thank_you_message: proposalTemplate.thank_you_message ?? structuralTemplate.thank_you_message,
+  };
 }
 
 async function generateFromQuotePdfs(
@@ -186,12 +53,10 @@ async function generateFromQuotePdfs(
     .maybeSingle();
   if (propErr) throw propErr;
 
-  // Fallback template (used only if a quote has no template_id of its own).
-  // Each quote is rendered with ITS OWN template — that's the layout the user
-  // configured on the quote and expects to see in the proposal.
-  const fallbackTemplate =
-    (await fetchQuotePdfTemplateById(proposal?.template_id))
-    ?? (await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null));
+  // Template explicitly selected on the proposal — used for branding only
+  // (see mergeProposalBranding above), never as the structural template.
+  const explicitProposalTemplate = await fetchQuotePdfTemplateById(proposal?.template_id);
+  const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
 
   // Resolve quote ids linked to this proposal
   const { data: quotes, error: quotesErr } = await (supabase as any)
@@ -262,11 +127,14 @@ async function generateFromQuotePdfs(
 
   for (const quote of resolvedQuotes) {
     try {
-      // Prefer the quote's own template; fall back to the proposal/org template.
-      const quoteOwnTemplate = quote.template_id
+      // Structural template: the quote's own (compatible layout for the
+      // items table/bundles), falling back to the org default quote template.
+      const structuralTemplate = (quote.template_id
         ? await fetchQuotePdfTemplateById(quote.template_id)
-        : null;
-      const templateForQuote = quoteOwnTemplate ?? fallbackTemplate;
+        : null) ?? orgDefaultTemplate;
+      // Branding on top: the proposal's own selected template (title, colors,
+      // footer/terms/thank-you), when one is configured.
+      const templateForQuote = mergeProposalBranding(structuralTemplate, explicitProposalTemplate);
       const isLastQuote = quote.id === lastQuoteId;
       // Mark this render as proposal-context so a quote missing a variable
       // referenced only by the proposal template renders (blank/placeholder)
@@ -308,32 +176,14 @@ async function generateFromQuotePdfs(
 }
 
 /**
- * Generate a single PDF blob for a proposal.
- * - If the proposal has a portal template selected → renders ProposalPortalDocument as HTML → PDF
- *   (respects the layout/brand the user configured in "Template de Proposta")
- * - Otherwise → falls back to merging the PDFs of its associated quotes (legacy behaviour)
+ * Generate a single PDF blob for a proposal by merging the vectorial PDFs of
+ * its associated quotes (each rendered with its own configured template, in
+ * proposal document context — hence the "Proposta ..." title/number instead
+ * of "Orçamento"/quote number).
  */
 export async function generateProposalPdfBlob(
   proposalId: string,
 ): Promise<{ blob: Blob; fileName: string }> {
-  const portalData = await loadProposalPortalData(proposalId);
-
-  if (portalData?.template) {
-    try {
-      return await generateFromPortalTemplate(portalData);
-    } catch (e) {
-      if (e instanceof BlankCaptureError) {
-        // The branded template render came back blank (CORS/rasterization
-        // issue with html-to-image) — fall back to the vectorial per-quote
-        // PDF so the user still gets the proposal's information, instead of
-        // an error dialog.
-        console.warn('[generateProposalPdfBlob] Portal template capture failed, falling back to quote-based PDF:', e.message);
-        return generateFromQuotePdfs(proposalId);
-      }
-      throw e;
-    }
-  }
-
   return generateFromQuotePdfs(proposalId);
 }
 
