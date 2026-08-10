@@ -15,12 +15,13 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2, PenTool } from "lucide-react";
+import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
+import { injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
 
 const REJECTION_REASONS = [
   "Condições não adequadas",
@@ -371,65 +372,26 @@ const ClientPortalContractDetail = () => {
             <CardContent>
               <div
                 className="prose prose-sm max-w-none dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(contract.contract_body_html) }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(
+                    injectSignaturesIntoBlock(
+                      contract.contract_body_html,
+                      {
+                        signed: !!contract.company_signature_date,
+                        name: contract.company_signed_by_name,
+                        showOtpBadge: false,
+                      },
+                      {
+                        signed: !!contract.signature_date,
+                        name: contract.signed_by_name,
+                        signedAt: contract.signature_date,
+                        ip: contract.signature_ip,
+                        showOtpBadge: true,
+                      },
+                    ),
+                  ),
+                }}
               />
-              {/* Signature block at the end of the contract */}
-              {(contract.company_signature_date || contract.signature_date) && (
-                <div className="mt-10 pt-6 border-t-2 border-dashed border-muted">
-                  <div className="flex flex-col sm:flex-row justify-between gap-8">
-                    {/* Company (First Party) */}
-                    <div className="text-center">
-                      {contract.company_signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-blue-600">
-                            <PenTool className="h-4 w-4" />
-                            <span className="text-sm font-bold">Assinado</span>
-                          </div>
-                          {contract.company_signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.company_signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.company_signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.company_signature_date ? "border-blue-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">A PRIMEIRA CONTRATANTE</p>
-                    </div>
-
-                    {/* Client (Second Party) */}
-                    <div className="text-center">
-                      {contract.signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-emerald-600">
-                            <ShieldCheck className="h-5 w-5" />
-                            <span className="text-sm font-bold">Assinado via SMS OTP</span>
-                          </div>
-                          {contract.signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                          </p>
-                          {contract.signature_ip && (
-                            <p className="text-xs text-muted-foreground">IP: {contract.signature_ip}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.signature_date ? "border-emerald-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">O SEGUNDO CONTRATANTE</p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
