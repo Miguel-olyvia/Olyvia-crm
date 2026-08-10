@@ -4,6 +4,44 @@ import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
+// Proposal-type templates ("Templates de Proposta") use a different section
+// layout convention (client_info/company_info as "card"/"inline" blocks)
+// than quote-type templates (`layout: "quote_pdf"`), which is the only
+// convention QuotePDFDocument's items table/bundle rendering actually knows
+// how to lay out correctly. Swapping the whole template object for a
+// proposal-type one breaks that layout (overlapping bundle rows). Instead,
+// keep the quote-compatible template's structure and only patch the visible
+// branding — title, colors, footer/terms/thank-you text — from the
+// proposal's own selected template on top of it.
+function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate: any | null) {
+  if (!proposalTemplate) return structuralTemplate;
+  if (!structuralTemplate) return proposalTemplate;
+
+  const proposalHeaderTitle = Array.isArray(proposalTemplate.sections)
+    ? proposalTemplate.sections.find((s: any) => s?.type === 'header')?.settings?.customTitle
+    : null;
+
+  const sections = Array.isArray(structuralTemplate.sections)
+    ? structuralTemplate.sections.map((s: any) =>
+        s?.type === 'header' && proposalHeaderTitle
+          ? { ...s, settings: { ...s.settings, customTitle: proposalHeaderTitle } }
+          : s
+      )
+    : structuralTemplate.sections;
+
+  return {
+    ...structuralTemplate,
+    sections,
+    primary_color: proposalTemplate.primary_color ?? structuralTemplate.primary_color,
+    secondary_color: proposalTemplate.secondary_color ?? structuralTemplate.secondary_color,
+    accent_color: proposalTemplate.accent_color ?? structuralTemplate.accent_color,
+    logo_url: proposalTemplate.logo_url ?? structuralTemplate.logo_url,
+    footer_text: proposalTemplate.footer_text ?? structuralTemplate.footer_text,
+    terms_conditions: proposalTemplate.terms_conditions ?? structuralTemplate.terms_conditions,
+    thank_you_message: proposalTemplate.thank_you_message ?? structuralTemplate.thank_you_message,
+  };
+}
+
 async function generateFromQuotePdfs(
   proposalId: string,
 ): Promise<{ blob: Blob; fileName: string }> {
@@ -15,12 +53,10 @@ async function generateFromQuotePdfs(
     .maybeSingle();
   if (propErr) throw propErr;
 
-  // Fallback template (used only if a quote has no template_id of its own).
-  // Each quote is rendered with ITS OWN template — that's the layout the user
-  // configured on the quote and expects to see in the proposal.
-  const fallbackTemplate =
-    (await fetchQuotePdfTemplateById(proposal?.template_id))
-    ?? (await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null));
+  // Template explicitly selected on the proposal — used for branding only
+  // (see mergeProposalBranding above), never as the structural template.
+  const explicitProposalTemplate = await fetchQuotePdfTemplateById(proposal?.template_id);
+  const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
 
   // Resolve quote ids linked to this proposal
   const { data: quotes, error: quotesErr } = await (supabase as any)
@@ -91,11 +127,14 @@ async function generateFromQuotePdfs(
 
   for (const quote of resolvedQuotes) {
     try {
-      // Prefer the quote's own template; fall back to the proposal/org template.
-      const quoteOwnTemplate = quote.template_id
+      // Structural template: the quote's own (compatible layout for the
+      // items table/bundles), falling back to the org default quote template.
+      const structuralTemplate = (quote.template_id
         ? await fetchQuotePdfTemplateById(quote.template_id)
-        : null;
-      const templateForQuote = quoteOwnTemplate ?? fallbackTemplate;
+        : null) ?? orgDefaultTemplate;
+      // Branding on top: the proposal's own selected template (title, colors,
+      // footer/terms/thank-you), when one is configured.
+      const templateForQuote = mergeProposalBranding(structuralTemplate, explicitProposalTemplate);
       const isLastQuote = quote.id === lastQuoteId;
       // Mark this render as proposal-context so a quote missing a variable
       // referenced only by the proposal template renders (blank/placeholder)
