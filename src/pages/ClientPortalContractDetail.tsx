@@ -161,14 +161,27 @@ const ClientPortalContractDetail = () => {
     try {
       let clientIp = "";
       try {
-        const ipRes = await fetch("https://api.ipify.org?format=json");
+        // Bounded — an unbounded third-party fetch here (blocked/slow on some
+        // networks) could push the call to client-portal-action past the
+        // 10-minute OTP freshness window it checks, silently failing the sign.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const ipRes = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+        clearTimeout(timeoutId);
         const ipData = await ipRes.json();
         clientIp = ipData.ip;
       } catch {}
 
-      await supabase.functions.invoke("client-portal-action", {
+      // Was previously not checked at all: a failed sign (e.g. OTP expired/
+      // already used) returned {error: ...} with a non-2xx status, which
+      // `invoke()` surfaces as `error` — silently ignored here, so the
+      // client always saw the success toast below even when nothing was
+      // persisted (client_contracts.status never left "draft"/"sent").
+      const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
         body: { action: "sign_contract", contract_id: id, signature_image: "OTP_SMS_VERIFIED", client_ip: clientIp },
       });
+      if (invokeError) throw new Error(invokeError.message);
+      if (data?.error) throw new Error(data.message || data.error);
 
       toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });
       await loadData(); // M11
