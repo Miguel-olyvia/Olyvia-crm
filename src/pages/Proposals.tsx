@@ -1176,13 +1176,15 @@ const Proposals = () => {
     setBulkPdfExporting(true);
     let successCount = 0;
     let failCount = 0;
+    let fallbackCount = 0;
     try {
       toast({ title: "A gerar PDFs…", description: "Pode demorar alguns segundos." });
       for (const id of selectedIds) {
         try {
-          const { blob, fileName } = await generateProposalPdfBlob(id);
+          const { blob, fileName, usedFallback } = await generateProposalPdfBlob(id);
           downloadBlob(blob, fileName);
           successCount++;
+          if (usedFallback) fallbackCount++;
         } catch (exportError) {
           console.error(`Error exporting PDF for proposal ${id}:`, exportError);
           failCount++;
@@ -1190,8 +1192,8 @@ const Proposals = () => {
       }
       toast({
         title: "Exportação concluída",
-        description: `${successCount} PDF(s) gerado(s)${failCount > 0 ? `, ${failCount} com erro` : ""}.`,
-        variant: failCount > 0 ? "destructive" : undefined,
+        description: `${successCount} PDF(s) gerado(s)${failCount > 0 ? `, ${failCount} com erro` : ""}${fallbackCount > 0 ? `. ${fallbackCount} PDF(s) usaram o layout de orçamento como alternativa por não ser possível gerar o template configurado.` : "."}`,
+        variant: failCount > 0 || fallbackCount > 0 ? "destructive" : undefined,
       });
     } finally {
       setBulkPdfExporting(false);
@@ -2160,8 +2162,15 @@ const Proposals = () => {
           onClick={async () => {
             try {
               toast({ title: "A gerar PDF…", description: "Pode demorar alguns segundos." });
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
+              const { blob, fileName, usedFallback } = await generateProposalPdfBlob(proposal.id);
               downloadBlob(blob, fileName);
+              if (usedFallback) {
+                toast({
+                  title: "PDF gerado com layout alternativo",
+                  description: "Não foi possível gerar o PDF com o template configurado da proposta; foi usado o layout do orçamento como alternativa. Tente novamente dentro de momentos.",
+                  variant: "destructive",
+                });
+              }
             } catch (e: any) {
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
             }
@@ -3304,7 +3313,7 @@ const Proposals = () => {
                               />
                             </TableCell>
                             <TableCell>
-                              <PortalStatusBadge status={(portalStatuses as any)?.[proposal.id] || null} />
+                              <PortalStatusBadge status={proposal.status === 'accepted' ? 'signed' : ((portalStatuses as any)?.[proposal.id] || null)} />
                             </TableCell>
                             <TableCell className="text-sm text-muted-foreground">
                               {format(new Date(proposal.created_at), "dd/MM/yyyy", { locale: pt })}

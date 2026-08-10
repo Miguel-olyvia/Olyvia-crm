@@ -109,7 +109,7 @@ async function generateFromPortalTemplate(
     await new Promise<void>((r) => setTimeout(r, 100));
     await document.fonts.ready;
     await waitForImages(container);
-    await new Promise<void>((r) => setTimeout(r, 300));
+    await new Promise<void>((r) => setTimeout(r, 600));
 
     const fullWidth = 900;
     const fullHeight = Math.max(container.offsetHeight, 1200);
@@ -127,6 +127,9 @@ async function generateFromPortalTemplate(
 
     if (isCanvasBlank(canvas)) {
       console.warn('[generateProposalPdfBlob] Captura inicial do PDF saiu em branco — a tentar novamente com pixelRatio reduzido.');
+      // Give the DOM a bit more time to (re-)render before the retry capture
+      // instead of retrying immediately against the same still-settling frame.
+      await new Promise<void>((r) => setTimeout(r, 300));
       canvas = await toCanvas(container, { ...captureOptions, pixelRatio: 1 });
     }
 
@@ -315,7 +318,7 @@ async function generateFromQuotePdfs(
  */
 export async function generateProposalPdfBlob(
   proposalId: string,
-): Promise<{ blob: Blob; fileName: string }> {
+): Promise<{ blob: Blob; fileName: string; usedFallback?: boolean }> {
   const portalData = await loadProposalPortalData(proposalId);
 
   if (portalData?.template) {
@@ -326,14 +329,18 @@ export async function generateProposalPdfBlob(
         // The branded template render came back blank (CORS/rasterization
         // issue with html-to-image) — fall back to the vectorial per-quote
         // PDF so the user still gets the proposal's information, instead of
-        // an error dialog.
+        // an error dialog. A template WAS configured, so let the caller warn
+        // the user that the layout shown isn't the one they set up.
         console.warn('[generateProposalPdfBlob] Portal template capture failed, falling back to quote-based PDF:', e.message);
-        return generateFromQuotePdfs(proposalId);
+        const result = await generateFromQuotePdfs(proposalId);
+        return { ...result, usedFallback: true };
       }
       throw e;
     }
   }
 
+  // No template configured on this proposal — using the quote-based PDF is
+  // the expected/default behaviour here, not a fallback from a failure.
   return generateFromQuotePdfs(proposalId);
 }
 

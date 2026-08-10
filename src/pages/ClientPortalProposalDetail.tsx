@@ -388,8 +388,15 @@ const ClientPortalProposalDetail = () => {
           onSelectedQuotesChange={setSelectedQuoteIds}
           onDownloadPdf={async () => {
             try {
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
+              const { blob, fileName, usedFallback } = await generateProposalPdfBlob(proposal.id);
               downloadBlob(blob, fileName);
+              if (usedFallback) {
+                toast({
+                  title: "PDF gerado com layout alternativo",
+                  description: "Não foi possível gerar o PDF com o template configurado da proposta; foi usado o layout do orçamento como alternativa. Tente novamente dentro de momentos.",
+                  variant: "destructive",
+                });
+              }
             } catch (e: any) {
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
             }
