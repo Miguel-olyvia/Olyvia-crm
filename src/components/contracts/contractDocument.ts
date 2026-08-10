@@ -258,29 +258,58 @@ export function injectSignaturesIntoBlock(
   template.innerHTML = html;
   const candidates = Array.from(template.content.querySelectorAll("div, p, td, span, tr"));
 
+  // Uma "coluna" de assinatura real tem sempre uma linha para assinar por
+  // cima da etiqueta — via borda (border-bottom), <hr>, ou um parágrafo feito
+  // só de underscores/traços (ex.: "_______________________"). Sem isto, um
+  // <div> "container" maior (ex.: o parágrafo "Pontinha, {{data}}" que
+  // antecede o bloco de assinatura, cujo ÚLTIMO filho é o wrapper com as
+  // colunas lá dentro) também "parece" ter duas partes (uma menciona o
+  // cliente, outra não) e era escolhido por engano.
+  const isLineElement = (el: Element): boolean => {
+    if (/border-bottom/i.test((el as HTMLElement).getAttribute?.("style") || "")) return true;
+    if (el.tagName === "HR") return true;
+    const text = el.textContent || "";
+    const stripped = text.replace(/[\s_·\-–—]/g, "");
+    return stripped.length === 0 && text.replace(/\s/g, "").length > 0;
+  };
+  const hasLineMarker = (el: Element): boolean => {
+    if (isLineElement(el)) return true;
+    if (Array.from(el.children).some(isLineElement)) return true;
+    if (el.querySelector('[style*="border-bottom" i], hr')) return true;
+    return false;
+  };
+
   // 1) Preferido: o contentor cujos PRÓPRIOS filhos diretos já se dividem em
-  //    duas colunas (uma menciona o cliente/segunda parte, outra não) —
-  //    normalmente um `display:flex`/`<tr>` envolvido por outro `<div>`
-  //    "wrapper" (ex.: `<div style="margin-top:40px"><div style="display:flex">
-  //    <div>coluna A</div><div>coluna B</div></div></div>`). Procurar por esta
-  //    condição em vez de "o 1º elemento cujo texto contém O CLIENTE" evita
-  //    apanhar esse wrapper exterior (que só tem 1 filho) por engano.
+  //    duas colunas de assinatura genuínas (cada uma com a sua linha) — uma
+  //    menciona o cliente/segunda parte, a outra não. Isto ignora tanto
+  //    wrappers de 1 filho como containers maiores que incluem texto solto
+  //    (datas, quebras de linha) ao lado do verdadeiro bloco de colunas.
   const columnsTarget = candidates.find((el) => {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (!SECOND_PARTY_RE.test(text) || text.length >= 260) return false;
-    const kids = Array.from(el.children);
+    if (!SECOND_PARTY_RE.test(text) || text.length >= 400) return false;
+    const kids = Array.from(el.children) as HTMLElement[];
     if (kids.length < 2) return false;
-    const hasClientKid = kids.some((k) => SECOND_PARTY_RE.test(k.textContent || ""));
-    const hasOtherKid = kids.some((k) => !SECOND_PARTY_RE.test(k.textContent || ""));
-    return hasClientKid && hasOtherKid;
+    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
+    const companyCol = kids.find((k) => k !== clientCol);
+    if (!clientCol || !companyCol) return false;
+    return hasLineMarker(clientCol) && hasLineMarker(companyCol);
   });
 
   if (columnsTarget) {
     const kids = Array.from(columnsTarget.children) as HTMLElement[];
-    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
-    const companyCol = kids.find((k) => k !== clientCol);
-    if (companyStamp && companyCol) companyCol.insertAdjacentHTML("afterbegin", companyStamp);
-    if (clientStamp && clientCol) clientCol.insertAdjacentHTML("afterbegin", clientStamp);
+    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""))!;
+    const companyCol = kids.find((k) => k !== clientCol)!;
+    // Inserir mesmo antes da linha (não no início da coluna) — a assinatura
+    // fica colada por cima da linha, como um "assina aqui" normal, mesmo que
+    // a coluna tenha outro conteúdo antes da linha.
+    const insertNearLine = (col: HTMLElement, stamp: string) => {
+      if (!stamp) return;
+      const lineEl = Array.from(col.children).find(isLineElement);
+      if (lineEl) lineEl.insertAdjacentHTML("beforebegin", stamp);
+      else col.insertAdjacentHTML("afterbegin", stamp);
+    };
+    insertNearLine(companyCol, companyStamp);
+    insertNearLine(clientCol, clientStamp);
     return template.innerHTML;
   }
 
