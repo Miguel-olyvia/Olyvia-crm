@@ -258,7 +258,13 @@ const ClientPortalProposalDetail = () => {
     try {
       let clientIp = "";
       try {
-        const ipRes = await fetch("https://api.ipify.org?format=json");
+        // Bounded — an unbounded third-party fetch here (blocked/slow on some
+        // networks) could push the call to client-portal-action past the
+        // 10-minute OTP freshness window it checks, silently failing the sign.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const ipRes = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+        clearTimeout(timeoutId);
         const ipData = await ipRes.json();
         clientIp = ipData.ip;
       } catch {}
