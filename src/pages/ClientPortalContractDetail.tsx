@@ -15,7 +15,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2, PenTool } from "lucide-react";
+import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
@@ -37,6 +37,8 @@ const ClientPortalContractDetail = () => {
 
   const [contract, setContract] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [companyName, setCompanyName] = useState("");
+  const [clientName, setClientName] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -84,6 +86,25 @@ const ClientPortalContractDetail = () => {
         .eq("entity_id", id!)
         .order("created_at", { ascending: false });
       setDocuments(docs || []);
+
+      // Real names for the signature block labels (replaces the generic
+      // "A PRIMEIRA CONTRATANTE" / "O SEGUNDO CONTRATANTE" placeholders).
+      if (cont.organization_id) {
+        const { data: org } = await (supabase as any)
+          .from("anew_organizations")
+          .select("name")
+          .eq("id", cont.organization_id)
+          .maybeSingle();
+        setCompanyName(org?.name || "");
+      }
+      if (cont.entity_id) {
+        const { data: entity } = await (supabase as any)
+          .from("anew_entities")
+          .select("display_name")
+          .eq("id", cont.entity_id)
+          .maybeSingle();
+        setClientName(entity?.display_name || "");
+      }
     }
 
     setLoading(false);
@@ -364,19 +385,14 @@ const ClientPortalContractDetail = () => {
               {(contract.company_signature_date || contract.signature_date) && (
                 <div className="mt-10 pt-6 border-t-2 border-dashed border-muted">
                   <div className="flex flex-col sm:flex-row justify-between gap-8">
-                    {/* Company (First Party) */}
+                    {/* Company (First Party) — signatory already SMS-verified
+                        at the minuta level, so shown as a plain signature
+                        (cursive name) rather than another OTP badge. */}
                     <div className="text-center">
                       {contract.company_signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-blue-600">
-                            <PenTool className="h-4 w-4" />
-                            <span className="text-sm font-bold">Assinado</span>
-                          </div>
-                          {contract.company_signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.company_signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.company_signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
+                        <div className="w-48 mx-auto mb-2">
+                          <p style={{ fontFamily: "'Brush Script MT', 'Segoe Script', 'Lucida Handwriting', cursive", fontSize: "24px", color: "inherit", margin: 0 }}>
+                            {contract.company_signed_by_name || "Assinado"}
                           </p>
                         </div>
                       ) : (
@@ -385,7 +401,7 @@ const ClientPortalContractDetail = () => {
                         </div>
                       )}
                       <div className={`border-b w-48 mx-auto mb-2 ${contract.company_signature_date ? "border-blue-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">A PRIMEIRA CONTRATANTE</p>
+                      <p className="text-sm font-medium text-muted-foreground">{companyName || "A PRIMEIRA CONTRATANTE"}</p>
                     </div>
 
                     {/* Client (Second Party) */}
@@ -412,7 +428,7 @@ const ClientPortalContractDetail = () => {
                         </div>
                       )}
                       <div className={`border-b w-48 mx-auto mb-2 ${contract.signature_date ? "border-emerald-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">O SEGUNDO CONTRATANTE</p>
+                      <p className="text-sm font-medium text-muted-foreground">{clientName || "O SEGUNDO CONTRATANTE"}</p>
                     </div>
                   </div>
                 </div>

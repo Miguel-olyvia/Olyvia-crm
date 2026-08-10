@@ -380,6 +380,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     const headerLayout = ds?.header_layout || "left";
     const logoUrl = ds?.logo_url || organization?.logo_url || null;
     const companyName = ds?.company_name_override || variableData?.empresa_nome || organization?.name || activeCompany?.name || "";
+    const clientName = (variableData as any)?.cliente_nome || "";
 
     const headerLineOne = [
       ds?.show_nif !== false && variableData?.empresa_nif ? `NIF: ${variableData.empresa_nif}` : null,
@@ -449,19 +450,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           {(contract?.company_signature_date || contract?.signature_date) && (
             <div className="mt-10 pt-6 border-t-2 border-dashed" style={{ borderColor: "#d1d5db" }}>
               <div className="flex justify-between gap-8">
-                {/* Company (First Party) */}
+                {/* Company (First Party) — signatory pre-verified via SMS at the
+                    minuta level (SignatoriesPanel), so here it's shown as a
+                    plain signature (cursive name), not another OTP badge. */}
                 <div className="text-center">
                   {contract.company_signature_date ? (
                     <div style={{ width: "200px", margin: "0 auto 8px" }}>
-                      <div className="flex items-center justify-center gap-2" style={{ color: "#2563eb" }}>
-                        <ShieldCheck style={{ width: "16px", height: "16px" }} />
-                        <span style={{ fontSize: "11px", fontWeight: 600 }}>Assinado via SMS OTP</span>
-                      </div>
-                      {contract.company_signed_by_name && (
-                        <p className="text-xs font-medium mt-1" style={{ color: "#374151" }}>{contract.company_signed_by_name}</p>
-                      )}
-                      <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                        {format(new Date(contract.company_signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
+                      <p style={{ fontFamily: "'Brush Script MT', 'Segoe Script', 'Lucida Handwriting', cursive", fontSize: "24px", color: "#1a1a1a", margin: 0 }}>
+                        {contract.company_signed_by_name || "Assinado"}
                       </p>
                     </div>
                   ) : (
@@ -470,10 +466,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                     </div>
                   )}
                   <div style={{ borderBottom: `1px solid ${contract.company_signature_date ? "#2563eb" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>A PRIMEIRA CONTRATANTE</p>
+                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>{companyName || "A PRIMEIRA CONTRATANTE"}</p>
                 </div>
 
-                {/* Client (Second Party) */}
+                {/* Client (Second Party) — signs via SMS OTP through the client
+                    portal, so the OTP badge + timestamp + IP stay as proof. */}
                 <div className="text-center">
                   {contract.signature_date ? (
                     <div style={{ width: "200px", margin: "0 auto 8px" }}>
@@ -497,7 +494,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                     </div>
                   )}
                   <div style={{ borderBottom: `1px solid ${contract.signature_date ? "#059669" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>O SEGUNDO CONTRATANTE</p>
+                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>{clientName || "O SEGUNDO CONTRATANTE"}</p>
                 </div>
               </div>
             </div>
