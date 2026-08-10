@@ -15,15 +15,12 @@ async function generateFromQuotePdfs(
     .maybeSingle();
   if (propErr) throw propErr;
 
-  // Template explicitly selected on the PROPOSAL itself ("Template" field in
-  // Templates de Proposta) — takes priority over whatever template the
-  // underlying quote happens to have, because that's the one the user picked
-  // for this specific proposal (e.g. a "Cozinha" proposal template on a quote
-  // that still carries a generic/older quote template). `null` here means
-  // "no explicit proposal template" — the per-quote loop below still falls
-  // back to each quote's own template, and only then to the org default.
-  const explicitProposalTemplate = await fetchQuotePdfTemplateById(proposal?.template_id);
-  const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
+  // Fallback template (used only if a quote has no template_id of its own).
+  // Each quote is rendered with ITS OWN template — that's the layout the user
+  // configured on the quote and expects to see in the proposal.
+  const fallbackTemplate =
+    (await fetchQuotePdfTemplateById(proposal?.template_id))
+    ?? (await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null));
 
   // Resolve quote ids linked to this proposal
   const { data: quotes, error: quotesErr } = await (supabase as any)
@@ -94,12 +91,11 @@ async function generateFromQuotePdfs(
 
   for (const quote of resolvedQuotes) {
     try {
-      // Prefer the proposal's own selected template; only fall back to the
-      // quote's own template (then the org default) when the proposal has
-      // none configured.
-      const templateForQuote = explicitProposalTemplate
-        ?? (quote.template_id ? await fetchQuotePdfTemplateById(quote.template_id) : null)
-        ?? orgDefaultTemplate;
+      // Prefer the quote's own template; fall back to the proposal/org template.
+      const quoteOwnTemplate = quote.template_id
+        ? await fetchQuotePdfTemplateById(quote.template_id)
+        : null;
+      const templateForQuote = quoteOwnTemplate ?? fallbackTemplate;
       const isLastQuote = quote.id === lastQuoteId;
       // Mark this render as proposal-context so a quote missing a variable
       // referenced only by the proposal template renders (blank/placeholder)
