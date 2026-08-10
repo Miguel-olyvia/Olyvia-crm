@@ -74,17 +74,33 @@ async function generateFromPortalTemplate(
   const { proposal, template, quotes, quoteLines, quoteFees, commercial, company } = portalData;
   const statusLabel = STATUS_LABELS[proposal.status as string] || (proposal.status as string);
 
-  const container = document.createElement('div');
-  Object.assign(container.style, {
+  // html-to-image (like html2canvas) can come back with a fully blank
+  // capture when the rendered node sits far outside the page's layout
+  // bounds — some browsers deprioritize/clip paint for elements placed
+  // thousands of pixels off-screen (`left: -9999px`), which is exactly how
+  // this container used to be positioned. Keep it anchored at the actual
+  // viewport origin (0,0) instead, and hide it by clipping a zero-size
+  // outer wrapper around it — the inner node still lays out at full size
+  // for capture purposes, it just never becomes visible or affects scroll.
+  const clipper = document.createElement('div');
+  Object.assign(clipper.style, {
     position: 'fixed',
     top: '0',
-    left: '-9999px',
+    left: '0',
+    width: '0',
+    height: '0',
+    overflow: 'hidden',
+    zIndex: '-1',
+  });
+
+  const container = document.createElement('div');
+  Object.assign(container.style, {
     width: '900px',
     background: '#ffffff',
-    zIndex: '-1',
     overflow: 'visible',
   });
-  document.body.appendChild(container);
+  clipper.appendChild(container);
+  document.body.appendChild(clipper);
 
   let root: ReturnType<typeof createRoot> | null = null;
 
@@ -172,8 +188,8 @@ async function generateFromPortalTemplate(
     return { blob, fileName };
   } finally {
     try { root?.unmount(); } catch { /* ignore unmount errors */ }
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
+    if (document.body.contains(clipper)) {
+      document.body.removeChild(clipper);
     }
   }
 }
