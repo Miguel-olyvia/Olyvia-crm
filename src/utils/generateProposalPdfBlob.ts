@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { createRoot } from 'react-dom/client';
 import { createElement } from 'react';
-import { toPng } from 'html-to-image';
+import { toCanvas } from 'html-to-image';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
@@ -17,6 +17,34 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: 'Proposta rejeitada',
   expired: 'Proposta expirada',
 };
+
+// 1x1 transparent PNG used as a fallback whenever html-to-image fails to
+// embed a remote image (e.g. logo CORS/404) — without this it silently
+// substitutes an empty string, which can break rasterization downstream.
+const TRANSPARENT_PIXEL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+// html-to-image can "succeed" (canvas.onload fires, no exception) while the
+// foreignObject/SVG failed to rasterize, leaving a uniformly blank canvas.
+// Detect that by sampling a downscaled copy instead of trusting the promise
+// resolving cleanly.
+function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
+  const sampleSize = 64;
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = sampleSize;
+  sampleCanvas.height = sampleSize;
+  const ctx = sampleCanvas.getContext('2d');
+  if (!ctx) return false; // can't verify — don't block the download on this
+  ctx.drawImage(canvas, 0, 0, sampleSize, sampleSize);
+  const { data } = ctx.getImageData(0, 0, sampleSize, sampleSize);
+  const [r0, g0, b0, a0] = data;
+  for (let i = 4; i < data.length; i += 4) {
+    if (data[i] !== r0 || data[i + 1] !== g0 || data[i + 2] !== b0 || data[i + 3] !== a0) {
+      return false; // some variation found — has real content
+    }
+  }
+  return true; // uniform color across the whole sample — treat as blank
+}
 
 async function waitForImages(container: HTMLElement, timeoutMs = 5000): Promise<void> {
   const imgs = Array.from(container.querySelectorAll('img'));
@@ -80,11 +108,27 @@ async function generateFromPortalTemplate(
     const fullWidth = 900;
     const fullHeight = Math.max(container.offsetHeight, 1200);
 
-    const dataUrl = await toPng(container, {
+    const captureOptions = {
       width: fullWidth,
       height: fullHeight,
       pixelRatio: 2,
-    });
+      cacheBust: true,
+      imagePlaceholder: TRANSPARENT_PIXEL,
+      fetchRequestInit: { mode: 'cors' as RequestMode, cache: 'no-store' as RequestCache },
+    };
+
+    let canvas = await toCanvas(container, captureOptions);
+
+    if (isCanvasBlank(canvas)) {
+      console.warn('[generateProposalPdfBlob] Captura inicial do PDF saiu em branco — a tentar novamente com pixelRatio reduzido.');
+      canvas = await toCanvas(container, { ...captureOptions, pixelRatio: 1 });
+    }
+
+    if (isCanvasBlank(canvas)) {
+      throw new Error('Não foi possível gerar o PDF desta proposta (falha ao capturar o conteúdo). Tenta novamente ou contacta o suporte.');
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
 
     // A4 dimensions in PDF points (72 dpi)
     const A4_W = 595.28;
