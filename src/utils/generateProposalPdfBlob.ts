@@ -5,18 +5,9 @@ import { toCanvas } from 'html-to-image';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
-import { ProposalPortalDocument } from '@/components/proposals/ProposalPortalDocument';
+import { ProposalTemplateDocument } from '@/components/proposals/ProposalTemplateDocument';
 import { loadProposalPortalData, type ProposalPortalData } from '@/components/proposals/proposalPortalData';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
-
-const STATUS_LABELS: Record<string, string> = {
-  sent: 'A aguardar decisão',
-  pending: 'A aguardar decisão',
-  draft: 'Rascunho',
-  accepted: 'Proposta aceite',
-  rejected: 'Proposta rejeitada',
-  expired: 'Proposta expirada',
-};
 
 // Thrown when the DOM-screenshot capture of the portal template comes back
 // blank — lets generateProposalPdfBlob() tell this apart from other failures
@@ -71,8 +62,7 @@ async function waitForImages(container: HTMLElement, timeoutMs = 5000): Promise<
 async function generateFromPortalTemplate(
   portalData: ProposalPortalData,
 ): Promise<{ blob: Blob; fileName: string }> {
-  const { proposal, template, quotes, quoteLines, quoteFees, commercial, company } = portalData;
-  const statusLabel = STATUS_LABELS[proposal.status as string] || (proposal.status as string);
+  const { proposal, template, quotes, quoteLines, client, commercial, company } = portalData;
 
   // html-to-image (like html2canvas) can come back with a fully blank
   // capture when the rendered node sits far outside the page's layout
@@ -107,17 +97,14 @@ async function generateFromPortalTemplate(
   try {
     root = createRoot(container);
     root.render(
-      createElement(ProposalPortalDocument, {
+      createElement(ProposalTemplateDocument, {
         proposal,
         template,
         quotes,
         quoteLines,
-        quoteFees,
+        client,
         commercial,
         company,
-        mode: 'preview',
-        statusLabel,
-        canActOnProposal: false,
       })
     );
 
@@ -328,8 +315,8 @@ async function generateFromQuotePdfs(
 
 /**
  * Generate a single PDF blob for a proposal.
- * - If the proposal has a portal template selected → renders ProposalPortalDocument as HTML → PDF
- *   (respects the layout/brand the user configured in "Template de Proposta")
+ * - If the proposal has a template selected → renders ProposalTemplateDocument (mirrors the
+ *   "Templates de Proposta" editor layout, with the real proposal data) as HTML → PDF
  * - Otherwise → falls back to merging the PDFs of its associated quotes (legacy behaviour)
  */
 export async function generateProposalPdfBlob(

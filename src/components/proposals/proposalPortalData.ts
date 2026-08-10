@@ -1,4 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
+import { buildQuoteRenderContext } from "@/utils/buildQuoteRenderContext";
+import type { ClientCtx } from "@/utils/documentVariables/context";
 
 export interface ProposalPortalCommercial {
   name: string;
@@ -14,6 +16,35 @@ export interface ProposalPortalData {
   quoteLines: Record<string, any[]>;
   quoteFees: Record<string, any[]>;
   commercial: ProposalPortalCommercial | null;
+  /** Cliente resolvido via o primeiro orçamento ligado (mesma lógica do PDF de orçamento). */
+  client: ClientCtx | null;
+}
+
+// Resolve o cliente da proposta reutilizando o resolver já usado no PDF do
+// orçamento (entity/lead/contact → nome/email/telefone/morada), em vez de
+// reimplementar a cadeia de fallback aqui. Usa o orçamento mais antigo como
+// referência — é o que a proposta foi originalmente construída a partir de.
+async function resolveClientForProposal(quoteIds: string[]): Promise<ClientCtx | null> {
+  if (quoteIds.length === 0) return null;
+  const { data: quoteRow, error } = await supabase
+    .from("quotes")
+    .select("*")
+    .eq("id", quoteIds[0])
+    .maybeSingle();
+  if (error || !quoteRow) {
+    console.error("[proposalPortalData] resolveClientForProposal quote lookup", error);
+    return null;
+  }
+  try {
+    const { ctx } = await buildQuoteRenderContext({
+      quoteData: quoteRow,
+      organizationId: (quoteRow as any).organization_id ?? null,
+    });
+    return ctx.client;
+  } catch (e) {
+    console.error("[proposalPortalData] resolveClientForProposal", e);
+    return null;
+  }
 }
 
 // H5: minimal shape returned by get_commercial_info RPC.
@@ -219,7 +250,7 @@ export async function loadProposalPortalData(
     const [linesResult, feesResult] = await Promise.all([
       supabase
         .from("quote_lines")
-        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent")
+        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, retail_price_unit, products (sku), services (sku)")
         .in("quote_id", quoteIds)
         .order("ordem", { ascending: true }),
       (supabase as any)
@@ -250,12 +281,15 @@ export async function loadProposalPortalData(
     });
   }
 
+  const client = await resolveClientForProposal(quotes.map((q: any) => q.id));
+
   return {
     proposal,
     template,
     company: companyResult.data ?? null,
     quotes,
     quoteLines,
+    client,
     quoteFees,
     commercial,
   };
