@@ -14,7 +14,7 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignatoryIntoSignatureBlock, fetchTemplateSignatory } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -142,10 +142,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       const safeKey = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       withPrompts = withPrompts.replace(new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"), v);
     }
-    // Injecta o signatário da minuta no bloco final de assinatura (markup, não token).
-    const sig = await fetchTemplateSignatory(templateId);
-    const finalHtml = injectSignatoryIntoSignatureBlock(withPrompts, sig?.name, sig?.roleName);
-    setBodyHtml(finalHtml);
+    // Nota: o bloco de assinatura já não é "cozido" aqui — é injetado em cada
+    // render (renderDocumentPreview) a partir do estado real de assinatura,
+    // para refletir sempre o estado atual em vez de um nome estático fixo.
+    setBodyHtml(withPrompts);
     setGeneratedFromName(templateName);
     setIsEditing(true);
     toast.success(`Contrato gerado a partir da minuta "${templateName}". Reveja e guarde.`);
@@ -380,7 +380,6 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     const headerLayout = ds?.header_layout || "left";
     const logoUrl = ds?.logo_url || organization?.logo_url || null;
     const companyName = ds?.company_name_override || variableData?.empresa_nome || organization?.name || activeCompany?.name || "";
-    const clientName = (variableData as any)?.cliente_nome || "";
 
     const headerLineOne = [
       ds?.show_nif !== false && variableData?.empresa_nif ? `NIF: ${variableData.empresa_nif}` : null,
@@ -406,10 +405,24 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       ? substituteVariables(htmlWithItems, variableData)
       : htmlWithItems;
     const processedHtml = applyFormulaChips(substituted, (variableData || {}) as any);
-    const withSignatory = injectSignatoryIntoSignatureBlock(
+    // Injeta o estado REAL de assinatura de cada parte no bloco de assinatura
+    // já existente no corpo (preserva o texto original das etiquetas —
+    // "A [Empresa]" / "O Cliente" ou o genérico legacy). Nada aparece do
+    // lado de quem ainda não assinou.
+    const withSignatory = injectSignaturesIntoBlock(
       processedHtml,
-      (variableData as any)?.signatario_nome,
-      (variableData as any)?.signatario_cargo,
+      {
+        signed: !!contract?.company_signature_date,
+        name: contract?.company_signed_by_name,
+        showOtpBadge: false,
+      },
+      {
+        signed: !!contract?.signature_date,
+        name: contract?.signed_by_name,
+        signedAt: contract?.signature_date,
+        ip: contract?.signature_ip,
+        showOtpBadge: true,
+      },
     );
 
     const sanitized = DOMPurify.sanitize(stripVariableChips(withSignatory));
@@ -445,60 +458,6 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
             className="contract-body-content"
             dangerouslySetInnerHTML={{ __html: sanitized }}
           />
-
-          {/* Signature block - show when either party has signed */}
-          {(contract?.company_signature_date || contract?.signature_date) && (
-            <div className="mt-10 pt-6 border-t-2 border-dashed" style={{ borderColor: "#d1d5db" }}>
-              <div className="flex justify-between gap-8">
-                {/* Company (First Party) — signatory pre-verified via SMS at the
-                    minuta level (SignatoriesPanel), so here it's shown as a
-                    plain signature (cursive name), not another OTP badge. */}
-                <div className="text-center">
-                  {contract.company_signature_date ? (
-                    <div style={{ width: "200px", margin: "0 auto 8px" }}>
-                      <p style={{ fontFamily: "'Brush Script MT', 'Segoe Script', 'Lucida Handwriting', cursive", fontSize: "24px", color: "#1a1a1a", margin: 0 }}>
-                        {contract.company_signed_by_name || "Assinado"}
-                      </p>
-                    </div>
-                  ) : (
-                    <div style={{ width: "200px", margin: "0 auto 8px", color: "#9ca3af", fontSize: "11px" }}>
-                      Aguarda assinatura
-                    </div>
-                  )}
-                  <div style={{ borderBottom: `1px solid ${contract.company_signature_date ? "#2563eb" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>{companyName || "A PRIMEIRA CONTRATANTE"}</p>
-                </div>
-
-                {/* Client (Second Party) — signs via SMS OTP through the client
-                    portal, so the OTP badge + timestamp + IP stay as proof. */}
-                <div className="text-center">
-                  {contract.signature_date ? (
-                    <div style={{ width: "200px", margin: "0 auto 8px" }}>
-                      <div className="flex items-center justify-center gap-2" style={{ color: "#059669" }}>
-                        <ShieldCheck style={{ width: "16px", height: "16px" }} />
-                        <span style={{ fontSize: "11px", fontWeight: 600 }}>Assinado via SMS OTP</span>
-                      </div>
-                      {contract.signed_by_name && (
-                        <p className="text-xs font-medium mt-1" style={{ color: "#374151" }}>{contract.signed_by_name}</p>
-                      )}
-                      <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                        {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                      </p>
-                      {contract.signature_ip && (
-                        <p className="text-[10px]" style={{ color: "#9ca3af" }}>IP: {contract.signature_ip}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ width: "200px", margin: "0 auto 8px", color: "#9ca3af", fontSize: "11px" }}>
-                      Aguarda assinatura
-                    </div>
-                  )}
-                  <div style={{ borderBottom: `1px solid ${contract.signature_date ? "#059669" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>{clientName || "O SEGUNDO CONTRATANTE"}</p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Footer */}
           {ds?.show_footer !== false && ds?.footer_text && (

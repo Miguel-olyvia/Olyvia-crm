@@ -193,10 +193,107 @@ export function hasSignatoryHook(html: string | null | undefined): boolean {
   if (!html) return false;
   if (/data-signatory-block\s*=\s*"primary"/i.test(html)) return true;
   if (/\{\{\s*signatario_nome\s*\}\}/i.test(html)) return true;
-  return (
-    /A PRIMEIRA CONTRATANTE/i.test(html) &&
-    /O SEGUNDO CONTRATANTE/i.test(html)
-  );
+  if (/O SEGUNDO CONTRATANTE/i.test(html) || /\bO CLIENTE\b/i.test(html)) return true;
+  return false;
+}
+
+export interface PartySignatureInfo {
+  signed: boolean;
+  name?: string | null;
+  signedAt?: string | null;
+  ip?: string | null;
+  /** true = client (shows "Assinado via SMS OTP" + name/date/IP); false = company (plain signature, no badge) */
+  showOtpBadge?: boolean;
+}
+
+const SECOND_PARTY_RE = /O SEGUNDO CONTRATANTE|\bO CLIENTE\b/i;
+const FIRST_PARTY_RE = /A PRIMEIRA CONTRATANTE/i;
+
+function buildSignatureStampHtml(esc: (s: string) => string, info: PartySignatureInfo): string {
+  if (!info.signed) return "";
+  if (info.showOtpBadge) {
+    const dateStr = info.signedAt
+      ? new Date(info.signedAt).toLocaleString("pt-PT", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "";
+    return `<div style="margin-bottom:6px;">
+      <div style="color:#059669;font-size:11px;font-weight:600;">&#10003; Assinado via SMS OTP</div>
+      ${info.name ? `<div style="font-size:12px;font-weight:600;color:#374151;">${esc(info.name)}</div>` : ""}
+      ${dateStr ? `<div style="font-size:11px;color:#6b7280;">${esc(dateStr)}</div>` : ""}
+      ${info.ip ? `<div style="font-size:10px;color:#9ca3af;">IP: ${esc(info.ip)}</div>` : ""}
+    </div>`;
+  }
+  return `<div style="font-family:'Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;color:#1a1a1a;margin-bottom:2px;">${esc(info.name || "Assinado")}</div>`;
+}
+
+/**
+ * Injeta o ESTADO REAL de assinatura (empresa + cliente) diretamente no bloco
+ * de assinatura existente no corpo do contrato — sem substituir o texto
+ * original das etiquetas ("A [Empresa]" / "O Cliente" ou o genérico legacy
+ * "A PRIMEIRA CONTRATANTE" / "O SEGUNDO CONTRATANTE"). Nada aparece do lado
+ * de uma parte enquanto ela não tiver assinado (`signed: false` → sem
+ * conteúdo injetado, o espaço fica como já estava na minuta).
+ *
+ * Ao contrário de `injectSignatoryIntoSignatureBlock` (que só sabe mostrar um
+ * nome estático definido na minuta, sem estado real), esta função é chamada
+ * em cada render/PDF a partir dos campos reais do contrato
+ * (company_signature_date/company_signed_by_name, signature_date/
+ * signed_by_name/signature_ip), por isso reflete sempre o estado atual.
+ */
+export function injectSignaturesIntoBlock(
+  html: string,
+  company: PartySignatureInfo,
+  client: PartySignatureInfo,
+): string {
+  if (!html) return html;
+  if (typeof document === "undefined") return html; // SSR: no-op (não exercitado neste código)
+
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const candidates = Array.from(template.content.querySelectorAll("p, div, td"));
+  const target = candidates.find((el) => {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    return SECOND_PARTY_RE.test(text) && text.length < 260;
+  });
+  if (!target) return html;
+
+  const companyStamp = buildSignatureStampHtml(esc, company);
+  const clientStamp = buildSignatureStampHtml(esc, client);
+  if (!companyStamp && !clientStamp) return html;
+
+  // Preferir colunas próprias (2 elementos filhos, um deles mencionando o
+  // cliente/segunda parte) — preserva o texto original de cada etiqueta.
+  const children = Array.from(target.children) as HTMLElement[];
+  const clientCol = children.find((c) => SECOND_PARTY_RE.test(c.textContent || ""));
+  const companyCol = children.find((c) => c !== clientCol);
+
+  if (clientCol && companyCol) {
+    if (companyStamp) companyCol.insertAdjacentHTML("afterbegin", companyStamp);
+    if (clientStamp) clientCol.insertAdjacentHTML("afterbegin", clientStamp);
+    return template.innerHTML;
+  }
+
+  // Fallback legacy: bloco plano com o texto genérico exato numa única
+  // etiqueta (sem colunas próprias) — reconstrói como antes.
+  const text = (target.textContent || "").replace(/\s+/g, " ").trim();
+  if (FIRST_PARTY_RE.test(text) && SECOND_PARTY_RE.test(text) && text.length < 220) {
+    target.innerHTML = `
+      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
+        ${companyStamp}
+        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
+        <span>A PRIMEIRA CONTRATANTE</span>
+      </span>
+      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
+        ${clientStamp}
+        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
+        <span>O SEGUNDO CONTRATANTE</span>
+      </span>`;
+    return template.innerHTML;
+  }
+
+  return html;
 }
 
 /**
@@ -1090,11 +1187,22 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   bodyHtml = applyFormulaChips(bodyHtml, variableData);
   // Remove os "chips" visuais do editor (fundo roxo) — render final sem destaques.
   bodyHtml = stripVariableChips(bodyHtml);
-  // Bloco final de assinatura — injectar nome/cargo do signatário se ainda for o bloco estático.
-  bodyHtml = injectSignatoryIntoSignatureBlock(
+  // Bloco final de assinatura — injeta o estado REAL de assinatura de cada
+  // parte (nada aparece do lado de quem ainda não assinou).
+  bodyHtml = injectSignaturesIntoBlock(
     bodyHtml,
-    (variableData as any).signatario_nome,
-    (variableData as any).signatario_cargo,
+    {
+      signed: !!contract.company_signature_date,
+      name: contract.company_signed_by_name,
+      showOtpBadge: false,
+    },
+    {
+      signed: !!contract.signature_date,
+      name: contract.signed_by_name,
+      signedAt: contract.signature_date,
+      ip: contract.signature_ip,
+      showOtpBadge: true,
+    },
   );
 
   const companyName = settings.company_name_override || variableData.empresa_nome || organization?.name || activeCompanyName || "";

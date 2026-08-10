@@ -21,6 +21,7 @@ import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
+import { injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
 
 const REJECTION_REASONS = [
   "Condições não adequadas",
@@ -37,8 +38,6 @@ const ClientPortalContractDetail = () => {
 
   const [contract, setContract] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
-  const [companyName, setCompanyName] = useState("");
-  const [clientName, setClientName] = useState("");
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -86,25 +85,6 @@ const ClientPortalContractDetail = () => {
         .eq("entity_id", id!)
         .order("created_at", { ascending: false });
       setDocuments(docs || []);
-
-      // Real names for the signature block labels (replaces the generic
-      // "A PRIMEIRA CONTRATANTE" / "O SEGUNDO CONTRATANTE" placeholders).
-      if (cont.organization_id) {
-        const { data: org } = await (supabase as any)
-          .from("anew_organizations")
-          .select("name")
-          .eq("id", cont.organization_id)
-          .maybeSingle();
-        setCompanyName(org?.name || "");
-      }
-      if (cont.entity_id) {
-        const { data: entity } = await (supabase as any)
-          .from("anew_entities")
-          .select("display_name")
-          .eq("id", cont.entity_id)
-          .maybeSingle();
-        setClientName(entity?.display_name || "");
-      }
     }
 
     setLoading(false);
@@ -379,60 +359,26 @@ const ClientPortalContractDetail = () => {
             <CardContent>
               <div
                 className="prose prose-sm max-w-none dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(contract.contract_body_html) }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(
+                    injectSignaturesIntoBlock(
+                      contract.contract_body_html,
+                      {
+                        signed: !!contract.company_signature_date,
+                        name: contract.company_signed_by_name,
+                        showOtpBadge: false,
+                      },
+                      {
+                        signed: !!contract.signature_date,
+                        name: contract.signed_by_name,
+                        signedAt: contract.signature_date,
+                        ip: contract.signature_ip,
+                        showOtpBadge: true,
+                      },
+                    ),
+                  ),
+                }}
               />
-              {/* Signature block at the end of the contract */}
-              {(contract.company_signature_date || contract.signature_date) && (
-                <div className="mt-10 pt-6 border-t-2 border-dashed border-muted">
-                  <div className="flex flex-col sm:flex-row justify-between gap-8">
-                    {/* Company (First Party) — signatory already SMS-verified
-                        at the minuta level, so shown as a plain signature
-                        (cursive name) rather than another OTP badge. */}
-                    <div className="text-center">
-                      {contract.company_signature_date ? (
-                        <div className="w-48 mx-auto mb-2">
-                          <p style={{ fontFamily: "'Brush Script MT', 'Segoe Script', 'Lucida Handwriting', cursive", fontSize: "24px", color: "inherit", margin: 0 }}>
-                            {contract.company_signed_by_name || "Assinado"}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.company_signature_date ? "border-blue-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">{companyName || "A PRIMEIRA CONTRATANTE"}</p>
-                    </div>
-
-                    {/* Client (Second Party) */}
-                    <div className="text-center">
-                      {contract.signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-emerald-600">
-                            <ShieldCheck className="h-5 w-5" />
-                            <span className="text-sm font-bold">Assinado via SMS OTP</span>
-                          </div>
-                          {contract.signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                          </p>
-                          {contract.signature_ip && (
-                            <p className="text-xs text-muted-foreground">IP: {contract.signature_ip}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.signature_date ? "border-emerald-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">{clientName || "O SEGUNDO CONTRATANTE"}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
