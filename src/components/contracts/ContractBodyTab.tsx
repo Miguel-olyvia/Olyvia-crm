@@ -62,13 +62,33 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       if (!activeCompany?.id) return [];
       const { data, error } = await (supabase as any)
         .from("client_contract_templates")
-        .select("id, name, body_html, doc_settings, is_default")
+        .select("id, name, body_html, doc_settings, is_default, signatory_user_id")
         .eq("organization_id", activeCompany.id)
         .eq("is_active", true)
         .order("is_default", { ascending: false });
       return data || [];
     },
     enabled: !!activeCompany?.id,
+  });
+
+  // The minuta this contract was generated from. Once a signatory has been
+  // SMS-verified for a minuta (ContractTemplates.tsx), every contract
+  // generated from that same minuta can reuse that verification instead of
+  // asking for a new SMS code per document.
+  const currentTemplate = (templates as any[]).find((t: any) => t.id === contract?.contract_template_id);
+  const hasVerifiedTemplateSignatory = !!currentTemplate?.signatory_user_id;
+
+  const { data: templateSignatoryUser } = useQuery({
+    queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name")
+        .eq("id", currentTemplate!.signatory_user_id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!currentTemplate?.signatory_user_id,
   });
 
   const { data: variableData } = useQuery({
@@ -302,6 +322,41 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     }
   };
 
+  // Sign using the minuta's already SMS-verified signatory (SignatoriesPanel +
+  // SignatoryOtpDialog in ContractTemplates.tsx). No new SMS is sent — the
+  // legal signer of record is the minuta's verified signatory, while the
+  // audit trail still records whoever actually performed this write.
+  const handleCompanySignAsTemplateSignatory = async () => {
+    if (!templateSignatoryUser?.id) {
+      toast.error("Esta minuta ainda não tem um signatário verificado.");
+      return;
+    }
+    setCompanySigning(true);
+    try {
+      const actingBusinessUserId = await resolveCurrentBusinessUserId();
+      if (actingBusinessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: actingBusinessUserId, p_source: 'ui' });
+      }
+      await (supabase as any)
+        .from("client_contracts")
+        .update({
+          company_signature_date: new Date().toISOString(),
+          company_signed_by_name: templateSignatoryUser.name || "Representante",
+          company_signed_by_id: templateSignatoryUser.id,
+        })
+        .eq("id", contract.id);
+
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(`Contrato assinado por ${templateSignatoryUser.name} (signatário já verificado nesta minuta).`);
+      setShowCompanySign(false);
+      resetOtpState();
+    } catch (err: any) {
+      toast.error("Erro ao assinar: " + err.message);
+    } finally {
+      setCompanySigning(false);
+    }
+  };
+
   const resetOtpState = () => {
     setOtpStep("idle");
     setOtpCode("");
@@ -340,7 +395,6 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       ds?.show_website !== false && websiteVal ? websiteVal : null,
     ].filter(Boolean).join(" · ");
 
-    const currentTemplate = (templates as any[]).find(t => t.id === contract?.contract_template_id);
     const templateDocSettings = currentTemplate?.doc_settings || {};
     const mergedDs = { ...(ds || {}), ...(templateDocSettings || {}) };
     const primaryColor = (templateDocSettings as any)?.primary_color || ds?.accent_color || ds?.primary_color || "#7C3AED";
@@ -596,12 +650,40 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
               <PenTool className="h-5 w-5" /> Assinar contrato pela empresa
             </DialogTitle>
             <DialogDescription>
-              A assinatura será validada através de um código SMS enviado para o seu telemóvel.
+              {hasVerifiedTemplateSignatory
+                ? "O signatário desta minuta já foi verificado por SMS — a assinatura aplica-se sem novo código."
+                : "A assinatura será validada através de um código SMS enviado para o seu telemóvel."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {otpStep === "idle" && (
+            {otpStep === "idle" && hasVerifiedTemplateSignatory && (
+              <div className="text-center space-y-4">
+                <div className="mx-auto w-16 h-16 rounded-full bg-green-50 flex items-center justify-center">
+                  <ShieldCheck className="h-8 w-8 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">
+                    {templateSignatoryUser?.name || "O signatário"} já está verificado como signatário desta minuta.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Não é necessário novo código SMS.</p>
+                </div>
+                {otpError && (
+                  <p className="text-sm text-destructive">{otpError}</p>
+                )}
+                <Button
+                  onClick={handleCompanySignAsTemplateSignatory}
+                  disabled={companySigning || !templateSignatoryUser}
+                  className="w-full gap-2"
+                  style={{ backgroundColor: "#16a34a" }}
+                >
+                  {companySigning ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <PenTool className="h-4 w-4 text-white" />}
+                  <span className="text-white">Confirmar assinatura</span>
+                </Button>
+              </div>
+            )}
+
+            {otpStep === "idle" && !hasVerifiedTemplateSignatory && (
               <div className="text-center space-y-4">
                 <div className="mx-auto w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
                   <Smartphone className="h-8 w-8 text-blue-600" />
