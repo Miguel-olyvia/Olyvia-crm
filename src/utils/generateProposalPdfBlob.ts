@@ -18,6 +18,12 @@ const STATUS_LABELS: Record<string, string> = {
   expired: 'Proposta expirada',
 };
 
+// Thrown when the DOM-screenshot capture of the portal template comes back
+// blank — lets generateProposalPdfBlob() tell this apart from other failures
+// (data loading, etc.) and fall back to the vectorial quote-based PDF instead
+// of surfacing an error to the user.
+class BlankCaptureError extends Error {}
+
 // 1x1 transparent PNG used as a fallback whenever html-to-image fails to
 // embed a remote image (e.g. logo CORS/404) — without this it silently
 // substitutes an empty string, which can break rasterization downstream.
@@ -125,7 +131,7 @@ async function generateFromPortalTemplate(
     }
 
     if (isCanvasBlank(canvas)) {
-      throw new Error('Não foi possível gerar o PDF desta proposta (falha ao capturar o conteúdo). Tenta novamente ou contacta o suporte.');
+      throw new BlankCaptureError('Captura do template da proposta saiu em branco.');
     }
 
     const dataUrl = canvas.toDataURL('image/png');
@@ -313,7 +319,19 @@ export async function generateProposalPdfBlob(
   const portalData = await loadProposalPortalData(proposalId);
 
   if (portalData?.template) {
-    return generateFromPortalTemplate(portalData);
+    try {
+      return await generateFromPortalTemplate(portalData);
+    } catch (e) {
+      if (e instanceof BlankCaptureError) {
+        // The branded template render came back blank (CORS/rasterization
+        // issue with html-to-image) — fall back to the vectorial per-quote
+        // PDF so the user still gets the proposal's information, instead of
+        // an error dialog.
+        console.warn('[generateProposalPdfBlob] Portal template capture failed, falling back to quote-based PDF:', e.message);
+        return generateFromQuotePdfs(proposalId);
+      }
+      throw e;
+    }
   }
 
   return generateFromQuotePdfs(proposalId);
