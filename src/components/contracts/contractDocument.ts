@@ -250,36 +250,48 @@ export function injectSignaturesIntoBlock(
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const candidates = Array.from(template.content.querySelectorAll("p, div, td"));
-  const target = candidates.find((el) => {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    return SECOND_PARTY_RE.test(text) && text.length < 260;
-  });
-  if (!target) return html;
-
   const companyStamp = buildSignatureStampHtml(esc, company);
   const clientStamp = buildSignatureStampHtml(esc, client);
   if (!companyStamp && !clientStamp) return html;
 
-  // Preferir colunas próprias (2 elementos filhos, um deles mencionando o
-  // cliente/segunda parte) — preserva o texto original de cada etiqueta.
-  const children = Array.from(target.children) as HTMLElement[];
-  const clientCol = children.find((c) => SECOND_PARTY_RE.test(c.textContent || ""));
-  const companyCol = children.find((c) => c !== clientCol);
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const candidates = Array.from(template.content.querySelectorAll("div, p, td, span, tr"));
 
-  if (clientCol && companyCol) {
-    if (companyStamp) companyCol.insertAdjacentHTML("afterbegin", companyStamp);
-    if (clientStamp) clientCol.insertAdjacentHTML("afterbegin", clientStamp);
+  // 1) Preferido: o contentor cujos PRÓPRIOS filhos diretos já se dividem em
+  //    duas colunas (uma menciona o cliente/segunda parte, outra não) —
+  //    normalmente um `display:flex`/`<tr>` envolvido por outro `<div>`
+  //    "wrapper" (ex.: `<div style="margin-top:40px"><div style="display:flex">
+  //    <div>coluna A</div><div>coluna B</div></div></div>`). Procurar por esta
+  //    condição em vez de "o 1º elemento cujo texto contém O CLIENTE" evita
+  //    apanhar esse wrapper exterior (que só tem 1 filho) por engano.
+  const columnsTarget = candidates.find((el) => {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!SECOND_PARTY_RE.test(text) || text.length >= 260) return false;
+    const kids = Array.from(el.children);
+    if (kids.length < 2) return false;
+    const hasClientKid = kids.some((k) => SECOND_PARTY_RE.test(k.textContent || ""));
+    const hasOtherKid = kids.some((k) => !SECOND_PARTY_RE.test(k.textContent || ""));
+    return hasClientKid && hasOtherKid;
+  });
+
+  if (columnsTarget) {
+    const kids = Array.from(columnsTarget.children) as HTMLElement[];
+    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
+    const companyCol = kids.find((k) => k !== clientCol);
+    if (companyStamp && companyCol) companyCol.insertAdjacentHTML("afterbegin", companyStamp);
+    if (clientStamp && clientCol) clientCol.insertAdjacentHTML("afterbegin", clientStamp);
     return template.innerHTML;
   }
 
-  // Fallback legacy: bloco plano com o texto genérico exato numa única
-  // etiqueta (sem colunas próprias) — reconstrói como antes.
-  const text = (target.textContent || "").replace(/\s+/g, " ").trim();
-  if (FIRST_PARTY_RE.test(text) && SECOND_PARTY_RE.test(text) && text.length < 220) {
-    target.innerHTML = `
+  // 2) Fallback legacy: bloco plano com o texto genérico exato numa única
+  //    etiqueta, sem sub-elementos por parte — reconstrói como antes.
+  const flatTarget = candidates.find((el) => {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    return FIRST_PARTY_RE.test(text) && SECOND_PARTY_RE.test(text) && text.length < 220;
+  });
+  if (flatTarget) {
+    flatTarget.innerHTML = `
       <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
         ${companyStamp}
         <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
