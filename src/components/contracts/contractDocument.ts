@@ -209,20 +209,33 @@ export interface PartySignatureInfo {
 const SECOND_PARTY_RE = /O SEGUNDO CONTRATANTE|\bO CLIENTE\b/i;
 const FIRST_PARTY_RE = /A PRIMEIRA CONTRATANTE/i;
 
+// Reserved height (px) above each signature line once at least one party has
+// signed — the client stamp (badge + name + date + IP, 4 lines) is naturally
+// taller than the company's (just a cursive name, 1 line); without a shared
+// minimum height the two lines end up at different vertical positions.
+const STAMP_MIN_HEIGHT = 60;
+
 function buildSignatureStampHtml(esc: (s: string) => string, info: PartySignatureInfo): string {
-  if (!info.signed) return "";
+  const base = `min-height:${STAMP_MIN_HEIGHT}px;display:flex;flex-direction:column;justify-content:flex-end;`;
+  if (!info.signed) {
+    // Not signed yet — invisible spacer only, so the line doesn't jump when
+    // the OTHER party's (possibly taller) stamp appears.
+    return `<div style="${base}"></div>`;
+  }
   if (info.showOtpBadge) {
     const dateStr = info.signedAt
       ? new Date(info.signedAt).toLocaleString("pt-PT", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
       : "";
-    return `<div style="margin-bottom:6px;">
+    return `<div style="${base}margin-bottom:6px;">
       <div style="color:#059669;font-size:11px;font-weight:600;">&#10003; Assinado via SMS OTP</div>
       ${info.name ? `<div style="font-size:12px;font-weight:600;color:#374151;">${esc(info.name)}</div>` : ""}
       ${dateStr ? `<div style="font-size:11px;color:#6b7280;">${esc(dateStr)}</div>` : ""}
       ${info.ip ? `<div style="font-size:10px;color:#9ca3af;">IP: ${esc(info.ip)}</div>` : ""}
     </div>`;
   }
-  return `<div style="font-family:'Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;color:#1a1a1a;margin-bottom:2px;">${esc(info.name || "Assinado")}</div>`;
+  return `<div style="${base}margin-bottom:2px;">
+    <div style="font-family:'Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;color:#1a1a1a;">${esc(info.name || "Assinado")}</div>
+  </div>`;
 }
 
 /**
@@ -246,13 +259,15 @@ export function injectSignaturesIntoBlock(
 ): string {
   if (!html) return html;
   if (typeof document === "undefined") return html; // SSR: no-op (não exercitado neste código)
+  // Nada assinado ainda — não mexer no HTML original (buildSignatureStampHtml
+  // já não devolve vazio quando signed=false, para poder reservar espaço).
+  if (!company.signed && !client.signed) return html;
 
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
   const companyStamp = buildSignatureStampHtml(esc, company);
   const clientStamp = buildSignatureStampHtml(esc, client);
-  if (!companyStamp && !clientStamp) return html;
 
   const template = document.createElement("template");
   template.innerHTML = html;

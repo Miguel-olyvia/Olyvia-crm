@@ -40,6 +40,11 @@ describe("injectSignaturesIntoBlock — real minuta markup", () => {
     // The stamp must land inside the LEFT column, before the client column's
     // "O CLIENTE" text — not duplicated/misplaced on the client side.
     expect(out.indexOf("Ricardo Belchior")).toBeLessThan(out.indexOf("O CLIENTE"));
+    // The client side (unsigned) must still get an equal-height invisible
+    // spacer, so its line stays aligned with the company's taller/shorter
+    // stamp instead of jumping up — regression for the "lines misaligned"
+    // report when only one party had signed.
+    expect((out.match(/min-height:\d+px/g) || []).length).toBe(2);
   });
 
   it("injects the client's SMS OTP badge once signed, keeps company signature intact", () => {
