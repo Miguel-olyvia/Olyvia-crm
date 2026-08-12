@@ -99,7 +99,7 @@ interface Quote {
   updated_at?: string;
   validade_dias?: number | null;
   accepted_at?: string | null;
-  observacoes?: string | null;
+  lost_reason?: string | null;
   desconto_global?: number | null;
   proposal_id?: string | null;
   title?: string | null;
@@ -1228,7 +1228,7 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ estado: 'perdido', observacoes: reason } as any).eq("id", quoteId);
+    const { error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
@@ -1334,10 +1334,12 @@ export default function Quotes() {
       enviado: { icon: <Send className="w-3 h-3 mr-1" />, color: "bg-blue-500/20 text-blue-600 dark:text-blue-400" },
       aceite: { icon: <CheckCircle2 className="w-3 h-3 mr-1" />, color: "bg-green-500/20 text-green-600 dark:text-green-400" },
       perdido: { icon: <FileX className="w-3 h-3 mr-1" />, color: "bg-destructive/20 text-destructive" },
+      rejeitado: { icon: <FileX className="w-3 h-3 mr-1" />, color: "bg-red-500/20 text-red-600 dark:text-red-400" },
     };
     const statusLabels: Record<string, string> = {
       rascunho: t('quotes.status.draft'), enviado: t('quotes.status.sent'),
       aceite: t('quotes.status.accepted'), perdido: t('quotes.status.lost'),
+      rejeitado: "Rejeitado",
     };
     const cfg = config[status] || config.rascunho;
     return <Badge className={cn("flex items-center", cfg.color)}>{cfg.icon}{statusLabels[status] || status}</Badge>;
@@ -1353,12 +1355,13 @@ export default function Quotes() {
     if (quote.estado === 'enviado' && daysOld > 5) return `Enviado há ${daysOld} dias — sem resposta`;
     if (agg?.hasCostData && agg.margin < 15 && agg.totalValue > 0) return `⚠ Margem abaixo do target (${agg.margin.toFixed(0)}%)`;
     if (quote.estado === 'perdido') return `❌ Perdido`;
+    if (quote.estado === 'rejeitado') return `❌ Rejeitado`;
     return null;
   };
 
   const getRowColorClass = (quote: Quote): string => {
     if (quote.estado === 'aceite') return "bg-green-50/50 dark:bg-green-950/10";
-    if (quote.estado === 'perdido') return "bg-red-50/50 dark:bg-red-950/10";
+    if (quote.estado === 'perdido' || quote.estado === 'rejeitado') return "bg-red-50/50 dark:bg-red-950/10";
     if (quote.estado === 'rascunho') return "bg-muted/20";
     if (quote.estado === 'enviado' && differenceInDays(new Date(), parseISO(quote.created_at)) > 5) return "bg-amber-50/50 dark:bg-amber-950/10";
     return "";
@@ -1751,14 +1754,14 @@ export default function Quotes() {
                             {/* Number + subtitle */}
                             <TableCell>
                               <div className="flex flex-col gap-0.5">
-                                <span className={cn("font-semibold text-sm", quote.estado === 'perdido' && "line-through text-muted-foreground")}>
+                                <span className={cn("font-semibold text-sm", (quote.estado === 'perdido' || quote.estado === 'rejeitado') && "line-through text-muted-foreground")}>
                                   {quote.quote_number || '-'}
                                 </span>
                                 {contextSub && (
                                   <span className={cn(
                                     "text-[10px] leading-tight",
                                     quote.estado === 'aceite' ? "text-green-600 dark:text-green-400" :
-                                    quote.estado === 'perdido' ? "text-destructive" :
+                                    (quote.estado === 'perdido' || quote.estado === 'rejeitado') ? "text-destructive" :
                                     contextSub.includes("⚠") ? "text-amber-600" : "text-muted-foreground"
                                   )}>
                                     {contextSub}
@@ -2274,12 +2277,12 @@ export default function Quotes() {
                         </>
                       )}
                     </div>
-                    {detailQuote.observacoes && (
+                    {detailQuote.lost_reason && (
                       <>
                         <Separator />
                         <div>
-                          <label className="text-xs font-medium text-muted-foreground">{t('quotes.observations')}</label>
-                          <p className="text-sm mt-1 whitespace-pre-wrap">{detailQuote.observacoes}</p>
+                          <label className="text-xs font-medium text-muted-foreground">{t('quotes.lostReason')}</label>
+                          <p className="text-sm mt-1 whitespace-pre-wrap">{detailQuote.lost_reason}</p>
                         </div>
                       </>
                     )}
