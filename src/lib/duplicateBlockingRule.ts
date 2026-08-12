@@ -17,7 +17,7 @@
  */
 
 import type { DuplicateMatch } from "@/components/shared/DuplicateEntityDialog";
-import { findEntityMatches } from "@/utils/orgEntity";
+import { findEntityMatches, type EntityMatchResult } from "@/utils/orgEntity";
 
 export type StrongField = "email" | "phone" | "nif";
 const STRONG: readonly StrongField[] = ["email", "phone", "nif"] as const;
@@ -85,13 +85,16 @@ export async function fetchSameOrgFieldsByEntity(params: {
   phone?: string | null;
   vat?: string | null;
   countryCode?: string;
+  /** Pre-fetched result of `findEntityMatches` for the same params, to avoid a
+   *  redundant Edge Function round-trip when the caller already has it. */
+  matches?: EntityMatchResult[];
 }): Promise<Map<string, StrongField[]>> {
-  const { orgId, email, phone, vat, countryCode = "PT" } = params;
+  const { orgId, email, phone, vat, countryCode = "PT", matches: precomputed } = params;
   const out = new Map<string, StrongField[]>();
   if (!orgId) return out;
   if (!email && !phone && !vat) return out;
   try {
-    const matches = await findEntityMatches({
+    const matches = precomputed ?? await findEntityMatches({
       orgId,
       email: email || null,
       phone: phone || null,
