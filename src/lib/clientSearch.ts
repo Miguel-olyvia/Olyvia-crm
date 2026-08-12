@@ -22,6 +22,19 @@ export function escapeIlike(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+/**
+ * Sanitizes a term before it's interpolated into a PostgREST `.or(...)`
+ * filter string (e.g. `.or(\`name.ilike.%${term}%,sku.ilike.%${term}%\`)`).
+ * `,` and `()` are structural characters in that mini-language — an
+ * unescaped one in the term breaks the filter with a syntax error (400)
+ * instead of just matching oddly, e.g. searching "Cadeira, Mesa (2un)".
+ * `%`/`_` (ilike wildcards) are also escaped via escapeIlike so the term is
+ * matched literally rather than as a pattern.
+ */
+export function escapePostgrestOrTerm(term: string): string {
+  return escapeIlike(term).replace(/[,()]/g, " ").trim();
+}
+
 function sanitizeWord(raw: string): string {
   return escapeIlike(raw.trim().toLowerCase())
     .replace(/[,()*]/g, " ")

@@ -5,6 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Trash2, Package, Wrench } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { escapeIlike } from "@/lib/clientSearch";
+
+// Results are capped — this is a compact "type to search" dropdown, not a
+// paginated list, so there is no affordance to page past this many rows.
+// Below the cap, the empty-search case (browsing without typing) also stays
+// small: showing hundreds of unfiltered rows in a small popup isn't useful,
+// and at a large catalog size it would be a heavy, mostly-wasted query.
+const RESULT_LIMIT = 50;
 
 export interface CatalogLineItem {
   id?: string;
@@ -62,8 +70,8 @@ export const CatalogItemPicker = ({ items, onChange, organizationId }: CatalogIt
           .eq("is_active", true)
           .eq("is_deleted", false)
           .order("name")
-          .limit(500);
-        if (query.length > 0) pQuery = pQuery.ilike("name", `%${query}%`);
+          .limit(RESULT_LIMIT);
+        if (query.length > 0) pQuery = pQuery.ilike("name", `%${escapeIlike(query)}%`);
         const { data } = await pQuery;
         fetched = (data || []).map((p: any) => {
           const retailPrice = (p.product_prices || []).find((pp: any) => pp.price_type === "retail");
@@ -75,8 +83,8 @@ export const CatalogItemPicker = ({ items, onChange, organizationId }: CatalogIt
           .eq("is_active", true)
           .eq("is_deleted", false)
           .order("name")
-          .limit(500);
-        if (query.length > 0) sQuery = sQuery.ilike("name", `%${query}%`);
+          .limit(RESULT_LIMIT);
+        if (query.length > 0) sQuery = sQuery.ilike("name", `%${escapeIlike(query)}%`);
         const { data } = await sQuery;
         fetched = (data || []).map((s: any) => {
           const retailPrice = (s.service_prices || []).find((sp: any) => sp.price_type === "retail");
@@ -183,6 +191,11 @@ export const CatalogItemPicker = ({ items, onChange, organizationId }: CatalogIt
                 <span className="text-xs font-medium">€{r.price?.toFixed(2)}</span>
               </button>
             ))}
+            {!searching && results.length === RESULT_LIMIT && (
+              <p className="text-[11px] text-muted-foreground px-3 py-2 border-t border-border">
+                A mostrar os primeiros {RESULT_LIMIT} resultados — escreva para refinar a pesquisa.
+              </p>
+            )}
           </div>
         </div>
       )}
