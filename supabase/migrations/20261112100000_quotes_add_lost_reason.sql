@@ -1,0 +1,12 @@
+-- Adds the missing "lost_reason" column to quotes, mirroring the pattern already
+-- used by deals.lost_reason, proposals.rejection_reason and
+-- client_contracts.cancellation_reason. The "Marcar como Perdido" dialog in
+-- src/pages/Quotes.tsx was writing to a non-existent "observacoes" column,
+-- causing "Could not find the 'observacoes' column of 'quotes' in the schema
+-- cache" whenever any user (regardless of role) marked a quote as lost.
+--
+-- The lost-reason *options* remain quote-specific (Preço elevado, Concorrência,
+-- Sem resposta, Desistência do cliente, Outro) — only the persistence
+-- mechanism (a plain text column set alongside estado = 'perdido') follows the
+-- same logic as the other modules.
+ALTER TABLE public.quotes ADD COLUMN IF NOT EXISTS lost_reason text;
