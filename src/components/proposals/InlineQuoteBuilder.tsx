@@ -35,6 +35,7 @@ export interface InlineQuoteLine {
   product_id?: string | null;
   service_id?: string | null;
   bundle_id?: string | null;
+  item_supplier_id?: string | null;
   retail_price_unit?: number;
   cost_price?: number;
   selected_attributes?: Record<string, any>;

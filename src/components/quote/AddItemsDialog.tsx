@@ -50,6 +50,15 @@ interface ProductAttribute {
   pricing_type?: string;
 }
 
+interface SupplierRef {
+  id: string;
+  supplier_id: string;
+  supplier_sku: string | null;
+  purchase_price: number | null;
+  is_preferred: boolean;
+  supplier_name: string | null;
+}
+
 interface CatalogItem {
   id: string;
   name: string;
@@ -63,6 +72,7 @@ interface CatalogItem {
   type: "product" | "service";
   uom_symbol: string | null;
   uom_name: string | null;
+  supplierRefs?: SupplierRef[];
 }
 
 // Bundle component info
@@ -97,6 +107,7 @@ interface SelectedItem {
   fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>; // enriched data
   attributePriceAddon?: number; // Additional price from attribute ranges (dimension pricing)
   bundleInfo?: BundleInfo; // If this item represents a bundle
+  itemSupplierId?: string | null; // Chosen item_suppliers reference (null when none/not applicable)
 }
 
 interface Props {
@@ -463,6 +474,31 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .in("product_id", batch);
           (pd || []).forEach(p => pricesMap.set(p.product_id, { price: p.price, vat_rate: p.vat_rate }));
         }
+        const supplierRefsMap = new Map<string, SupplierRef[]>();
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const batch = ids.slice(i, i + BATCH);
+          if (batch.length === 0) continue;
+          const { data: refsData } = await (supabase as any).from("item_suppliers")
+            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .in("product_id", batch)
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .order("is_preferred", { ascending: false })
+            .order("purchase_price", { ascending: true, nullsFirst: false });
+          (refsData || []).forEach((r: any) => {
+            if (!r.product_id) return;
+            const list = supplierRefsMap.get(r.product_id) || [];
+            list.push({
+              id: r.id,
+              supplier_id: r.supplier_id,
+              supplier_sku: r.supplier_sku ?? null,
+              purchase_price: r.purchase_price ?? null,
+              is_preferred: !!r.is_preferred,
+              supplier_name: r.suppliers?.name ?? null,
+            });
+            supplierRefsMap.set(r.product_id, list);
+          });
+        }
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
           return {
@@ -478,6 +514,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             type: "product" as const,
             uom_symbol: r.uom?.code ?? null,
             uom_name: r.uom?.description ?? null,
+            supplierRefs: supplierRefsMap.get(r.id) || undefined,
           };
         });
       } else {
@@ -494,6 +531,31 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .in("service_id", batch);
           (pd || []).forEach(p => pricesMap.set(p.service_id, { price: p.price, vat_rate: p.vat_rate }));
         }
+        const supplierRefsMap = new Map<string, SupplierRef[]>();
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const batch = ids.slice(i, i + BATCH);
+          if (batch.length === 0) continue;
+          const { data: refsData } = await (supabase as any).from("item_suppliers")
+            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .in("service_id", batch)
+            .is("deleted_at", null)
+            .eq("is_active", true)
+            .order("is_preferred", { ascending: false })
+            .order("purchase_price", { ascending: true, nullsFirst: false });
+          (refsData || []).forEach((r: any) => {
+            if (!r.service_id) return;
+            const list = supplierRefsMap.get(r.service_id) || [];
+            list.push({
+              id: r.id,
+              supplier_id: r.supplier_id,
+              supplier_sku: r.supplier_sku ?? null,
+              purchase_price: r.purchase_price ?? null,
+              is_preferred: !!r.is_preferred,
+              supplier_name: r.suppliers?.name ?? null,
+            });
+            supplierRefsMap.set(r.service_id, list);
+          });
+        }
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
           return {
@@ -509,6 +571,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             type: "service" as const,
             uom_symbol: null,
             uom_name: null,
+            supplierRefs: supplierRefsMap.get(r.id) || undefined,
           };
         });
       }
@@ -819,7 +882,8 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       const existing = newSelected.get(item.id)!;
       newSelected.set(item.id, { ...existing, quantity: existing.quantity + 1 });
     } else {
-      newSelected.set(item.id, { item, quantity: 1, attributes: {} });
+      const defaultItemSupplierId = item.supplierRefs && item.supplierRefs.length > 0 ? item.supplierRefs[0].id : null;
+      newSelected.set(item.id, { item, quantity: 1, attributes: {}, itemSupplierId: defaultItemSupplierId });
       if (item.type === "product") {
         loadProductAttributes(item.id);
       }
@@ -1009,6 +1073,15 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       attributePriceAddon: newAttributePriceAddon
     });
     
+    setSelectedItems(newSelected);
+  };
+
+  // Handle supplier reference change (local selection only; persisted only on Save)
+  const handleSupplierRefChange = (itemId: string, itemSupplierId: string) => {
+    const newSelected = new Map(selectedItems);
+    const existing = newSelected.get(itemId);
+    if (!existing) return;
+    newSelected.set(itemId, { ...existing, itemSupplierId });
     setSelectedItems(newSelected);
   };
 
@@ -1477,10 +1550,11 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       return {
         ...selected,
         fullAttributes,
-        attributePriceAddon
+        attributePriceAddon,
+        item_supplier_id: selected.itemSupplierId ?? null,
       };
     });
-    
+
     // Convert bundles to single items with component info (not expanded lines)
     const bundleItems: SelectedItem[] = [];
     selectedBundles.forEach((selectedBundle) => {
@@ -1877,7 +1951,18 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                     {item.sku}
                                   </p>
                                 )}
-                                
+
+                                {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                  <Badge variant="outline" className="text-xs mb-2">
+                                    Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                  </Badge>
+                                )}
+                                {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                  <Badge variant="outline" className="text-xs mb-2">
+                                    {item.supplierRefs.length} fornecedores
+                                  </Badge>
+                                )}
+
                                 <div className="flex items-baseline justify-between mb-3">
                                   <span className="text-lg font-bold text-primary">
                                     €{((item.retail_price || 0) + (selection?.attributePriceAddon || 0)).toFixed(2)}
@@ -2100,7 +2185,19 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                   </div>
                                 </td>
                                 <td className="px-3 py-3">
-                                  <span className="text-xs font-mono text-muted-foreground">{item.sku || "-"}</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-mono text-muted-foreground">{item.sku || "-"}</span>
+                                    {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                      </Badge>
+                                    )}
+                                    {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        {item.supplierRefs.length} fornecedores
+                                      </Badge>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-3">
                                   <span className="font-medium text-sm" title={item.name}>{item.name}</span>
@@ -2232,7 +2329,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                         
                         {/* Items in group */}
                         <div className="space-y-2 mb-4">
-                          {items.map(({ item, quantity, attributePriceAddon }) => {
+                          {items.map(({ item, quantity, attributePriceAddon, itemSupplierId }) => {
                             const basePrice = item.retail_price || 0;
                             const addon = attributePriceAddon || 0;
                             const unitPrice = basePrice + addon;
@@ -2277,6 +2374,30 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                     <p>{quantity}x €{unitPrice.toFixed(2)}</p>
                                   )}
                                 </div>
+
+                                {item.supplierRefs && item.supplierRefs.length === 1 && (
+                                  <Badge variant="outline" className="text-xs mt-1.5">
+                                    Ref: {item.supplierRefs[0].supplier_sku || "s/ código"}
+                                  </Badge>
+                                )}
+
+                                {item.supplierRefs && item.supplierRefs.length > 1 && (
+                                  <Select
+                                    value={itemSupplierId || item.supplierRefs[0].id}
+                                    onValueChange={(val) => handleSupplierRefChange(item.id, val)}
+                                  >
+                                    <SelectTrigger className="h-7 text-xs mt-1.5">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="z-[9999] bg-popover border shadow-lg" position="popper" sideOffset={4}>
+                                      {item.supplierRefs.map((ref) => (
+                                        <SelectItem key={ref.id} value={ref.id}>
+                                          {`${ref.supplier_name ?? "Fornecedor"} — ${ref.supplier_sku ?? "sem ref."} — ${ref.purchase_price != null ? ref.purchase_price.toFixed(2) + "€" : "s/ preço"}${ref.is_preferred ? " ★" : ""}`}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                )}
                               </div>
                               <div className="text-right">
                                 <p className="font-semibold text-sm text-primary">
