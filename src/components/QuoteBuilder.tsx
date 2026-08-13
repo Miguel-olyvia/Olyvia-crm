@@ -344,7 +344,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [templates, setTemplates] = useState<any[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
   const saveLockRef = useRef(false);
-  const draftRestoredRef = useRef(false);
+  // Tracks the organization.id a draft restore attempt has already run for
+  // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
+  // right after a forced reload (e.g. the stale-chunk recovery in main.tsx),
+  // activeCompany?.id can resolve through a transient/default value before
+  // settling on the real one a render or two later. A boolean latch would
+  // burn its one-shot attempt on that transient id, find no draft there, and
+  // then — because the guard below only checks "did we ever restore" — never
+  // retry once the correct id arrives, silently stranding a real draft in
+  // localStorage under the correct key forever. Comparing against the
+  // specific id lets each distinct value get its own attempt.
+  const draftRestoredRef = useRef<string | null>(null);
   // For an existing quote, fetchQuote() populates formData/lines from the
   // server first; draft restore must wait for that to finish so it overlays
   // on top of the server state instead of being clobbered by it.
@@ -361,13 +371,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
   useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current || typeof window === "undefined") return;
+    if (!activeCompany?.id || draftRestoredRef.current === activeCompany.id || typeof window === "undefined") return;
     // Editing an existing quote: wait for fetchQuote() to finish loading the
     // server state first, so a restored draft overlays it instead of being
     // overwritten by it.
     if (quoteId && !existingQuoteLoadedRef.current) return;
 
-    draftRestoredRef.current = true;
+    draftRestoredRef.current = activeCompany.id;
     const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId));
     if (!rawDraft) return;
 
@@ -391,7 +401,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   }, [quoteId, activeCompany?.id, quoteLoadTick]);
 
   useEffect(() => {
-    if (!activeCompany?.id || !draftRestoredRef.current || typeof window === "undefined") return;
+    if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
 
     const hasDraftContent = Boolean(
       formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
