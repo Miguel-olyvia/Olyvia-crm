@@ -731,21 +731,17 @@ export function VisitReassignDialog({
         newResourceId = newResource?.id;
       }
 
-      // Update assignee
+      // Update assignee — RPC atómica (delete+insert numa única transação),
+      // evita a janela em que o utilizador perde a visibilidade RLS do item
+      // a meio da troca de recurso.
       if (newResourceId) {
-        // Remove ALL existing assignees for this item
-        await supabase
-          .from("schedule_item_assignees")
-          .delete()
-          .eq("item_id", visit.id);
-
-        // Add new assignee
-        const { error: assigneeError } = await supabase
-          .from("schedule_item_assignees")
-          .insert({
-            item_id: visit.id,
-            resource_id: newResourceId,
-          });
+        const { error: assigneeError } = await supabase.rpc(
+          "rpc_update_schedule_item_assignees",
+          {
+            p_item_id: visit.id,
+            p_resource_ids: [newResourceId],
+          }
+        );
 
         if (assigneeError) throw assigneeError;
       }

@@ -524,25 +524,15 @@ export function useScheduling(companyId?: string) {
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
       await withAuditContext(supabase, businessUserId, async () => {
-        // Remove existing
-        await supabase
-          .from('schedule_item_assignees')
-          .delete()
-          .eq('item_id', itemId);
+        // RPC atómica (delete+insert numa única transação, sem passar por RLS
+        // direta do cliente) — evita a janela em que um utilizador com scope
+        // OWNED perde a visibilidade do item a meio da troca de assignee.
+        const { error } = await supabase.rpc('rpc_update_schedule_item_assignees', {
+          p_item_id: itemId,
+          p_resource_ids: resourceIds,
+        });
 
-        // Add new
-        if (resourceIds.length) {
-          const assignees = resourceIds.map(resourceId => ({
-            item_id: itemId,
-            resource_id: resourceId,
-          }));
-
-          const { error } = await supabase
-            .from('schedule_item_assignees')
-            .insert(assignees);
-
-          if (error) throw error;
-        }
+        if (error) throw error;
       }, 'web_app');
 
       return true;
