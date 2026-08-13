@@ -116,6 +116,52 @@ const showUpdateBanner = () => {
   document.body.appendChild(banner);
 };
 
+// ── Proactive new-version detection ─────────────────────────────────────
+// Everything above only reacts AFTER a stale-chunk request has already
+// failed — i.e. after the user already hit an error mid-task. This polls
+// for a new deployment before that ever happens, so the same non-destructive
+// banner can show up calmly ahead of time, well before the user's next
+// navigation would try (and fail) to fetch a chunk the new deploy removed.
+// baselineScriptSrc is captured from the actual live DOM at module-load time
+// (not a re-fetch), so it always reflects exactly what this tab is running.
+const baselineScriptSrc = document.querySelector('script[type="module"]')?.getAttribute("src") ?? null;
+
+const extractIndexScriptSrc = (html: string): string | null => {
+  const match = html.match(/<script[^>]+type=["']module["'][^>]+src=["']([^"']+)["']/i);
+  return match ? match[1] : null;
+};
+
+const startVersionPolling = () => {
+  if (!baselineScriptSrc || typeof document === "undefined" || typeof fetch === "undefined") return;
+
+  // Frequent enough to catch a deploy within a normal work session, cheap
+  // enough (one static GET of "/") to leave running for the whole session.
+  const POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+  const checkForNewVersion = async () => {
+    if (updateBannerShown || document.visibilityState !== "visible") return;
+    try {
+      const res = await fetch("/", { cache: "no-store" });
+      const html = await res.text();
+      const currentScriptSrc = extractIndexScriptSrc(html);
+      if (currentScriptSrc && currentScriptSrc !== baselineScriptSrc) {
+        showUpdateBanner();
+      }
+    } catch {
+      // Offline / transient network error — not conclusive either way, skip
+      // this round silently and try again on the next tick.
+    }
+  };
+
+  window.setInterval(checkForNewVersion, POLL_INTERVAL_MS);
+  // Also check right away when the user comes back to this tab — catches a
+  // deploy that happened while it was in the background, without waiting up
+  // to a full POLL_INTERVAL_MS after they return.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void checkForNewVersion();
+  });
+};
+
 const renderPreviewRecovery = (error: unknown) => {
   const message = error instanceof Error ? error.message : String(error ?? "Erro desconhecido");
   root.render(
@@ -148,6 +194,7 @@ const loadApp = async () => {
       </LanguageProvider>
     );
     appMounted = true;
+    startVersionPolling();
   } catch (error) {
     if (isModuleLoadError(error) && !sessionStorage.getItem("olyvia-module-load-retried")) {
       sessionStorage.setItem("olyvia-module-load-retried", "true");
