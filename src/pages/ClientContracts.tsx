@@ -368,7 +368,7 @@ const ClientContracts = () => {
   const viewScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.view");
   const teamMemberIdsKey = teamMemberIds.join(",");
 
-  const { data: contracts = [], isLoading } = useQuery({
+  const { data: contracts = [], isLoading, isFetched } = useQuery({
     queryKey: ["client-contracts", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
@@ -665,8 +665,14 @@ const ClientContracts = () => {
   // Reuses handleEdit (the exact same handler triggered by the "Ver contrato"
   // Eye icon below) so the contract opens in the same ContractDetailDialog,
   // with the same PDF preview/layout — never a bespoke view. Waits for the
-  // contracts list to finish loading before looking the id up, since it may
-  // still be empty on first render.
+  // contracts query to have actually run at least once before looking the id
+  // up: `isLoading` alone is NOT enough — while the query is still `enabled:
+  // false` (activeCompany/permission scope not resolved yet on first mount),
+  // TanStack Query v5 reports `isLoading` as false too (it's `isPending &&
+  // isFetching`), so relying on it fired this effect immediately against an
+  // empty `contracts` default and showed a false "Contrato não encontrado."
+  // `isFetched` only flips true once a real fetch has completed, so it's the
+  // reliable signal here.
   // When accompanied by &viewPdf=1 (only set once the contract is signed —
   // see Propostas' "Ver contrato"), opens the real generated PDF instead,
   // via handleDownloadPdf(target, "view"). Without viewPdf, behaviour is
@@ -676,7 +682,7 @@ const ClientContracts = () => {
     const openContractId = searchParams.get("open");
     const viewPdf = searchParams.get("viewPdf");
     if (!openContractId) return;
-    if (isLoading) return;
+    if (!isFetched || isLoading) return;
 
     const target = contracts.find((c) => c.id === openContractId);
     if (target) {
@@ -692,7 +698,7 @@ const ClientContracts = () => {
     searchParams.delete("open");
     searchParams.delete("viewPdf");
     setSearchParams(searchParams, { replace: true });
-  }, [searchParams, setSearchParams, contracts, isLoading]);
+  }, [searchParams, setSearchParams, contracts, isLoading, isFetched]);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],
