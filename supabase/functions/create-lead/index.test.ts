@@ -221,3 +221,301 @@ Deno.test("L6 â€” mismatched body form_id is rejected in favour of campaign
     "form_id does not match the campaign's canonical form_id",
   );
 });
+
+// ---- Reused-entity backfill (email/phone/address) ----------------------
+//
+// Covers the conservative backfill added to the "Reused entity, but no
+// active contact/client/lead" branch in index.ts: when a public form
+// submission resolves to a pre-existing anew_entities row (dedup by
+// email/phone/NIF) that is missing email/phone/address, the new submission's
+// data is used to fill the gap — but ONLY when the entity has ZERO rows in
+// the corresponding table, and existing rows are NEVER overwritten.
+
+function computeAddressKey(street: string, postal: string, city: string): string {
+  // Mirrors create_entity_with_contacts_and_roles:
+  // lower(concat_ws('|', v_street, v_postal, COALESCE(v_city, '')))
+  // (20260821020000_security_definer_identity_from_authuid_fix_record.sql:106)
+  return [street, postal, city].join("|").toLowerCase();
+}
+
+Deno.test("address_key — matches SQL concat_ws('|', street, postal, city) lowercase", () => {
+  assertEquals(computeAddressKey("Rua A 12", "1000-001", "Lisboa"), "rua a 12|1000-001|lisboa");
+});
+
+Deno.test("address_key — empty city still yields the trailing '|' (concat_ws keeps empty-string args)", () => {
+  assertEquals(computeAddressKey("Rua A 12", "1000-001", ""), "rua a 12|1000-001|");
+});
+
+/**
+ * In-memory mock supabase supporting exactly the calls the reused-entity
+ * backfill routine makes: count lookups (head:true), address_key lookup,
+ * and inserts into anew_entity_emails / anew_entity_phones / anew_addresses
+ * / anew_entity_addresses.
+ */
+function makeBackfillMockSupabase(opts: {
+  emailCount?: number;
+  phoneCount?: number;
+  addressCount?: number;
+  existingAddressByKey?: Record<string, { id: string }>;
+}) {
+  const inserted: Record<string, any[]> = {
+    anew_entity_emails: [],
+    anew_entity_phones: [],
+    anew_addresses: [],
+    anew_entity_addresses: [],
+  };
+  const existingAddressByKey = opts.existingAddressByKey ?? {};
+  let addressSeq = 0;
+
+  const supabase = {
+    from: (table: string) => {
+      const builder: any = {
+        _table: table,
+        _filters: {} as Record<string, unknown>,
+        select: (_cols: string, selectOpts?: { count?: string; head?: boolean }) => {
+          builder._isCount = !!selectOpts?.head;
+          return builder;
+        },
+        eq: (col: string, val: any) => {
+          builder._filters[col] = val;
+          return builder;
+        },
+        maybeSingle: () => {
+          if (table === "anew_addresses") {
+            const key = builder._filters["address_key"];
+            const found = existingAddressByKey[key as string];
+            return Promise.resolve({ data: found ?? null, error: null });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        insert: (row: any) => {
+          inserted[table]?.push(row);
+          const insertResult = {
+            select: (_c?: string) => ({
+              single: () => {
+                if (table === "anew_addresses") {
+                  addressSeq += 1;
+                  return Promise.resolve({ data: { id: `new-address-${addressSeq}` }, error: null });
+                }
+                return Promise.resolve({ data: { id: "stub" }, error: null });
+              },
+            }),
+          };
+          // Also awaitable directly (no .select chained), matching the
+          // entity_emails/entity_phones/entity_addresses insert calls in index.ts.
+          return Object.assign(Promise.resolve({ error: null }), insertResult);
+        },
+      };
+      // Count queries resolve when awaited directly (no .single()/.maybeSingle() chained).
+      const originalEq = builder.eq;
+      builder.eq = (col: string, val: any) => {
+        originalEq(col, val);
+        if (builder._isCount) {
+          const countMap: Record<string, number | undefined> = {
+            anew_entity_emails: opts.emailCount,
+            anew_entity_phones: opts.phoneCount,
+            anew_entity_addresses: opts.addressCount,
+          };
+          return Object.assign(Promise.resolve({ count: countMap[table] ?? 0, error: null }), builder);
+        }
+        return builder;
+      };
+      return builder;
+    },
+  };
+  return { supabase, inserted };
+}
+
+/**
+ * Replicates the reused-entity backfill routine from create-lead/index.ts:
+ * email/phone/address are only inserted when the entity has ZERO existing
+ * rows in that table; an existing address_key is reused instead of
+ * duplicated.
+ */
+async function runReusedEntityBackfill(
+  supabase: any,
+  opts: {
+    entityId: string;
+    leadEmail: string | null;
+    leadPhone: string | null;
+    street: string;
+    postal: string;
+    city: string;
+    createdBy: string | null;
+  },
+) {
+  const { entityId, leadEmail, leadPhone, street, postal, city, createdBy } = opts;
+
+  if (leadEmail) {
+    const { count: emailCount } = await supabase
+      .from("anew_entity_emails")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_id", entityId);
+    if (!emailCount) {
+      await supabase.from("anew_entity_emails").insert({
+        entity_id: entityId,
+        email: leadEmail.toLowerCase().trim(),
+        email_type: "personal",
+        is_primary: true,
+        created_by: createdBy,
+      });
+    }
+  }
+
+  if (leadPhone) {
+    const { count: phoneCount } = await supabase
+      .from("anew_entity_phones")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_id", entityId);
+    if (!phoneCount) {
+      await supabase.from("anew_entity_phones").insert({
+        entity_id: entityId,
+        phone_number: leadPhone,
+        phone_type: "mobile",
+        is_primary: true,
+        created_by: createdBy,
+      });
+    }
+  }
+
+  if (street && postal) {
+    const { count: addressCount } = await supabase
+      .from("anew_entity_addresses")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_id", entityId);
+    if (!addressCount) {
+      const addressKey = computeAddressKey(street, postal, city);
+      let addressId: string | null = null;
+      const { data: existingAddress } = await supabase
+        .from("anew_addresses")
+        .select("id")
+        .eq("address_key", addressKey)
+        .maybeSingle();
+      if (existingAddress?.id) {
+        addressId = existingAddress.id;
+      } else {
+        const { data: newAddress } = await supabase
+          .from("anew_addresses")
+          .insert({
+            address_key: addressKey,
+            street,
+            number: "",
+            postal_code: postal,
+            city: city || "",
+            country: "PT",
+            created_by: createdBy,
+          })
+          .select("id")
+          .single();
+        addressId = newAddress?.id || null;
+      }
+      if (addressId) {
+        await supabase.from("anew_entity_addresses").insert({
+          entity_id: entityId,
+          address_id: addressId,
+          address_type: "primary",
+          is_primary: true,
+          created_by: createdBy,
+        });
+      }
+    }
+  }
+}
+
+Deno.test("reused-entity backfill — entity has NO email/phone/address: all get filled from the new submission", async () => {
+  const { supabase, inserted } = makeBackfillMockSupabase({
+    emailCount: 0,
+    phoneCount: 0,
+    addressCount: 0,
+  });
+
+  await runReusedEntityBackfill(supabase, {
+    entityId: "entity-1",
+    leadEmail: "  USER@Example.PT  ",
+    leadPhone: "+351912345678",
+    street: "Rua Nova 5",
+    postal: "2000-002",
+    city: "Santarém",
+    createdBy: "admin-1",
+  });
+
+  assertEquals(inserted.anew_entity_emails.length, 1);
+  assertEquals(inserted.anew_entity_emails[0].email, "user@example.pt");
+  assertEquals(inserted.anew_entity_phones.length, 1);
+  assertEquals(inserted.anew_entity_phones[0].phone_number, "+351912345678");
+  assertEquals(inserted.anew_addresses.length, 1);
+  assertEquals(inserted.anew_addresses[0].address_key, "rua nova 5|2000-002|santarém");
+  assertEquals(inserted.anew_entity_addresses.length, 1);
+  assertEquals(inserted.anew_entity_addresses[0].address_id, "new-address-1");
+});
+
+Deno.test("reused-entity backfill — entity ALREADY has email/phone/address: nothing is inserted (never overwritten)", async () => {
+  const { supabase, inserted } = makeBackfillMockSupabase({
+    emailCount: 1,
+    phoneCount: 1,
+    addressCount: 1,
+  });
+
+  await runReusedEntityBackfill(supabase, {
+    entityId: "entity-2",
+    leadEmail: "new@example.pt",
+    leadPhone: "+351900000000",
+    street: "Outra Rua",
+    postal: "3000-003",
+    city: "Coimbra",
+    createdBy: "admin-1",
+  });
+
+  assertEquals(inserted.anew_entity_emails.length, 0);
+  assertEquals(inserted.anew_entity_phones.length, 0);
+  assertEquals(inserted.anew_addresses.length, 0);
+  assertEquals(inserted.anew_entity_addresses.length, 0);
+});
+
+Deno.test("reused-entity backfill — matching address_key already exists: reused, not duplicated", async () => {
+  const key = computeAddressKey("Rua Existente", "4000-004", "Porto");
+  const { supabase, inserted } = makeBackfillMockSupabase({
+    emailCount: 1,
+    phoneCount: 1,
+    addressCount: 0,
+    existingAddressByKey: { [key]: { id: "existing-address-9" } },
+  });
+
+  await runReusedEntityBackfill(supabase, {
+    entityId: "entity-3",
+    leadEmail: null,
+    leadPhone: null,
+    street: "Rua Existente",
+    postal: "4000-004",
+    city: "Porto",
+    createdBy: "admin-1",
+  });
+
+  // No new anew_addresses row created — the existing one (by address_key) is reused.
+  assertEquals(inserted.anew_addresses.length, 0);
+  assertEquals(inserted.anew_entity_addresses.length, 1);
+  assertEquals(inserted.anew_entity_addresses[0].address_id, "existing-address-9");
+});
+
+Deno.test("reused-entity backfill — incomplete address (missing postal_code) is skipped, email/phone still processed", async () => {
+  const { supabase, inserted } = makeBackfillMockSupabase({
+    emailCount: 0,
+    phoneCount: 0,
+    addressCount: 0,
+  });
+
+  await runReusedEntityBackfill(supabase, {
+    entityId: "entity-4",
+    leadEmail: "someone@example.pt",
+    leadPhone: "+351911111111",
+    street: "Rua Sem Postal",
+    postal: "",
+    city: "Braga",
+    createdBy: null,
+  });
+
+  assertEquals(inserted.anew_entity_emails.length, 1);
+  assertEquals(inserted.anew_entity_phones.length, 1);
+  assertEquals(inserted.anew_addresses.length, 0);
+  assertEquals(inserted.anew_entity_addresses.length, 0);
+});
