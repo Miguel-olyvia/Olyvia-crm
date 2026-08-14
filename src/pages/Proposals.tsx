@@ -3,6 +3,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { setPendingPdfWindow } from "@/lib/contracts/pendingPdfWindow";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { searchEntityIds } from "@/lib/clientSearch";
@@ -1832,6 +1833,21 @@ const Proposals = () => {
   const isContractSigned = (contractId?: string | null) =>
     !!contractId && (contractStatuses[contractId] === "signed" || contractStatuses[contractId] === "active");
 
+  // Opens the contract's real PDF (ClientContracts.tsx generates it after
+  // navigating there). The blank tab MUST be opened here, synchronously
+  // inside the click handler — PDF generation on the destination page takes
+  // several awaits, and by then the browser no longer treats a fresh
+  // `window.open` as user-initiated, so it gets blocked as a popup. Opening
+  // it now (still within the click's user-activation window) and handing
+  // the reference off via `setPendingPdfWindow` lets ClientContracts.tsx
+  // just navigate this already-open tab once the PDF is ready.
+  const openContractPdf = (contractId?: string | null) => {
+    if (!isContractSigned(contractId)) return;
+    const pdfWindow = window.open("", "_blank");
+    setPendingPdfWindow(pdfWindow);
+    navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
+  };
+
   // Filter and sort
   const filteredProposals = useMemo(() => {
     const now = new Date();
@@ -2121,7 +2137,7 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600"
             disabled={!isContractSigned(pipelineLinks[proposal.id]?.contract_id)}
             title={isContractSigned(pipelineLinks[proposal.id]?.contract_id) ? "Ver contrato" : "Contrato ainda não assinado"}
-            onClick={() => { const link = pipelineLinks[proposal.id]; if (isContractSigned(link?.contract_id)) navigate(`/client-contracts?open=${link.contract_id}&viewPdf=1`); }}>
+            onClick={() => openContractPdf(pipelineLinks[proposal.id]?.contract_id)}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
@@ -2274,7 +2290,7 @@ const Proposals = () => {
         <DropdownMenuItem disabled={!proposal.deal_id} onClick={() => proposal.deal_id && navigate(`/deals?open=${proposal.deal_id}`)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver pedido {!proposal.deal_id && <span className="text-[10px] text-muted-foreground ml-1">(não existe)</span>}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!isContractSigned(link?.contract_id)} onClick={() => isContractSigned(link?.contract_id) && navigate(`/client-contracts?open=${link.contract_id}&viewPdf=1`)}>
+        <DropdownMenuItem disabled={!isContractSigned(link?.contract_id)} onClick={() => openContractPdf(link?.contract_id)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver contrato {!link?.contract_id && <span className="text-[10px] text-muted-foreground ml-1">(não criado)</span>}
           {link?.contract_id && !isContractSigned(link?.contract_id) && <span className="text-[10px] text-muted-foreground ml-1">(ainda não assinado)</span>}
         </DropdownMenuItem>

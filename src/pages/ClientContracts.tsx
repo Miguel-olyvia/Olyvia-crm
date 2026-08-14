@@ -43,6 +43,7 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { takePendingPdfWindow } from "@/lib/contracts/pendingPdfWindow";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
@@ -324,7 +325,16 @@ const ClientContracts = () => {
 
       if (mode === "view") {
         const blobUrl: string = await pdfWorker.output("bloburl");
-        window.open(blobUrl, "_blank");
+        // Reuse the tab opened synchronously by Proposals.tsx's click handler
+        // instead of calling window.open here — by now several awaits have
+        // passed since the user's gesture, so a fresh window.open would be
+        // blocked as a popup. Navigating an already-open window never is.
+        const pendingWindow = takePendingPdfWindow();
+        if (pendingWindow && !pendingWindow.closed) {
+          pendingWindow.location.href = blobUrl;
+        } else {
+          window.open(blobUrl, "_blank");
+        }
         toast.success(t('clientContracts.toast.pdfReady'));
       } else {
         await pdfWorker.save();
