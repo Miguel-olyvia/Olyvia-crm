@@ -202,7 +202,7 @@ const ClientContracts = () => {
     setShowWhatsAppDialog(true);
   };
 
-  const handleDownloadPdf = async (contract: any) => {
+  const handleDownloadPdf = async (contract: any, mode: "download" | "view" = "download") => {
     if (!activeCompany?.id) {
       toast.error(t('clientContracts.toast.noActiveOrg'));
       return;
@@ -288,7 +288,7 @@ const ClientContracts = () => {
       // pelo html2pdf) encavalite o último parágrafo da página.
       const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
 
-      await html2pdf()
+      const pdfWorker = html2pdf()
         .set({
           margin: [marginTop, marginRight, marginBottom, marginLeft],
 
@@ -320,10 +320,16 @@ const ClientContracts = () => {
             ],
           },
         })
-        .from(pageElement)
-        .save();
+        .from(pageElement);
 
-      toast.success(t('clientContracts.toast.pdfDownloaded'));
+      if (mode === "view") {
+        const blobUrl: string = await pdfWorker.output("bloburl");
+        window.open(blobUrl, "_blank");
+        toast.success(t('clientContracts.toast.pdfReady'));
+      } else {
+        await pdfWorker.save();
+        toast.success(t('clientContracts.toast.pdfDownloaded'));
+      }
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
@@ -653,6 +659,40 @@ const ClientContracts = () => {
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  // Handle "open contract" URL param (?open=<id>) — used by Propostas' "Ver
+  // contrato" button/dropdown item and the AI assistant's search results.
+  // Reuses handleEdit (the exact same handler triggered by the "Ver contrato"
+  // Eye icon below) so the contract opens in the same ContractDetailDialog,
+  // with the same PDF preview/layout — never a bespoke view. Waits for the
+  // contracts list to finish loading before looking the id up, since it may
+  // still be empty on first render.
+  // When accompanied by &viewPdf=1 (only set once the contract is signed —
+  // see Propostas' "Ver contrato"), opens the real generated PDF instead,
+  // via handleDownloadPdf(target, "view"). Without viewPdf, behaviour is
+  // unchanged so notifications/AI search links that use bare ?open= keep
+  // opening the edit dialog.
+  useEffect(() => {
+    const openContractId = searchParams.get("open");
+    const viewPdf = searchParams.get("viewPdf");
+    if (!openContractId) return;
+    if (isLoading) return;
+
+    const target = contracts.find((c) => c.id === openContractId);
+    if (target) {
+      if (viewPdf === "1") {
+        handleDownloadPdf(target, "view");
+      } else {
+        handleEdit(target);
+      }
+    } else {
+      toast.error("Contrato não encontrado.");
+    }
+
+    searchParams.delete("open");
+    searchParams.delete("viewPdf");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams, contracts, isLoading]);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],

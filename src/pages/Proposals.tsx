@@ -546,6 +546,7 @@ const Proposals = () => {
 
   // Pipeline data for proposals
   const [pipelineLinks, setPipelineLinks] = useState<Record<string, any>>({});
+  const [contractStatuses, setContractStatuses] = useState<Record<string, string>>({});
   const [proposalsWithQuotes, setProposalsWithQuotes] = useState<Set<string>>(new Set());
   const [portalStatuses, setPortalStatuses] = useState<Record<string, string>>({});
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
@@ -727,6 +728,22 @@ const Proposals = () => {
           linksMap[l.proposal_id] = l;
         });
         setPipelineLinks(linksMap);
+
+        // Load contract statuses for linked contracts (no FK between pipeline_links.contract_id
+        // and client_contracts, so this must be a separate query, not an embed).
+        const contractIds = Array.from(new Set((links || []).map((l: any) => l.contract_id).filter(Boolean)));
+        if (contractIds.length > 0) {
+          const { data: linkedContracts } = await (supabase.from("client_contracts") as any)
+            .select("id, status")
+            .in("id", contractIds);
+          const contractStatusMap: Record<string, string> = {};
+          (linkedContracts || []).forEach((c: any) => {
+            contractStatusMap[c.id] = c.status;
+          });
+          setContractStatuses(contractStatusMap);
+        } else {
+          setContractStatuses({});
+        }
 
         // Check which proposals have quotes directly linked (via quotes.proposal_id)
         const { data: quotesLinked } = await (supabase.from("quotes") as any)
@@ -1810,6 +1827,11 @@ const Proposals = () => {
     return stage?.name || proposal.status || "";
   }, [getProposalStage]);
 
+  // A linked contract is only viewable once it has actually been signed.
+  // Matches the "signed" / "active" convention used throughout ClientContracts.tsx.
+  const isContractSigned = (contractId?: string | null) =>
+    !!contractId && (contractStatuses[contractId] === "signed" || contractStatuses[contractId] === "active");
+
   // Filter and sort
   const filteredProposals = useMemo(() => {
     const now = new Date();
@@ -2096,8 +2118,10 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" title="Ver contrato"
-            onClick={() => { const link = pipelineLinks[proposal.id]; if (link?.contract_id) navigate(`/contracts?open=${link.contract_id}`); }}>
+          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600"
+            disabled={!isContractSigned(pipelineLinks[proposal.id]?.contract_id)}
+            title={isContractSigned(pipelineLinks[proposal.id]?.contract_id) ? "Ver contrato" : "Contrato ainda não assinado"}
+            onClick={() => { const link = pipelineLinks[proposal.id]; if (isContractSigned(link?.contract_id)) navigate(`/client-contracts?open=${link.contract_id}&viewPdf=1`); }}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
@@ -2250,8 +2274,9 @@ const Proposals = () => {
         <DropdownMenuItem disabled={!proposal.deal_id} onClick={() => proposal.deal_id && navigate(`/deals?open=${proposal.deal_id}`)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver pedido {!proposal.deal_id && <span className="text-[10px] text-muted-foreground ml-1">(não existe)</span>}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!link?.contract_id} onClick={() => link?.contract_id && navigate(`/contracts?open=${link.contract_id}`)}>
+        <DropdownMenuItem disabled={!isContractSigned(link?.contract_id)} onClick={() => isContractSigned(link?.contract_id) && navigate(`/client-contracts?open=${link.contract_id}&viewPdf=1`)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver contrato {!link?.contract_id && <span className="text-[10px] text-muted-foreground ml-1">(não criado)</span>}
+          {link?.contract_id && !isContractSigned(link?.contract_id) && <span className="text-[10px] text-muted-foreground ml-1">(ainda não assinado)</span>}
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
