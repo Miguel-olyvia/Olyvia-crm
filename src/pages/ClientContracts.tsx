@@ -43,7 +43,6 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { takePendingPdfWindow } from "@/lib/contracts/pendingPdfWindow";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
@@ -203,7 +202,7 @@ const ClientContracts = () => {
     setShowWhatsAppDialog(true);
   };
 
-  const handleDownloadPdf = async (contract: any, mode: "download" | "view" = "download") => {
+  const handleDownloadPdf = async (contract: any) => {
     if (!activeCompany?.id) {
       toast.error(t('clientContracts.toast.noActiveOrg'));
       return;
@@ -323,23 +322,8 @@ const ClientContracts = () => {
         })
         .from(pageElement);
 
-      if (mode === "view") {
-        const blobUrl: string = await pdfWorker.output("bloburl");
-        // Reuse the tab opened synchronously by Proposals.tsx's click handler
-        // instead of calling window.open here — by now several awaits have
-        // passed since the user's gesture, so a fresh window.open would be
-        // blocked as a popup. Navigating an already-open window never is.
-        const pendingWindow = takePendingPdfWindow();
-        if (pendingWindow && !pendingWindow.closed) {
-          pendingWindow.location.href = blobUrl;
-        } else {
-          window.open(blobUrl, "_blank");
-        }
-        toast.success(t('clientContracts.toast.pdfReady'));
-      } else {
-        await pdfWorker.save();
-        toast.success(t('clientContracts.toast.pdfDownloaded'));
-      }
+      await pdfWorker.save();
+      toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
@@ -684,10 +668,16 @@ const ClientContracts = () => {
   // `isFetched` only flips true once a real fetch has completed, so it's the
   // reliable signal here.
   // When accompanied by &viewPdf=1 (only set once the contract is signed —
-  // see Propostas' "Ver contrato"), opens the real generated PDF instead,
-  // via handleDownloadPdf(target, "view"). Without viewPdf, behaviour is
-  // unchanged so notifications/AI search links that use bare ?open= keep
-  // opening the edit dialog.
+  // see Propostas' "Ver contrato"), triggers the exact same PDF download as
+  // the "Descarregar" button (handleDownloadPdf) instead of opening the edit
+  // dialog. Deliberately NOT a new-tab/inline preview: a new tab is subject
+  // to the browser's pop-up blocker (blocked even for a same-tick
+  // window.open once a user has told the browser to always block pop-ups
+  // for this site), and an inline <iframe>/<object> preview is blocked by
+  // this app's own CSP (`frame-src 'none'; object-src 'none'` in
+  // vercel.json) — a real download sidesteps both. Without viewPdf,
+  // behaviour is unchanged so notifications/AI search links that use bare
+  // ?open= keep opening the edit dialog.
   useEffect(() => {
     const openContractId = searchParams.get("open");
     const viewPdf = searchParams.get("viewPdf");
@@ -697,7 +687,7 @@ const ClientContracts = () => {
     const target = contracts.find((c) => c.id === openContractId);
     if (target) {
       if (viewPdf === "1") {
-        handleDownloadPdf(target, "view");
+        handleDownloadPdf(target);
       } else {
         handleEdit(target);
       }

@@ -3,7 +3,6 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { setPendingPdfWindow } from "@/lib/contracts/pendingPdfWindow";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { searchEntityIds } from "@/lib/clientSearch";
@@ -1833,18 +1832,11 @@ const Proposals = () => {
   const isContractSigned = (contractId?: string | null) =>
     !!contractId && (contractStatuses[contractId] === "signed" || contractStatuses[contractId] === "active");
 
-  // Opens the contract's real PDF (ClientContracts.tsx generates it after
-  // navigating there). The blank tab MUST be opened here, synchronously
-  // inside the click handler — PDF generation on the destination page takes
-  // several awaits, and by then the browser no longer treats a fresh
-  // `window.open` as user-initiated, so it gets blocked as a popup. Opening
-  // it now (still within the click's user-activation window) and handing
-  // the reference off via `setPendingPdfWindow` lets ClientContracts.tsx
-  // just navigate this already-open tab once the PDF is ready.
+  // Opens the contract's real PDF. Navigates to ClientContracts.tsx, which
+  // generates the PDF and shows it inline (iframe in a dialog) — no
+  // window.open involved, so it can never be blocked as a pop-up.
   const openContractPdf = (contractId?: string | null) => {
     if (!isContractSigned(contractId)) return;
-    const pdfWindow = window.open("", "_blank");
-    setPendingPdfWindow(pdfWindow);
     navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
   };
 
