@@ -14,14 +14,21 @@
 // page reclaims the already-open window via `takePendingPdfWindow()` and
 // just sets its `location` — navigating an existing window is never treated
 // as a popup, regardless of how long generation took.
-let pendingWindow: Window | null = null;
+//
+// Backed by a property on the real `window` global (not module-scoped
+// state): Proposals.tsx and ClientContracts.tsx are separate lazy-loaded
+// route chunks, and depending on how the bundler splits shared modules a
+// plain `let` here could end up duplicated into each chunk instead of
+// shared — silently breaking the handoff. `window` is the one thing every
+// chunk unquestionably shares.
+const KEY = "__olyviaPendingPdfWindow__";
 
 export function setPendingPdfWindow(win: Window | null): void {
-  pendingWindow = win;
+  (window as any)[KEY] = win;
 }
 
 export function takePendingPdfWindow(): Window | null {
-  const win = pendingWindow;
-  pendingWindow = null;
+  const win = (window as any)[KEY] || null;
+  (window as any)[KEY] = null;
   return win;
 }
