@@ -466,15 +466,17 @@ const ClientContracts = () => {
         });
       }
 
-      // Resolve assigned user names (created_by is anew_users.id per identity boundary)
-      const userIds = [...new Set(data.map((c: any) => c.created_by).filter(Boolean))];
+      // Resolve assigned user names (assigned_to/created_by are anew_users.id per identity boundary).
+      // Prefer assigned_to (the actual commercial responsible, e.g. inherited from the
+      // proposal/quote) and fall back to created_by only when no assignment exists.
+      const userIds = [...new Set(data.flatMap((c: any) => [c.assigned_to, c.created_by]).filter(Boolean))];
       if (userIds.length > 0) {
         const { data: users } = await (supabase as any)
           .from("anew_users")
           .select("id, name")
           .in("id", userIds);
         const userMap = new Map((users || []).map((u: any) => [u.id, u.name]));
-        data.forEach((c: any) => { c.assigned_to_name = userMap.get(c.created_by) || null; });
+        data.forEach((c: any) => { c.assigned_to_name = userMap.get(c.assigned_to) || userMap.get(c.created_by) || null; });
       }
 
       return data as ClientContract[];
