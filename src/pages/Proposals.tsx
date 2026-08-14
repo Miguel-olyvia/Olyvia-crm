@@ -3258,6 +3258,11 @@ const Proposals = () => {
                                 <div className="flex items-center gap-2">
                                   <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: stage?.color || 'transparent' }} />
                                   <div>
+                                    {proposal.proposal_number && (
+                                      <div className="text-[11px] text-muted-foreground font-mono leading-none mb-0.5">
+                                        {proposal.proposal_number}
+                                      </div>
+                                    )}
                                     <span className="font-medium text-sm">{proposal.title}</span>
                                     {subtitle && (
                                       <div className={cn("text-[11px] mt-0.5", subtitle.color)}>{subtitle.text}</div>
