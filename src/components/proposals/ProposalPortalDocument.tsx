@@ -832,7 +832,16 @@ export function ProposalPortalDocument({
         </CardHeader>
         <CardContent>
           {(() => {
-            const quotesSubtotalSum = (quotes || []).reduce((acc: number, q: any) => {
+            // Mirrors calculate_proposal_value_from_quotes() (DB trigger): once
+            // at least one linked quote is accepted, only accepted quotes count
+            // toward the total — rejected alternatives must not inflate what
+            // the client sees. Before any decision, every non-rejected quote
+            // counts as the pipeline estimate.
+            const hasAcceptedQuote = (quotes || []).some((q: any) => q?.estado === "aceite");
+            const valueQuotes = (quotes || []).filter((q: any) =>
+              hasAcceptedQuote ? q?.estado === "aceite" : q?.estado !== "rejeitado"
+            );
+            const quotesSubtotalSum = valueQuotes.reduce((acc: number, q: any) => {
               const namedFees = quoteFees[q.id] || [];
               const namedFeesSubtotal = namedFees.reduce((s: number, f: any) => s + (Number(f.calculated_value) || 0), 0);
               const totalFeesField = Number(q?.total_fees) || 0;
@@ -842,7 +851,7 @@ export function ProposalPortalDocument({
                 : (totalFeesField > 0 ? totalFeesField / (1 + ivaRate / 100) : 0);
               return acc + (Number(q?.subtotal) || 0) + feesSubtotal;
             }, 0);
-            const quotesTotalSum = (quotes || []).reduce((acc: number, q: any) => acc + (Number(q?.total) || 0), 0);
+            const quotesTotalSum = valueQuotes.reduce((acc: number, q: any) => acc + (Number(q?.total) || 0), 0);
             const displayTotal = quotesTotalSum > 0 ? quotesTotalSum : Number(proposal.value) || 0;
             const displaySubtotal = quotesSubtotalSum > 0
               ? quotesSubtotalSum

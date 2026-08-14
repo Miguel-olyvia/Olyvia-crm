@@ -15,6 +15,18 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
+// Guards against a slow/unresponsive downstream call keeping this Edge
+// Function alive past its execution limit — when that happens the platform
+// kills the invocation mid-flight with no response body/CORS headers at
+// all, and the browser surfaces a generic "Failed to send a request to
+// the Edge Function" instead of any real error message.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}_timeout`)), ms)),
+  ]);
+}
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -33,9 +45,22 @@ serve(async (req) => {
     }
 
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const { data: { user }, error: userError } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+    let user: any;
+    try {
+      const { data, error: userError } = await withTimeout(
+        anonClient.auth.getUser(authHeader.replace("Bearer ", "")),
+        5000,
+        "auth_getUser",
+      );
+      if (userError || !data.user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      }
+      user = data.user;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "auth_unavailable", message: "Serviço de autenticação indisponível. Tente novamente." }),
+        { status: 503, headers: corsHeaders },
+      );
     }
 
     const body = await req.json();
@@ -706,6 +731,15 @@ serve(async (req) => {
         // client signature converts the linked contact into a client too —
         // without this, only signatures done manually inside the CRM did.
         try {
+          // Bounded — this is a best-effort automation trigger fired *after*
+          // the contract is already persisted as signed above. Without a
+          // timeout, a slow execute-workflow chain could keep this whole
+          // invocation alive past the platform's execution limit, which
+          // kills it mid-flight with no response at all (the client then
+          // sees a generic "Failed to send a request to the Edge Function"
+          // even though the signature was actually saved).
+          const wfController = new AbortController();
+          const wfTimeout = setTimeout(() => wfController.abort(), 8000);
           const wfResp = await fetch(`${supabaseUrl}/functions/v1/execute-workflow`, {
             method: "POST",
             headers: {
@@ -718,7 +752,9 @@ serve(async (req) => {
               new_stage_id: "signed",
               triggered_by: null,
             }),
+            signal: wfController.signal,
           });
+          clearTimeout(wfTimeout);
           const wfData = await wfResp.json();
           console.log("[client-portal-action] sign_contract execute-workflow response:", wfData);
         } catch (wfErr) {

@@ -180,7 +180,22 @@ const ClientPortalContractDetail = () => {
       const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
         body: { action: "sign_contract", contract_id: id, signature_image: "OTP_SMS_VERIFIED", client_ip: clientIp },
       });
-      if (invokeError) throw new Error(invokeError.message);
+      if (invokeError) {
+        // Surface the real reason (e.g. otp_required/Forbidden, or a network/CORS
+        // failure message) instead of a generic SDK message that hides the cause.
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message) friendly = body.message;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message) friendly = body.message;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
       if (data?.error) throw new Error(data.message || data.error);
 
       toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });

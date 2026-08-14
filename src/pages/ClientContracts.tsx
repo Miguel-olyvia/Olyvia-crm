@@ -43,6 +43,7 @@ import { PortalStatusBadge } from "@/components/portal/PortalStatusBadge";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { takePendingPdfWindow } from "@/lib/contracts/pendingPdfWindow";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
@@ -202,7 +203,7 @@ const ClientContracts = () => {
     setShowWhatsAppDialog(true);
   };
 
-  const handleDownloadPdf = async (contract: any) => {
+  const handleDownloadPdf = async (contract: any, mode: "download" | "view" = "download") => {
     if (!activeCompany?.id) {
       toast.error(t('clientContracts.toast.noActiveOrg'));
       return;
@@ -288,7 +289,7 @@ const ClientContracts = () => {
       // pelo html2pdf) encavalite o último parágrafo da página.
       const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
 
-      await html2pdf()
+      const pdfWorker = html2pdf()
         .set({
           margin: [marginTop, marginRight, marginBottom, marginLeft],
 
@@ -320,10 +321,25 @@ const ClientContracts = () => {
             ],
           },
         })
-        .from(pageElement)
-        .save();
+        .from(pageElement);
 
-      toast.success(t('clientContracts.toast.pdfDownloaded'));
+      if (mode === "view") {
+        const blobUrl: string = await pdfWorker.output("bloburl");
+        // Reuse the tab opened synchronously by Proposals.tsx's click handler
+        // instead of calling window.open here — by now several awaits have
+        // passed since the user's gesture, so a fresh window.open would be
+        // blocked as a popup. Navigating an already-open window never is.
+        const pendingWindow = takePendingPdfWindow();
+        if (pendingWindow && !pendingWindow.closed) {
+          pendingWindow.location.href = blobUrl;
+        } else {
+          window.open(blobUrl, "_blank");
+        }
+        toast.success(t('clientContracts.toast.pdfReady'));
+      } else {
+        await pdfWorker.save();
+        toast.success(t('clientContracts.toast.pdfDownloaded'));
+      }
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
@@ -362,7 +378,7 @@ const ClientContracts = () => {
   const viewScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.view");
   const teamMemberIdsKey = teamMemberIds.join(",");
 
-  const { data: contracts = [], isLoading } = useQuery({
+  const { data: contracts = [], isLoading, isFetched } = useQuery({
     queryKey: ["client-contracts", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
@@ -653,6 +669,46 @@ const ClientContracts = () => {
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  // Handle "open contract" URL param (?open=<id>) — used by Propostas' "Ver
+  // contrato" button/dropdown item and the AI assistant's search results.
+  // Reuses handleEdit (the exact same handler triggered by the "Ver contrato"
+  // Eye icon below) so the contract opens in the same ContractDetailDialog,
+  // with the same PDF preview/layout — never a bespoke view. Waits for the
+  // contracts query to have actually run at least once before looking the id
+  // up: `isLoading` alone is NOT enough — while the query is still `enabled:
+  // false` (activeCompany/permission scope not resolved yet on first mount),
+  // TanStack Query v5 reports `isLoading` as false too (it's `isPending &&
+  // isFetching`), so relying on it fired this effect immediately against an
+  // empty `contracts` default and showed a false "Contrato não encontrado."
+  // `isFetched` only flips true once a real fetch has completed, so it's the
+  // reliable signal here.
+  // When accompanied by &viewPdf=1 (only set once the contract is signed —
+  // see Propostas' "Ver contrato"), opens the real generated PDF instead,
+  // via handleDownloadPdf(target, "view"). Without viewPdf, behaviour is
+  // unchanged so notifications/AI search links that use bare ?open= keep
+  // opening the edit dialog.
+  useEffect(() => {
+    const openContractId = searchParams.get("open");
+    const viewPdf = searchParams.get("viewPdf");
+    if (!openContractId) return;
+    if (!isFetched || isLoading) return;
+
+    const target = contracts.find((c) => c.id === openContractId);
+    if (target) {
+      if (viewPdf === "1") {
+        handleDownloadPdf(target, "view");
+      } else {
+        handleEdit(target);
+      }
+    } else {
+      toast.error("Contrato não encontrado.");
+    }
+
+    searchParams.delete("open");
+    searchParams.delete("viewPdf");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams, contracts, isLoading, isFetched]);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],
