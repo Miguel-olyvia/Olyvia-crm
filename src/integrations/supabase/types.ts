@@ -18214,6 +18214,13 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_update_schedule_item_assignees: {
+        Args: {
+          p_item_id: string
+          p_resource_ids?: string[]
+        }
+        Returns: undefined
+      }
       rpc_update_service: {
         Args: {
           p_category_id: string

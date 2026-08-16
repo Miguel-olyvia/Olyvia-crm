@@ -13,6 +13,18 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
+// Guards against a slow/unresponsive downstream call keeping this Edge
+// Function alive past its execution limit — when that happens the platform
+// kills the invocation mid-flight with no response body/CORS headers at
+// all, and the browser surfaces a generic "Failed to send a request to
+// the Edge Function" instead of any real error message.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}_timeout`)), ms)),
+  ]);
+}
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -40,11 +52,24 @@ serve(async (req) => {
     }
 
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const { data: { user }, error: userError } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+    let user: any;
+    try {
+      const { data, error: userError } = await withTimeout(
+        anonClient.auth.getUser(authHeader.replace("Bearer ", "")),
+        5000,
+        "auth_getUser",
+      );
+      if (userError || !data.user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      user = data.user;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "auth_unavailable", message: "Serviço de autenticação indisponível. Tente novamente." }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
     const body = await req.json();

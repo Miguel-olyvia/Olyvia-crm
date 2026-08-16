@@ -9,6 +9,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { escapeIlike } from "@/lib/clientSearch";
+
+// Results are capped — this is a compact "type to search" dropdown, not a
+// paginated list, so there is no affordance to page past this many rows.
+const RESULT_LIMIT = 50;
 
 export interface ProposalItem {
   id: string;
@@ -68,8 +73,8 @@ export default function ProposalItemsEditor({
 
       if (type === "product") {
         let pQuery = supabase.from("products").select("id, name, sku, product_prices(price, price_type)")
-          .or(orgFilter).eq("is_active", true).eq("is_deleted", false).order("name").limit(500);
-        if (query.length > 0) pQuery = pQuery.ilike("name", `%${query}%`);
+          .or(orgFilter).eq("is_active", true).eq("is_deleted", false).order("name").limit(RESULT_LIMIT);
+        if (query.length > 0) pQuery = pQuery.ilike("name", `%${escapeIlike(query)}%`);
         const { data } = await pQuery;
         fetched = ((data || []) as ProductCatalogRow[]).map((p) => {
           const retailPrice = (p.product_prices || []).find((pp) => pp.price_type === "retail");
@@ -77,8 +82,8 @@ export default function ProposalItemsEditor({
         });
       } else {
         let sQuery = supabase.from("services").select("id, name, sku, service_prices(price, price_type)")
-          .or(orgFilter).eq("is_active", true).eq("is_deleted", false).order("name").limit(500);
-        if (query.length > 0) sQuery = sQuery.ilike("name", `%${query}%`);
+          .or(orgFilter).eq("is_active", true).eq("is_deleted", false).order("name").limit(RESULT_LIMIT);
+        if (query.length > 0) sQuery = sQuery.ilike("name", `%${escapeIlike(query)}%`);
         const { data } = await sQuery;
         fetched = ((data || []) as ServiceCatalogRow[]).map((s) => {
           const retailPrice = (s.service_prices || []).find((sp) => sp.price_type === "retail");
@@ -212,6 +217,11 @@ export default function ProposalItemsEditor({
                   <span className="text-xs font-medium">€{r.price?.toFixed(2)}</span>
                 </button>
               ))}
+              {!searching && catalogResults.length === RESULT_LIMIT && (
+                <p className="text-[11px] text-muted-foreground px-3 py-2 border-t">
+                  A mostrar os primeiros {RESULT_LIMIT} resultados — escreva para refinar a pesquisa.
+                </p>
+              )}
             </div>
             <div className="flex justify-between items-center pt-1">
               <Button type="button" variant="ghost" size="sm" onClick={addManualItem} className="text-xs gap-1">

@@ -14,7 +14,7 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignatoryIntoSignatureBlock, fetchTemplateSignatory } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -62,13 +62,33 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       if (!activeCompany?.id) return [];
       const { data, error } = await (supabase as any)
         .from("client_contract_templates")
-        .select("id, name, body_html, doc_settings, is_default")
+        .select("id, name, body_html, doc_settings, is_default, signatory_user_id")
         .eq("organization_id", activeCompany.id)
         .eq("is_active", true)
         .order("is_default", { ascending: false });
       return data || [];
     },
     enabled: !!activeCompany?.id,
+  });
+
+  // The minuta this contract was generated from. Once a signatory has been
+  // SMS-verified for a minuta (ContractTemplates.tsx), every contract
+  // generated from that same minuta can reuse that verification instead of
+  // asking for a new SMS code per document.
+  const currentTemplate = (templates as any[]).find((t: any) => t.id === contract?.contract_template_id);
+  const hasVerifiedTemplateSignatory = !!currentTemplate?.signatory_user_id;
+
+  const { data: templateSignatoryUser } = useQuery({
+    queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
+    queryFn: async () => {
+      const { data } = await (supabase as any)
+        .from("anew_users")
+        .select("id, name")
+        .eq("id", currentTemplate!.signatory_user_id)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!currentTemplate?.signatory_user_id,
   });
 
   const { data: variableData } = useQuery({
@@ -122,10 +142,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       const safeKey = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       withPrompts = withPrompts.replace(new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"), v);
     }
-    // Injecta o signatário da minuta no bloco final de assinatura (markup, não token).
-    const sig = await fetchTemplateSignatory(templateId);
-    const finalHtml = injectSignatoryIntoSignatureBlock(withPrompts, sig?.name, sig?.roleName);
-    setBodyHtml(finalHtml);
+    // Nota: o bloco de assinatura já não é "cozido" aqui — é injetado em cada
+    // render (renderDocumentPreview) a partir do estado real de assinatura,
+    // para refletir sempre o estado atual em vez de um nome estático fixo.
+    setBodyHtml(withPrompts);
     setGeneratedFromName(templateName);
     setIsEditing(true);
     toast.success(`Contrato gerado a partir da minuta "${templateName}". Reveja e guarde.`);
@@ -302,6 +322,41 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     }
   };
 
+  // Sign using the minuta's already SMS-verified signatory (SignatoriesPanel +
+  // SignatoryOtpDialog in ContractTemplates.tsx). No new SMS is sent — the
+  // legal signer of record is the minuta's verified signatory, while the
+  // audit trail still records whoever actually performed this write.
+  const handleCompanySignAsTemplateSignatory = async () => {
+    if (!templateSignatoryUser?.id) {
+      toast.error("Esta minuta ainda não tem um signatário verificado.");
+      return;
+    }
+    setCompanySigning(true);
+    try {
+      const actingBusinessUserId = await resolveCurrentBusinessUserId();
+      if (actingBusinessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: actingBusinessUserId, p_source: 'ui' });
+      }
+      await (supabase as any)
+        .from("client_contracts")
+        .update({
+          company_signature_date: new Date().toISOString(),
+          company_signed_by_name: templateSignatoryUser.name || "Representante",
+          company_signed_by_id: templateSignatoryUser.id,
+        })
+        .eq("id", contract.id);
+
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+      toast.success(`Contrato assinado por ${templateSignatoryUser.name} (signatário já verificado nesta minuta).`);
+      setShowCompanySign(false);
+      resetOtpState();
+    } catch (err: any) {
+      toast.error("Erro ao assinar: " + err.message);
+    } finally {
+      setCompanySigning(false);
+    }
+  };
+
   const resetOtpState = () => {
     setOtpStep("idle");
     setOtpCode("");
@@ -340,7 +395,6 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       ds?.show_website !== false && websiteVal ? websiteVal : null,
     ].filter(Boolean).join(" · ");
 
-    const currentTemplate = (templates as any[]).find(t => t.id === contract?.contract_template_id);
     const templateDocSettings = currentTemplate?.doc_settings || {};
     const mergedDs = { ...(ds || {}), ...(templateDocSettings || {}) };
     const primaryColor = (templateDocSettings as any)?.primary_color || ds?.accent_color || ds?.primary_color || "#7C3AED";
@@ -351,10 +405,24 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       ? substituteVariables(htmlWithItems, variableData)
       : htmlWithItems;
     const processedHtml = applyFormulaChips(substituted, (variableData || {}) as any);
-    const withSignatory = injectSignatoryIntoSignatureBlock(
+    // Injeta o estado REAL de assinatura de cada parte no bloco de assinatura
+    // já existente no corpo (preserva o texto original das etiquetas —
+    // "A [Empresa]" / "O Cliente" ou o genérico legacy). Nada aparece do
+    // lado de quem ainda não assinou.
+    const withSignatory = injectSignaturesIntoBlock(
       processedHtml,
-      (variableData as any)?.signatario_nome,
-      (variableData as any)?.signatario_cargo,
+      {
+        signed: !!contract?.company_signature_date,
+        name: contract?.company_signed_by_name,
+        showOtpBadge: false,
+      },
+      {
+        signed: !!contract?.signature_date,
+        name: contract?.signed_by_name,
+        signedAt: contract?.signature_date,
+        ip: contract?.signature_ip,
+        showOtpBadge: true,
+      },
     );
 
     const sanitized = DOMPurify.sanitize(stripVariableChips(withSignatory));
@@ -390,64 +458,6 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
             className="contract-body-content"
             dangerouslySetInnerHTML={{ __html: sanitized }}
           />
-
-          {/* Signature block - show when either party has signed */}
-          {(contract?.company_signature_date || contract?.signature_date) && (
-            <div className="mt-10 pt-6 border-t-2 border-dashed" style={{ borderColor: "#d1d5db" }}>
-              <div className="flex justify-between gap-8">
-                {/* Company (First Party) */}
-                <div className="text-center">
-                  {contract.company_signature_date ? (
-                    <div style={{ width: "200px", margin: "0 auto 8px" }}>
-                      <div className="flex items-center justify-center gap-2" style={{ color: "#2563eb" }}>
-                        <ShieldCheck style={{ width: "16px", height: "16px" }} />
-                        <span style={{ fontSize: "11px", fontWeight: 600 }}>Assinado via SMS OTP</span>
-                      </div>
-                      {contract.company_signed_by_name && (
-                        <p className="text-xs font-medium mt-1" style={{ color: "#374151" }}>{contract.company_signed_by_name}</p>
-                      )}
-                      <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                        {format(new Date(contract.company_signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                      </p>
-                    </div>
-                  ) : (
-                    <div style={{ width: "200px", margin: "0 auto 8px", color: "#9ca3af", fontSize: "11px" }}>
-                      Aguarda assinatura
-                    </div>
-                  )}
-                  <div style={{ borderBottom: `1px solid ${contract.company_signature_date ? "#2563eb" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>A PRIMEIRA CONTRATANTE</p>
-                </div>
-
-                {/* Client (Second Party) */}
-                <div className="text-center">
-                  {contract.signature_date ? (
-                    <div style={{ width: "200px", margin: "0 auto 8px" }}>
-                      <div className="flex items-center justify-center gap-2" style={{ color: "#059669" }}>
-                        <ShieldCheck style={{ width: "16px", height: "16px" }} />
-                        <span style={{ fontSize: "11px", fontWeight: 600 }}>Assinado via SMS OTP</span>
-                      </div>
-                      {contract.signed_by_name && (
-                        <p className="text-xs font-medium mt-1" style={{ color: "#374151" }}>{contract.signed_by_name}</p>
-                      )}
-                      <p className="text-xs mt-1" style={{ color: "#6b7280" }}>
-                        {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                      </p>
-                      {contract.signature_ip && (
-                        <p className="text-[10px]" style={{ color: "#9ca3af" }}>IP: {contract.signature_ip}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ width: "200px", margin: "0 auto 8px", color: "#9ca3af", fontSize: "11px" }}>
-                      Aguarda assinatura
-                    </div>
-                  )}
-                  <div style={{ borderBottom: `1px solid ${contract.signature_date ? "#059669" : "#9ca3af"}`, width: "200px", margin: "0 auto 8px" }} />
-                  <p className="text-sm font-medium" style={{ color: "#6b7280" }}>O SEGUNDO CONTRATANTE</p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Footer */}
           {ds?.show_footer !== false && ds?.footer_text && (
@@ -596,12 +606,40 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
               <PenTool className="h-5 w-5" /> Assinar contrato pela empresa
             </DialogTitle>
             <DialogDescription>
-              A assinatura será validada através de um código SMS enviado para o seu telemóvel.
+              {hasVerifiedTemplateSignatory
+                ? "O signatário desta minuta já foi verificado por SMS — a assinatura aplica-se sem novo código."
+                : "A assinatura será validada através de um código SMS enviado para o seu telemóvel."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {otpStep === "idle" && (
+            {otpStep === "idle" && hasVerifiedTemplateSignatory && (
+              <div className="text-center space-y-4">
+                <div className="mx-auto w-16 h-16 rounded-full bg-green-50 flex items-center justify-center">
+                  <ShieldCheck className="h-8 w-8 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">
+                    {templateSignatoryUser?.name || "O signatário"} já está verificado como signatário desta minuta.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">Não é necessário novo código SMS.</p>
+                </div>
+                {otpError && (
+                  <p className="text-sm text-destructive">{otpError}</p>
+                )}
+                <Button
+                  onClick={handleCompanySignAsTemplateSignatory}
+                  disabled={companySigning || !templateSignatoryUser}
+                  className="w-full gap-2"
+                  style={{ backgroundColor: "#16a34a" }}
+                >
+                  {companySigning ? <Loader2 className="h-4 w-4 animate-spin text-white" /> : <PenTool className="h-4 w-4 text-white" />}
+                  <span className="text-white">Confirmar assinatura</span>
+                </Button>
+              </div>
+            )}
+
+            {otpStep === "idle" && !hasVerifiedTemplateSignatory && (
               <div className="text-center space-y-4">
                 <div className="mx-auto w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
                   <Smartphone className="h-8 w-8 text-blue-600" />

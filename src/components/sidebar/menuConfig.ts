@@ -125,7 +125,7 @@ export const menuSections: MenuSection[] = [
     permissions: ["leads.view", "clients.view"],
     items: [
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
-      { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "leads.view" },
+      { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },
     ],
   },

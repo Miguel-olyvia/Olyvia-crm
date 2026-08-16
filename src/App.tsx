@@ -197,7 +197,7 @@ const App = () => (
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
-                      <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="leads.view"><PendingFormSubmissions /></ProtectedRoute>} />
+                      <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
                       <Route path="/proposals" element={<ProtectedRoute permission="proposals.view"><Proposals /></ProtectedRoute>} />
                       <Route path="/acquisition-help" element={<AcquisitionHelp />} />

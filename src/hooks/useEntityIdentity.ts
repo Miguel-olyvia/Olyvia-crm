@@ -174,11 +174,19 @@ export async function resolveEntityByIdentity(params: {
 
   // Gather candidate entity ids per signal (unscoped) — filtered to this org below.
   const [emailCandidates, phoneCandidates, vatCandidates] = await Promise.all([
+    // Exact match, not ILIKE: email is normalized to lowercase above, and a
+    // BEFORE INSERT/UPDATE trigger (fn_normalize_entity_email) guarantees
+    // every stored email is lowercase too — so `=` matches exactly what
+    // ILIKE (case-insensitive, no wildcards) used to match, but `=` is a
+    // leakproof operator. ILIKE is not, and on an RLS-protected table
+    // Postgres must apply non-leakproof quals AFTER the (expensive) RLS
+    // check on every row instead of pushing them into an index scan first —
+    // this alone was an ~800x slowdown (~8s vs ~10ms) on lead creation.
     normalizedEmail
       ? supabase
           .from('anew_entity_emails')
           .select('entity_id')
-          .ilike('email', normalizedEmail)
+          .eq('email', normalizedEmail)
           .limit(CANDIDATE_LIMIT)
           .then(r => (r.data || []).map((row: any) => row.entity_id as string))
       : Promise.resolve([] as string[]),

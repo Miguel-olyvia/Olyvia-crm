@@ -229,7 +229,11 @@ interface QuoteLine {
 }
 
 const NEW_QUOTE_DRAFT_VERSION = 1;
-const getNewQuoteDraftKey = (companyId?: string | null) => `olyvia:quote-builder:new:${companyId || "global"}`;
+// New quotes share one draft per company; an existing quote being edited
+// gets its own key (keyed by quoteId) so autosave/recovery also covers
+// editing/finishing an already-saved quote, not just creating one.
+const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
+  quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
 export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -340,7 +344,22 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [templates, setTemplates] = useState<any[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
   const saveLockRef = useRef(false);
-  const draftRestoredRef = useRef(false);
+  // Tracks the organization.id a draft restore attempt has already run for
+  // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
+  // right after a forced reload (e.g. the stale-chunk recovery in main.tsx),
+  // activeCompany?.id can resolve through a transient/default value before
+  // settling on the real one a render or two later. A boolean latch would
+  // burn its one-shot attempt on that transient id, find no draft there, and
+  // then — because the guard below only checks "did we ever restore" — never
+  // retry once the correct id arrives, silently stranding a real draft in
+  // localStorage under the correct key forever. Comparing against the
+  // specific id lets each distinct value get its own attempt.
+  const draftRestoredRef = useRef<string | null>(null);
+  // For an existing quote, fetchQuote() populates formData/lines from the
+  // server first; draft restore must wait for that to finish so it overlays
+  // on top of the server state instead of being clobbered by it.
+  const existingQuoteLoadedRef = useRef(false);
+  const [quoteLoadTick, setQuoteLoadTick] = useState(0);
   const postSaveActionRef = useRef<"email" | "whatsapp" | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [showSendEmailDialog, setShowSendEmailDialog] = useState(false);
@@ -352,10 +371,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
   useEffect(() => {
-    if (quoteId || !activeCompany?.id || draftRestoredRef.current || typeof window === "undefined") return;
+    if (!activeCompany?.id || draftRestoredRef.current === activeCompany.id || typeof window === "undefined") return;
+    // Editing an existing quote: wait for fetchQuote() to finish loading the
+    // server state first, so a restored draft overlays it instead of being
+    // overwritten by it.
+    if (quoteId && !existingQuoteLoadedRef.current) return;
 
-    draftRestoredRef.current = true;
-    const rawDraft = localStorage.getItem(getNewQuoteDraftKey(activeCompany.id));
+    draftRestoredRef.current = activeCompany.id;
+    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId));
     if (!rawDraft) return;
 
     try {
@@ -375,10 +398,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     } catch (error) {
       console.error("Error restoring quote draft:", error);
     }
-  }, [quoteId, activeCompany?.id]);
+  }, [quoteId, activeCompany?.id, quoteLoadTick]);
 
   useEffect(() => {
-    if (quoteId || !activeCompany?.id || !draftRestoredRef.current || typeof window === "undefined") return;
+    if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
 
     const hasDraftContent = Boolean(
       formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
@@ -387,7 +410,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     if (!hasDraftContent) return;
 
     const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getNewQuoteDraftKey(activeCompany.id), JSON.stringify({
+      localStorage.setItem(getQuoteDraftKey(activeCompany.id, quoteId), JSON.stringify({
         version: NEW_QUOTE_DRAFT_VERSION,
         savedAt: new Date().toISOString(),
         formData,
@@ -407,7 +430,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, inlineQuotes, selectedDeal]);
 
   useEffect(() => {
-    if (quoteId || !activeCompany?.id || typeof window === "undefined") return;
+    if (!activeCompany?.id || typeof window === "undefined") return;
 
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const hasDraftContent = Boolean(
@@ -427,7 +450,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   useEffect(() => {
     if (!quoteId && !autoReference) {
       const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getNewQuoteDraftKey(activeCompany.id))
+        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId))
         : null;
       if (hasSavedDraft) return;
 
@@ -552,7 +575,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       fetchCatalogItems();
       checkPermissions();
       if (quoteId) {
-        fetchQuote();
+        fetchQuote().finally(() => {
+          existingQuoteLoadedRef.current = true;
+          setQuoteLoadTick(tick => tick + 1);
+        });
       }
     }
   }, [quoteId, activeCompany?.id]);
@@ -565,8 +591,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   useEffect(() => {
     if (activeCompany?.id) {
-      fetchProducts();
-      fetchServices();
+      // fetchProducts()/fetchServices() used to run here unconditionally,
+      // pulling up to 10k products + services into memory on every quote
+      // open (see fetchProductsByIds/fetchServicesByIds above for the
+      // targeted replacement). At today's catalog size it was just wasteful;
+      // at 100k+ products the .limit(10000) would silently drop items
+      // beyond it, so callers now fetch exactly the ids they need instead.
       fetchServiceFees();
     }
   }, [activeCompany?.id]);
@@ -1567,6 +1597,99 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }
   };
 
+  // Targeted product/service lookups by id — used instead of dumping the
+  // whole catalog into memory (see removed fetchProducts()/fetchServices()
+  // call in the mount effect below). Callers only ever need a small, known
+  // set of ids (a quote's own lines, or one deal's need items), never the
+  // full catalog, so this scales to any catalog size.
+  const fetchProductsByIds = async (ids: string[]): Promise<Map<string, ProductCatalogItem>> => {
+    const map = new Map<string, ProductCatalogItem>();
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (uniqueIds.length === 0) return map;
+
+    const BATCH_SIZE = 200;
+    for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+      const batch = uniqueIds.slice(i, i + BATCH_SIZE);
+      const [{ data: productsData }, { data: pricesData }] = await Promise.all([
+        supabase
+          .from("products")
+          .select(`
+            id, sku, name, description, organization_id,
+            product_categories!category_id (name),
+            brands (name),
+            uom:uom_id(code, description)
+          `)
+          .in("id", batch),
+        supabase
+          .from("product_prices")
+          .select("product_id, price, vat_rate")
+          .eq("price_type", "retail")
+          .in("product_id", batch),
+      ]);
+      const pricesMap = new Map((pricesData || []).map((p: any) => [p.product_id, { price: p.price, vat_rate: p.vat_rate }]));
+      (productsData || []).forEach((product: any) => {
+        const priceInfo = pricesMap.get(product.id);
+        map.set(product.id, {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          sku: product.sku,
+          category_name: product.product_categories?.name || null,
+          brand_name: product.brands?.name || null,
+          retail_price: priceInfo?.price || null,
+          vat_rate: priceInfo?.vat_rate || 23,
+          organization_id: product.organization_id,
+          uom_symbol: product.uom?.code || null,
+          uom_name: product.uom?.description || null,
+        });
+      });
+    }
+    return map;
+  };
+
+  const fetchServicesByIds = async (ids: string[]): Promise<Map<string, ProductCatalogItem>> => {
+    const map = new Map<string, ProductCatalogItem>();
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+    if (uniqueIds.length === 0) return map;
+
+    const BATCH_SIZE = 200;
+    for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
+      const batch = uniqueIds.slice(i, i + BATCH_SIZE);
+      const [{ data: servicesData }, { data: pricesData }] = await Promise.all([
+        supabase
+          .from("services")
+          .select(`
+            id, sku, name, short_desc, long_desc, organization_id,
+            service_categories:service_category_id(name)
+          `)
+          .in("id", batch),
+        supabase
+          .from("service_prices")
+          .select("service_id, price, vat_rate")
+          .eq("price_type", "retail")
+          .in("service_id", batch),
+      ]);
+      const pricesMap = new Map((pricesData || []).map((p: any) => [p.service_id, { price: p.price, vat_rate: p.vat_rate }]));
+      (servicesData || []).forEach((service: any) => {
+        const priceInfo = pricesMap.get(service.id);
+        map.set(service.id, {
+          id: service.id,
+          name: service.name,
+          description: service.long_desc || service.short_desc,
+          sku: service.sku,
+          category_name: service.service_categories?.name || null,
+          brand_name: null,
+          retail_price: priceInfo?.price || null,
+          vat_rate: priceInfo?.vat_rate || 23,
+          organization_id: service.organization_id,
+          uom_symbol: null,
+          uom_name: null,
+        });
+      });
+    }
+    return map;
+  };
+
   const fetchServiceFees = async () => {
     const orgIdToUse = formData.organization_id || activeCompany?.id;
     if (!orgIdToUse) return;
@@ -2150,8 +2273,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       // Clear inline quotes after saving
       setInlineQuotes([]);
-      if (!quoteId && activeCompany?.id && typeof window !== "undefined") {
-        localStorage.removeItem(getNewQuoteDraftKey(activeCompany.id));
+      if (activeCompany?.id && typeof window !== "undefined") {
+        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, quoteId));
       }
 
       toast({
@@ -2707,6 +2830,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .order("sort_order");
 
         if (needItems && needItems.length > 0) {
+          // Fetch only the specific products/services this deal's needs
+          // reference — never the whole catalog.
+          const neededProductIds = needItems
+            .filter((i: any) => i.item_type === "product" && i.product_id)
+            .map((i: any) => i.product_id);
+          const neededServiceIds = needItems
+            .filter((i: any) => i.item_type === "service" && i.service_id)
+            .map((i: any) => i.service_id);
+          const [neededProductsMap, neededServicesMap] = await Promise.all([
+            fetchProductsByIds(neededProductIds),
+            fetchServicesByIds(neededServiceIds),
+          ]);
+
           for (const item of needItems) {
             let name = item.notes || "Item";
             let retailPrice = 0;
@@ -2717,7 +2853,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             const manualUnitPrice = item.unit_price ? parseFloat(item.unit_price) : null;
 
             if (item.item_type === "product" && item.product_id) {
-              const prod = products.find(p => p.id === item.product_id);
+              const prod = neededProductsMap.get(item.product_id);
               if (prod) {
                 name = prod.name;
                 sku = prod.sku || null;
@@ -2727,7 +2863,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 uom = prod.uom_symbol || prod.uom_name || null;
               }
             } else if (item.item_type === "service" && item.service_id) {
-              const svc = services.find(s => s.id === item.service_id);
+              const svc = neededServicesMap.get(item.service_id);
               if (svc) {
                 name = svc.name;
                 sku = svc.sku || null;
@@ -4224,12 +4360,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           productId={editingProductId}
           productName={editingProductName}
           currentAttributes={lines[editingLineIndex]?.selected_attributes || {}}
-          onSave={(attributes, attributePriceAddon) => {
+          onSave={async (attributes, attributePriceAddon) => {
             if (editingLineIndex !== null) {
               const line = lines[editingLineIndex];
               const updatedLines = [...lines];
-              const product = products.find(p => p.id === line.product_id);
-              const service = services.find(s => s.id === line.service_id);
+              // Fetch only this one line's product/service — not the whole catalog.
+              const [productsMap, servicesMap] = await Promise.all([
+                line.product_id ? fetchProductsByIds([line.product_id]) : Promise.resolve(new Map<string, ProductCatalogItem>()),
+                line.service_id ? fetchServicesByIds([line.service_id]) : Promise.resolve(new Map<string, ProductCatalogItem>()),
+              ]);
+              const product = line.product_id ? productsMap.get(line.product_id) : undefined;
+              const service = line.service_id ? servicesMap.get(line.service_id) : undefined;
               const basePrice = product?.retail_price ?? service?.retail_price ?? 0;
               const newRetailPrice = basePrice + (attributePriceAddon || 0);
               const defaultMargin = line.margem_percent || 30;

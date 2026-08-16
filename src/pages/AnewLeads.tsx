@@ -103,7 +103,7 @@ import {
   fetchSameOrgFieldsByEntity,
   revalidateStrongDuplicatesBeforeWrite,
 } from "@/lib/duplicateBlockingRule";
-import { ensureEntityOrgLink, linkEntityToOrg } from "@/utils/orgEntity";
+import { ensureEntityOrgLink, linkEntityToOrg, findEntityMatches } from "@/utils/orgEntity";
 import { assertNoSupabaseError } from "@/lib/assertNoSupabaseError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -3318,11 +3318,21 @@ export default function AnewLeads() {
           }
         }
 
+        // Single Edge Function round-trip shared by the 3 lookups below (they
+        // used to each call findEntityMatches independently with the exact
+        // same params, tripling network latency for no extra verification).
+        const orgEntityMatchesForCheck = await findEntityMatches({
+          orgId: activeCompanyId!, email: emailValue || null, phone: phoneValue || null, nif: vatValue || null,
+        }).catch((err) => {
+          console.warn("[duplicate-check] findEntityMatches failed (non-fatal)", err);
+          return [] as Awaited<ReturnType<typeof findEntityMatches>>;
+        });
+
         const sameOrgMatchFields2 = await fetchSameOrgMatchFields({
-          orgId: activeCompanyId!, email: emailValue, phone: phoneValue, vat: vatValue,
+          orgId: activeCompanyId!, email: emailValue, phone: phoneValue, vat: vatValue, matches: orgEntityMatchesForCheck,
         });
         const sameOrgFieldSets2 = await fetchSameOrgFieldsByEntity({
-          orgId: activeCompanyId!, email: emailValue, phone: phoneValue, vat: vatValue,
+          orgId: activeCompanyId!, email: emailValue, phone: phoneValue, vat: vatValue, matches: orgEntityMatchesForCheck,
         });
         const allMatches: import("@/components/shared/DuplicateEntityDialog").DuplicateMatch[] = allRawMatches.map((m: any) => {
           const identity = entityIdentityMap.get(m.entity_id) || { displayName, email: emailValue || null, phone: phoneValue || null };
@@ -3345,7 +3355,7 @@ export default function AnewLeads() {
         const localEntityIdsInScope = [...new Set(allMatches.map((m) => m.entityId).filter(Boolean))];
         const groupMatches = await fetchGroupDuplicateMatches({
           orgId: activeCompanyId!, email: emailValue, phone: phoneValue, vat: vatValue,
-          excludeEntityIds: localEntityIdsInScope,
+          excludeEntityIds: localEntityIdsInScope, matches: orgEntityMatchesForCheck,
         });
         if (groupMatches.length > 0) allMatches.push(...groupMatches);
 

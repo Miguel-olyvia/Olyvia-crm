@@ -15,12 +15,13 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2, PenTool } from "lucide-react";
+import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
+import { injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
 
 const REJECTION_REASONS = [
   "Condições não adequadas",
@@ -160,14 +161,42 @@ const ClientPortalContractDetail = () => {
     try {
       let clientIp = "";
       try {
-        const ipRes = await fetch("https://api.ipify.org?format=json");
+        // Bounded — an unbounded third-party fetch here (blocked/slow on some
+        // networks) could push the call to client-portal-action past the
+        // 10-minute OTP freshness window it checks, silently failing the sign.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const ipRes = await fetch("https://api.ipify.org?format=json", { signal: controller.signal });
+        clearTimeout(timeoutId);
         const ipData = await ipRes.json();
         clientIp = ipData.ip;
       } catch {}
 
-      await supabase.functions.invoke("client-portal-action", {
+      // Was previously not checked at all: a failed sign (e.g. OTP expired/
+      // already used) returned {error: ...} with a non-2xx status, which
+      // `invoke()` surfaces as `error` — silently ignored here, so the
+      // client always saw the success toast below even when nothing was
+      // persisted (client_contracts.status never left "draft"/"sent").
+      const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
         body: { action: "sign_contract", contract_id: id, signature_image: "OTP_SMS_VERIFIED", client_ip: clientIp },
       });
+      if (invokeError) {
+        // Surface the real reason (e.g. otp_required/Forbidden, or a network/CORS
+        // failure message) instead of a generic SDK message that hides the cause.
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message) friendly = body.message;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message) friendly = body.message;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
+      if (data?.error) throw new Error(data.message || data.error);
 
       toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });
       await loadData(); // M11
@@ -358,65 +387,26 @@ const ClientPortalContractDetail = () => {
             <CardContent>
               <div
                 className="prose prose-sm max-w-none dark:prose-invert"
-                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(contract.contract_body_html) }}
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(
+                    injectSignaturesIntoBlock(
+                      contract.contract_body_html,
+                      {
+                        signed: !!contract.company_signature_date,
+                        name: contract.company_signed_by_name,
+                        showOtpBadge: false,
+                      },
+                      {
+                        signed: !!contract.signature_date,
+                        name: contract.signed_by_name,
+                        signedAt: contract.signature_date,
+                        ip: contract.signature_ip,
+                        showOtpBadge: true,
+                      },
+                    ),
+                  ),
+                }}
               />
-              {/* Signature block at the end of the contract */}
-              {(contract.company_signature_date || contract.signature_date) && (
-                <div className="mt-10 pt-6 border-t-2 border-dashed border-muted">
-                  <div className="flex flex-col sm:flex-row justify-between gap-8">
-                    {/* Company (First Party) */}
-                    <div className="text-center">
-                      {contract.company_signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-blue-600">
-                            <PenTool className="h-4 w-4" />
-                            <span className="text-sm font-bold">Assinado</span>
-                          </div>
-                          {contract.company_signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.company_signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.company_signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.company_signature_date ? "border-blue-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">A PRIMEIRA CONTRATANTE</p>
-                    </div>
-
-                    {/* Client (Second Party) */}
-                    <div className="text-center">
-                      {contract.signature_date ? (
-                        <div className="w-48 mx-auto mb-2 space-y-1">
-                          <div className="flex items-center justify-center gap-2 text-emerald-600">
-                            <ShieldCheck className="h-5 w-5" />
-                            <span className="text-sm font-bold">Assinado via SMS OTP</span>
-                          </div>
-                          {contract.signed_by_name && (
-                            <p className="text-sm font-semibold text-foreground">{contract.signed_by_name}</p>
-                          )}
-                          <p className="text-xs text-muted-foreground">
-                            {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy, HH:mm", { locale: pt })}
-                          </p>
-                          {contract.signature_ip && (
-                            <p className="text-xs text-muted-foreground">IP: {contract.signature_ip}</p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="w-48 mx-auto mb-2">
-                          <p className="text-xs italic text-muted-foreground">Aguarda assinatura</p>
-                        </div>
-                      )}
-                      <div className={`border-b w-48 mx-auto mb-2 ${contract.signature_date ? "border-emerald-500" : "border-foreground/30"}`} />
-                      <p className="text-sm font-medium text-muted-foreground">O SEGUNDO CONTRATANTE</p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
