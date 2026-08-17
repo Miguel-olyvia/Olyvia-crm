@@ -295,14 +295,15 @@ export default function Quotes() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      // KPIs via RPC — agrega no servidor independentemente do volume de registos
-      // Only status + search are wired here: both are already enforced/matched
-      // by fetchQuotes' own server-side query (estado filter) or mirror the
-      // client-side text search. dateFrom/dateTo/comercialFilter are NOT sent:
-      // the list itself only applies those client-side over the already-loaded
-      // page, so passing them to the KPI RPC would make the KPI cards stricter
-      // than what the list actually queries from the server — a new, opposite
-      // inconsistency. Revisit only once the list filters those server-side too.
+      // KPIs via RPC — agrega no servidor independentemente do volume de registos.
+      //
+      // Datas e comercial SÃO enviados agora. Ficavam de fora de propósito,
+      // porque a lista só os aplicava no cliente sobre a página já carregada e
+      // enviá-los aqui tornaria os cartões mais restritos do que a lista. Essa
+      // condição deixou de existir: o fetchQuotes passou a filtrar estado,
+      // datas e comercial na própria query, portanto os cartões têm de usar o
+      // mesmo conjunto — senão deixam de bater certo com o que está no ecrã,
+      // que é exactamente a queixa que trouxe isto aqui.
       const trimmedSearch = searchTerm.trim();
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
@@ -310,6 +311,9 @@ export default function Quotes() {
           visible_ids: scopeIds,
           status: statusFilter !== "all" ? statusFilter : undefined,
           search: trimmedSearch || undefined,
+          date_from: dateFrom ? startOfDay(dateFrom).toISOString() : undefined,
+          date_to: dateTo ? endOfDay(dateTo).toISOString() : undefined,
+          comercial_id: comercialFilter !== "all" ? comercialFilter : undefined,
         },
       });
       if (kpiError) throw kpiError;
@@ -380,7 +384,7 @@ export default function Quotes() {
         setStatsLoading(false);
       }
     }
-  }, [activeCompany?.id, statusFilter, searchTerm]);
+  }, [activeCompany?.id, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
