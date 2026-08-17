@@ -206,10 +206,14 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
   };
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileList = e.target.files;
+    // Copy the FileList BEFORE resetting the input. `e.target.files` is a live
+    // FileList, not a snapshot: setting `value = ""` empties that very object,
+    // so reading it afterwards produced an empty array and choosing a file
+    // appeared to do nothing at all. The reset itself has to stay — without it,
+    // picking the same file twice in a row fires no change event.
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!fileList) return;
-    const files = Array.from(fileList);
+    if (files.length === 0) return;
     if (files.length > MAX_FILES_PER_BATCH) {
       toast.warning(`Só pode anexar até ${MAX_FILES_PER_BATCH} ficheiros de cada vez. Foram selecionados apenas os primeiros ${MAX_FILES_PER_BATCH}.`);
     }
