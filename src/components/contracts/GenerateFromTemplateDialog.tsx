@@ -213,7 +213,8 @@ export function GenerateFromTemplateDialog({
             <Separator />
 
             {/* Template list */}
-            <ScrollArea className="flex-1 max-h-[400px]">
+            {/* Same reason as the preview below: needs a definite height to scroll. */}
+            <ScrollArea className="h-[400px]">
               <div className="space-y-2 pr-3">
                 <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                   Minutas disponíveis ({templates.length})
@@ -296,8 +297,17 @@ export function GenerateFromTemplateDialog({
               </div>
             </div>
 
-            {/* A4-style preview */}
-            <ScrollArea className="flex-1 max-h-[55vh]">
+            {/* A4-style preview.
+                Definite height, not flex-1 + max-h: DialogContent's base class
+                is `grid`, and Tailwind emits `.grid` after `.flex`, so the
+                `flex flex-col` added below never takes effect and `flex-1` here
+                does nothing. The Root then keeps `height: auto`, the Radix
+                viewport's `h-full` resolves to auto too, so nothing ever
+                overflows *inside* the scroll area — the dialog's
+                `overflow-hidden` simply clipped the contract and there was no
+                way to scroll. Every other working ScrollArea in this codebase
+                uses a definite height for the same reason. */}
+            <ScrollArea className="h-[55vh]">
               <div className="mx-auto bg-white dark:bg-gray-950 shadow-lg border rounded-lg" style={{ maxWidth: "210mm", padding: "20mm 25mm" }}>
                 <div
                   className="prose prose-sm dark:prose-invert max-w-none"
