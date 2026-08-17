@@ -42,16 +42,34 @@ function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate:
   };
 }
 
+/**
+ * Proposal, quotes, lines and fees already loaded by the caller.
+ *
+ * The client portal cannot read `quotes`/`quote_lines` (RLS), so its copy comes
+ * from the client-portal-action Edge Function with cost and margin columns
+ * removed. Rendering then follows exactly the same path as the CRM, so both
+ * produce the same document.
+ */
+export interface ProposalPdfPrefetch {
+  proposal: { id: string; proposal_number?: string | null; title?: string | null; template_id?: string | null; organization_id?: string | null } | null;
+  quotes: Array<{ quote: any; lines: any[]; fees: any[] }>;
+}
+
 async function generateFromQuotePdfs(
   proposalId: string,
+  prefetched?: ProposalPdfPrefetch,
 ): Promise<{ blob: Blob; fileName: string }> {
-  // Fetch proposal basic data for filename + template resolution
-  const { data: proposal, error: propErr } = await (supabase as any)
-    .from('proposals')
-    .select('id, proposal_number, title, template_id, organization_id')
-    .eq('id', proposalId)
-    .maybeSingle();
-  if (propErr) throw propErr;
+  let proposal: any = prefetched?.proposal ?? null;
+  if (!prefetched) {
+    // Fetch proposal basic data for filename + template resolution
+    const { data, error: propErr } = await (supabase as any)
+      .from('proposals')
+      .select('id, proposal_number, title, template_id, organization_id')
+      .eq('id', proposalId)
+      .maybeSingle();
+    if (propErr) throw propErr;
+    proposal = data;
+  }
 
   // Template explicitly selected on the proposal — used for branding only
   // (see mergeProposalBranding above), never as the structural template.
@@ -59,19 +77,29 @@ async function generateFromQuotePdfs(
   const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
 
   // Resolve quote ids linked to this proposal
-  const { data: quotes, error: quotesErr } = await (supabase as any)
-    .from('quotes')
-    .select('id, quote_number, template_id, created_at')
-    .eq('proposal_id', proposalId)
-    .order('created_at', { ascending: true });
-  if (quotesErr) throw quotesErr;
+  let resolvedQuotes: Array<{ id: string; quote_number?: string | null; template_id?: string | null; created_at?: string | null }> = [];
 
-  let resolvedQuotes: Array<{ id: string; quote_number?: string | null; template_id?: string | null; created_at?: string | null }> = quotes || [];
+  if (prefetched) {
+    resolvedQuotes = prefetched.quotes.map(q => ({
+      id: q.quote.id,
+      quote_number: q.quote.quote_number,
+      template_id: q.quote.template_id,
+      created_at: q.quote.created_at,
+    }));
+  } else {
+    const { data: quotes, error: quotesErr } = await (supabase as any)
+      .from('quotes')
+      .select('id, quote_number, template_id, created_at')
+      .eq('proposal_id', proposalId)
+      .order('created_at', { ascending: true });
+    if (quotesErr) throw quotesErr;
+    resolvedQuotes = quotes || [];
+  }
 
   // Fallback: alguns orçamentos ficam associados via pipeline_links (não têm
   // quotes.proposal_id preenchido). Replicar a lógica do ProposalDetailsDialog
   // para o PDF não falhar quando o utilizador vê o orçamento listado na UI.
-  if (resolvedQuotes.length === 0) {
+  if (resolvedQuotes.length === 0 && !prefetched) {
     const { data: pLinks } = await (supabase as any)
       .from('pipeline_links')
       .select('quote_id')
@@ -103,6 +131,14 @@ async function generateFromQuotePdfs(
     try {
       const perQuoteData = await Promise.all(
         resolvedQuotes.map(async (quote) => {
+          const injected = prefetched?.quotes.find(q => q.quote.id === quote.id);
+          if (injected) {
+            return {
+              lines: injected.lines || [],
+              fees: injected.fees || [],
+              descontoPercent: injected.quote?.desconto_global_percent || 0,
+            };
+          }
           const [{ data: quoteRow }, { data: linesData }, { data: feesData }] = await Promise.all([
             (supabase as any).from('quotes').select('desconto_global_percent').eq('id', quote.id).maybeSingle(),
             supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quote.id).order('ordem'),
@@ -140,6 +176,7 @@ async function generateFromQuotePdfs(
       // referenced only by the proposal template renders (blank/placeholder)
       // instead of being silently dropped from the merged PDF.
       const { blob } = await generateQuotePdfBlob(quote.id, {
+        prefetched: prefetched?.quotes.find(q => q.quote.id === quote.id),
         templateOverride: templateForQuote,
         documentContext: {
           kind: 'proposal',
@@ -183,8 +220,9 @@ async function generateFromQuotePdfs(
  */
 export async function generateProposalPdfBlob(
   proposalId: string,
+  prefetched?: ProposalPdfPrefetch,
 ): Promise<{ blob: Blob; fileName: string }> {
-  return generateFromQuotePdfs(proposalId);
+  return generateFromQuotePdfs(proposalId, prefetched);
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {

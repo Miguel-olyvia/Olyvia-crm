@@ -457,6 +457,100 @@ serve(async (req) => {
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
 
+      // Data needed to render the proposal PDF in the client's browser.
+      //
+      // The portal's "download PDF" button used the same generator as the CRM,
+      // which merges the PDFs of the proposal's quotes. Portal users cannot
+      // read `quotes` (RLS), so it always found zero and threw — the button
+      // silently did nothing, for every client.
+      //
+      // Opening RLS on quotes/quote_lines was not an option: quote_lines holds
+      // cost_price, custo_mao_obra_unit, custo_material_unit and
+      // margem_percent — the company's costs and margins. Instead the data is
+      // read here with service_role, stripped of those four columns, and
+      // returned only to a caller that owns the proposal.
+      case "get_proposal_pdf_data": {
+        const { proposal_id } = params;
+        if (!proposal_id) {
+          return new Response(JSON.stringify({ error: "proposal_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("proposal_id", proposal_id))) return forbidden();
+
+        const { data: proposal } = await supabase
+          .from("proposals")
+          .select("id, proposal_number, title, template_id, organization_id")
+          .eq("id", proposal_id)
+          .maybeSingle();
+
+        // Same resolution order as generateProposalPdfBlob: quotes linked
+        // directly, falling back to pipeline_links for the ones whose
+        // quotes.proposal_id was never filled in.
+        let quoteRows: any[] = [];
+        const { data: directQuotes } = await supabase
+          .from("quotes")
+          .select("*")
+          .eq("proposal_id", proposal_id)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true });
+        quoteRows = directQuotes || [];
+
+        if (quoteRows.length === 0) {
+          const { data: links } = await supabase
+            .from("pipeline_links")
+            .select("quote_id")
+            .eq("proposal_id", proposal_id)
+            .eq("status", "active")
+            .not("quote_id", "is", null);
+          const linkedIds = (links || []).map((l: any) => l.quote_id).filter(Boolean);
+          if (linkedIds.length > 0) {
+            const { data: linkedQuotes } = await supabase
+              .from("quotes")
+              .select("*")
+              .in("id", linkedIds)
+              .is("deleted_at", null)
+              .order("created_at", { ascending: true });
+            quoteRows = linkedQuotes || [];
+          }
+        }
+
+        // Never leaves the server: costs and margins are internal.
+        const SENSITIVE_LINE_COLUMNS = [
+          "cost_price",
+          "custo_mao_obra_unit",
+          "custo_material_unit",
+          "margem_percent",
+        ];
+        const stripCosts = (row: Record<string, unknown>) => {
+          const clean: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(row)) {
+            if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
+          }
+          return clean;
+        };
+
+        const quotes: any[] = [];
+        for (const quote of quoteRows) {
+          const [{ data: lines }, { data: fees }] = await Promise.all([
+            supabase
+              .from("quote_lines")
+              .select("*, products (sku), services (sku)")
+              .eq("quote_id", quote.id)
+              .order("ordem"),
+            supabase
+              .from("quote_fees")
+              .select("*, service_fee_types (name, calculation_type, percentage, fixed_amount)")
+              .eq("quote_id", quote.id),
+          ]);
+          quotes.push({
+            quote,
+            lines: (lines || []).map((l: any) => stripCosts(l)),
+            fees: fees || [],
+          });
+        }
+
+        return new Response(JSON.stringify({ proposal, quotes }), { headers: corsHeaders });
+      }
+
       case "sign_proposal": {
         const { proposal_id, signature_image, selected_quote_ids } = params;
         if (!proposal_id || !signature_image) {
