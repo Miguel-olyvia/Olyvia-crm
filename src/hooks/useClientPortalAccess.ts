@@ -135,6 +135,16 @@ Apenas o link de login foi copiado para a área de transferência.`,
           }
         );
       }
+      // The client already had portal access under a different email and the
+      // backend moved the existing account instead of creating a second one.
+      // Always say so: the previous address stops working from now on.
+      if (data.portal_email_migrated_from) {
+        sonnerToast.info("Email do acesso ao portal actualizado", {
+          description: `O acesso passou de ${data.portal_email_migrated_from} para ${data.email}. O email antigo deixa de dar entrada no portal; a conta e o histórico do cliente foram mantidos.`,
+          duration: 15000,
+        });
+      }
+
       options?.onSuccess?.();
     } catch (err: any) {
       const rawCode = (err?.message || "").trim();
