@@ -237,12 +237,17 @@ export function useInternalChat() {
 
   useEffect(() => { loadMessages(); }, [loadMessages]);
 
-  // Realtime subscription for new messages
+  // Realtime subscription for new messages.
+  // The channel name carries a unique suffix for the same reason as the global
+  // channel below: removeChannel is async, so leaving a conversation and going
+  // back into it could re-subscribe to a topic Supabase still considers joined.
+  // The new subscription then silently receives nothing, and the only way out is
+  // a page reload — which is exactly how this bug was reported.
   useEffect(() => {
     if (!activeConversation) return;
 
     const channel = supabase
-      .channel(`chat-${activeConversation}`)
+      .channel(`chat-${activeConversation}-${Date.now()}`)
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -250,7 +255,9 @@ export function useInternalChat() {
         filter: `conversation_id=eq.${activeConversation}`,
       }, (payload) => {
         const m = payload.new as any;
-        setMessages(prev => [...prev, {
+        // sendMessage appends the sender's own message straight away, so this
+        // echo can be a duplicate. Key off the row id instead of appending blind.
+        setMessages(prev => prev.some(existing => existing.id === m.id) ? prev : [...prev, {
           id: m.id, sender_id: m.sender_id, content: m.content,
           created_at: m.created_at, is_read: m.is_read,
         }]);
@@ -318,21 +325,49 @@ export function useInternalChat() {
     loadConversations();
   }, [anewUserId, loadConversations]);
 
-  // Send message
+  // Send message.
+  // The sender's own message is appended locally rather than waiting for the
+  // realtime echo: a degraded channel would otherwise leave the sender staring
+  // at a conversation that never shows what they just wrote. The realtime
+  // handler de-duplicates by row id, so the echo is harmless when it does arrive.
   const sendMessage = useCallback(async (content: string) => {
     if (!anewUserId || !activeConversation || !content.trim()) return;
 
-    await (supabase as any).from("internal_chat_messages").insert({
-      conversation_id: activeConversation,
-      sender_id: anewUserId,
-      content: content.trim(),
-    });
+    const { data: inserted, error } = await (supabase as any)
+      .from("internal_chat_messages")
+      .insert({
+        conversation_id: activeConversation,
+        sender_id: anewUserId,
+        content: content.trim(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("useInternalChat: sendMessage failed", error);
+      throw error;
+    }
+
+    if (inserted) {
+      setMessages(prev => prev.some(m => m.id === inserted.id) ? prev : [...prev, {
+        id: inserted.id,
+        sender_id: inserted.sender_id,
+        content: inserted.content,
+        created_at: inserted.created_at,
+        is_read: inserted.is_read,
+      }]);
+    }
 
     // Update last_message_at
-    await (supabase as any)
+    const { error: convoError } = await (supabase as any)
       .from("internal_chat_conversations")
       .update({ last_message_at: new Date().toISOString() })
       .eq("id", activeConversation);
+
+    if (convoError) {
+      // The message itself is already sent; only the ordering hint failed.
+      console.error("useInternalChat: last_message_at update failed", convoError);
+    }
   }, [anewUserId, activeConversation]);
 
   return {
