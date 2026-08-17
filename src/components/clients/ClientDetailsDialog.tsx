@@ -692,6 +692,20 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       if (!businessUserId) throw new Error("Business user not found for current auth user");
       const entityId = client.entity_id;
 
+      // rpc_update_client only writes the address when BOTH street and postal
+      // code are present — a deliberate rule (never persist half an address),
+      // shared with create-lead. It enforces it silently, so filling only
+      // "Morada" used to return success while the address was discarded, and
+      // the user found the field empty on reopening. Fail loudly instead.
+      if (editFormData.address?.trim() && !editFormData.postal_code?.trim()) {
+        toast({
+          title: "Código postal em falta",
+          description: "Para guardar a morada é preciso preencher também o código postal.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       if (entityId) {
         await withAuditContext(supabase, businessUserId, async () => {
           const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
