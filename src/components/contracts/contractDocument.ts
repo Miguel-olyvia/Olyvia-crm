@@ -603,7 +603,16 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
       .select("title, proposal_number, value, created_at")
       .eq("id", contract.proposal_id)
       .single();
-    data.proposta_numero = proposal?.proposal_number || proposal?.title || "";
+    // NEVER fall back to the proposal title here. This value is printed into
+    // contract clauses as "a proposta n.º {{proposta_numero}}", so a title
+    // produces legally-worded nonsense such as "a proposta n.º MODELO 3" —
+    // and, because the contract body is snapshotted into contract_body_html at
+    // creation, that text is then frozen into the signed document. Leaving it
+    // empty makes resolveValue render a visible "Nº da proposta" placeholder
+    // instead: obviously wrong to whoever reads it, rather than quietly wrong.
+    // Proposals created before proposal_number generation existed (migration
+    // 20261112140000) are the ones that hit this.
+    data.proposta_numero = proposal?.proposal_number || "";
     const proposalValue = parseNumericAmount(proposal?.value);
     if (proposalValue != null) data.proposta_valor = proposalValue;
     if (proposal?.created_at) data.proposta_data = proposal.created_at;
