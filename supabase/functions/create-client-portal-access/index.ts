@@ -837,13 +837,26 @@ serve(async (req: Request) => {
     };
 
     if (emailSent) {
-      // BASE-USR-012: password was delivered via email — do NOT echo it back in
-      // the API response. The caller can display a generic success message.
+      // BASE-USR-012: the password was delivered by email, so it is NOT echoed
+      // back by default — that would expose it to whoever reads the API
+      // response (browser, proxy logs).
+      //
+      // Single, deliberate exception: the operator pressed "Reenviar
+      // credenciais", which sets force_new_password. That action exists
+      // precisely to hand the credentials to the client through another
+      // channel when the email does not reach them, and the password returned
+      // was minted in THIS request — the previous one is hashed and
+      // unrecoverable, so nothing older is disclosed. Every other path (new
+      // access, first login, republish) stays suppressed.
       response.smtp_status = "sent";
       response.smtp_source = resolvedSmtp.source;
       response.message = hasCredentials
         ? `Credenciais e email enviados para ${email}`
         : `Email enviado para ${email}`;
+      if (force_new_password && tempPassword) {
+        response.temp_password = tempPassword;
+        response.credentials_for_manual_delivery = true;
+      }
     } else {
       // SMTP send failed: password was NOT delivered. Return smtp_warning flag
       // so the UI can prompt the user to copy and share the credentials manually,
