@@ -588,10 +588,21 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const organizationId = client?.organization_id;
       if (!organizationId) throw new Error("Cliente sem organização associada");
       if (client?.entity_id) {
-        const { data: addressesData } = await (supabase as any)
+        const { data: addressesData, error: addressesError } = await (supabase as any)
           .from("anew_entity_addresses")
           .select(`id, address_id, is_primary, address_type, anew_addresses:anew_addresses!anew_entity_addresses_address_id_fkey (id, street, number, floor, postal_code, city, district, country)`)
           .eq("entity_id", client.entity_id).is("valid_to", null).order("is_primary", { ascending: false });
+        // The error used to be discarded: a failed lookup was indistinguishable
+        // from "this client has no address", so the edit form silently showed
+        // empty Morada/Código Postal/Cidade even when the address was on file.
+        if (addressesError) {
+          console.error("[ClientDetailsDialog] address lookup failed:", addressesError, { entityId: client.entity_id });
+          toast({
+            title: "Não foi possível carregar a morada",
+            description: "Os campos de morada podem aparecer vazios. Recarregue a página antes de gravar, para não a apagar.",
+            variant: "destructive",
+          });
+        }
         setAddresses((addressesData || []).map((item: any) => ({
           id: item.id, is_primary: item.is_primary, address_type: item.address_type,
           street: item.anew_addresses?.street, number: item.anew_addresses?.number, floor: item.anew_addresses?.floor,
