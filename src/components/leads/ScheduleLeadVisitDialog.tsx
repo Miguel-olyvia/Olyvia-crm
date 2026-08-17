@@ -27,7 +27,7 @@ function formatDateTimeLocal(date: Date): string {
 interface ScheduleLeadVisitDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  lead: { id: string; organization_id?: string | null; field_values?: Record<string, any> | null } | null;
+  lead: { id: string; organization_id?: string | null; field_values?: Record<string, any> | null; assigned_to?: string | null } | null;
   leadName: string;
   companyId: string | null;
   onScheduled?: () => void;
@@ -54,7 +54,7 @@ export function ScheduleLeadVisitDialog({ open, onOpenChange, lead, leadName, co
     setStartTime(formatDateTimeLocal(new Date(Date.now() + 60 * 60000)));
     setDuration("60");
     setLocation(extractLeadLocation(lead) || "");
-    setAssignedTo("");
+    setAssignedTo(lead.assigned_to || "");
     setNotes("");
 
     const loadOrgUsers = async () => {

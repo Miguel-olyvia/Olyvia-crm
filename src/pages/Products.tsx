@@ -55,6 +55,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { escapePostgrestOrTerm } from "@/lib/clientSearch";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -355,8 +356,10 @@ export default function Products() {
 
       // Apply search filter (server-side)
       if (filters.debouncedSearchTerm.trim()) {
-        const searchLower = filters.debouncedSearchTerm.toLowerCase().trim();
-        query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,barcode.ilike.%${searchLower}%`);
+        const searchLower = escapePostgrestOrTerm(filters.debouncedSearchTerm.toLowerCase().trim());
+        if (searchLower) {
+          query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,barcode.ilike.%${searchLower}%`);
+        }
       }
 
       // Apply sorting and pagination

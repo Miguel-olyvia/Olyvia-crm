@@ -1,4 +1,4 @@
-import { findEntityMatches } from "@/utils/orgEntity";
+import { findEntityMatches, type EntityMatchResult } from "@/utils/orgEntity";
 import type { DuplicateMatch } from "@/components/shared/DuplicateEntityDialog";
 
 /**
@@ -15,13 +15,16 @@ export async function fetchGroupDuplicateMatches(params: {
   phone?: string | null;
   vat?: string | null;
   excludeEntityIds?: string[];
+  /** Pre-fetched result of `findEntityMatches` for the same params, to avoid a
+   *  redundant Edge Function round-trip when the caller already has it. */
+  matches?: EntityMatchResult[];
 }): Promise<DuplicateMatch[]> {
-  const { orgId, email, phone, vat, excludeEntityIds = [] } = params;
+  const { orgId, email, phone, vat, excludeEntityIds = [], matches: precomputed } = params;
   if (!orgId) return [];
   if (!email && !phone && !vat) return [];
 
   try {
-    const matches = await findEntityMatches({
+    const matches = precomputed ?? await findEntityMatches({
       orgId,
       email: email || null,
       phone: phone || null,
@@ -62,13 +65,16 @@ export async function fetchSameOrgMatchFields(params: {
   email?: string | null;
   phone?: string | null;
   vat?: string | null;
+  /** Pre-fetched result of `findEntityMatches` for the same params, to avoid a
+   *  redundant Edge Function round-trip when the caller already has it. */
+  matches?: EntityMatchResult[];
 }): Promise<Map<string, "email" | "phone" | "nif">> {
-  const { orgId, email, phone, vat } = params;
+  const { orgId, email, phone, vat, matches: precomputed } = params;
   const out = new Map<string, "email" | "phone" | "nif">();
   if (!orgId) return out;
   if (!email && !phone && !vat) return out;
   try {
-    const matches = await findEntityMatches({
+    const matches = precomputed ?? await findEntityMatches({
       orgId,
       email: email || null,
       phone: phone || null,

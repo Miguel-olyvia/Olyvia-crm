@@ -193,10 +193,163 @@ export function hasSignatoryHook(html: string | null | undefined): boolean {
   if (!html) return false;
   if (/data-signatory-block\s*=\s*"primary"/i.test(html)) return true;
   if (/\{\{\s*signatario_nome\s*\}\}/i.test(html)) return true;
-  return (
-    /A PRIMEIRA CONTRATANTE/i.test(html) &&
-    /O SEGUNDO CONTRATANTE/i.test(html)
-  );
+  if (/O SEGUNDO CONTRATANTE/i.test(html) || /\bO CLIENTE\b/i.test(html)) return true;
+  return false;
+}
+
+export interface PartySignatureInfo {
+  signed: boolean;
+  name?: string | null;
+  signedAt?: string | null;
+  ip?: string | null;
+  /** true = client (shows "Assinado via SMS OTP" + name/date/IP); false = company (plain signature, no badge) */
+  showOtpBadge?: boolean;
+}
+
+const SECOND_PARTY_RE = /O SEGUNDO CONTRATANTE|\bO CLIENTE\b/i;
+const FIRST_PARTY_RE = /A PRIMEIRA CONTRATANTE/i;
+
+// Reserved height (px) above each signature line once at least one party has
+// signed — the client stamp (badge + name + date + IP, 4 lines) is naturally
+// taller than the company's (just a cursive name, 1 line); without a shared
+// minimum height the two lines end up at different vertical positions.
+const STAMP_MIN_HEIGHT = 60;
+
+function buildSignatureStampHtml(esc: (s: string) => string, info: PartySignatureInfo): string {
+  const base = `min-height:${STAMP_MIN_HEIGHT}px;display:flex;flex-direction:column;justify-content:flex-end;`;
+  if (!info.signed) {
+    // Not signed yet — invisible spacer only, so the line doesn't jump when
+    // the OTHER party's (possibly taller) stamp appears.
+    return `<div style="${base}"></div>`;
+  }
+  if (info.showOtpBadge) {
+    const dateStr = info.signedAt
+      ? new Date(info.signedAt).toLocaleString("pt-PT", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
+      : "";
+    return `<div style="${base}margin-bottom:6px;">
+      <div style="color:#059669;font-size:11px;font-weight:600;">&#10003; Assinado via SMS OTP</div>
+      ${info.name ? `<div style="font-size:12px;font-weight:600;color:#374151;">${esc(info.name)}</div>` : ""}
+      ${dateStr ? `<div style="font-size:11px;color:#6b7280;">${esc(dateStr)}</div>` : ""}
+      ${info.ip ? `<div style="font-size:10px;color:#9ca3af;">IP: ${esc(info.ip)}</div>` : ""}
+    </div>`;
+  }
+  return `<div style="${base}margin-bottom:2px;">
+    <div style="font-family:'Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;color:#1a1a1a;">${esc(info.name || "Assinado")}</div>
+  </div>`;
+}
+
+/**
+ * Injeta o ESTADO REAL de assinatura (empresa + cliente) diretamente no bloco
+ * de assinatura existente no corpo do contrato — sem substituir o texto
+ * original das etiquetas ("A [Empresa]" / "O Cliente" ou o genérico legacy
+ * "A PRIMEIRA CONTRATANTE" / "O SEGUNDO CONTRATANTE"). Nada aparece do lado
+ * de uma parte enquanto ela não tiver assinado (`signed: false` → sem
+ * conteúdo injetado, o espaço fica como já estava na minuta).
+ *
+ * Ao contrário de `injectSignatoryIntoSignatureBlock` (que só sabe mostrar um
+ * nome estático definido na minuta, sem estado real), esta função é chamada
+ * em cada render/PDF a partir dos campos reais do contrato
+ * (company_signature_date/company_signed_by_name, signature_date/
+ * signed_by_name/signature_ip), por isso reflete sempre o estado atual.
+ */
+export function injectSignaturesIntoBlock(
+  html: string,
+  company: PartySignatureInfo,
+  client: PartySignatureInfo,
+): string {
+  if (!html) return html;
+  if (typeof document === "undefined") return html; // SSR: no-op (não exercitado neste código)
+  // Nada assinado ainda — não mexer no HTML original (buildSignatureStampHtml
+  // já não devolve vazio quando signed=false, para poder reservar espaço).
+  if (!company.signed && !client.signed) return html;
+
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const companyStamp = buildSignatureStampHtml(esc, company);
+  const clientStamp = buildSignatureStampHtml(esc, client);
+
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  const candidates = Array.from(template.content.querySelectorAll("div, p, td, span, tr"));
+
+  // Uma "coluna" de assinatura real tem sempre uma linha para assinar por
+  // cima da etiqueta — via borda (border-bottom), <hr>, ou um parágrafo feito
+  // só de underscores/traços (ex.: "_______________________"). Sem isto, um
+  // <div> "container" maior (ex.: o parágrafo "Pontinha, {{data}}" que
+  // antecede o bloco de assinatura, cujo ÚLTIMO filho é o wrapper com as
+  // colunas lá dentro) também "parece" ter duas partes (uma menciona o
+  // cliente, outra não) e era escolhido por engano.
+  const isLineElement = (el: Element): boolean => {
+    if (/border-bottom/i.test((el as HTMLElement).getAttribute?.("style") || "")) return true;
+    if (el.tagName === "HR") return true;
+    const text = el.textContent || "";
+    const stripped = text.replace(/[\s_·\-–—]/g, "");
+    return stripped.length === 0 && text.replace(/\s/g, "").length > 0;
+  };
+  const hasLineMarker = (el: Element): boolean => {
+    if (isLineElement(el)) return true;
+    if (Array.from(el.children).some(isLineElement)) return true;
+    if (el.querySelector('[style*="border-bottom" i], hr')) return true;
+    return false;
+  };
+
+  // 1) Preferido: o contentor cujos PRÓPRIOS filhos diretos já se dividem em
+  //    duas colunas de assinatura genuínas (cada uma com a sua linha) — uma
+  //    menciona o cliente/segunda parte, a outra não. Isto ignora tanto
+  //    wrappers de 1 filho como containers maiores que incluem texto solto
+  //    (datas, quebras de linha) ao lado do verdadeiro bloco de colunas.
+  const columnsTarget = candidates.find((el) => {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!SECOND_PARTY_RE.test(text) || text.length >= 400) return false;
+    const kids = Array.from(el.children) as HTMLElement[];
+    if (kids.length < 2) return false;
+    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
+    const companyCol = kids.find((k) => k !== clientCol);
+    if (!clientCol || !companyCol) return false;
+    return hasLineMarker(clientCol) && hasLineMarker(companyCol);
+  });
+
+  if (columnsTarget) {
+    const kids = Array.from(columnsTarget.children) as HTMLElement[];
+    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""))!;
+    const companyCol = kids.find((k) => k !== clientCol)!;
+    // Inserir mesmo antes da linha (não no início da coluna) — a assinatura
+    // fica colada por cima da linha, como um "assina aqui" normal, mesmo que
+    // a coluna tenha outro conteúdo antes da linha.
+    const insertNearLine = (col: HTMLElement, stamp: string) => {
+      if (!stamp) return;
+      const lineEl = Array.from(col.children).find(isLineElement);
+      if (lineEl) lineEl.insertAdjacentHTML("beforebegin", stamp);
+      else col.insertAdjacentHTML("afterbegin", stamp);
+    };
+    insertNearLine(companyCol, companyStamp);
+    insertNearLine(clientCol, clientStamp);
+    return template.innerHTML;
+  }
+
+  // 2) Fallback legacy: bloco plano com o texto genérico exato numa única
+  //    etiqueta, sem sub-elementos por parte — reconstrói como antes.
+  const flatTarget = candidates.find((el) => {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    return FIRST_PARTY_RE.test(text) && SECOND_PARTY_RE.test(text) && text.length < 220;
+  });
+  if (flatTarget) {
+    flatTarget.innerHTML = `
+      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
+        ${companyStamp}
+        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
+        <span>A PRIMEIRA CONTRATANTE</span>
+      </span>
+      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
+        ${clientStamp}
+        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
+        <span>O SEGUNDO CONTRATANTE</span>
+      </span>`;
+    return template.innerHTML;
+  }
+
+  return html;
 }
 
 /**
@@ -1090,11 +1243,22 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   bodyHtml = applyFormulaChips(bodyHtml, variableData);
   // Remove os "chips" visuais do editor (fundo roxo) — render final sem destaques.
   bodyHtml = stripVariableChips(bodyHtml);
-  // Bloco final de assinatura — injectar nome/cargo do signatário se ainda for o bloco estático.
-  bodyHtml = injectSignatoryIntoSignatureBlock(
+  // Bloco final de assinatura — injeta o estado REAL de assinatura de cada
+  // parte (nada aparece do lado de quem ainda não assinou).
+  bodyHtml = injectSignaturesIntoBlock(
     bodyHtml,
-    (variableData as any).signatario_nome,
-    (variableData as any).signatario_cargo,
+    {
+      signed: !!contract.company_signature_date,
+      name: contract.company_signed_by_name,
+      showOtpBadge: false,
+    },
+    {
+      signed: !!contract.signature_date,
+      name: contract.signed_by_name,
+      signedAt: contract.signature_date,
+      ip: contract.signature_ip,
+      showOtpBadge: true,
+    },
   );
 
   const companyName = settings.company_name_override || variableData.empresa_nome || organization?.name || activeCompanyName || "";
