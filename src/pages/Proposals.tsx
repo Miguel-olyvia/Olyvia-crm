@@ -180,6 +180,11 @@ const Proposals = () => {
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
   const [rejectReasonDialogOpen, setRejectReasonDialogOpen] = useState(false);
+  // Drag-and-drop no kanban para uma stage `is_lost`: guarda a proposta e o
+  // stage de destino enquanto se pede o motivo de rejeição (mesmo diálogo
+  // usado no "Rejeitar (com motivo)" do dropdown).
+  const [kanbanRejectTarget, setKanbanRejectTarget] = useState<{ proposal: Proposal; stageId: string } | null>(null);
+  const [kanbanRejectDialogOpen, setKanbanRejectDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -526,6 +531,9 @@ const Proposals = () => {
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("");
+  // Bulk status change para uma stage `is_lost`: pede motivo de rejeição
+  // (aplicado a todas as propostas selecionadas) em vez de gravar direto.
+  const [bulkRejectDialogOpen, setBulkRejectDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkStatusChanging, setIsBulkStatusChanging] = useState(false);
   const [duplicatingProposalId, setDuplicatingProposalId] = useState<string | null>(null);
@@ -1145,6 +1153,37 @@ const Proposals = () => {
     }
   };
 
+  // Bulk status change para uma stage `is_lost`: em vez de gravar direto,
+  // pede o motivo (uma vez) e aplica-o a todas as propostas selecionadas,
+  // reutilizando `rejectProposalCore` — cada proposta herda a mesma cascata
+  // para os seus orçamentos. Loop sequencial, seguindo o padrão já usado em
+  // `handleBulkDelete`.
+  const handleBulkRejectConfirm = async (reason: ProposalRejectionDecision) => {
+    if (!bulkNewStatus) return;
+    setIsBulkStatusChanging(true);
+    try {
+      const targets = filteredProposals.filter(p => selectedIds.includes(p.id));
+      let anyWorkflowFailed = false;
+      for (const proposal of targets) {
+        const { workflowFailed } = await rejectProposalCore(proposal, reason, bulkNewStatus);
+        if (workflowFailed) anyWorkflowFailed = true;
+      }
+      toast({
+        title: t('common.statusUpdated'),
+        description: anyWorkflowFailed ? t('proposals.toast.workflowWarning') : `${targets.length} propostas atualizadas.`,
+      });
+      setSelectedIds([]);
+      setBulkStatusDialogOpen(false);
+      setBulkRejectDialogOpen(false);
+      setBulkNewStatus("");
+      loadData();
+    } catch (error: any) {
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkStatusChanging(false);
+    }
+  };
+
   // Bulk email: reuses the same send-proposal-email edge function as
   // SendProposalDialog (single-row send), applied sequentially to every
   // selected proposal that has a resolvable recipient email. Kept simple on
@@ -1733,37 +1772,72 @@ const Proposals = () => {
     }
   };
 
+  /**
+   * Núcleo da rejeição de uma proposta: atualiza stage/status/motivo na
+   * proposta e faz cascata do MESMO motivo para os orçamentos (`quotes`)
+   * ligados que ainda estejam em rascunho/enviado. Orçamentos já aceites ou
+   * já rejeitados não são tocados. Não mostra toast nem fecha diálogos —
+   * cada caminho de chamada (dropdown, drag no kanban, bulk) decide isso.
+   * `stageIdOverride` permite indicar o stage `is_lost` exato de destino
+   * (ex.: drag-and-drop no kanban ou bulk); sem isso, resolve o stage
+   * "Rejeitada" pelo nome, como sempre fez.
+   */
+  const rejectProposalCore = async (
+    proposal: Proposal,
+    reason: ProposalRejectionDecision,
+    stageIdOverride?: string,
+  ): Promise<{ workflowFailed: boolean }> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+    const rejectedStage = stageIdOverride
+      ? workflowStages.find(s => s.id === stageIdOverride)
+      : workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
+    if (!rejectedStage) throw new Error("Estágio 'Rejeitada' não encontrado");
+    const oldStageId = proposal.stage_id;
+    const businessUserIdReject = await resolveCurrentBusinessUserId();
+    if (!businessUserIdReject) throw new Error("Utilizador não identificado");
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
+    const { error } = await supabase.from("proposals").update({
+      stage_id: rejectedStage.id,
+      status: "rejected",
+      rejected_at: new Date().toISOString(),
+      rejection_reason_id: reason.reasonId,
+      rejection_reason_code: reason.code,
+      rejection_reason: reason.label,
+      rejection_notes: reason.notes,
+    }).eq("id", proposal.id);
+    if (error) throw error;
+
+    // Cascata: orçamentos ligados a esta proposta que ainda estejam em
+    // rascunho/enviado herdam o mesmo motivo e passam a rejeitado. Um erro
+    // aqui não desfaz a rejeição da proposta (já persistida) — só é
+    // registado, para não bloquear o fluxo principal por uma falha lateral.
+    const { error: quotesError } = await supabase
+      .from("quotes")
+      .update({ estado: "rejeitado", lost_reason: reason.label } as any)
+      .eq("proposal_id", proposal.id)
+      .in("estado", ["rascunho", "enviado"]);
+    if (quotesError) {
+      console.error("Erro ao rejeitar orçamentos ligados à proposta:", quotesError);
+    }
+
+    let workflowFailed = false;
+    try {
+      const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      });
+      if (workflowError) throw workflowError;
+    } catch (workflowError) {
+      console.error("Workflow execution error:", workflowError);
+      workflowFailed = true;
+    }
+    return { workflowFailed };
+  };
+
   const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      const rejectedStage = workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
-      if (!rejectedStage) { toast({ title: "Erro", description: "Estágio 'Rejeitada' não encontrado", variant: "destructive" }); return; }
-      const oldStageId = selectedProposal.stage_id;
-      const businessUserIdReject = await resolveCurrentBusinessUserId();
-      if (!businessUserIdReject) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
-      const { error } = await supabase.from("proposals").update({
-        stage_id: rejectedStage.id,
-        status: "rejected",
-        rejected_at: new Date().toISOString(),
-        rejection_reason_id: reason.reasonId,
-        rejection_reason_code: reason.code,
-        rejection_reason: reason.label,
-        rejection_notes: reason.notes,
-      }).eq("id", selectedProposal.id);
-      if (error) throw error;
-      let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      const { workflowFailed } = await rejectProposalCore(selectedProposal, reason);
       toast({
         title: "Proposta recusada",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
@@ -2491,7 +2565,7 @@ const Proposals = () => {
                         <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })} disabled={editingProposalIsSent}>
                           <SelectTrigger><SelectValue placeholder={t('proposals.form.selectStatus')} /></SelectTrigger>
                           <SelectContent>
-                            {workflowStages.map((stage) => (
+                            {workflowStages.filter(stage => !stage.is_lost).map((stage) => (
                               <SelectItem key={stage.id} value={stage.id}>
                                 <div className="flex items-center gap-2">
                                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -2501,6 +2575,9 @@ const Proposals = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Para rejeitar, usa a ação "Rejeitar (com motivo)" no menu.
+                        </p>
                       </div>
                       {/* Template de proposta */}
                       {proposalTemplates.length > 0 && (
@@ -3097,6 +3174,12 @@ const Proposals = () => {
                 loadData();
               }
             }}
+            onLostStageDrop={(proposalId, stageId) => {
+              const proposal = filteredProposals.find(p => p.id === proposalId);
+              if (!proposal) return;
+              setKanbanRejectTarget({ proposal, stageId });
+              setKanbanRejectDialogOpen(true);
+            }}
             onViewProposal={(p) => { setSelectedProposal(p as any); setDetailsOpen(true); }}
           />
         ) : (
@@ -3411,6 +3494,36 @@ const Proposals = () => {
         onConfirm={handleRejectProposal}
       />
 
+      {/* Drag-and-drop no kanban para uma stage "is_lost": pede o motivo
+          antes de gravar, reutilizando o mesmo diálogo/lógica de rejeição. */}
+      <ProposalRejectReasonDialog
+        open={kanbanRejectDialogOpen}
+        onOpenChange={(open) => {
+          setKanbanRejectDialogOpen(open);
+          if (!open) setKanbanRejectTarget(null);
+        }}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={async (reason) => {
+          if (!kanbanRejectTarget) return;
+          try {
+            const { workflowFailed } = await rejectProposalCore(
+              kanbanRejectTarget.proposal,
+              reason,
+              kanbanRejectTarget.stageId,
+            );
+            toast({
+              title: "Proposta movida",
+              description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+            });
+            setKanbanRejectDialogOpen(false);
+            setKanbanRejectTarget(null);
+            loadData();
+          } catch (error: any) {
+            toast({ title: "Erro", description: error.message, variant: "destructive" });
+          }
+        }}
+      />
+
       <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -3534,10 +3647,29 @@ const Proposals = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)} disabled={isBulkStatusChanging}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus || isBulkStatusChanging}>{t('common.save')}</Button>
+            <Button
+              onClick={() => {
+                const targetStage = workflowStages.find(s => s.id === bulkNewStatus);
+                if (targetStage?.is_lost) {
+                  setBulkRejectDialogOpen(true);
+                } else {
+                  handleBulkStatusChange();
+                }
+              }}
+              disabled={!bulkNewStatus || isBulkStatusChanging}
+            >{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk status change para uma stage "is_lost": pede o motivo (uma vez,
+          aplicado a todas as selecionadas) em vez de gravar direto. */}
+      <ProposalRejectReasonDialog
+        open={bulkRejectDialogOpen}
+        onOpenChange={setBulkRejectDialogOpen}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={handleBulkRejectConfirm}
+      />
 
       <AIProposalGeneratorDialog
         open={aiGeneratorOpen}
