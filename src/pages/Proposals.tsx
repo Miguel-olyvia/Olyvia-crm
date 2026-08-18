@@ -16,11 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
 import { 
-  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter, 
+  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, Eye, Settings2,
   Copy, History, Link2, Paintbrush, Palette,
   CheckSquare, Send, Mail, MoreHorizontal, Phone, MessageSquare, KeyRound,
-  RotateCcw, BarChart3, Columns3, LayoutList, Download
+  RotateCcw, BarChart3, Columns3, LayoutList, Download, HelpCircle
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -266,6 +266,9 @@ const Proposals = () => {
   });
   const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
   const [originalStageId, setOriginalStageId] = useState<string | null>(null);
+  // When editing a proposal already "Enviada", only the Orçamentos section stays
+  // editable — the rest of the form is locked (visually disabled).
+  const [editingProposalIsSent, setEditingProposalIsSent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   const [dealSearch, setDealSearch] = useState("");
@@ -353,16 +356,17 @@ const Proposals = () => {
         // For deals, keep showing only drafts (the typical "ready to attach" set)
         q = q.eq("deal_id", dealId).eq("estado", "rascunho");
       } else if (entityId) {
-        // For a contact/client, surface ALL their quotes not yet linked to a proposal,
-        // regardless of state (rascunho/enviado/aceite/...).
-        q = q.eq("entity_id", entityId);
+        // Surface only relevant quotes: drafts, or quotes already assigned to the
+        // same commercial as the proposal being edited.
+        const assignedTo = formData.assigned_to;
+        q = q.eq("entity_id", entityId).or(assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`);
       }
       const { data } = await q;
       if (cancelled) return;
       setSuggestedQuotes((data || []).map((r: any) => ({ id: r.id, quote_number: r.quote_number, total: r.total, estado: r.estado })));
     })();
     return () => { cancelled = true; };
-  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length]);
+  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length, formData.assigned_to]);
 
   // Pre-fill "Comercial" in create mode based on selected client/contact/deal.
   // Never overrides a manual choice; falls back to current business user when no entity/deal.
@@ -464,12 +468,15 @@ const Proposals = () => {
     const orgId = activeCompany?.id;
     if (!orgId) return;
     const like = `%${val}%`;
+    const assignedTo = formData.assigned_to;
+    const relevanceFilter = assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`;
 
     const directPromise = supabase
       .from("quotes")
       .select("id, quote_number, total, estado, title, created_at")
       .eq("organization_id", orgId)
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
+      .or(relevanceFilter)
       .is("proposal_id", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -499,6 +506,7 @@ const Proposals = () => {
         .select("id, quote_number, total, estado, title, created_at")
         .eq("organization_id", orgId)
         .in("entity_id", entityIds)
+        .or(relevanceFilter)
         .is("proposal_id", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -511,7 +519,7 @@ const Proposals = () => {
       new Map([...(directData || []), ...byEntity].map((q: any) => [q.id, q])).values()
     );
     setQuoteSearchResults(merged.map(toQuoteItem));
-  }, [activeCompany?.id, toQuoteItem]);
+  }, [activeCompany?.id, toQuoteItem, formData.assigned_to]);
 
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -923,6 +931,8 @@ const Proposals = () => {
   }, [proposals, comercialNamesMap]);
 
   const handleEdit = async (proposal: Proposal) => {
+    const editStageName = getStageName(proposal);
+    setEditingProposalIsSent(editStageName === "sent" || editStageName === "enviada");
     setEditingId(proposal.id);
     const currentStageId = proposal.stage_id || proposal.proposal_workflow_stages?.id || workflowStages[0]?.id || "";
     setOriginalStageId(currentStageId);
@@ -1599,6 +1609,7 @@ const Proposals = () => {
   const resetForm = () => {
     setEditingId(null);
     setOriginalStageId(null);
+    setEditingProposalIsSent(false);
     setFormData({ title: "", description: "", value: "", deal_id: "", valid_until: "", notes: "", stage_id: workflowStages[0]?.id || "", template_id: "", assigned_to: "" });
     setSelectedDeal(null);
     setSelectedEntity(null);
@@ -2114,6 +2125,9 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
             <Mail className="w-3.5 h-3.5" />
           </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Adicionar orçamento">
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
@@ -2289,10 +2303,10 @@ const Proposals = () => {
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
-        {(sn === "draft" || sn === "rascunho") && (
+        {(sn === "draft" || sn === "rascunho" || sn === "sent" || sn === "enviada") && (
           <PermissionGate permission="proposals.edit">
             <DropdownMenuItem onClick={() => handleEdit(proposal)}>
-              <Pencil className="w-3.5 h-3.5 mr-2" /> Editar proposta
+              <Pencil className="w-3.5 h-3.5 mr-2" /> {(sn === "sent" || sn === "enviada") ? "Adicionar orçamento" : "Editar proposta"}
             </DropdownMenuItem>
           </PermissionGate>
         )}
@@ -2434,7 +2448,7 @@ const Proposals = () => {
                 </PermissionGate>
                 <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle>{editingId ? t('proposals.editProposal') : t('proposals.newProposal')}</DialogTitle>
+                    <DialogTitle>{editingProposalIsSent ? "Adicionar orçamento" : editingId ? t('proposals.editProposal') : t('proposals.newProposal')}</DialogTitle>
                   </DialogHeader>
                   {editingId && (
                     <div className="px-1 mb-4">
@@ -2445,22 +2459,23 @@ const Proposals = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="title">{t('proposals.form.title')} *</Label>
-                        <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required className={fieldErrors.title ? "border-destructive" : ""} />
+                        <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required disabled={editingProposalIsSent} className={fieldErrors.title ? "border-destructive" : ""} />
                         {fieldErrors.title && <p className="text-sm text-destructive">{fieldErrors.title}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="value">{t('proposals.form.value')} *</Label>
-                        <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required />
+                        <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required disabled={editingProposalIsSent} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="valid_until">{t('proposals.form.validUntil')}</Label>
-                        <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} />
+                        <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} disabled={editingProposalIsSent} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="assigned_to">Comercial</Label>
                         <Select
                           value={formData.assigned_to || "__none__"}
                           onValueChange={(v) => setFormData({ ...formData, assigned_to: v === "__none__" ? "" : v })}
+                          disabled={editingProposalIsSent}
                         >
                           <SelectTrigger><SelectValue placeholder="Sem comercial" /></SelectTrigger>
                           <SelectContent>
@@ -2473,7 +2488,7 @@ const Proposals = () => {
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="stage_id">{t('proposals.form.status')} *</Label>
-                        <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })}>
+                        <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })} disabled={editingProposalIsSent}>
                           <SelectTrigger><SelectValue placeholder={t('proposals.form.selectStatus')} /></SelectTrigger>
                           <SelectContent>
                             {workflowStages.map((stage) => (
@@ -2494,7 +2509,7 @@ const Proposals = () => {
                             <Palette className="h-4 w-4" />
                             Template de Proposta
                           </Label>
-                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })} disabled={editingProposalIsSent}>
                             <SelectTrigger>
                               <SelectValue placeholder="Template default" />
                             </SelectTrigger>
@@ -2514,7 +2529,7 @@ const Proposals = () => {
                         </div>
                       )}
                       {/* Deal search */}
-                      <div className="col-span-2 space-y-2">
+                      <div className={cn("col-span-2 space-y-2", editingProposalIsSent && "opacity-50 pointer-events-none")}>
                         <Label>{t('proposals.form.deal')}</Label>
                         <div className="relative">
                           {selectedDeal ? (
@@ -2715,7 +2730,7 @@ const Proposals = () => {
 
                       {/* Entity (contact/client) — only shown when no Deal is selected */}
                       {!selectedDeal && !formData.deal_id && (
-                        <div className="col-span-2 space-y-2">
+                        <div className={cn("col-span-2 space-y-2", editingProposalIsSent && "opacity-50 pointer-events-none")}>
                           <Label>Lead ou Cliente</Label>
                           <EntitySearchInput
                             value={selectedEntity}
@@ -2738,6 +2753,14 @@ const Proposals = () => {
                               <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setShowQuoteDropdown(!showQuoteDropdown)}>
                                 🔗 Associar existente
                               </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-3.5 w-3.5 text-muted-foreground inline-block ml-1 align-middle cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">
+                                  Mostra orçamentos em rascunho ou já atribuídos ao mesmo comercial desta proposta.
+                                </TooltipContent>
+                              </Tooltip>
                               {showQuoteDropdown && (
                                 <div className="absolute z-50 top-8 left-0 w-80 bg-popover border rounded-lg shadow-lg p-2">
                                   <Input
@@ -2852,7 +2875,7 @@ const Proposals = () => {
                        
                       <div className="col-span-2">
                         {editingId && (
-                          <div className="pt-4 border-t">
+                          <div className={cn("pt-4 border-t", editingProposalIsSent && "opacity-50 pointer-events-none")}>
                             <div className="flex items-center justify-between mb-4">
                               <Label className="text-base font-semibold">Itens Manuais</Label>
                             </div>
@@ -2886,11 +2909,11 @@ const Proposals = () => {
                       
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="description">{t('proposals.form.description')}</Label>
-                        <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={3} />
+                        <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={3} disabled={editingProposalIsSent} />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="notes">{t('proposals.form.notes')}</Label>
-                        <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
+                        <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} disabled={editingProposalIsSent} />
                       </div>
                     </div>
                     <DialogFooter className="flex justify-between sm:justify-between">
@@ -2903,7 +2926,7 @@ const Proposals = () => {
                       </div>
                       <div className="flex gap-2">
                         <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t('proposals.form.cancel')}</Button>
-                        <Button type="submit" disabled={savingProposal}>{editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
+                        <Button type="submit" disabled={savingProposal}>{editingProposalIsSent ? "Guardar orçamentos" : editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
                       </div>
                     </DialogFooter>
                   </form>
