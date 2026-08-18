@@ -1920,7 +1920,7 @@ const ClientContracts = () => {
                           {(contract.status === "signed" || contract.status === "active") && (
                             <>
                               <Button variant="ghost" size="icon" title="Ver contrato" onClick={() => handleEdit(contract)}><Eye className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" title="PDF"><Download className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" title="PDF" onClick={() => handleDownloadPdf(contract)}><Download className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => navigate("/clients")}>
                                 <User className="h-4 w-4" />
                               </Button>
