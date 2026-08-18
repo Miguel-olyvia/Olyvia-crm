@@ -32,6 +32,7 @@ import {
 } from "@/lib/leads/fieldDefinitions";
 import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validations";
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
+import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
 
 interface Lead {
@@ -456,6 +457,52 @@ export function AnewLeadEditDialog({
               description,
               variant: "destructive",
             });
+          }
+        }
+      }
+
+      // Sync Morada/Código Postal/Localidade/Email/Telefone to the entity's
+      // relational contact tables (anew_entity_addresses/anew_addresses,
+      // anew_entity_emails, anew_entity_phones) — same overwrite semantics as
+      // the NIF link above. Without this, a correction made here only ever
+      // reached anew_leads.field_values, which contract/document generation
+      // (gatherContractData in contractDocument.ts) never reads — so an
+      // edited address/email/phone silently never showed up on the contract.
+      // Best-effort, per field: one failing sync must never block saving the
+      // lead's core data (already succeeded above) nor the other fields.
+      if (lead.entity_id) {
+        const street = readGeneralField("address", updatedFieldValues);
+        const postalCode = readGeneralField("postal_code", updatedFieldValues);
+        const city = readGeneralField("city", updatedFieldValues);
+        if (street && postalCode) {
+          try {
+            await linkEntityAddress(lead.entity_id, street, postalCode, city, userId);
+          } catch (addressError) {
+            console.error("Error linking lead's address:", addressError);
+            const description = await getFriendlyErrorMessage(addressError);
+            toast({
+              title: "Lead guardada, mas a morada não foi atualizada no contrato",
+              description,
+              variant: "destructive",
+            });
+          }
+        }
+
+        const emailValue = readGeneralField("email", updatedFieldValues);
+        if (emailValue) {
+          try {
+            await linkEntityEmail(lead.entity_id, emailValue, userId);
+          } catch (emailError) {
+            console.error("Error linking lead's email:", emailError);
+          }
+        }
+
+        const phoneValue = readGeneralField("phone", updatedFieldValues);
+        if (phoneValue) {
+          try {
+            await linkEntityPhone(lead.entity_id, phoneValue, userId);
+          } catch (phoneError) {
+            console.error("Error linking lead's phone:", phoneError);
           }
         }
       }
