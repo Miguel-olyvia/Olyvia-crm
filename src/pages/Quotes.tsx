@@ -266,6 +266,10 @@ export default function Quotes() {
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendQuote, setSendQuote] = useState<Quote | null>(null);
   const [lostReasonDialog, setLostReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
+  // Preenchimento a posteriori do motivo, quando o orçamento já ficou perdido/rejeitado
+  // sem motivo (ex: cliente rejeitou este orçamento no Portal, que não pede motivo) — não
+  // muda o estado, só grava lost_reason no que já está gravado.
+  const [addReasonDialog, setAddReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
   // Motivo exigido quando a alteração de estado em massa (bulk) muda para 'perdido'/'rejeitado'.
   const [bulkLostReason, setBulkLostReason] = useState("");
   const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
@@ -1246,6 +1250,26 @@ export default function Quotes() {
     setLostReasonDialog(null);
   };
 
+  // Preenche o motivo a posteriori, sem tocar no estado (o orçamento já está
+  // perdido/rejeitado — normalmente porque o cliente rejeitou no Portal, que
+  // não pede motivo nenhum ao cliente).
+  const handleAddLostReason = async (quoteId: string, reason: string) => {
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) {
+      toast({ title: t('quotes.toast.userNotIdentified'), variant: 'destructive' });
+      return;
+    }
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+    const { error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Motivo guardado" });
+    fetchQuotes();
+    setAddReasonDialog(null);
+  };
+
   const handleDuplicateQuote = async (quote: Quote, applyDiscountPercent?: number) => {
     try {
       toast({ title: t('quotes.toast.duplicating') });
@@ -1963,6 +1987,17 @@ export default function Quotes() {
                                       </>
                                     )}
 
+                                    {/* Motivo em falta — normalmente porque o cliente rejeitou/perdeu este
+                                        orçamento no Portal, que não pede motivo. Não muda o estado. */}
+                                    {(quote.estado === 'perdido' || quote.estado === 'rejeitado') && !(quote as any).lost_reason && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => setAddReasonDialog({ open: true, quoteId: quote.id, reason: '' })}>
+                                          <FileX className="w-3.5 h-3.5 mr-2" />Adicionar motivo
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                      </>
+                                    )}
+
                                     {/* RELACIONADOS */}
                                     <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔗 Relacionados</DropdownMenuLabel>
                                     {quote.deals ? (
@@ -2090,6 +2125,32 @@ export default function Quotes() {
             <Button variant="outline" onClick={() => setLostReasonDialog(null)}>Cancelar</Button>
             <Button variant="destructive" onClick={() => lostReasonDialog && handleMarkAsLost(lostReasonDialog.quoteId, lostReasonDialog.reason)} disabled={!lostReasonDialog?.reason}>
               Marcar como Perdido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add-reason-after-the-fact dialog */}
+      <Dialog open={!!addReasonDialog?.open} onOpenChange={() => setAddReasonDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Adicionar motivo</DialogTitle>
+            <DialogDescription>Este orçamento já está perdido/rejeitado sem motivo registado — normalmente porque o cliente rejeitou no Portal. Indique o motivo.</DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={addReasonDialog?.reason || ''} onValueChange={(v) => setAddReasonDialog(prev => prev ? { ...prev, reason: v } : null)}>
+              <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
+              <SelectContent>
+                {QUOTE_LOST_REASONS.map((reason) => (
+                  <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddReasonDialog(null)}>Cancelar</Button>
+            <Button variant="destructive" onClick={() => addReasonDialog && handleAddLostReason(addReasonDialog.quoteId, addReasonDialog.reason)} disabled={!addReasonDialog?.reason}>
+              Guardar motivo
             </Button>
           </DialogFooter>
         </DialogContent>
