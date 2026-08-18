@@ -46,6 +46,7 @@ interface Lead {
   assigned_to: string | null;
   workflow_stage_id?: string | null;
   qualification_type?: string | null;
+  lost_reason?: string | null;
 }
 
 export interface LeadEditDialogUpdate {
@@ -101,6 +102,17 @@ const isNotesFieldKey = (key: string) => NOTES_FIELD_KEYS.includes(normalizeFiel
 const isGeneralFieldKey = (key: string) => Object.values(GENERAL_FIELD_ALIASES).some((aliases) => aliases.includes(normalizeFieldKey(key)));
 
 const GENERAL_FIELD_KEYS = GENERAL_FIELDS.map((f) => f.key);
+
+// Same generic business reasons as LeadLostReasonDialog (Kanban / bulk
+// flows) — kept as a plain array here too since this Select lives inline in
+// the form instead of a separate dialog.
+const LOST_REASON_OPTIONS = [
+  "Sem resposta",
+  "Preço",
+  "Escolheu concorrente",
+  "Não é o momento certo",
+  "Outro",
+];
 
 /**
  * Maps each base lead field to the form field key that actually holds its
@@ -167,6 +179,7 @@ export function AnewLeadEditDialog({
   const [notes, setNotes] = useState("");
   const [assignedTo, setAssignedTo] = useState<string | null>(null);
   const [qualificationType, setQualificationType] = useState<string | null>(null);
+  const [lostReason, setLostReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -213,6 +226,7 @@ export function AnewLeadEditDialog({
     setNotes(lead.notes || "");
     setAssignedTo(lead.assigned_to);
     setQualificationType(lead.qualification_type ?? null);
+    setLostReason(lead.lost_reason || "");
     setFieldErrors({});
   };
 
@@ -310,6 +324,17 @@ export function AnewLeadEditDialog({
     if (!lead) return;
     if (!validateForm()) return;
 
+    // Marking a lead as "Perdida" must always carry a reason — block the
+    // submit (never call the RPC) instead of silently saving without one.
+    if (status === "lost" && !lostReason.trim()) {
+      toast({
+        title: "Motivo obrigatório",
+        description: "Indique o motivo de perda antes de guardar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       // Preserve _meta if it exists
@@ -385,6 +410,13 @@ export function AnewLeadEditDialog({
       }
 
       await withAuditContext(supabase, userId, async () => {
+        // p_lost_reason is cast via `as any`: it's added by migration
+        // 20261112200000_rpc_update_lead_add_lost_reason.sql, not yet
+        // reflected in the generated src/integrations/supabase/types.ts
+        // (regenerating that file requires a `supabase db push` first,
+        // which is out of scope here) — same "as any" pattern already used
+        // for genuinely-existing-but-not-yet-typed columns elsewhere in the
+        // codebase (e.g. src/pages/Quotes.tsx's lost_reason update).
         const { error } = await supabase.rpc("rpc_update_lead", {
           p_lead_id: lead.id,
           p_field_values: updatedFieldValues,
@@ -400,7 +432,8 @@ export function AnewLeadEditDialog({
           ...(qualificationChanged
             ? { p_qualification_type: qualificationType, p_qualification_changed: true }
             : {}),
-        });
+          ...(status === "lost" ? { p_lost_reason: lostReason.trim() } : {}),
+        } as any);
 
         if (error) throw error;
       });
@@ -560,6 +593,25 @@ export function AnewLeadEditDialog({
                 </Select>
               </div>
             </div>
+
+            {status === "lost" && (
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-3 space-y-2">
+                  <Label htmlFor="lost_reason">Motivo da Perda *</Label>
+                  <Select value={lostReason} onValueChange={setLostReason}>
+                    <SelectTrigger id="lost_reason" className={!lostReason ? "border-destructive/50" : ""}>
+                      <SelectValue placeholder="Selecione o motivo..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LOST_REASON_OPTIONS.map((opt) => (
+                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Obrigatório para leads marcadas como perdidas</p>
+                </div>
+              </div>
+            )}
 
             {status === "qualified" && (
               <div className="grid grid-cols-3 gap-4">

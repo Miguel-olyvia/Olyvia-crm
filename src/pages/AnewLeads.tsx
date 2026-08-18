@@ -83,6 +83,7 @@ import { LeadsAIConfig } from "@/components/leads/LeadsAIConfig";
 import { DynamicFormField } from "@/components/leads/DynamicFormField";
 import { LeadsBulkActions } from "@/components/leads/LeadsBulkActions";
 import { AnewLeadEditDialog } from "@/components/leads/AnewLeadEditDialog";
+import { LeadLostReasonDialog } from "@/components/leads/LeadLostReasonDialog";
 import { VisitReassignDialog } from "@/components/leads/VisitReassignDialog";
 import { HelpButton } from "@/components/HelpButton";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -636,6 +637,12 @@ export default function AnewLeads() {
 
   // Edit dialog state
   const [showEditDialog, setShowEditDialog] = useState(false);
+
+  // "Perdida" (is_rejection) reason dialog — shared by the Kanban
+  // drag-and-drop and the bulk status-change flows. Only one of the two
+  // pending states is ever set at a time.
+  const [pendingLostDrop, setPendingLostDrop] = useState<{ leadId: string; newStage: WorkflowStage; leadTitle?: string } | null>(null);
+  const [pendingLostBulk, setPendingLostBulk] = useState<{ newStatus: string; matchingStage: WorkflowStage } | null>(null);
 
   // Visit reassign dialog state
   const [showVisitReassignDialog, setShowVisitReassignDialog] = useState(false);
@@ -2150,21 +2157,14 @@ export default function AnewLeads() {
   // Persist a kanban drag: same status + workflow_stage_id update and
   // execute-workflow automation trigger as handleBulkStatusChange, for a
   // single lead moved between kanban columns instead of a bulk selection.
-  const handleKanbanStageDrop = useCallback(async (leadId: string, newStageId: string) => {
-    const newStage = workflowStages.find(s => s.id === newStageId);
-    if (!newStage) return;
-
-    if (newStage.is_conversion) {
-      toast({
-        title: "Não é possível mover diretamente para esta fase",
-        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" no lead.",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  // Extracted from handleKanbanStageDrop so a stage with is_rejection = true
+  // can hold off calling this until the LeadLostReasonDialog is confirmed.
+  const persistKanbanStageDrop = useCallback(async (leadId: string, newStage: WorkflowStage, lostReason?: string) => {
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    const updatePayload = { status: newStage.name, workflow_stage_id: newStage.id };
+    const updatePayload: any = { status: newStage.name, workflow_stage_id: newStage.id };
+    if (lostReason) {
+      updatePayload.lost_reason = lostReason;
+    }
 
     try {
       const { error } = await withAuditContext(supabase, auditUserId, async () =>
@@ -2205,7 +2205,36 @@ export default function AnewLeads() {
       const description = await getFriendlyErrorMessage(error);
       toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
     }
-  }, [workflowStages, scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads, t]);
+  }, [scopeAnewUserId, scopeAuthUserId, activeCompanyId, toast, loadKanbanLeads, loadStatusCounts, loadLeads, t]);
+
+  const handleKanbanStageDrop = useCallback(async (leadId: string, newStageId: string) => {
+    const newStage = workflowStages.find(s => s.id === newStageId);
+    if (!newStage) return;
+
+    if (newStage.is_conversion) {
+      toast({
+        title: "Não é possível mover diretamente para esta fase",
+        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" no lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // "Perdida" stages (is_rejection = true) must always capture a reason
+    // before writing anything — hold off and let the user confirm it in
+    // LeadLostReasonDialog instead of saving immediately.
+    if (newStage.is_rejection) {
+      const draggedLead = kanbanLeads.find(l => l.id === leadId);
+      const identity = draggedLead?.entity_id ? getIdentity(draggedLead.entity_id) : null;
+      const leadTitle = (identity?.first_name && identity?.last_name
+        ? `${identity.first_name} ${identity.last_name}`
+        : identity?.display_name) || (draggedLead ? extractSmartField(draggedLead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']) : "") || undefined;
+      setPendingLostDrop({ leadId, newStage, leadTitle });
+      return;
+    }
+
+    await persistKanbanStageDrop(leadId, newStage);
+  }, [workflowStages, toast, kanbanLeads, getIdentity, persistKanbanStageDrop]);
 
   // Fetch kanban data only while that tab is visible, but keep it in sync
   // with every filter change made anywhere on the page (same dependency list
@@ -4014,16 +4043,17 @@ export default function AnewLeads() {
     setIsBulkDeleting(false);
   };
 
-  const handleBulkStatusChange = async (newStatus: string) => {
-    if (selectedLeadIds.length === 0) return;
-
+  // Extracted from handleBulkStatusChange so a stage with is_rejection = true
+  // can hold off calling this until the LeadLostReasonDialog is confirmed.
+  const persistBulkStatusChange = async (newStatus: string, matchingStage: WorkflowStage | undefined, lostReason?: string) => {
     setIsBulkUpdating(true);
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    // Find matching workflow stage
-    const matchingStage = workflowStages.find(s => s.name === newStatus);
     const updatePayload: any = { status: newStatus };
     if (matchingStage?.id) {
       updatePayload.workflow_stage_id = matchingStage.id;
+    }
+    if (lostReason) {
+      updatePayload.lost_reason = lostReason;
     }
     try {
       const { error } = await withAuditContext(supabase, auditUserId, async () =>
@@ -4075,6 +4105,24 @@ export default function AnewLeads() {
     } finally {
       setIsBulkUpdating(false);
     }
+  };
+
+  const handleBulkStatusChange = async (newStatus: string) => {
+    if (selectedLeadIds.length === 0) return;
+
+    // Find matching workflow stage
+    const matchingStage = workflowStages.find(s => s.name === newStatus);
+
+    // "Perdida" stages (is_rejection = true) must always capture a reason
+    // before writing anything, exactly like the Kanban drag-and-drop path —
+    // hold off and let the user confirm it in LeadLostReasonDialog instead
+    // of saving immediately.
+    if (matchingStage?.is_rejection) {
+      setPendingLostBulk({ newStatus, matchingStage });
+      return;
+    }
+
+    await persistBulkStatusChange(newStatus, matchingStage);
   };
 
   const handleBulkContactResultChange = async (resultId: string) => {
@@ -6892,6 +6940,30 @@ export default function AnewLeads() {
           companyUsers={assignableCompanyUsers}
           onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
           userId={scopeAnewUserId || scopeAuthUserId || ""}
+        />
+
+        {/* Lost reason dialog — shared by Kanban drag-and-drop (pendingLostDrop)
+            and bulk status change (pendingLostBulk); only one is ever set. */}
+        <LeadLostReasonDialog
+          open={!!pendingLostDrop || !!pendingLostBulk}
+          onOpenChange={(open) => {
+            if (!open) {
+              setPendingLostDrop(null);
+              setPendingLostBulk(null);
+            }
+          }}
+          leadTitle={pendingLostDrop?.leadTitle}
+          onConfirm={(reason) => {
+            if (pendingLostDrop) {
+              const { leadId, newStage } = pendingLostDrop;
+              setPendingLostDrop(null);
+              void persistKanbanStageDrop(leadId, newStage, reason);
+            } else if (pendingLostBulk) {
+              const { newStatus, matchingStage } = pendingLostBulk;
+              setPendingLostBulk(null);
+              void persistBulkStatusChange(newStatus, matchingStage, reason);
+            }
+          }}
         />
 
         {/* Visit Reassign Dialog */}
