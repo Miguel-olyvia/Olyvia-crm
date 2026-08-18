@@ -57,6 +57,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn, formatCurrency } from "@/lib/utils";
+import { QUOTE_LOST_REASONS } from "@/lib/quoteReasons";
 import { format, parseISO, startOfDay, endOfDay, isWithinInterval, differenceInDays, addDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -265,6 +266,8 @@ export default function Quotes() {
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendQuote, setSendQuote] = useState<Quote | null>(null);
   const [lostReasonDialog, setLostReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
+  // Motivo exigido quando a alteração de estado em massa (bulk) muda para 'perdido'/'rejeitado'.
+  const [bulkLostReason, setBulkLostReason] = useState("");
   const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   
@@ -1102,8 +1105,12 @@ export default function Quotes() {
     }
   };
 
+  // Mesmas regras de motivo obrigatório do "Marcar como Perdido" individual, aplicadas ao bulk.
+  const bulkStatusRequiresReason = bulkNewStatus === 'perdido' || bulkNewStatus === 'rejeitado';
+
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0 || !bulkNewStatus || !activeCompany?.id) return;
+    if (bulkStatusRequiresReason && !bulkLostReason) return;
     setProcessing(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -1117,10 +1124,11 @@ export default function Quotes() {
         p_ids: idsArr,
         p_organization_id: activeCompany.id,
         p_estado: bulkNewStatus,
-      });
+        p_lost_reason: bulkStatusRequiresReason ? bulkLostReason : null,
+      } as any);
       if (error) throw error;
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.size} ${t('quotes.records')} ${t('common.updated')}.` });
-      clearSelection(); setBulkStatusDialogOpen(false); fetchQuotes();
+      clearSelection(); setBulkStatusDialogOpen(false); setBulkLostReason(""); fetchQuotes();
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
@@ -2072,11 +2080,9 @@ export default function Quotes() {
             <Select value={lostReasonDialog?.reason || ''} onValueChange={(v) => setLostReasonDialog(prev => prev ? { ...prev, reason: v } : null)}>
               <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="Preço elevado">Preço elevado</SelectItem>
-                <SelectItem value="Concorrência">Concorrência</SelectItem>
-                <SelectItem value="Sem resposta">Sem resposta</SelectItem>
-                <SelectItem value="Desistência do cliente">Desistência do cliente</SelectItem>
-                <SelectItem value="Outro">Outro</SelectItem>
+                {QUOTE_LOST_REASONS.map((reason) => (
+                  <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -2331,14 +2337,14 @@ export default function Quotes() {
       />
 
       {/* Bulk Status Change */}
-      <Dialog open={bulkStatusDialogOpen} onOpenChange={setBulkStatusDialogOpen}>
+      <Dialog open={bulkStatusDialogOpen} onOpenChange={(open) => { setBulkStatusDialogOpen(open); if (!open) setBulkLostReason(""); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('common.changeStatus')}</DialogTitle>
             <DialogDescription>{t('common.bulkStatusDescription', { count: selectedIds.size })}</DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <Select value={bulkNewStatus} onValueChange={setBulkNewStatus}>
+          <div className="py-4 space-y-4">
+            <Select value={bulkNewStatus} onValueChange={(v) => { setBulkNewStatus(v); setBulkLostReason(""); }}>
               <SelectTrigger><SelectValue placeholder={t('quotes.selectStatus')} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="rascunho">{t('quotes.status.draft')}</SelectItem>
@@ -2347,10 +2353,20 @@ export default function Quotes() {
                 <SelectItem value="perdido">{t('quotes.status.lost')}</SelectItem>
               </SelectContent>
             </Select>
+            {bulkStatusRequiresReason && (
+              <Select value={bulkLostReason} onValueChange={setBulkLostReason}>
+                <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
+                <SelectContent>
+                  {QUOTE_LOST_REASONS.map((reason) => (
+                    <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={processing || !bulkNewStatus}>{processing ? t('common.processing') : t('common.confirm')}</Button>
+            <Button onClick={handleBulkStatusChange} disabled={processing || !bulkNewStatus || (bulkStatusRequiresReason && !bulkLostReason)}>{processing ? t('common.processing') : t('common.confirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

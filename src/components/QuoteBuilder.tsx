@@ -39,6 +39,7 @@ import { downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { QuoteConditions } from "@/components/quote/QuoteConditions";
 import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog";
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
+import { QuoteRejectReasonDialog } from "@/components/quotes/QuoteRejectReasonDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -253,6 +254,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [showNewSectionDialog, setShowNewSectionDialog] = useState(false);
   const [showApplyVatDialog, setShowApplyVatDialog] = useState(false);
   const [applyVatValue, setApplyVatValue] = useState<string>("6");
+  // Motivo de rejeição — pedido antes de gravar quando estado === "rejeitado".
+  // Uma vez confirmado, fica guardado em "rejectReason" para o resto desta sessão
+  // de edição (não pede novamente em cliques subsequentes de guardar).
+  const [showRejectReasonDialog, setShowRejectReasonDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState<string>("");
   const [newSectionName, setNewSectionName] = useState("");
   const [selectedCatalogItems, setSelectedCatalogItems] = useState<string[]>([]);
   const [catalogSearchTerm, setCatalogSearchTerm] = useState("");
@@ -1976,8 +1982,24 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
 
 
-  const handleSave = async () => {
+  // handleSave doubles as an onClick handler (<Button onClick={handleSave}>), so its
+  // first argument may be a React MouseEvent — only treat it as a reject-reason
+  // override when it is actually a string (the value passed from the confirm dialog).
+  const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
+
+    const overrideReason = typeof rejectReasonOverride === "string" ? rejectReasonOverride : undefined;
+    const effectiveRejectReason = overrideReason ?? rejectReason;
+
+    // Estado "rejeitado" exige motivo antes de gravar (mesma lógica do "Marcar como
+    // Perdido" em Quotes.tsx). Se ainda não foi capturado nesta sessão de edição,
+    // bloqueia o submit e abre o dialog; ao confirmar, handleSave(reason) é chamado de
+    // novo passando o motivo diretamente (evita depender do estado React, que só fica
+    // visível em handleSave numa próxima renderização).
+    if (formData.estado === "rejeitado" && !effectiveRejectReason) {
+      setShowRejectReasonDialog(true);
+      return;
+    }
 
     // Validate at least one line exists
     if (lines.length === 0) {
@@ -2114,6 +2136,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         modelo_base: formData.modelo_base,
         desconto_global_percent: formData.desconto_global_percent,
         estado: formData.estado || "rascunho",
+        // Só relevante quando estado === "rejeitado" (motivo capturado via
+        // QuoteRejectReasonDialog acima). NOTA: rpc_save_quote ainda não persiste
+        // esta coluna (não está na whitelist de campos editáveis da função) — ver
+        // comentário junto à chamada da RPC mais abaixo.
+        ...(formData.estado === "rejeitado" && effectiveRejectReason ? { lost_reason: effectiveRejectReason } : {}),
         validade_dias: formData.validade_dias,
         iva_rate: formData.iva_rate,
         client_notes: formData.client_notes || null,
@@ -2254,6 +2281,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
+      // KNOWN GAP: quoteData may carry lost_reason (set above when estado === "rejeitado"),
+      // but rpc_save_quote (supabase/migrations/20260812010000_quotes_audit_bypass_and_rpcs.sql)
+      // does not read/persist that key today — its v_editable_cols whitelist and the
+      // INSERT/UPDATE column lists do not include lost_reason. Persisting it end-to-end
+      // requires a follow-up migration extending rpc_save_quote; out of scope here pending
+      // approval (não é um dos ficheiros autorizados nesta tarefa).
       const { data: savedQuote, error: saveError } = await supabase.rpc('rpc_save_quote', {
         // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
         // updates an existing one) but the generated RPC Args type widens it
@@ -4658,6 +4691,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Reject Reason Dialog — obrigatório quando estado === "rejeitado" */}
+      <QuoteRejectReasonDialog
+        open={showRejectReasonDialog}
+        onOpenChange={setShowRejectReasonDialog}
+        onConfirm={(reason) => {
+          setRejectReason(reason);
+          setShowRejectReasonDialog(false);
+          // Passa o motivo diretamente (não confiar no estado React, que só se
+          // reflete no closure de handleSave numa próxima renderização).
+          handleSave(reason);
+        }}
+      />
     </div>
   );
 }
