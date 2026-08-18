@@ -106,6 +106,25 @@ Apenas o link de login foi copiado para a área de transferência.`,
           description: `O email não foi enviado (erro SMTP).${reason} Contacte o cliente (${data.email ?? "email desconhecido"}) por outro canal para lhe fornecer as credenciais de acesso ao portal.`,
           duration: 12000,
         });
+      } else if (data.credentials_for_manual_delivery && data.temp_password) {
+        // Case D: "Reenviar credenciais". The email went out, but the operator
+        // asked for the credentials so they can also hand them to the client
+        // directly. The backend only returns temp_password for this explicit
+        // action — see BASE-USR-012 in create-client-portal-access.
+        const credentials = `Email: ${data.email}\nPassword: ${data.temp_password}`;
+        sonnerToast.success("Credenciais novas emitidas", {
+          description: `${credentials}\n\nO email foi enviado ao cliente. Esta password só é mostrada agora — não fica guardada em lado nenhum e não pode ser recuperada depois.`,
+          duration: 60000,
+          action: {
+            label: "Copiar",
+            onClick: () => {
+              navigator.clipboard.writeText(credentials).then(
+                () => sonnerToast.success("Credenciais copiadas"),
+                () => sonnerToast.error("Não foi possível copiar. Copie manualmente do texto acima."),
+              );
+            },
+          },
+        });
       } else {
         // Case C: normal success
         sonnerToast.success(
@@ -116,6 +135,16 @@ Apenas o link de login foi copiado para a área de transferência.`,
           }
         );
       }
+      // The client already had portal access under a different email and the
+      // backend moved the existing account instead of creating a second one.
+      // Always say so: the previous address stops working from now on.
+      if (data.portal_email_migrated_from) {
+        sonnerToast.info("Email do acesso ao portal actualizado", {
+          description: `O acesso passou de ${data.portal_email_migrated_from} para ${data.email}. O email antigo deixa de dar entrada no portal; a conta e o histórico do cliente foram mantidos.`,
+          duration: 15000,
+        });
+      }
+
       options?.onSuccess?.();
     } catch (err: any) {
       const rawCode = (err?.message || "").trim();

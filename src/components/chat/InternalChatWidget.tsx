@@ -11,6 +11,7 @@ import { useInternalChat, type ChatColleague } from "@/hooks/useInternalChat";
 import { usePresence } from "@/hooks/usePresence";
 import { formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
+import { toast } from "sonner";
 import AIAssistant from "@/components/AIAssistant";
 import olyviaIcon from "@/assets/olyvia-icon.png";
 
@@ -63,8 +64,13 @@ export function InternalChatWidget() {
 
   const handleSend = async () => {
     if (!messageText.trim()) return;
-    await sendMessage(messageText);
-    setMessageText("");
+    try {
+      await sendMessage(messageText);
+      setMessageText("");
+    } catch {
+      // Keep the text in the box so nothing typed is lost on a failed send.
+      toast.error("Não foi possível enviar a mensagem. Tente novamente.");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

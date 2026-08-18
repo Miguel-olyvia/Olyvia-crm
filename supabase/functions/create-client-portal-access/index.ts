@@ -361,6 +361,58 @@ serve(async (req: Request) => {
     let isNewAccount = false;
     let tempPassword = "";
     let existingPortalUser: any = null;
+    let portalEmailMigratedFrom: string | null = null;
+
+    // The email was edited after portal access already existed: no auth account
+    // matches the NEW email, but this entity may already have portal access
+    // under the OLD one. Falling through to createUser below would mint a second
+    // auth account and, through the anew_users trigger, a DUPLICATE ENTITY for
+    // the same person — leaving the portal row pointing at the original entity
+    // while the new user hangs off a fresh, empty one. That is exactly what
+    // happened to the "Loren Penton" lead: a second entity created at
+    // 2026-08-14 16:14:17, in the same second as the portal send, with nothing
+    // attached to it.
+    //
+    // Move the existing account to the new email instead of creating a second
+    // identity. The caller is told through portal_email_migrated_from, so the
+    // change is never silent — the old address loses portal access.
+    if (!existingUser) {
+      const { data: entityPortalRows } = await supabase
+        .from("client_portal_users")
+        .select("auth_user_id, created_at")
+        .eq("entity_id", entityId)
+        .eq("organization_id", organization_id)
+        .not("auth_user_id", "is", null)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      const priorAuthUserId = entityPortalRows?.[0]?.auth_user_id;
+      if (priorAuthUserId) {
+        const { data: priorAuth } = await supabase.auth.admin.getUserById(priorAuthUserId);
+        const priorEmail = priorAuth?.user?.email ?? null;
+
+        if (priorEmail && priorEmail.toLowerCase() !== email.toLowerCase()) {
+          const { error: emailMigrateError } = await withRetryResult(() =>
+            supabase.auth.admin.updateUserById(priorAuthUserId, { email, email_confirm: true })
+          );
+
+          if (emailMigrateError) {
+            console.error("Portal email migration failed:", emailMigrateError);
+            return new Response(
+              JSON.stringify({
+                error: `Este contacto já tem acesso ao portal com o email ${priorEmail} e não foi possível actualizá-lo para ${email}: ${emailMigrateError.message}`,
+              }),
+              { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+
+          console.log("Portal account email migrated", { entityId, organization_id, from: priorEmail, to: email });
+          portalEmailMigratedFrom = priorEmail;
+        }
+
+        existingUser = priorAuth?.user ?? { id: priorAuthUserId };
+      }
+    }
 
     if (existingUser) {
       // ============================================================
@@ -836,14 +888,33 @@ serve(async (req: Request) => {
       login_url: finalLoginUrl,
     };
 
+    // Surfaced so the operator learns that the client's portal login changed —
+    // the old address no longer gets in.
+    if (portalEmailMigratedFrom) {
+      response.portal_email_migrated_from = portalEmailMigratedFrom;
+    }
+
     if (emailSent) {
-      // BASE-USR-012: password was delivered via email — do NOT echo it back in
-      // the API response. The caller can display a generic success message.
+      // BASE-USR-012: the password was delivered by email, so it is NOT echoed
+      // back by default — that would expose it to whoever reads the API
+      // response (browser, proxy logs).
+      //
+      // Single, deliberate exception: the operator pressed "Reenviar
+      // credenciais", which sets force_new_password. That action exists
+      // precisely to hand the credentials to the client through another
+      // channel when the email does not reach them, and the password returned
+      // was minted in THIS request — the previous one is hashed and
+      // unrecoverable, so nothing older is disclosed. Every other path (new
+      // access, first login, republish) stays suppressed.
       response.smtp_status = "sent";
       response.smtp_source = resolvedSmtp.source;
       response.message = hasCredentials
         ? `Credenciais e email enviados para ${email}`
         : `Email enviado para ${email}`;
+      if (force_new_password && tempPassword) {
+        response.temp_password = tempPassword;
+        response.credentials_for_manual_delivery = true;
+      }
     } else {
       // SMTP send failed: password was NOT delivered. Return smtp_warning flag
       // so the UI can prompt the user to copy and share the credentials manually,

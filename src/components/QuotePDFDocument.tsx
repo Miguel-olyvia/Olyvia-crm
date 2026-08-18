@@ -202,6 +202,13 @@ interface QuotePDFProps {
    * multi-orçamento.
    */
   totalsOverride?: AggregatedTotals;
+  /**
+   * Que documento está a ser gerado. Numa proposta, o PDF é a fusão dos PDFs
+   * dos seus orçamentos, mas o cabeçalho tem de identificar a PROPOSTA — caso
+   * contrário sai o número do orçamento (Q-...) num documento intitulado
+   * "Proposta", que foi exactamente o defeito reportado.
+   */
+  documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
 }
 
 // Extract attributes from a line as a list of { label, value, priceImpact }
@@ -246,7 +253,7 @@ const resolveTemplateText = (template: any, section: any, keys: string[]): strin
   return '';
 };
 
-export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], user, descontoPercent = 0, proposalTemplate = null, renderContext = null, strictVariables = false, hideTotals = false, totalsOverride }: QuotePDFProps) => {
+export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], user, descontoPercent = 0, proposalTemplate = null, renderContext = null, strictVariables = false, hideTotals = false, totalsOverride, documentContext = { kind: 'quote' } }: QuotePDFProps) => {
   /**
    * Helper para os 3 blocos configuráveis (client_info, company_info, footer).
    * Backward-compat: se não houver renderContext ou se fieldModes[key] estiver
@@ -418,11 +425,21 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const hasValueSection = bodySections.some((section: any) => section.type === 'value');
   const sectionLabel = (section: any, fallback: string) => section?.settings?.sectionLabel || section?.label || fallback;
 
+  // Numa proposta o cabeçalho identifica a proposta (P-...), não o orçamento
+  // que está a ser renderizado por baixo. O número da proposta só entra quando
+  // existe mesmo; sem ele, cair para o do orçamento é preferível a deixar o
+  // documento sem qualquer identificação.
+  const isProposalDocument = documentContext?.kind === 'proposal';
+  const headerNumber =
+    (isProposalDocument ? (documentContext as { number?: string | null }).number : null)
+    || quote.quote_number
+    || 'N/A';
+
   const renderHeader = (section: any) => (
     <View fixed style={headerStyle}>
       <View style={styles.headerLeft}>
         <Text style={[styles.title, { color: textColor }]}>{section?.settings?.customTitle || headerTitle}</Text>
-        <Text style={styles.quoteNumber}>{quote.quote_number || 'N/A'}</Text>
+        <Text style={styles.quoteNumber}>{headerNumber}</Text>
         <Text style={styles.quoteDate}>Data: {new Date(quote.created_at).toLocaleDateString('pt-PT')}</Text>
       </View>
       {logoSource && section?.settings?.showLogo !== false && <Image src={logoSource} style={styles.logo} />}

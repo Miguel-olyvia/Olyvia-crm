@@ -416,7 +416,25 @@ const ClientPortalProposalDetail = () => {
           onSelectedQuotesChange={setSelectedQuoteIds}
           onDownloadPdf={async () => {
             try {
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
+              // The generator builds the proposal PDF by merging its quotes'
+              // PDFs, and RLS keeps portal users out of `quotes`/`quote_lines`
+              // — so calling it directly always found zero quotes and threw,
+              // and the button did nothing. The data comes from the Edge
+              // Function instead, already stripped of cost and margin columns,
+              // and is handed to the very same generator the CRM uses.
+              const { data, error } = await supabase.functions.invoke("client-portal-action", {
+                body: { action: "get_proposal_pdf_data", params: { proposal_id: proposal.id } },
+              });
+              if (error) throw error;
+              if (!data?.quotes?.length) {
+                toast({
+                  title: "Sem conteúdo para gerar o PDF",
+                  description: "Esta proposta não tem orçamentos associados.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, data);
               downloadBlob(blob, fileName);
             } catch (e: any) {
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });

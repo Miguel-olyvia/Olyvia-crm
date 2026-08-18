@@ -302,14 +302,15 @@ export default function Quotes() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      // KPIs via RPC — agrega no servidor independentemente do volume de registos
-      // Only status + search are wired here: both are already enforced/matched
-      // by fetchQuotes' own server-side query (estado filter) or mirror the
-      // client-side text search. dateFrom/dateTo/comercialFilter are NOT sent:
-      // the list itself only applies those client-side over the already-loaded
-      // page, so passing them to the KPI RPC would make the KPI cards stricter
-      // than what the list actually queries from the server — a new, opposite
-      // inconsistency. Revisit only once the list filters those server-side too.
+      // KPIs via RPC — agrega no servidor independentemente do volume de registos.
+      //
+      // Datas e comercial SÃO enviados agora. Ficavam de fora de propósito,
+      // porque a lista só os aplicava no cliente sobre a página já carregada e
+      // enviá-los aqui tornaria os cartões mais restritos do que a lista. Essa
+      // condição deixou de existir: o fetchQuotes passou a filtrar estado,
+      // datas e comercial na própria query, portanto os cartões têm de usar o
+      // mesmo conjunto — senão deixam de bater certo com o que está no ecrã,
+      // que é exactamente a queixa que trouxe isto aqui.
       const trimmedSearch = searchTerm.trim();
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
@@ -317,6 +318,9 @@ export default function Quotes() {
           visible_ids: scopeIds,
           status: statusFilter !== "all" ? statusFilter : undefined,
           search: trimmedSearch || undefined,
+          date_from: dateFrom ? startOfDay(dateFrom).toISOString() : undefined,
+          date_to: dateTo ? endOfDay(dateTo).toISOString() : undefined,
+          comercial_id: comercialFilter !== "all" ? comercialFilter : undefined,
         },
       });
       if (kpiError) throw kpiError;
@@ -387,7 +391,7 @@ export default function Quotes() {
         setStatsLoading(false);
       }
     }
-  }, [activeCompany?.id, statusFilter, searchTerm]);
+  }, [activeCompany?.id, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
@@ -468,6 +472,29 @@ export default function Quotes() {
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
     const searchQuoteNumber = searchTerm.trim().length >= 2 ? escapePostgrestIlike(searchTerm.trim()) : null;
 
+    // Server-side filters. The list is paginated 20 at a time, so a filter that
+    // only runs in the browser can never see past the current page: picking a
+    // status or a date range appeared to do nothing because it was narrowing
+    // 20 rows instead of the whole set. Everything that maps to a plain column
+    // is pushed into the query here and applied to EVERY branch below — the
+    // full-scope list, its count, and the metadata query that decides the page
+    // slice for scoped users — so pagination is computed over filtered rows.
+    //
+    // Scope is untouched: these conditions are added on top of each branch's
+    // own visibility rules (organization, and for OWNED/TEAM the resolved set
+    // of visible quote ids), never instead of them.
+    const dateFromIso = dateFrom ? startOfDay(dateFrom).toISOString() : null;
+    const dateToIso = dateTo ? endOfDay(dateTo).toISOString() : null;
+    const applyServerFilters = (q: any) => {
+      if (statusFilter !== "all") q = q.eq("estado", statusFilter);
+      if (searchQuoteNumber) q = q.ilike("quote_number", `%${searchQuoteNumber}%`);
+      if (dateFromIso) q = q.gte("created_at", dateFromIso);
+      if (dateToIso) q = q.lte("created_at", dateToIso);
+      if (comercialFilter === "none") q = q.is("assigned_to", null);
+      else if (comercialFilter !== "all") q = q.eq("assigned_to", comercialFilter);
+      return q;
+    };
+
     if (!append) {
       let stagesQuery = supabase
         .from("proposal_workflow_stages")
@@ -491,8 +518,7 @@ export default function Quotes() {
           .is("deleted_at", null);
 
         adminQuery = adminQuery.eq("organization_id", activeCompany.id);
-        if (statusFilter !== "all") adminQuery = adminQuery.eq("estado", statusFilter);
-        if (searchQuoteNumber) adminQuery = adminQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+        adminQuery = applyServerFilters(adminQuery);
 
         const { data, error } = await adminQuery.order("created_at", { ascending: false }).range(from, to);
         if (error) throw error;
@@ -501,9 +527,8 @@ export default function Quotes() {
         if (fetchRequestIdRef.current !== requestId) return;
 
         if (!append) {
-          let countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
-          if (statusFilter !== "all") countQuery = countQuery.eq("estado", statusFilter);
-          if (searchQuoteNumber) countQuery = countQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+          let countQuery: any = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
+          countQuery = applyServerFilters(countQuery);
           const { count } = await countQuery;
           if (fetchRequestIdRef.current !== requestId) return;
           setTotalCount(count || 0);
@@ -634,8 +659,7 @@ export default function Quotes() {
                 .eq("organization_id", activeCompany.id)
                 .in("id", chunk)
                 .is("deleted_at", null);
-              if (statusFilter !== "all") metaQuery = metaQuery.eq("estado", statusFilter);
-              if (searchQuoteNumber) metaQuery = metaQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              metaQuery = applyServerFilters(metaQuery);
               const { data, error } = await metaQuery;
               if (error) throw error;
               return (data as any[]) || [];
@@ -676,8 +700,7 @@ export default function Quotes() {
                 .eq("organization_id", activeCompany.id)
                 .in("id", pageIds)
                 .is("deleted_at", null);
-              if (statusFilter !== "all") pageQuery = pageQuery.eq("estado", statusFilter);
-              if (searchQuoteNumber) pageQuery = pageQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              pageQuery = applyServerFilters(pageQuery);
               const { data, error } = await pageQuery;
               if (error) throw error;
               if (fetchRequestIdRef.current !== requestId) return;
@@ -710,7 +733,7 @@ export default function Quotes() {
         setLoadingMore(false);
       }
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Resolve entity names
   useEffect(() => {
@@ -919,9 +942,11 @@ export default function Quotes() {
     fetchLinesAgg();
   }, [quotes]);
 
+  // fetchQuotes is memoised on every filter it sends to the server, so this
+  // refetches (and resets to page 0) whenever one of them changes.
   useEffect(() => {
     if (activeCompany?.id) fetchQuotes();
-  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm]);
+  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Limpa qualquer rascunho de novo orçamento ao entrar na página de listagem
   // (evita reabrir o Quote Builder automaticamente).
