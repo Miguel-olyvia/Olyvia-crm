@@ -445,6 +445,7 @@ serve(async (req) => {
         await withRetryResult(() => supabase.from("quotes").update({
           estado: "rejeitado",
           client_notes: safeReason,
+          lost_reason: safeReason,
         }).eq("id", quote_id));
 
         const { data: rejQuote } = await supabase.from("quotes").select("quote_number").eq("id", quote_id).maybeSingle();
@@ -660,6 +661,15 @@ serve(async (req) => {
           rejection_notes: safeReasonText,
           ...(rejectedStageId ? { stage_id: rejectedStageId } : {}),
         }).eq("id", proposal_id));
+
+        // Cascade rejection into quotes still open under this proposal, keeping
+        // the same rejection motive so lost-reason reporting stays consistent.
+        const cascadeReason = safeReasonText || reason_code || null;
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("quotes")
+          .update({ estado: "rejeitado", lost_reason: cascadeReason })
+          .eq("proposal_id", proposal_id)
+          .in("estado", ["rascunho", "enviado"]));
 
         // Freeze the decided snapshot for later change detection — fail-soft,
         // never blocks the rejection flow that already succeeded above.
