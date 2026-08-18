@@ -597,6 +597,11 @@ const Deals = () => {
   const isDisqualifiedStage = useMemo(() => {
     const selectedStage = stages.find(s => s.id === formData.stage_id);
     if (!selectedStage) return false;
+    // Real "lost" flag first (matches isLostStage used by Kanban/bulk, e.g.
+    // "Fechado Perdido"/closedLost) — the literal 'disqualified' stage_key/name
+    // below never matches any stage actually configured in this system, but is
+    // kept as a fallback in case some other org config still uses it.
+    if ((selectedStage as any).is_lost) return true;
     if (selectedStage.stage_key) return selectedStage.stage_key === 'disqualified';
     return selectedStage.name === 'Desqualificado';
   }, [stages, formData.stage_id]);
