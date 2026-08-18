@@ -624,6 +624,7 @@ serve(async (req) => {
             .from("client_contracts")
             .select("id")
             .eq("proposal_id", proposal_id)
+            .is("deleted_at", null)
             .limit(1);
 
           if (existingContract && existingContract.length > 0) {
