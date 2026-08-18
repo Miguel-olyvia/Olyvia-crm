@@ -44,6 +44,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { buildContactScopeOrFilter, getContactScopeUserIds } from "@/lib/contacts/scope";
 import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -173,6 +174,16 @@ const AnewClients = () => {
   );
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { resolveEntities, getIdentity } = useEntityIdentity();
+  // Full comercial roster for this org (scoped to the viewer's permission scope) —
+  // independent of which clients happen to be loaded, so the filter/bulk-assign
+  // dropdowns always list every assignable comercial, not just the ones with a
+  // client in the currently-loaded page.
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: clientsViewScope,
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   const { alerts: clientAlerts, dismissAlert: dismissClientAlert } = useModuleAlerts('client', activeCompany?.id);
 
   const [assignedUserMap, setAssignedUserMap] = useState<Map<string, string>>(new Map());
@@ -488,16 +499,6 @@ const AnewClients = () => {
     return max || 1;
   }, [contractMap]);
 
-  // Unique sales reps for filter
-  const salesReps = useMemo(() => {
-    const reps = new Map<string, string>();
-    clients.forEach(c => {
-      if (c.assigned_to && assignedUserMap.has(c.assigned_to)) {
-        reps.set(c.assigned_to, assignedUserMap.get(c.assigned_to)!);
-      }
-    });
-    return Array.from(reps.entries());
-  }, [clients, assignedUserMap]);
 
   // Load organizations (same pattern)
   useEffect(() => {
@@ -616,6 +617,7 @@ const AnewClients = () => {
 
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
+      if (salesRepFilter !== "all") query = query.eq("assigned_to", salesRepFilter);
       if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
       } else {
@@ -688,11 +690,11 @@ const AnewClients = () => {
         setLoadingMore(false);
       }
     }
-  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, alertData, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
-  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
+  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, salesRepFilter, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
 
   useEffect(() => {
     const openId = searchParams.get("open");
@@ -1883,12 +1885,12 @@ const AnewClients = () => {
               <Button size="sm" variant={onlyMine ? "default" : "outline"} onClick={() => setOnlyMine(!onlyMine)} className="gap-1.5 h-9">
                 <User className="w-3.5 h-3.5" />Só os meus
               </Button>
-              {salesReps.length > 0 && (
+              {comercialUsers.length > 0 && (
                 <Select value={salesRepFilter} onValueChange={setSalesRepFilter}>
                   <SelectTrigger className="w-[140px] h-9"><SelectValue placeholder="Comercial" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Comercial</SelectItem>
-                    {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                    {comercialUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               )}
@@ -2508,7 +2510,7 @@ const AnewClients = () => {
               <Select value={bulkAssignUserId} onValueChange={setBulkAssignUserId}>
                 <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
                 <SelectContent>
-                  {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                  {comercialUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <div className="flex justify-end gap-2">
