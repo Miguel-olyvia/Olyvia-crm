@@ -16,11 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
 import { 
-  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter, 
+  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, Eye, Settings2,
   Copy, History, Link2, Paintbrush, Palette,
   CheckSquare, Send, Mail, MoreHorizontal, Phone, MessageSquare, KeyRound,
-  RotateCcw, BarChart3, Columns3, LayoutList, Download
+  RotateCcw, BarChart3, Columns3, LayoutList, Download, HelpCircle
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -2753,6 +2753,14 @@ const Proposals = () => {
                               <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setShowQuoteDropdown(!showQuoteDropdown)}>
                                 🔗 Associar existente
                               </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-3.5 w-3.5 text-muted-foreground inline-block ml-1 align-middle cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">
+                                  Mostra orçamentos em rascunho ou já atribuídos ao mesmo comercial desta proposta.
+                                </TooltipContent>
+                              </Tooltip>
                               {showQuoteDropdown && (
                                 <div className="absolute z-50 top-8 left-0 w-80 bg-popover border rounded-lg shadow-lg p-2">
                                   <Input
