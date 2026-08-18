@@ -1,21 +1,19 @@
--- rpc_save_quote(...) — add 'lost_reason' to v_editable_cols
+-- rpc_save_quote(...) — persist 'lost_reason' end-to-end
 -- Supersedes the definition in 20260813010000_quotes_audit_bypass_child_trigger_fix.sql.
 -- Same signature, same authorization, same single-audit-row design. Body is byte-identical
--- to that version with ONE change: 'lost_reason' appended to the v_editable_cols array.
+-- to that version except for three additions, all needed together:
+--   1. 'lost_reason' appended to the v_editable_cols array (so it appears in the
+--      consolidated audit diff, §8).
+--   2. 'lost_reason' added to the INSERT INTO public.quotes column/VALUES list (§1, new-quote
+--      branch).
+--   3. 'lost_reason' added to the UPDATE public.quotes SET clause (§1, edit branch).
+-- v_editable_cols alone does NOT drive the INSERT/UPDATE column lists — those are separate,
+-- hand-written lists that only happen to mirror it — so all three additions are required for
+-- p_quote_data->>'lost_reason' to actually persist (an earlier revision of this migration only
+-- did #1, which made the audit diff mention lost_reason without ever saving it — fixed here).
 --
 -- Context: 20261112100000_quotes_add_lost_reason.sql added public.quotes.lost_reason (plain
--- text, no CHECK constraint — same shape as client_notes). v_editable_cols did not include it.
---
--- IMPORTANT — scope of this change: v_editable_cols is referenced in exactly two places in
--- this function, both inside §8 "Build ONE combined diff and write ONE audit row"
--- (the FOREACH v_key IN ARRAY v_editable_cols loops). The actual INSERT INTO public.quotes
--- (§1, new-quote branch) and UPDATE public.quotes SET ... (§1, edit branch) column lists are
--- separate, hand-written, hardcoded lists that are NOT generated from v_editable_cols — they
--- merely happen to mirror it today. Consequently, this migration makes 'lost_reason' appear
--- in the consolidated audit diff, but does NOT by itself make rpc_save_quote persist
--- p_quote_data->>'lost_reason' into the quotes row: that still requires adding lost_reason to
--- the INSERT column/VALUES list and to the UPDATE SET clause, which is intentionally NOT done
--- here per the requested scope (only the array entry is added).
+-- text, no CHECK constraint — same shape as client_notes).
 
 CREATE OR REPLACE FUNCTION public.rpc_save_quote(
   p_quote_id      uuid,
@@ -98,7 +96,7 @@ BEGIN
       deal_id, cliente_id, organization_id, root_organization_id, entity_id,
       title, obra_notas, modelo_base, desconto_global_percent, estado,
       validade_dias, iva_rate, client_notes, conditions, proposal_id,
-      assigned_to, template_id, created_by
+      assigned_to, template_id, lost_reason, created_by
     )
     VALUES (
       v_deal_id,
@@ -118,6 +116,7 @@ BEGIN
       v_proposal_id,
       nullif(p_quote_data ->> 'assigned_to', '')::uuid,
       nullif(p_quote_data ->> 'template_id', '')::uuid,
+      nullif(p_quote_data ->> 'lost_reason', ''),
       v_actor
     )
     RETURNING * INTO v_after;
@@ -151,7 +150,8 @@ BEGIN
         conditions              = nullif(p_quote_data ->> 'conditions', ''),
         proposal_id             = v_proposal_id,
         assigned_to             = nullif(p_quote_data ->> 'assigned_to', '')::uuid,
-        template_id             = nullif(p_quote_data ->> 'template_id', '')::uuid
+        template_id             = nullif(p_quote_data ->> 'template_id', '')::uuid,
+        lost_reason             = nullif(p_quote_data ->> 'lost_reason', '')
     WHERE id = p_quote_id
     RETURNING * INTO v_after;
 
