@@ -356,16 +356,17 @@ const Proposals = () => {
         // For deals, keep showing only drafts (the typical "ready to attach" set)
         q = q.eq("deal_id", dealId).eq("estado", "rascunho");
       } else if (entityId) {
-        // For a contact/client, surface ALL their quotes not yet linked to a proposal,
-        // regardless of state (rascunho/enviado/aceite/...).
-        q = q.eq("entity_id", entityId);
+        // Surface only relevant quotes: drafts, or quotes already assigned to the
+        // same commercial as the proposal being edited.
+        const assignedTo = formData.assigned_to;
+        q = q.eq("entity_id", entityId).or(assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`);
       }
       const { data } = await q;
       if (cancelled) return;
       setSuggestedQuotes((data || []).map((r: any) => ({ id: r.id, quote_number: r.quote_number, total: r.total, estado: r.estado })));
     })();
     return () => { cancelled = true; };
-  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length]);
+  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length, formData.assigned_to]);
 
   // Pre-fill "Comercial" in create mode based on selected client/contact/deal.
   // Never overrides a manual choice; falls back to current business user when no entity/deal.
@@ -467,12 +468,15 @@ const Proposals = () => {
     const orgId = activeCompany?.id;
     if (!orgId) return;
     const like = `%${val}%`;
+    const assignedTo = formData.assigned_to;
+    const relevanceFilter = assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`;
 
     const directPromise = supabase
       .from("quotes")
       .select("id, quote_number, total, estado, title, created_at")
       .eq("organization_id", orgId)
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
+      .or(relevanceFilter)
       .is("proposal_id", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -502,6 +506,7 @@ const Proposals = () => {
         .select("id, quote_number, total, estado, title, created_at")
         .eq("organization_id", orgId)
         .in("entity_id", entityIds)
+        .or(relevanceFilter)
         .is("proposal_id", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -514,7 +519,7 @@ const Proposals = () => {
       new Map([...(directData || []), ...byEntity].map((q: any) => [q.id, q])).values()
     );
     setQuoteSearchResults(merged.map(toQuoteItem));
-  }, [activeCompany?.id, toQuoteItem]);
+  }, [activeCompany?.id, toQuoteItem, formData.assigned_to]);
 
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
