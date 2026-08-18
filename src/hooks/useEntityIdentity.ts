@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { callFiscalEntityResolve } from '@/lib/nif/callFiscalEntityResolve';
@@ -43,6 +43,15 @@ export async function selectInBatches<T>(
 
 export function useEntityIdentity() {
   const [identityMap, setIdentityMap] = useState<Record<string, EntityIdentity>>({});
+  // Mirrors identityMap so resolveEntities/getIdentity can read the latest
+  // value without depending on identityMap itself — depending on it would
+  // give both callbacks a new reference every time it changes, which in
+  // turn destabilizes every useMemo/useCallback/useEffect downstream that
+  // depends on them (AnewClients.tsx/AnewLeads.tsx/AnewContacts.tsx all did
+  // this), causing a visible refetch+re-render cascade right after mount.
+  // Kept in sync synchronously on every render — safe, no side effects.
+  const identityMapRef = useRef(identityMap);
+  identityMapRef.current = identityMap;
   const [loading, setLoading] = useState(false);
 
   const resolveEntities = useCallback(async (entityIds: string[]) => {
@@ -52,11 +61,12 @@ export function useEntityIdentity() {
     }
 
     // Filter out already-cached IDs to avoid redundant queries
-    const uncachedIds = uniqueIds.filter(id => !(id in identityMap));
+    const currentMap = identityMapRef.current;
+    const uncachedIds = uniqueIds.filter(id => !(id in currentMap));
     if (uncachedIds.length === 0) {
       // All already cached — return existing map subset
       const map: Record<string, EntityIdentity> = {};
-      uniqueIds.forEach(id => { if (identityMap[id]) map[id] = identityMap[id]; });
+      uniqueIds.forEach(id => { if (currentMap[id]) map[id] = currentMap[id]; });
       return map;
     }
 
@@ -138,12 +148,12 @@ export function useEntityIdentity() {
     } finally {
       setLoading(false);
     }
-  }, [identityMap]);
+  }, []);
 
   const getIdentity = useCallback((entityId: string | null | undefined): EntityIdentity | null => {
     if (!entityId) return null;
-    return identityMap[entityId] || null;
-  }, [identityMap]);
+    return identityMapRef.current[entityId] || null;
+  }, []);
 
   return { identityMap, resolveEntities, getIdentity, loading };
 }
