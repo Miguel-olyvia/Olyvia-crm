@@ -30,6 +30,7 @@ interface FullContract {
   entity_id: string | null;
   status: string;
   total_value: number | null;
+  total_value_sem_iva: number | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;
@@ -95,7 +96,7 @@ export function ClientsValueView({
         for (let i = 0; i < entityIds.length; i += 100) {
           const batch = entityIds.slice(i, i + 100);
           let q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, start_date, end_date, created_at, payment_terms, notes")
+            .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
             .in("entity_id", batch)
             .is("deleted_at", null)
             .in("organization_id", scopeOrgIds);
@@ -131,7 +132,7 @@ export function ClientsValueView({
     // ones, inflating the reported average.
     const activeEntityIds = new Set(clients.filter(c => c.status === "active").map(c => c.entity_id));
     const activeRevenueContracts = revenueContracts.filter(c => c.entity_id && activeEntityIds.has(c.entity_id));
-    const totalRevenue = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const totalRevenue = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
     const clientCount = clients.filter(c => c.status === "active").length;
     const avgPerClient = clientCount > 0 ? totalRevenue / clientCount : 0;
 
@@ -142,11 +143,11 @@ export function ClientsValueView({
       return pt.includes("mensal") || pt.includes("monthly") || pt.includes("recorrente") ||
         notes.includes("recorrente") || notes.includes("mensal");
     });
-    const recurringRevenue = recurringContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const recurringRevenue = recurringContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
 
     // Lifetime value: total committed revenue / distinct entities with revenue contracts
     const revenueEntities = new Set(revenueContracts.map(c => c.entity_id).filter(Boolean));
-    const totalLifetime = revenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const totalLifetime = revenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
     const avgLifetime = revenueEntities.size > 0 ? totalLifetime / revenueEntities.size : 0;
 
     return { totalRevenue, avgPerClient, recurringRevenue, recurringCount: recurringContracts.length, avgLifetime, clientCount };
@@ -158,7 +159,7 @@ export function ClientsValueView({
     for (const c of revenueContracts) {
       if (!c.entity_id) continue;
       const existing = entityValueMap.get(c.entity_id) || { totalValue: 0, contractCount: 0, clientSince: c.created_at, tags: [] };
-      existing.totalValue += c.total_value || 0;
+      existing.totalValue += c.total_value_sem_iva ?? 0;
       existing.contractCount++;
       if (c.created_at < existing.clientSince) existing.clientSince = c.created_at;
       entityValueMap.set(c.entity_id, existing);
@@ -210,7 +211,7 @@ export function ClientsValueView({
           const d = new Date(c.start_date || c.created_at);
           return d >= start && d <= end;
         })
-        .reduce((sum, c) => sum + (c.total_value || 0), 0);
+        .reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
       months.push({
         month: monthDate,
         label: format(monthDate, "MMM", { locale: pt }).charAt(0).toUpperCase() + format(monthDate, "MMM", { locale: pt }).slice(1),
@@ -240,7 +241,7 @@ export function ClientsValueView({
     for (const c of revenueContracts) {
       const category = c.payment_terms || c.notes?.split(" ")[0] || "Outros";
       const label = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
-      categoryMap.set(label, (categoryMap.get(label) || 0) + (c.total_value || 0));
+      categoryMap.set(label, (categoryMap.get(label) || 0) + (c.total_value_sem_iva ?? 0));
     }
     // If too many categories, keep top 5 and group rest as "Outros"
     const entries = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);

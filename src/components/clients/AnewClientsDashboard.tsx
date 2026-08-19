@@ -274,7 +274,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
         const contractTasks = contractBatches.map((batch) => async () => {
           const q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, end_date")
+            .select("id, entity_id, status, total_value, total_value_sem_iva, end_date")
             .in("entity_id", batch)
             .is("deleted_at", null)
             .eq("organization_id", organizationId);
@@ -289,7 +289,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         const contractResults = await runWithLimit(contractTasks, 4);
         for (const contracts of contractResults) {
           for (const c of contracts) {
-            const val = (c as any).total_value || 0;
+            const val = (c as any).total_value_sem_iva ?? 0;
             const eid = (c as any).entity_id;
             const isActive = (c as any).status === "active" || (c as any).status === "signed";
             const clientIsActive = activeEntityIdSet.has(eid);

@@ -3,15 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formatCurrency } from "@/lib/utils";
-import { getEffectiveContractValue } from "@/utils/contractValue";
+import { getEffectiveContractValue, getEffectiveContractValueExVat } from "@/utils/contractValue";
+import { AlertCircle } from "lucide-react";
 
 interface Contract {
   id: string;
   status: string;
   contract_number?: string;
   total_value?: number;
+  total_value_sem_iva?: number | null;
   quote_id?: string | null;
-  proposals?: { quotes?: { id: string; total?: number }[] } | null;
+  proposals?: { quotes?: { id: string; total?: number; subtotal?: number; total_fees?: number }[] } | null;
   start_date?: string;
   end_date?: string;
   created_at: string;
@@ -35,15 +37,24 @@ const statusLabels: Record<string, string> = {
 };
 
 export function ContractsDashboardView({ contracts }: ContractsDashboardViewProps) {
+  // getEffectiveContractValueExVat pode devolver null quando o contrato não tem
+  // quote ligada com subtotal nem total_value_sem_iva preenchido. Nesses casos
+  // os somatórios tratam o contrato como 0, mas contamos quantos ficaram assim
+  // para se poder sinalizar dados incompletos em vez de esconder o problema.
+  const missingExVatCount = useMemo(
+    () => contracts.filter(c => getEffectiveContractValueExVat(c) == null).length,
+    [contracts]
+  );
+
   const statusDistribution = useMemo(() => {
-    const map: Record<string, { count: number; value: number; color: string }> = {
-      draft: { count: 0, value: 0, color: "bg-yellow-400" },
-      pending_signature: { count: 0, value: 0, color: "bg-blue-400" },
-      signed: { count: 0, value: 0, color: "bg-green-400" },
-      active: { count: 0, value: 0, color: "bg-green-500" },
-      expired: { count: 0, value: 0, color: "bg-red-400" },
-      cancelled: { count: 0, value: 0, color: "bg-gray-400" },
-      outro: { count: 0, value: 0, color: "bg-gray-300" },
+    const map: Record<string, { count: number; value: number; valueWithVat: number; color: string }> = {
+      draft: { count: 0, value: 0, valueWithVat: 0, color: "bg-yellow-400" },
+      pending_signature: { count: 0, value: 0, valueWithVat: 0, color: "bg-blue-400" },
+      signed: { count: 0, value: 0, valueWithVat: 0, color: "bg-green-400" },
+      active: { count: 0, value: 0, valueWithVat: 0, color: "bg-green-500" },
+      expired: { count: 0, value: 0, valueWithVat: 0, color: "bg-red-400" },
+      cancelled: { count: 0, value: 0, valueWithVat: 0, color: "bg-gray-400" },
+      outro: { count: 0, value: 0, valueWithVat: 0, color: "bg-gray-300" },
     };
     contracts.forEach(c => {
       let s = map[c.status];
@@ -54,30 +65,34 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
         s = map.outro;
       }
       s.count++;
-      s.value += getEffectiveContractValue(c);
+      s.value += getEffectiveContractValueExVat(c) ?? 0;
+      s.valueWithVat += getEffectiveContractValue(c);
     });
     return map;
   }, [contracts]);
 
   const byMonth = useMemo(() => {
-    const months: Record<string, number> = {};
+    const months: Record<string, { value: number; valueWithVat: number }> = {};
     contracts.forEach(c => {
       const d = new Date(c.start_date || c.created_at);
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      months[key] = (months[key] || 0) + getEffectiveContractValue(c);
+      if (!months[key]) months[key] = { value: 0, valueWithVat: 0 };
+      months[key].value += getEffectiveContractValueExVat(c) ?? 0;
+      months[key].valueWithVat += getEffectiveContractValue(c);
     });
     return Object.entries(months).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
   }, [contracts]);
 
-  const maxMonth = Math.max(...byMonth.map(([, v]) => v), 1);
+  const maxMonth = Math.max(...byMonth.map(([, v]) => v.value), 1);
 
   const byCommercial = useMemo(() => {
-    const map: Record<string, { count: number; value: number; signed: number }> = {};
+    const map: Record<string, { count: number; value: number; valueWithVat: number; signed: number }> = {};
     contracts.forEach(c => {
       const name = c.assigned_to_name || "Não atribuído";
-      if (!map[name]) map[name] = { count: 0, value: 0, signed: 0 };
+      if (!map[name]) map[name] = { count: 0, value: 0, valueWithVat: 0, signed: 0 };
       map[name].count++;
-      map[name].value += getEffectiveContractValue(c);
+      map[name].value += getEffectiveContractValueExVat(c) ?? 0;
+      map[name].valueWithVat += getEffectiveContractValue(c);
       if (c.status === "signed" || c.status === "active") map[name].signed++;
     });
     return Object.entries(map).sort((a, b) => b[1].value - a[1].value);
@@ -106,7 +121,14 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
   const denom = Math.max(contracts.length, 1);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-4">
+      {missingExVatCount > 0 && (
+        <Badge variant="outline" className="w-fit gap-1 text-[10px] font-normal text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-700">
+          <AlertCircle className="h-3 w-3" />
+          {missingExVatCount} contrato(s) sem valor sem IVA disponível (contam como 0€ nos totais abaixo)
+        </Badge>
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Status Distribution */}
       <Card>
         <CardHeader><CardTitle className="text-base">Distribuição por Estado</CardTitle></CardHeader>
@@ -123,7 +145,10 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
                   />
                 </div>
                 <span className="text-xs font-semibold w-8 text-right">{val.count}</span>
-                <span className="text-xs text-muted-foreground w-24 text-right">{formatCurrency(val.value)}</span>
+                <div className="w-24 text-right">
+                  <span className="text-xs text-muted-foreground block">{formatCurrency(val.value)}</span>
+                  <span className="text-[10px] text-muted-foreground/70 block">{formatCurrency(val.valueWithVat)} c/ IVA</span>
+                </div>
               </div>
             ))}
           </div>
@@ -135,16 +160,19 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
         <CardHeader><CardTitle className="text-base">Valor dos Contratos por Mês</CardTitle></CardHeader>
         <CardContent>
           <div className="space-y-2">
-            {byMonth.map(([month, value]) => (
+            {byMonth.map(([month, data]) => (
               <div key={month} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-16">{month}</span>
                 <div className="flex-1 h-6 bg-muted rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary rounded-full"
-                    style={{ width: `${(value / maxMonth) * 100}%`, minWidth: "4px" }}
+                    style={{ width: `${(data.value / maxMonth) * 100}%`, minWidth: "4px" }}
                   />
                 </div>
-                <span className="text-xs font-semibold w-28 text-right">{formatCurrency(value)}</span>
+                <div className="w-28 text-right">
+                  <span className="text-xs font-semibold block">{formatCurrency(data.value)}</span>
+                  <span className="text-[10px] text-muted-foreground block">{formatCurrency(data.valueWithVat)} c/ IVA</span>
+                </div>
               </div>
             ))}
           </div>
@@ -162,7 +190,10 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
                   <p className="text-sm font-medium">{name}</p>
                   <p className="text-xs text-muted-foreground">{data.count} contratos · {data.signed} assinados</p>
                 </div>
-                <span className="text-sm font-semibold text-primary">{formatCurrency(data.value)}</span>
+                <div className="text-right">
+                  <span className="text-sm font-semibold text-primary block">{formatCurrency(data.value)}</span>
+                  <span className="text-[10px] text-muted-foreground block">{formatCurrency(data.valueWithVat)} c/ IVA</span>
+                </div>
               </div>
             ))}
             {byCommercial.length > 10 && (
@@ -197,7 +228,10 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
                       >
                         {daysLeft}d
                       </Badge>
-                      <span className="text-sm font-medium">{formatCurrency(getEffectiveContractValue(c))}</span>
+                      <div className="text-right">
+                        <span className="text-sm font-medium block">{formatCurrency(getEffectiveContractValueExVat(c) ?? 0)}</span>
+                        <span className="text-[10px] text-muted-foreground block">{formatCurrency(getEffectiveContractValue(c))} c/ IVA</span>
+                      </div>
                     </div>
                   );
                 })}
@@ -206,6 +240,7 @@ export function ContractsDashboardView({ contracts }: ContractsDashboardViewProp
           )}
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

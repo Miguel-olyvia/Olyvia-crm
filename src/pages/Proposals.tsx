@@ -118,6 +118,7 @@ interface Proposal {
   title: string;
   description: string | null;
   value: number;
+  value_sem_iva: number | null;
   probability: number | null;
   status: string;
   stage_id: string | null;

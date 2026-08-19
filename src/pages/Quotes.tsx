@@ -222,6 +222,7 @@ export default function Quotes() {
     totalValue: number; avgValue: number; taxaAceitacao: number; avgAcceptTime: number;
     rascunhoValue: number; enviadoValue: number;
     aceiteValue: number; perdidoValue: number; finalizadoValue: number; rejeitadoValue: number; outrosValue: number;
+    totalValueWithVat: number; aceiteValueWithVat: number;
   } | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -229,7 +230,7 @@ export default function Quotes() {
   // used by the Dashboard view so it always reflects the real DB state — independent of
   // the paginated `quotes` list shown in the Lista view.
   const [allQuotesForDashboard, setAllQuotesForDashboard] = useState<Array<{
-    id: string; estado: string; total: number | null; created_at: string;
+    id: string; estado: string; total: number | null; subtotal: number | null; total_fees: number | null; created_at: string;
     accepted_at: string | null; validade_dias: number | null; assigned_to: string | null;
   }>>([]);
   
@@ -346,6 +347,8 @@ export default function Quotes() {
         avgValue:        kpi.avgValue        ?? 0,
         taxaAceitacao:   kpi.taxaAceitacao   ?? 0,
         avgAcceptTime:   kpi.avgAcceptTime   ?? 0,
+        totalValueWithVat:  kpi.totalValueWithVat  ?? 0,
+        aceiteValueWithVat: kpi.aceiteValueWithVat ?? 0,
       });
 
       // Query separada com limite para graficos/visualizacoes no dashboard
@@ -353,7 +356,7 @@ export default function Quotes() {
       if (scopeIds === null) {
         const { data: vizData, error: vizError } = await supabase
           .from("quotes")
-          .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+          .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
           .is("deleted_at", null)
           .eq("organization_id", activeCompany.id)
           .order("created_at", { ascending: false })
@@ -364,7 +367,7 @@ export default function Quotes() {
         vizRows = await fetchInBatches(scopeIds, async (chunk) => {
           const { data, error } = await supabase
             .from("quotes")
-            .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+            .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
             .is("deleted_at", null)
             .eq("organization_id", activeCompany.id)
             .in("id", chunk);
@@ -377,7 +380,7 @@ export default function Quotes() {
       }
       if (fetchRequestIdRef.current !== requestId) return;
       setAllQuotesForDashboard(vizRows.map((q: any) => ({
-        id: q.id, estado: q.estado, total: q.total, created_at: q.created_at,
+        id: q.id, estado: q.estado, total: q.total, subtotal: q.subtotal ?? null, total_fees: q.total_fees ?? null, created_at: q.created_at,
         accepted_at: q.accepted_at ?? null, validade_dias: q.validade_dias ?? null,
         assigned_to: q.assigned_to,
       })));
@@ -1564,10 +1567,10 @@ export default function Quotes() {
               const ds = dashboardStats;
               const s = stats;
               const cardData = [
-                { key: "all", label: "TOTAL ORÇAMENTOS", count: ds?.total ?? s.total, subtitle: `${formatCurrency(ds?.totalValue ?? s.totalValue)} total`, icon: FileText, color: "text-primary" },
+                { key: "all", label: "TOTAL ORÇAMENTOS", count: ds?.total ?? s.total, subtitle: `${formatCurrency(ds?.totalValue ?? s.totalValue)} total`, subtitle2: ds ? `com IVA: ${formatCurrency(ds.totalValueWithVat)}` : undefined, icon: FileText, color: "text-primary" },
                 { key: "rascunho", label: "RASCUNHO", count: ds?.rascunho ?? s.rascunho, subtitle: "A aguardar envio", icon: FileClock, color: "text-muted-foreground" },
                 { key: "enviado", label: "ENVIADO", count: ds?.enviado ?? s.enviado, subtitle: "A aguardar resposta", icon: Send, color: "text-blue-500" },
-                { key: "aceite", label: "ACEITE", count: ds?.aceite ?? s.aceite, subtitle: (ds?.aceite ?? s.aceite) > 0 ? `${formatCurrency(ds?.aceiteValue ?? 0)}` : formatCurrency(0), icon: CheckCircle2, color: "text-green-500", bgTint: (ds?.aceite ?? s.aceite) > 0 ? "bg-green-50/50 dark:bg-green-950/20" : "" },
+                { key: "aceite", label: "ACEITE", count: ds?.aceite ?? s.aceite, subtitle: (ds?.aceite ?? s.aceite) > 0 ? `${formatCurrency(ds?.aceiteValue ?? 0)}` : formatCurrency(0), subtitle2: ds && (ds.aceite > 0) ? `com IVA: ${formatCurrency(ds.aceiteValueWithVat)}` : undefined, icon: CheckCircle2, color: "text-green-500", bgTint: (ds?.aceite ?? s.aceite) > 0 ? "bg-green-50/50 dark:bg-green-950/20" : "" },
                 { key: "perdido", label: "PERDIDO", count: ds?.perdido ?? s.perdido, subtitle: (ds?.perdido ?? s.perdido) > 0 ? `${formatCurrency(ds?.perdidoValue ?? 0)}` : formatCurrency(0), icon: FileX, color: "text-red-500", bgTint: (ds?.perdido ?? s.perdido) > 0 ? "bg-red-50/50 dark:bg-red-950/20" : "" },
                 ...((ds?.finalizado ?? 0) > 0 ? [{ key: "finalizado", label: "FINALIZADO", count: ds!.finalizado, subtitle: formatCurrency(ds!.finalizadoValue), icon: FileCheck, color: "text-green-600", bgTint: "bg-green-50/50 dark:bg-green-950/20" }] : []),
                 ...((ds?.rejeitado ?? 0) > 0 ? [{ key: "rejeitado", label: "REJEITADO", count: ds!.rejeitado, subtitle: formatCurrency(ds!.rejeitadoValue), icon: FileX, color: "text-orange-500", bgTint: "bg-orange-50/50 dark:bg-orange-950/20" }] : []),
@@ -1577,7 +1580,7 @@ export default function Quotes() {
                 { key: "_taxaAceitacao", label: "TAXA ACEITAÇÃO", count: null, displayValue: `${ds?.taxaAceitacao ?? s.taxaAceitacao}%`, subtitle: `${ds?.aceite ?? s.aceite} de ${ds?.total ?? s.total} aceites`, icon: BarChart3, color: "text-green-600", bgTint: "bg-green-50/50 dark:bg-green-950/20" },
                 { key: "_avgAcceptTime", label: "TEMPO MÉDIO ACEITAÇÃO", count: null, displayValue: `${ds?.avgAcceptTime ?? s.avgAcceptTime}d`, subtitle: "Da criação à aceitação", icon: Timer, color: "text-primary" },
               ];
-              return cardData.map(({ key, label, count, displayValue, subtitle, icon: Icon, color, bgTint }) => (
+              return cardData.map(({ key, label, count, displayValue, subtitle, subtitle2, icon: Icon, color, bgTint }) => (
               <Card 
                 key={key}
                 className={cn(
@@ -1595,6 +1598,7 @@ export default function Quotes() {
                     {displayValue || count}
                   </div>
                   {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
+                  {subtitle2 && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{subtitle2}</p>}
                 </CardContent>
               </Card>
             ));
@@ -1723,6 +1727,8 @@ export default function Quotes() {
               accepted_at: q.accepted_at,
               validade_dias: q.validade_dias,
               total: q.total,
+              subtotal: q.subtotal,
+              total_fees: q.total_fees,
               assigned_to_name: q.assigned_to ? (comercialNamesMap[q.assigned_to] || undefined) : undefined,
             }))}
             isLoading={statsLoading}

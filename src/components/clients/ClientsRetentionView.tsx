@@ -29,6 +29,7 @@ interface FullContract {
   entity_id: string | null;
   status: string;
   total_value: number | null;
+  total_value_sem_iva: number | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;
@@ -160,7 +161,7 @@ export function ClientsRetentionView({
         for (let i = 0; i < entityIds.length; i += 100) {
           const batch = entityIds.slice(i, i + 100);
           let q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, start_date, end_date, created_at, payment_terms, notes")
+            .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
             .in("entity_id", batch)
             .is("deleted_at", null)
             .in("organization_id", scopeOrgIds);
@@ -217,7 +218,7 @@ export function ClientsRetentionView({
         const days = differenceInDays(new Date(c.end_date), now);
         if (days >= 0 && days <= 30) {
           expiringCount++;
-          expiringValue += c.total_value || 0;
+          expiringValue += c.total_value_sem_iva ?? 0;
         }
       }
     });
@@ -351,7 +352,7 @@ export function ClientsRetentionView({
           isExpired,
           isUrgent,
           isHealthy: !!isHealthy,
-          value: c.total_value || 0,
+          value: c.total_value_sem_iva ?? 0,
           details: details.join(" · "),
           endDate: c.end_date!,
         };
