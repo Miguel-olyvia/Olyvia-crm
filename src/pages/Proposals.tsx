@@ -570,6 +570,39 @@ const Proposals = () => {
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
   const [dealEntityIds, setDealEntityIds] = useState<Record<string, string>>({}); // deal_id -> entity_id, for proposals without a direct entity_id
+  // Most recent entity_interactions.interaction_at per entity (same key
+  // convention as entityPhones/entityNames: raw entity_id, or `deal:${proposalId}`
+  // for proposals resolved via a deal). Used so "Registar atividade" actually
+  // resets the "sem resposta" follow-up indicator instead of it blinking
+  // forever regardless of how many calls/contacts are logged.
+  const [entityLastInteraction, setEntityLastInteraction] = useState<Record<string, string>>({});
+
+  // Configurable "sem resposta" threshold (Definições > Alertas > "Sem
+  // resposta após envio"), instead of a hardcoded 5 — see alert_settings /
+  // useAlertSettings. Declared this early (before filteredProposals/stats
+  // below) since those useMemo callbacks run during render and would
+  // otherwise reference this const before its declaration.
+  const getFollowUpThresholdDays = () => alertSettings.get("proposal_no_response", 5).days_threshold;
+
+  // Days since whichever is more recent: the proposal being sent, or the last
+  // activity logged for its entity ("Registar atividade" / calls / WhatsApp,
+  // all written to entity_interactions). Using only `created_at` meant
+  // registering a follow-up call had zero effect on the "sem resposta"
+  // indicator — it kept blinking forever regardless of how many contacts
+  // were logged, since created_at never changes.
+  const getFollowUpDaysOld = (proposal: Proposal): number => {
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const lastInteractionAt = directEntityId
+      ? entityLastInteraction[directEntityId]
+      : entityLastInteraction[`deal:${proposal.id}`];
+    const sentAt = (proposal as any).sent_at as string | null | undefined;
+    const baseline = parseISO(sentAt || proposal.created_at);
+    const reference = lastInteractionAt && parseISO(lastInteractionAt) > baseline
+      ? parseISO(lastInteractionAt)
+      : baseline;
+    return differenceInDays(new Date(), reference);
+  };
+
   const submitLockRef = useRef(false);
   const acceptProposalLockRef = useRef(false);
   const [isAcceptingProposal, setIsAcceptingProposal] = useState(false);
@@ -809,18 +842,25 @@ const Proposals = () => {
         ])];
 
         if (allEntityIds.length > 0) {
-          const [entRes, emailRes, phoneRes] = await Promise.all([
+          const [entRes, emailRes, phoneRes, interactionRes] = await Promise.all([
             supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
             supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
             supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
+            // Ordered desc so the forEach below (which only ever keeps the
+            // first value seen per entity_id) naturally keeps the latest one.
+            supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
           ]);
           const nameMap: Record<string, string> = {};
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
+          const lastInteractionMap: Record<string, string> = {};
           (entRes.data || []).forEach((e: any) => { nameMap[e.id] = e.display_name; });
           (emailRes.data || []).forEach((e: any) => { emailMap[e.entity_id] = e.email; });
           (phoneRes.data || []).forEach((e: any) => { phoneMap[e.entity_id] = e.phone_number; });
-          
+          (interactionRes.data || []).forEach((i: any) => {
+            if (i.entity_id && !lastInteractionMap[i.entity_id]) lastInteractionMap[i.entity_id] = i.interaction_at;
+          });
+
           // Map deal entity data to proposal keys using deal_id
           proposalsData.forEach((p: any) => {
             if (!p.entity_id && p.deal_id && dealEntityMap[p.deal_id]) {
@@ -828,18 +868,21 @@ const Proposals = () => {
               if (nameMap[entityId]) nameMap[`deal:${p.id}`] = nameMap[entityId];
               if (emailMap[entityId]) emailMap[`deal:${p.id}`] = emailMap[entityId];
               if (phoneMap[entityId]) phoneMap[`deal:${p.id}`] = phoneMap[entityId];
+              if (lastInteractionMap[entityId]) lastInteractionMap[`deal:${p.id}`] = lastInteractionMap[entityId];
             }
           });
-          
+
           setEntityNames(nameMap);
           setEntityEmails(emailMap);
           setEntityPhones(phoneMap);
           setDealEntityIds(dealEntityMap);
+          setEntityLastInteraction(lastInteractionMap);
         } else {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
           setDealEntityIds({});
+          setEntityLastInteraction({});
         }
       }
 
@@ -1928,7 +1971,6 @@ const Proposals = () => {
 
   // Filter and sort
   const filteredProposals = useMemo(() => {
-    const now = new Date();
     return proposals
       .filter(proposal => {
         // "Só os meus" — filter to proposals assigned to the current user.
@@ -1944,7 +1986,7 @@ const Proposals = () => {
 
         if (noResponseFilter) {
           const sn = getStageName(proposal);
-          if (!((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5)) return false;
+          if (!((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays())) return false;
         }
 
         if (expiredFilter) {
@@ -2048,7 +2090,7 @@ const Proposals = () => {
 
     const noResponse5d = filteredProposals.filter(p => {
       const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
+      return (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(p) > getFollowUpThresholdDays();
     });
     const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
     const noResponse5dValueExVat = noResponse5d.reduce((s, p) => s + Number(p.value_sem_iva ?? 0), 0);
@@ -2109,8 +2151,9 @@ const Proposals = () => {
     if (stage?.is_lost) {
       return { text: "❌ Rejeitada", color: "text-red-500" };
     }
-    if ((sn === "sent" || sn === "enviada") && daysOld > 5) {
-      return { text: `⏰ Enviada há ${daysOld} dias sem resposta — follow-up urgente`, color: "text-orange-600" };
+    const followUpDaysOld = getFollowUpDaysOld(proposal);
+    if ((sn === "sent" || sn === "enviada") && followUpDaysOld > getFollowUpThresholdDays()) {
+      return { text: `⏰ Sem atividade há ${followUpDaysOld} dias — follow-up urgente`, color: "text-orange-600" };
     }
     if ((sn === "draft" || sn === "rascunho") && daysOld > 2) {
       return { text: `📝 Rascunho há ${daysOld} dias — enviar?`, color: "text-muted-foreground" };
@@ -2166,12 +2209,11 @@ const Proposals = () => {
   };
 
   const getRowBg = (proposal: Proposal): string => {
-    const now = new Date();
     const stage = getProposalStage(proposal);
     const sn = getStageName(proposal);
     if (stage?.is_won) return "bg-green-50/50 dark:bg-green-950/20";
     if (stage?.is_lost) return "bg-red-50/30 dark:bg-red-950/10 opacity-75";
-    if ((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5) return "bg-amber-50/50 dark:bg-amber-950/20";
+    if ((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays()) return "bg-amber-50/50 dark:bg-amber-950/20";
     if (sn === "draft" || sn === "rascunho") return "bg-muted/30";
     return "";
   };
@@ -2180,9 +2222,7 @@ const Proposals = () => {
   const getQuickActions = (proposal: Proposal) => {
     const sn = getStageName(proposal);
     const stage = getProposalStage(proposal);
-    const now = new Date();
-    const daysOld = differenceInDays(now, parseISO(proposal.created_at));
-    const isNoResponse = (sn === "sent" || sn === "enviada") && daysOld > 5;
+    const isNoResponse = (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays();
 
     if (sn === "draft" || sn === "rascunho") {
       return (
