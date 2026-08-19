@@ -68,7 +68,31 @@ const AUDIT_IGNORED_FIELDS = new Set([
   "created_at", "updated_at", "created_by", "search_text",
   "pipeline_dirty_at", "workflow_stage_id", "raw_status", "previous_status",
   "field_values", "needs_manual_scheduling",
+  // Written automatically by the same action that already produces a
+  // dedicated "Chamada telefónica"/"Email enviado"/etc. entry (registering
+  // an interaction updates the lead's last_contact_* bookkeeping in the
+  // same UPDATE) — showing them again as raw "Editou last contact by:
+  // <uuid>" lines is pure duplication of what's already on screen.
+  "last_contact_at", "last_contact_by", "last_contact_result",
 ]);
+
+// Raw status/stage values -> the same PT labels shown elsewhere (funnel,
+// status pills), so "Editou estado" reads as "new → rejected" no longer.
+const STATUS_VALUE_LABELS: Record<string, string> = {
+  new: "Novo",
+  contacted: "Contactado",
+  visit_scheduled: "Visita Agendada",
+  qualified: "Qualificado",
+  negotiation: "Negociação",
+  converted: "Ganho",
+  rejected: "Perdido",
+  lost: "Perdido",
+  incomplete: "Incompleto",
+  cancelled: "Cancelado",
+  callback_scheduled: "Callback Agendado",
+  no_answer: "Sem Resposta",
+};
+const statusValueLabel = (value: string): string => STATUS_VALUE_LABELS[value] || value;
 
 // Friendly labels for satellite-table INSERTs, instead of a generic
 // "Registo adicionado" that gives no clue what was actually added.
@@ -195,14 +219,17 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
         } else if (isRoleStatus) {
           title = "Estado do ciclo de vida alterado";
           description = d.old_value && d.new_value
-            ? `${d.old_value} → ${d.new_value}`
+            ? `${statusValueLabel(d.old_value)} → ${statusValueLabel(d.new_value)}`
             : d.metadata?.old_status && d.metadata?.new_status
-              ? `${d.metadata.old_status} → ${d.metadata.new_status}`
+              ? `${statusValueLabel(d.metadata.old_status)} → ${statusValueLabel(d.metadata.new_status)}`
               : (d.new_value || d.metadata?.new_status || null);
         } else {
           const label = d.field_name ? fieldLabel(d.field_name) : "campo";
           title = `Editou ${label}`;
-          description = d.old_value || d.new_value ? `${d.old_value ?? "—"} → ${d.new_value ?? "—"}` : null;
+          const translate = d.field_name === "status" ? statusValueLabel : (v: string) => v;
+          description = d.old_value || d.new_value
+            ? `${d.old_value ? translate(d.old_value) : "—"} → ${d.new_value ? translate(d.new_value) : "—"}`
+            : null;
         }
 
         return {
@@ -224,8 +251,9 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
           const entries = Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
             .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field));
           entries.forEach(([field, diff], idx) => {
-            const oldVal = diff?.old == null ? "—" : String(diff.old);
-            const newVal = diff?.new == null ? "—" : String(diff.new);
+            const translate = field === "status" ? statusValueLabel : (v: string) => v;
+            const oldVal = diff?.old == null ? "—" : translate(String(diff.old));
+            const newVal = diff?.new == null ? "—" : translate(String(diff.new));
             auditEvents.push({
               id: `audit-${row.id}-${idx}`,
               type: "field_change",
@@ -235,7 +263,15 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
               actor,
             });
           });
-        } else if (row.operation === "INSERT" && row.table_name !== "anew_leads" && row.table_name !== "anew_entities") {
+        } else if (
+          row.operation === "INSERT"
+          && row.table_name !== "anew_leads"
+          && row.table_name !== "anew_entities"
+          // Already shown as its own "Chamada telefónica"/"Email enviado"/etc.
+          // entry from interactionEvents above — showing the raw audit-log
+          // INSERT too was a plain duplicate of the same action.
+          && row.table_name !== "entity_interactions"
+        ) {
           // Satellite inserts (emails, phones, addresses) — surface with a
           // label that actually says what was added, instead of the generic
           // "Registo adicionado" that gave no clue and just added noise.
