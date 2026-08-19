@@ -957,6 +957,41 @@ serve(async (req) => {
           // 3. Try pipeline_links → deals
           if (!eId) { const { data: l } = await supabase.from("pipeline_links").select("lead_id, deal_id").eq("contract_id", contract.id).eq("status", "active").maybeSingle(); if (l?.deal_id) { const { data: d } = await supabase.from("deals").select("entity_id, lead_id").eq("id", l.deal_id).single(); if (d) { eId = d.entity_id; lid = d.lead_id; } } if (l?.lead_id) lid = l.lead_id; }
           if (!lid) lid = await resolveLeadFromPipeline("contract", contract.id);
+          // 4. Fallback: contracts created via the manual "Novo Contrato" form
+          // (rpc_create_client_contract) never write to pipeline_links.contract_id, so
+          // resolveLeadFromPipeline above always returns null for them. Mirror the
+          // entity_id join already used by evaluate_lead_signals_v2's has_signed_contract
+          // signal (anew_leads.entity_id = client_contracts.entity_id) as a last resort.
+          // Only auto-apply when unambiguous (exactly one still-open lead for this
+          // entity, scoped to the contract's own organization); if more than one
+          // candidate exists, log it instead of guessing which lead to convert.
+          if (!lid && eId) {
+            const { data: candidateLeads } = await supabase
+              .from("anew_leads")
+              .select("id, status, created_at")
+              .eq("entity_id", eId)
+              .eq("organization_id", contract.organization_id)
+              .is("deleted_at", null)
+              .not("status", "in", '("converted","archived","rejected")');
+            if (candidateLeads && candidateLeads.length === 1) {
+              lid = candidateLeads[0].id;
+            } else if (candidateLeads && candidateLeads.length > 1) {
+              await logWorkflowExecution({
+                ruleId: null,
+                sourceEntity: "contract",
+                sourceRecordId: contract.id,
+                targetEntity: "lead",
+                targetRecordId: null,
+                actionType: "diagnostic:contract_signed_lead_entity_fallback_ambiguous",
+                status: "success",
+                executionData: {
+                  reason: "entity_id fallback found more than one open lead for this entity; skipped auto-conversion to avoid converting the wrong lead",
+                  entity_id: eId,
+                  candidate_lead_ids: candidateLeads.map((l: any) => l.id),
+                },
+              });
+            }
+          }
           console.log("[execute-workflow] Contract conversion - entity_id:", eId, "lead_id:", lid, "contract_id:", contract.id, "hasConvertToClient:", hasConvertToClient);
           if (eId && !hasConvertToClient) {
             // No active contract_stage_actions row (org-specific or global) configures
