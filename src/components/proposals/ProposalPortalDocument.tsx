@@ -390,6 +390,42 @@ export function ProposalPortalDocument({
                       {/* Overall quote totals and actions */}
                       <Card>
                         <CardContent className="pt-6 space-y-4">
+                          {(() => {
+                            // Each section card above only shows its OWN
+                            // subtotal/discount/IVA — the service fee is never
+                            // tied to a single section (it belongs to the whole
+                            // quote), so without this it never appeared
+                            // anywhere: the client saw the sections not add up
+                            // to "Total do Orçamento" with no explanation why.
+                            const namedFees = quoteFees[quote.id] || [];
+                            const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                            const totals = computeQuoteTotals(lines, namedFees, globalDiscount);
+                            if (namedFees.length === 0) return null;
+                            return (
+                              <div className="space-y-1 border-b pb-3 text-sm">
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">Subtotal (todas as secções)</span>
+                                  <span>{formatCurrency(totals.subtotalBruto)}</span>
+                                </div>
+                                {namedFees.map((fee: any) => (
+                                  <div key={fee.id} className="flex justify-between">
+                                    <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
+                                    <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
+                                  </div>
+                                ))}
+                                {globalDiscount > 0 && (
+                                  <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                                    <span>Desconto global ({globalDiscount}%)</span>
+                                    <span>-{formatCurrency(totals.discountValue)}</span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between">
+                                  <span className="text-muted-foreground">IVA</span>
+                                  <span>{formatCurrency(totals.totalIva)}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
@@ -408,7 +444,7 @@ export function ProposalPortalDocument({
                               {formatCurrency(quote.total || 0)}
                             </span>
                           </div>
-    
+
                           {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
                             <p className="text-xs text-muted-foreground">
                               {isQuoteSelected ? "✓ Selecionado para aceitação" : "Desmarque para excluir este orçamento"}
