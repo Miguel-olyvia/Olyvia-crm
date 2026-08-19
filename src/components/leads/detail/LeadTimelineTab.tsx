@@ -57,11 +57,28 @@ const FIELD_LABELS: Record<string, string> = {
 
 const fieldLabel = (field: string): string => FIELD_LABELS[field] || field.replace(/_/g, " ");
 
-// Skip noisy audited columns that carry no meaning for the user-facing timeline.
+// Skip noisy audited columns that carry no meaning for the user-facing timeline
+// — purely internal bookkeeping (pipeline_dirty_at, workflow_stage_id, the
+// raw/previous status mirrors) that fired on every automated recalculation
+// and drowned out real actions like a registered call. Applied to BOTH the
+// entity_audit_log diffs and the anew_entity_history field_change events
+// below, which previously had no such filter at all.
 const AUDIT_IGNORED_FIELDS = new Set([
   "id", "entity_id", "organization_id", "root_organization_id",
   "created_at", "updated_at", "created_by", "search_text",
+  "pipeline_dirty_at", "workflow_stage_id", "raw_status", "previous_status",
+  "field_values", "needs_manual_scheduling",
 ]);
+
+// Friendly labels for satellite-table INSERTs, instead of a generic
+// "Registo adicionado" that gives no clue what was actually added.
+const TABLE_INSERT_LABELS: Record<string, string> = {
+  anew_entity_emails: "Email adicionado",
+  anew_entity_phones: "Telefone adicionado",
+  anew_entity_addresses: "Morada adicionada",
+  anew_entity_fiscal_entities: "Dados fiscais adicionados",
+  anew_entity_roles: "Novo papel atribuído",
+};
 
 const SENTIMENT_EMOJI: Record<string, string> = {
   positive: "😊",
@@ -158,7 +175,14 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
       }));
 
       // 2. Lifecycle events (created / converted / role changes).
-      const lifecycleEvents: TimelineEvent[] = (lifecycleRes.data || []).map((d: any) => {
+      const lifecycleEvents: TimelineEvent[] = (lifecycleRes.data || [])
+        .filter((d: any) => {
+          const isFieldChange = d.change_type !== "created"
+            && d.change_type !== "role_status_changed"
+            && d.change_type !== "status_changed";
+          return !isFieldChange || !AUDIT_IGNORED_FIELDS.has(d.field_name);
+        })
+        .map((d: any) => {
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
         const type = isCreated ? "created" : isRoleStatus ? "role_status_changed" : "field_change";
@@ -212,11 +236,13 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
             });
           });
         } else if (row.operation === "INSERT" && row.table_name !== "anew_leads" && row.table_name !== "anew_entities") {
-          // Satellite inserts (emails, phones, addresses) — surface as a lightweight edit.
+          // Satellite inserts (emails, phones, addresses) — surface with a
+          // label that actually says what was added, instead of the generic
+          // "Registo adicionado" that gave no clue and just added noise.
           auditEvents.push({
             id: `audit-${row.id}`,
             type: "field_change",
-            title: "Registo adicionado",
+            title: TABLE_INSERT_LABELS[row.table_name] || "Registo adicionado",
             description: null,
             date: row.created_at,
             actor,
@@ -286,18 +312,23 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
           {filteredEvents.map(event => {
             const cfg = TYPE_CONFIG[event.type] || TYPE_CONFIG.note;
             const Icon = cfg.icon;
+            // Plain edits (field_change) recede visually — smaller icon,
+            // muted title, tighter spacing — so real actions (calls, emails,
+            // meetings, visits, lifecycle changes) stand out instead of
+            // getting buried under a wall of routine edits.
+            const isMinor = event.type === "field_change";
             return (
               <button
                 key={event.id}
                 type="button"
                 onClick={() => setSelectedEvent(event)}
-                className="flex w-full items-start gap-3 py-2.5 border-b last:border-0 text-left transition-opacity hover:opacity-80"
+                className={`flex w-full items-start gap-3 border-b last:border-0 text-left transition-opacity hover:opacity-80 ${isMinor ? "py-1.5" : "py-2.5"}`}
               >
-                <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${cfg.bg}`}>
-                  <Icon className={`h-4 w-4 ${cfg.color}`} />
+                <div className={`rounded-full flex items-center justify-center shrink-0 ${cfg.bg} ${isMinor ? "h-6 w-6" : "h-9 w-9"}`}>
+                  <Icon className={`${cfg.color} ${isMinor ? "h-3 w-3" : "h-4 w-4"}`} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">
+                  <p className={isMinor ? "text-xs text-muted-foreground" : "text-sm font-medium"}>
                     {event.title}
                     {event.sentiment && <span className="ml-1">{SENTIMENT_EMOJI[event.sentiment]}</span>}
                   </p>
