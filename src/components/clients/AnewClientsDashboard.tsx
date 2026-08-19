@@ -34,7 +34,9 @@ interface DashboardStats {
   inactiveClients: number;
   newLast30Days: number;
   totalContractValue: number;
+  totalContractValueWithVat: number;
   avgValuePerClient: number;
+  avgValuePerClientWithVat: number;
   activeContracts: number;
   noContact30d: number;
   noContact30dValue: number;
@@ -110,7 +112,7 @@ const StatCard = ({
 
 const DEFAULT_STATS: DashboardStats = {
   totalClients: 0, activeClients: 0, inactiveClients: 0, newLast30Days: 0,
-  totalContractValue: 0, avgValuePerClient: 0, activeContracts: 0,
+  totalContractValue: 0, totalContractValueWithVat: 0, avgValuePerClient: 0, avgValuePerClientWithVat: 0, activeContracts: 0,
   noContact30d: 0, noContact30dValue: 0, contractsExpiring30d: 0,
   contractsExpiring30dValue: 0, retentionRate: 0,
   retentionCohortSize: 0, retentionStillActive: 0,
@@ -224,6 +226,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       );
       // entityIds mirrors the component-level `entityIds` memo (both derived from scopedClients).
       let totalContractValue = 0;
+      let totalContractValueWithVat = 0;
       let activeContracts = 0;
       let contractsExpiring30d = 0;
       let contractsExpiring30dValue = 0;
@@ -290,12 +293,14 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         for (const contracts of contractResults) {
           for (const c of contracts) {
             const val = (c as any).total_value_sem_iva ?? 0;
+            const valWithVat = (c as any).total_value ?? 0;
             const eid = (c as any).entity_id;
             const isActive = (c as any).status === "active" || (c as any).status === "signed";
             const clientIsActive = activeEntityIdSet.has(eid);
             if (isActive && clientIsActive) {
               activeContracts++;
               totalContractValue += val;
+              totalContractValueWithVat += valWithVat;
               if ((c as any).end_date) {
                 const endDate = new Date((c as any).end_date);
                 const daysUntilExpiry = differenceInDays(endDate, now);
@@ -313,6 +318,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       }
 
       const avgValuePerClient = activeClients > 0 ? totalContractValue / activeClients : 0;
+      const avgValuePerClientWithVat = activeClients > 0 ? totalContractValueWithVat / activeClients : 0;
 
       let noContact30d = 0;
       let noContact30dValue = 0;
@@ -373,7 +379,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
 
       return {
         totalClients, activeClients, inactiveClients, newLast30Days,
-        totalContractValue, avgValuePerClient, activeContracts,
+        totalContractValue, totalContractValueWithVat, avgValuePerClient, avgValuePerClientWithVat, activeContracts,
         noContact30d, noContact30dValue,
         contractsExpiring30d, contractsExpiring30dValue,
         retentionRate,
@@ -426,8 +432,8 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       {/* Row 2: Contract & health KPIs */}
       {showExtendedKPIs && (
         <div className="grid grid-cols-7 gap-2">
-          <StatCard title="Valor Contratos" value={formatCurrency(stats.totalContractValue)} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
-          <StatCard title="Valor Médio" value={formatCurrency(stats.avgValuePerClient)} icon={DollarSign} iconColor="text-purple-500" loading={loading} />
+          <StatCard title="Valor Contratos" value={formatCurrency(stats.totalContractValue)} subtitle={`${formatCurrency(stats.totalContractValueWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
+          <StatCard title="Valor Médio" value={formatCurrency(stats.avgValuePerClient)} subtitle={`${formatCurrency(stats.avgValuePerClientWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-500" loading={loading} />
           <StatCard title="Contratos Activos" value={stats.activeContracts} icon={FileText} iconColor="text-green-600" loading={loading}
             subtitle={`em ${stats.activeClients} clientes`} />
           <StatCard title="Sem Contacto >30D" value={stats.noContact30d} icon={AlertTriangle} iconColor="text-red-600" loading={loading}

@@ -213,12 +213,14 @@ export function ClientsRetentionView({
     // Expiring contracts (30 days)
     let expiringCount = 0;
     let expiringValue = 0;
+    let expiringValueWithVat = 0;
     allContracts.forEach(c => {
       if ((c.status === "active" || c.status === "signed") && c.end_date) {
         const days = differenceInDays(new Date(c.end_date), now);
         if (days >= 0 && days <= 30) {
           expiringCount++;
           expiringValue += c.total_value_sem_iva ?? 0;
+          expiringValueWithVat += c.total_value ?? 0;
         }
       }
     });
@@ -235,7 +237,7 @@ export function ClientsRetentionView({
     return {
       retentionRate, lostCount, totalAtStart: clientsAtStart.length, stillActiveCount: stillActive.length,
       atRiskCount: atRiskClients.length, atRiskValue,
-      expiringCount, expiringValue,
+      expiringCount, expiringValue, expiringValueWithVat,
       avgHealth,
     };
   }, [clients, activeClients, healthScores, contracts, allContracts, now]);
@@ -353,6 +355,7 @@ export function ClientsRetentionView({
           isUrgent,
           isHealthy: !!isHealthy,
           value: c.total_value_sem_iva ?? 0,
+          valueWithVat: c.total_value ?? 0,
           details: details.join(" · "),
           endDate: c.end_date!,
         };
@@ -362,6 +365,7 @@ export function ClientsRetentionView({
   }, [allContracts, identityMap, healthScores, interactions, tags, now]);
 
   const renewTotalValue = useMemo(() => contractsToRenew.reduce((sum, c) => sum + c.value, 0), [contractsToRenew]);
+  const renewTotalValueWithVat = useMemo(() => contractsToRenew.reduce((sum, c) => sum + c.valueWithVat, 0), [contractsToRenew]);
 
   // ── Health Distribution ──
   const healthDistribution = useMemo(() => {
@@ -555,6 +559,7 @@ export function ClientsRetentionView({
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Contratos a Expirar</p>
             <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">{kpis.expiringCount}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.expiringValue)} nos próximos 30 dias</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.expiringValueWithVat)} com IVA</p>
           </CardContent>
         </Card>
         <Card>
@@ -728,7 +733,10 @@ export function ClientsRetentionView({
 
                     {/* Value + action */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm font-bold">{formatCurrency(contract.value)}</span>
+                      <div className="text-right">
+                        <span className="text-sm font-bold block">{formatCurrency(contract.value)}</span>
+                        <span className="text-[10px] text-muted-foreground block">{formatCurrency(contract.valueWithVat)} c/ IVA</span>
+                      </div>
                       <Button
                         size="sm"
                         variant={contract.isExpired ? "destructive" : contract.isHealthy ? "outline" : "outline"}
@@ -755,6 +763,7 @@ export function ClientsRetentionView({
                   <p className="text-sm font-semibold text-yellow-700 dark:text-yellow-400 flex items-center justify-center gap-2">
                     💰 {formatCurrency(renewTotalValue)} em contratos a renovar nos próximos 45 dias
                   </p>
+                  <p className="text-xs text-yellow-700/80 dark:text-yellow-400/80 mt-0.5">{formatCurrency(renewTotalValueWithVat)} com IVA</p>
                 </div>
               </>
             )}

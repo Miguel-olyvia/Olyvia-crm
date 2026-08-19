@@ -133,8 +133,10 @@ export function ClientsValueView({
     const activeEntityIds = new Set(clients.filter(c => c.status === "active").map(c => c.entity_id));
     const activeRevenueContracts = revenueContracts.filter(c => c.entity_id && activeEntityIds.has(c.entity_id));
     const totalRevenue = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const totalRevenueWithVat = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
     const clientCount = clients.filter(c => c.status === "active").length;
     const avgPerClient = clientCount > 0 ? totalRevenue / clientCount : 0;
+    const avgPerClientWithVat = clientCount > 0 ? totalRevenueWithVat / clientCount : 0;
 
     // Recurring: contracts with payment_terms containing "mensal", "monthly", "recorrente"
     const recurringContracts = revenueContracts.filter(c => {
@@ -144,22 +146,30 @@ export function ClientsValueView({
         notes.includes("recorrente") || notes.includes("mensal");
     });
     const recurringRevenue = recurringContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const recurringRevenueWithVat = recurringContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
 
     // Lifetime value: total committed revenue / distinct entities with revenue contracts
     const revenueEntities = new Set(revenueContracts.map(c => c.entity_id).filter(Boolean));
     const totalLifetime = revenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const totalLifetimeWithVat = revenueContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
     const avgLifetime = revenueEntities.size > 0 ? totalLifetime / revenueEntities.size : 0;
+    const avgLifetimeWithVat = revenueEntities.size > 0 ? totalLifetimeWithVat / revenueEntities.size : 0;
 
-    return { totalRevenue, avgPerClient, recurringRevenue, recurringCount: recurringContracts.length, avgLifetime, clientCount };
+    return {
+      totalRevenue, totalRevenueWithVat, avgPerClient, avgPerClientWithVat,
+      recurringRevenue, recurringRevenueWithVat, recurringCount: recurringContracts.length,
+      avgLifetime, avgLifetimeWithVat, clientCount,
+    };
   }, [revenueContracts, clients]);
 
   // ── Top 10 Clients ──
   const topClients = useMemo(() => {
-    const entityValueMap = new Map<string, { totalValue: number; contractCount: number; clientSince: string; tags: string[] }>();
+    const entityValueMap = new Map<string, { totalValue: number; totalValueWithVat: number; contractCount: number; clientSince: string; tags: string[] }>();
     for (const c of revenueContracts) {
       if (!c.entity_id) continue;
-      const existing = entityValueMap.get(c.entity_id) || { totalValue: 0, contractCount: 0, clientSince: c.created_at, tags: [] };
+      const existing = entityValueMap.get(c.entity_id) || { totalValue: 0, totalValueWithVat: 0, contractCount: 0, clientSince: c.created_at, tags: [] };
       existing.totalValue += c.total_value_sem_iva ?? 0;
+      existing.totalValueWithVat += c.total_value ?? 0;
       existing.contractCount++;
       if (c.created_at < existing.clientSince) existing.clientSince = c.created_at;
       entityValueMap.set(c.entity_id, existing);
@@ -361,6 +371,7 @@ export function ClientsValueView({
               </UITooltip>
             </p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{formatCurrency(kpis.totalRevenue)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.totalRevenueWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
               <TrendingUp className="w-3 h-3 text-green-500" />
               {kpis.clientCount} clientes activos
@@ -371,6 +382,7 @@ export function ClientsValueView({
           <CardContent className="pt-5 pb-4">
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Valor Médio / Cliente</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(kpis.avgPerClient)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.avgPerClientWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
               <Users className="w-3 h-3" />
               {kpis.clientCount} clientes
@@ -391,6 +403,7 @@ export function ClientsValueView({
               </UITooltip>
             </p>
             <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(kpis.recurringRevenue)}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.recurringRevenueWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5">{kpis.recurringCount} contratos recorrentes</p>
           </CardContent>
         </Card>
@@ -398,6 +411,7 @@ export function ClientsValueView({
           <CardContent className="pt-5 pb-4">
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Lifetime Value Médio</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(kpis.avgLifetime)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.avgLifetimeWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5">Desde que são clientes</p>
           </CardContent>
         </Card>
@@ -463,6 +477,7 @@ export function ClientsValueView({
                   {/* Value + bar */}
                   <div className="text-right shrink-0 w-28">
                     <p className="text-sm font-bold text-green-600 dark:text-green-400">{formatCurrency(client.totalValue)}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatCurrency(client.totalValueWithVat)} c/ IVA</p>
                     <div className="w-full bg-muted rounded-full h-1.5 mt-1">
                       <div
                         className="bg-gradient-to-r from-purple-500 to-purple-400 h-1.5 rounded-full transition-all"
