@@ -1,4 +1,4 @@
-import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays } from "date-fns";
+import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays, subYears } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 
@@ -28,6 +28,18 @@ export interface LeadsDashboardQuery {
 export interface DashboardDateRange {
   from: Date;
   to: Date;
+  /**
+   * true when no explicit dateFrom/dateTo was chosen (e.g. on the Lista tab)
+   * and this range is only a wide structural placeholder for `from`/`to`
+   * (used by the calendar pickers and secondary queries below). Callers must
+   * check this flag and send p_date_from/p_date_to as NULL to the RPC (and
+   * skip any .gte/.lte on created_at) instead of using `from`/`to` literally
+   * — see buildDashboardScopedRpcParams. Without this, the dashboard KPI
+   * cards silently applied a hidden "last 30 days" default while the status
+   * pills (get_lead_status_counts) already defaulted to all-time, making the
+   * two disagree on the same unfiltered view.
+   */
+  isAllTime?: boolean;
 }
 
 export interface AvgDaysToQualify {
@@ -99,6 +111,16 @@ function toDate(value: Date | string | null | undefined): Date | null {
 export function resolveDashboardDateRange(filters?: LeadsDashboardFilters, now = new Date()): DashboardDateRange {
   const rawTo = filters?.dateTo;
   const rawFrom = filters?.dateFrom;
+
+  if (toDate(rawFrom) === null && toDate(rawTo) === null) {
+    // No date filter chosen on the Lista tab -- show everything, matching
+    // the status pills (get_lead_status_counts already defaults to
+    // all-time). `from`/`to` here are only a wide structural placeholder for
+    // the calendar pickers; isAllTime is what callers must actually branch
+    // on (RPC params, secondary .gte/.lte queries).
+    return { from: startOfDay(subYears(now, 20)), to: endOfDay(now), isAllTime: true };
+  }
+
   const resolvedTo = toDate(rawTo) ?? now;
   const resolvedFrom = toDate(rawFrom) ?? subDays(resolvedTo, 30);
   const to = rawTo instanceof Date ? endOfDay(resolvedTo) : resolvedTo;
@@ -107,6 +129,7 @@ export function resolveDashboardDateRange(filters?: LeadsDashboardFilters, now =
   return {
     from,
     to,
+    isAllTime: false,
   };
 }
 
@@ -134,8 +157,8 @@ export function buildDashboardScopedRpcParams(query: LeadsDashboardQuery, dateRa
     p_scope: resolveDashboardScope(query),
     p_anew_user_id: query.anewUserId ?? null,
     p_auth_user_id: query.authUserId ?? null,
-    p_date_from: dateRange.from.toISOString(),
-    p_date_to: dateRange.to.toISOString(),
+    p_date_from: dateRange.isAllTime ? null : dateRange.from.toISOString(),
+    p_date_to: dateRange.isAllTime ? null : dateRange.to.toISOString(),
   };
 
   const search = normalizeFilterValue(filters.search ?? null);
@@ -213,8 +236,13 @@ export function deriveDashboardKpis({
     }
   }
 
+  // "Average per day" is meaningless against the all-time placeholder range
+  // (from/to span ~20 years here, see resolveDashboardDateRange) — it would
+  // silently render as a near-zero, misleading figure instead of the real
+  // per-day rate for whatever period is actually being shown.
   const daysInRange = differenceInDays(dateRange.to, dateRange.from) + 1;
-  const avgLeadsPerDay = leadsInPeriod === null ? null : roundToOneDecimal(leadsInPeriod / daysInRange);
+  const avgLeadsPerDay =
+    leadsInPeriod === null || dateRange.isAllTime ? null : roundToOneDecimal(leadsInPeriod / daysInRange);
 
   let conversionRate: string | null = null;
   if (leadsInPeriod && leadsInPeriod > 0 && cohortConversions !== null) {
