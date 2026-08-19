@@ -282,8 +282,19 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
       q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
     } else if (statusFilter === "new") {
       q = q.eq("status", "new").is("scheduled_visit_id", null);
-    } else {
+    } else if (statusFilter === "qualified" || statusFilter === "negotiation") {
+      // Decisivos no CASE de effective_status (get_scoped_leads_base) —
+      // avaliados antes de qualquer verificação de scheduled_visit_id, logo
+      // uma lead com este status literal nunca é promovida a visit_scheduled.
       q = q.eq("status", statusFilter);
+    } else {
+      // Qualquer outro status literal (incluindo etapas customizadas da
+      // organização) não é decisivo na prioridade de effective_status —
+      // get_scoped_leads_base promove estas leads para 'visit_scheduled'
+      // sempre que scheduled_visit_id está preenchido (mesma regra já
+      // aplicada acima para 'new'). Sem esta exclusão, o pill deste status
+      // sub-conta e a mesma lead aparece também em "Visita Agendada".
+      q = q.eq("status", statusFilter).is("scheduled_visit_id", null);
     }
   }
   if (campaignFilter !== "all") q = q.eq("campaign_id", campaignFilter);
