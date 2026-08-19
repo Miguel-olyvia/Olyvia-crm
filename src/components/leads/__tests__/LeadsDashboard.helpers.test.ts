@@ -156,4 +156,30 @@ describe("deriveDashboardKpis", () => {
     expect(kpis.convertedLeads).toBeNull();
     expect(kpis.conversionRate).toBeNull();
   });
+
+  it("falls back to the unconditional converted count on the all-time view, instead of a structural zero", () => {
+    // cohort_conversions requires bounded p_date_from/p_date_to (see
+    // resolveDashboardDateRange/buildDashboardScopedRpcParams) — the RPC
+    // always returns 0 for it under isAllTime, since "created and converted
+    // within the same period" is undefined without a period.
+    const kpis = deriveDashboardKpis({
+      stats: {
+        active_pipeline: 5306,
+        leads_in_period: 5306,
+        converted_in_period: 53,
+        cohort_conversions: 0,
+        status_counts: {},
+      },
+      comparisonStats: null,
+      dateRange: {
+        from: new Date("2006-08-19T00:00:00.000Z"),
+        to: new Date("2026-08-19T23:59:59.999Z"),
+        isAllTime: true,
+      },
+    });
+
+    expect(kpis.convertedLeads).toBe(53);
+    expect(kpis.cohortConversions).toBe(53);
+    expect(kpis.conversionRate).toBe("1.0");
+  });
 });
