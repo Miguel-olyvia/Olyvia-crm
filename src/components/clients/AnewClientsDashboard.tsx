@@ -34,7 +34,9 @@ interface DashboardStats {
   inactiveClients: number;
   newLast30Days: number;
   totalContractValue: number;
+  totalContractValueWithVat: number;
   avgValuePerClient: number;
+  avgValuePerClientWithVat: number;
   activeContracts: number;
   noContact30d: number;
   noContact30dValue: number;
@@ -110,7 +112,7 @@ const StatCard = ({
 
 const DEFAULT_STATS: DashboardStats = {
   totalClients: 0, activeClients: 0, inactiveClients: 0, newLast30Days: 0,
-  totalContractValue: 0, avgValuePerClient: 0, activeContracts: 0,
+  totalContractValue: 0, totalContractValueWithVat: 0, avgValuePerClient: 0, avgValuePerClientWithVat: 0, activeContracts: 0,
   noContact30d: 0, noContact30dValue: 0, contractsExpiring30d: 0,
   contractsExpiring30dValue: 0, retentionRate: 0,
   retentionCohortSize: 0, retentionStillActive: 0,
@@ -224,6 +226,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       );
       // entityIds mirrors the component-level `entityIds` memo (both derived from scopedClients).
       let totalContractValue = 0;
+      let totalContractValueWithVat = 0;
       let activeContracts = 0;
       let contractsExpiring30d = 0;
       let contractsExpiring30dValue = 0;
@@ -266,6 +269,10 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       // query entirely rather than silently omitting the organization filter (never leak
       // cross-tenant data). Same guard as ClientsValueView.tsx / ClientsRetentionView.tsx.
       const orgScopeBlocked = !activeCompany?.id;
+
+      // Per-client contract map (known/converted clients only): feeds noContact30dValue and
+      // other per-entity analytics that only make sense for entities already formally
+      // registered as clients. Intentionally restricted to entityIds from scopedClients.
       if (entityIds.length > 0 && !contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
         const organizationId = activeCompany.id;
         const contractBatches: string[][] = [];
@@ -274,7 +281,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
         const contractTasks = contractBatches.map((batch) => async () => {
           const q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, end_date")
+            .select("id, entity_id, status, total_value, total_value_sem_iva, end_date")
             .in("entity_id", batch)
             .is("deleted_at", null)
             .eq("organization_id", organizationId);
@@ -289,22 +296,9 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         const contractResults = await runWithLimit(contractTasks, 4);
         for (const contracts of contractResults) {
           for (const c of contracts) {
-            const val = (c as any).total_value || 0;
+            const val = (c as any).total_value_sem_iva ?? 0;
             const eid = (c as any).entity_id;
             const isActive = (c as any).status === "active" || (c as any).status === "signed";
-            const clientIsActive = activeEntityIdSet.has(eid);
-            if (isActive && clientIsActive) {
-              activeContracts++;
-              totalContractValue += val;
-              if ((c as any).end_date) {
-                const endDate = new Date((c as any).end_date);
-                const daysUntilExpiry = differenceInDays(endDate, now);
-                if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {
-                  contractsExpiring30d++;
-                  contractsExpiring30dValue += val;
-                }
-              }
-            }
             const existing = entityContractMap.get(eid) || { activeCount: 0, totalValue: 0 };
             if (isActive) { existing.activeCount++; existing.totalValue += val; }
             entityContractMap.set(eid, existing);
@@ -312,7 +306,43 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
       }
 
+      // Org-wide aggregate totals for the top KPI cards ("Valor Contratos", "Contratos
+      // Activos", "A Expirar"): these MUST reflect every signed/active contract for this
+      // organization — independent of entityIds/scopedClients — so they always reconcile
+      // with the Contratos module's own total for the same organization_id/status filter.
+      // A failed lead→client conversion (missing anew_clients row) must never make a real
+      // signed contract silently disappear from these totals. Not gated on entityIds.length,
+      // since orphaned/unconverted entities have no entry in scopedClients at all.
+      if (!contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
+        const organizationId = activeCompany.id;
+        const orgWideQuery = supabase.from("client_contracts")
+          .select("id, entity_id, status, total_value, total_value_sem_iva, end_date")
+          .eq("organization_id", organizationId)
+          .in("status", ["signed", "active"])
+          .is("deleted_at", null);
+        const scopedOrgWideQuery = contractCreatorFilter ? orgWideQuery.in("created_by", contractCreatorFilter) : orgWideQuery;
+        const { data: orgWideContracts, error: orgWideError } = await scopedOrgWideQuery;
+        if (orgWideError) {
+          console.error("Error loading org-wide signed contracts for clients dashboard:", orgWideError);
+        } else {
+          for (const c of orgWideContracts || []) {
+            totalContractValue += (c as any).total_value_sem_iva ?? 0;
+            totalContractValueWithVat += (c as any).total_value ?? 0;
+            activeContracts++;
+            if ((c as any).end_date) {
+              const endDate = new Date((c as any).end_date);
+              const daysUntilExpiry = differenceInDays(endDate, now);
+              if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {
+                contractsExpiring30d++;
+                contractsExpiring30dValue += (c as any).total_value_sem_iva ?? 0;
+              }
+            }
+          }
+        }
+      }
+
       const avgValuePerClient = activeClients > 0 ? totalContractValue / activeClients : 0;
+      const avgValuePerClientWithVat = activeClients > 0 ? totalContractValueWithVat / activeClients : 0;
 
       let noContact30d = 0;
       let noContact30dValue = 0;
@@ -373,7 +403,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
 
       return {
         totalClients, activeClients, inactiveClients, newLast30Days,
-        totalContractValue, avgValuePerClient, activeContracts,
+        totalContractValue, totalContractValueWithVat, avgValuePerClient, avgValuePerClientWithVat, activeContracts,
         noContact30d, noContact30dValue,
         contractsExpiring30d, contractsExpiring30dValue,
         retentionRate,
@@ -426,8 +456,8 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       {/* Row 2: Contract & health KPIs */}
       {showExtendedKPIs && (
         <div className="grid grid-cols-7 gap-2">
-          <StatCard title="Valor Contratos" value={formatCurrency(stats.totalContractValue)} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
-          <StatCard title="Valor Médio" value={formatCurrency(stats.avgValuePerClient)} icon={DollarSign} iconColor="text-purple-500" loading={loading} />
+          <StatCard title="Valor Contratos" value={formatCurrency(stats.totalContractValue)} subtitle={`${formatCurrency(stats.totalContractValueWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
+          <StatCard title="Valor Médio" value={formatCurrency(stats.avgValuePerClient)} subtitle={`${formatCurrency(stats.avgValuePerClientWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-500" loading={loading} />
           <StatCard title="Contratos Activos" value={stats.activeContracts} icon={FileText} iconColor="text-green-600" loading={loading}
             subtitle={`em ${stats.activeClients} clientes`} />
           <StatCard title="Sem Contacto >30D" value={stats.noContact30d} icon={AlertTriangle} iconColor="text-red-600" loading={loading}

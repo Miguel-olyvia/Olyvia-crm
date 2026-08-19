@@ -19,6 +19,7 @@ interface Proposal {
   id: string;
   title: string;
   value: number;
+  value_sem_iva: number | null;
   status: string;
   stage_id: string | null;
   created_at: string;
@@ -41,6 +42,12 @@ interface ProposalsDashboardViewProps {
   /** Whether the organization has any proposals at all, ignoring active filters. */
   hasAnyProposals?: boolean;
 }
+
+// proposals.value_sem_iva e o valor principal usado nos agregados do dashboard.
+// Zero e um valor valido.
+const valueOf = (p: Proposal) => Number(p.value_sem_iva ?? 0);
+// proposals.value (com IVA) e mostrado como informacao secundaria a par do valor sem IVA.
+const valueWithVatOf = (p: Proposal) => Number(p.value);
 
 // Pick readable text color (black/white) for a given hex background via YIQ luminance.
 function getReadableTextColor(hex: string): string {
@@ -70,11 +77,13 @@ export function ProposalsDashboardView({
 
     const directCount: Record<string, number> = {};
     const directValue: Record<string, number> = {};
+    const directValueWithVat: Record<string, number> = {};
     proposals.forEach(p => {
       const sId = getProposalStage(p)?.id;
       if (!sId) return;
       directCount[sId] = (directCount[sId] || 0) + 1;
-      directValue[sId] = (directValue[sId] || 0) + Number(p.value);
+      directValue[sId] = (directValue[sId] || 0) + valueOf(p);
+      directValueWithVat[sId] = (directValueWithVat[sId] || 0) + valueWithVatOf(p);
     });
 
     return ordered.map((stage, idx) => {
@@ -82,9 +91,11 @@ export function ProposalsDashboardView({
       // MAIS todos os stages seguintes no pipeline (não apenas o stage exato).
       let count = 0;
       let value = 0;
+      let valueWithVat = 0;
       for (let i = idx; i < ordered.length; i++) {
         count += directCount[ordered[i].id] || 0;
         value += directValue[ordered[i].id] || 0;
+        valueWithVat += directValueWithVat[ordered[i].id] || 0;
       }
       const nextStage = ordered[idx + 1];
       let nextCount = 0;
@@ -94,7 +105,7 @@ export function ProposalsDashboardView({
         }
       }
       const conversionRate = count > 0 && nextStage ? Math.round((nextCount / count) * 100) : null;
-      return { stage, count, value, conversionRate };
+      return { stage, count, value, valueWithVat, conversionRate };
     });
   }, [proposals, workflowStages, getProposalStage]);
 
@@ -102,25 +113,29 @@ export function ProposalsDashboardView({
     const lostIds = new Set(workflowStages.filter(s => s.is_lost).map(s => s.id));
     let count = 0;
     let value = 0;
+    let valueWithVat = 0;
     proposals.forEach(p => {
       const sId = getProposalStage(p)?.id;
       if (sId && lostIds.has(sId)) {
         count++;
-        value += Number(p.value);
+        value += valueOf(p);
+        valueWithVat += valueWithVatOf(p);
       }
     });
-    return { count, value };
+    return { count, value, valueWithVat };
   }, [proposals, workflowStages, getProposalStage]);
 
   const byMonth = useMemo(() => {
     const wonIds = new Set(workflowStages.filter(s => s.is_won).map(s => s.id));
-    const map: Record<string, number> = {};
+    const map: Record<string, { value: number; valueWithVat: number }> = {};
     proposals.forEach(p => {
       const stage = getProposalStage(p);
       if (!stage || !wonIds.has(stage.id)) return;
       if (!p.accepted_at) return;
       const month = p.accepted_at.slice(0, 7);
-      map[month] = (map[month] || 0) + Number(p.value);
+      if (!map[month]) map[month] = { value: 0, valueWithVat: 0 };
+      map[month].value += valueOf(p);
+      map[month].valueWithVat += valueWithVatOf(p);
     });
     return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).slice(-6);
   }, [proposals, workflowStages, getProposalStage]);
@@ -139,16 +154,17 @@ export function ProposalsDashboardView({
   }, [proposals, workflowStages, getProposalStage]);
 
   const byCommercial = useMemo(() => {
-    const map: Record<string, { label: string; count: number; value: number }> = {};
+    const map: Record<string, { label: string; count: number; value: number; valueWithVat: number }> = {};
     proposals.forEach(p => {
       const key = p.assigned_to ?? "__unassigned__";
       const label = p.assigned_to
         ? (comercialNamesMap[p.assigned_to] || "...")
         : "Não atribuído";
-      if (!map[key]) map[key] = { label, count: 0, value: 0 };
+      if (!map[key]) map[key] = { label, count: 0, value: 0, valueWithVat: 0 };
       map[key].label = label;
       map[key].count++;
-      map[key].value += Number(p.value);
+      map[key].value += valueOf(p);
+      map[key].valueWithVat += valueWithVatOf(p);
     });
     return Object.entries(map).sort((a, b) => b[1].value - a[1].value);
   }, [proposals, comercialNamesMap]);
@@ -190,7 +206,17 @@ export function ProposalsDashboardView({
     return proposals.reduce((sum, p) => {
       const sId = getProposalStage(p)?.id;
       if (!sId || terminalIds.has(sId)) return sum;
-      return sum + Number(p.value);
+      return sum + valueOf(p);
+    }, 0);
+  }, [proposals, workflowStages, getProposalStage]);
+  const pipelineValueWithVat = useMemo(() => {
+    const terminalIds = new Set(
+      workflowStages.filter(s => s.is_won || s.is_lost).map(s => s.id)
+    );
+    return proposals.reduce((sum, p) => {
+      const sId = getProposalStage(p)?.id;
+      if (!sId || terminalIds.has(sId)) return sum;
+      return sum + valueWithVatOf(p);
     }, 0);
   }, [proposals, workflowStages, getProposalStage]);
 
@@ -250,7 +276,7 @@ export function ProposalsDashboardView({
 
   const maxFunnel = Math.max(...funnelData.map(f => f.count), 1);
   const maxCommercial = Math.max(...byCommercial.map(c => c[1].value), 1);
-  const maxMonth = Math.max(...byMonth.map(m => m[1]), 1);
+  const maxMonth = Math.max(...byMonth.map(m => m[1].value), 1);
   const totalRejections = rejectionReasons.reduce((s, r) => s + r[1], 0);
 
   const rejectionColors = ["#ef4444", "#f97316", "#eab308", "#6b7280", "#a855f7", "#06b6d4"];
@@ -287,6 +313,7 @@ export function ProposalsDashboardView({
           <CardContent className="p-4">
             <div className="text-xs text-muted-foreground uppercase">Pipeline em Curso</div>
             <div className="text-2xl font-bold tabular-nums">{formatCurrency(pipelineValue)}</div>
+            <div className="text-[11px] text-muted-foreground mt-1">{formatCurrency(pipelineValueWithVat)} com IVA</div>
           </CardContent>
         </Card>
       </div>
@@ -312,7 +339,10 @@ export function ProposalsDashboardView({
                         <span className="text-xs font-bold" style={{ color: textColor }}>{item.count}</span>
                       </div>
                     </div>
-                    <div className="w-24 text-right text-sm font-medium tabular-nums">{formatCurrency(item.value)}</div>
+                    <div className="w-24 text-right">
+                      <div className="text-sm font-medium tabular-nums">{formatCurrency(item.value)}</div>
+                      <div className="text-[10px] text-muted-foreground tabular-nums">{formatCurrency(item.valueWithVat)} c/ IVA</div>
+                    </div>
                   </div>
                   {item.conversionRate !== null && idx < funnelData.length - 1 && (
                     <div className="ml-28 pl-6 py-0.5 text-xs text-muted-foreground">
@@ -327,7 +357,7 @@ export function ProposalsDashboardView({
             <div className="mt-4 pt-3 border-t flex items-center justify-between text-xs text-muted-foreground">
               <span>Fugas do funil (Perdidas)</span>
               <span className="tabular-nums">
-                <span className="font-semibold text-foreground">{lostSummary.count}</span> · {formatCurrency(lostSummary.value)}
+                <span className="font-semibold text-foreground">{lostSummary.count}</span> · {formatCurrency(lostSummary.value)} ({formatCurrency(lostSummary.valueWithVat)} c/ IVA)
               </span>
             </div>
           )}
@@ -350,7 +380,10 @@ export function ProposalsDashboardView({
                       <div className="h-full bg-primary/70 rounded" style={{ width: `${(data.value / maxCommercial) * 100}%` }} />
                     </div>
                     <Badge variant="secondary" className="text-xs">{data.count}</Badge>
-                    <span className="text-xs font-medium tabular-nums w-20 text-right">{formatCurrency(data.value)}</span>
+                    <div className="w-20 text-right">
+                      <span className="text-xs font-medium tabular-nums block">{formatCurrency(data.value)}</span>
+                      <span className="text-[10px] text-muted-foreground tabular-nums block">{formatCurrency(data.valueWithVat)} c/ IVA</span>
+                    </div>
                   </div>
                 ))}
                 {byCommercial.length === 0 && (
@@ -365,13 +398,14 @@ export function ProposalsDashboardView({
           <CardHeader className="pb-3"><CardTitle className="text-base">Valor Aceite por Mês</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-end gap-2 h-40">
-              {byMonth.map(([month, value]) => (
+              {byMonth.map(([month, data]) => (
                 <div key={month} className="flex-1 flex flex-col items-center gap-1">
-                  <span className="text-xs font-medium tabular-nums">{formatCurrency(value)}</span>
+                  <span className="text-xs font-medium tabular-nums">{formatCurrency(data.value)}</span>
+                  <span className="text-[9px] text-muted-foreground tabular-nums">{formatCurrency(data.valueWithVat)} c/ IVA</span>
                   <div className="w-full bg-muted rounded-t overflow-hidden flex-1 flex items-end">
                     <div
                       className="w-full bg-primary/60 rounded-t transition-all"
-                      style={{ height: `${(value / maxMonth) * 100}%` }}
+                      style={{ height: `${(data.value / maxMonth) * 100}%` }}
                     />
                   </div>
                   <span className="text-[10px] text-muted-foreground">{month.slice(5)}/{month.slice(2, 4)}</span>

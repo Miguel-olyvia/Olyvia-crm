@@ -14,6 +14,8 @@ interface Quote {
   accepted_at?: string | null;
   validade_dias?: number | null;
   total?: number | null;
+  subtotal?: number | null;
+  total_fees?: number | null;
   assigned_to_name?: string;
   lead_source?: string;
 }
@@ -58,8 +60,12 @@ const LOST_STATUSES = new Set(["perdido", "rejeitado"]);
 const WON_STATUSES = new Set(["aceite", "finalizado"]);
 const OPEN_STATUSES = ["rascunho", "enviado"];
 
-// quotes.total is the authoritative DB value. Zero is a valid value.
-const valueOf = (q: Quote) => Number(q.total ?? 0);
+// Valor sem IVA real de uma quote = subtotal (itens, sem IVA) + total_fees (taxas de
+// serviço, já sem IVA — computeQuoteTotals.ts). Usar só subtotal excluiria as taxas.
+// Zero is a valid value.
+const valueOf = (q: Quote) => Number(q.subtotal ?? 0) + Number(q.total_fees ?? 0);
+// quotes.total (com IVA) is shown as secondary info alongside the primary sem-IVA value.
+const valueWithVatOf = (q: Quote) => Number(q.total ?? 0);
 
 export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage, rpcStatusCounts, rpcStatusValues, totalQuotes }: QuotesDashboardViewProps) {
   // `funnelData`'s stage-0 total comes from rpcStatusCounts (true global count),
@@ -75,6 +81,7 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
   );
   const wonCount = wonQuotes.length;
   const wonValue = useMemo(() => wonQuotes.reduce((s, q) => s + valueOf(q), 0), [wonQuotes]);
+  const wonValueWithVat = useMemo(() => wonQuotes.reduce((s, q) => s + valueWithVatOf(q), 0), [wonQuotes]);
 
   const funnelData = useMemo(() => {
     // Usar dados RPC quando disponíveis (totais correctos), caso contrário fallback local
@@ -120,19 +127,27 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
   const lostSummary = useMemo(() => {
     let count = 0;
     let value = 0;
+    let valueWithVat = 0;
     quotes.forEach(q => {
       if (LOST_STATUSES.has(normalizeStatus(q.estado))) {
         count++;
         value += valueOf(q);
+        valueWithVat += valueWithVatOf(q);
       }
     });
-    return { count, value };
+    return { count, value, valueWithVat };
   }, [quotes]);
 
   const openPipeline = useMemo(
     () => quotes
       .filter(q => OPEN_STATUSES.includes(normalizeStatus(q.estado)))
       .reduce((s, q) => s + valueOf(q), 0),
+    [quotes]
+  );
+  const openPipelineWithVat = useMemo(
+    () => quotes
+      .filter(q => OPEN_STATUSES.includes(normalizeStatus(q.estado)))
+      .reduce((s, q) => s + valueWithVatOf(q), 0),
     [quotes]
   );
 
@@ -146,24 +161,27 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
   }, [quotes]);
 
   const byCommercial = useMemo(() => {
-    const map: Record<string, { count: number; value: number }> = {};
+    const map: Record<string, { count: number; value: number; valueWithVat: number }> = {};
     quotes.forEach(q => {
       const name = q.assigned_to_name || "Não atribuído";
-      if (!map[name]) map[name] = { count: 0, value: 0 };
+      if (!map[name]) map[name] = { count: 0, value: 0, valueWithVat: 0 };
       map[name].count++;
       map[name].value += valueOf(q);
+      map[name].valueWithVat += valueWithVatOf(q);
     });
     return Object.entries(map).sort((a, b) => b[1].value - a[1].value);
   }, [quotes]);
 
   // Revenue grouped by accepted_at (real won month), not created_at.
   const byMonth = useMemo(() => {
-    const map: Record<string, number> = {};
+    const map: Record<string, { value: number; valueWithVat: number }> = {};
     quotes.forEach(q => {
       if (!WON_STATUSES.has(normalizeStatus(q.estado))) return;
       if (!q.accepted_at) return;
       const month = q.accepted_at.slice(0, 7);
-      map[month] = (map[month] || 0) + valueOf(q);
+      if (!map[month]) map[month] = { value: 0, valueWithVat: 0 };
+      map[month].value += valueOf(q);
+      map[month].valueWithVat += valueWithVatOf(q);
     });
     return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).slice(-6);
   }, [quotes]);
@@ -186,7 +204,7 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
 
   const maxFunnel = Math.max(...funnelData.map(f => f.count), 1);
   const maxCommercial = Math.max(...byCommercial.map(c => c[1].value), 1);
-  const maxMonth = Math.max(...byMonth.map(m => m[1]), 1);
+  const maxMonth = Math.max(...byMonth.map(m => m[1].value), 1);
 
   if (hasError) {
     return (
@@ -255,7 +273,7 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
             <div className="rounded-md border p-3">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Receita ganha</p>
               <p className="text-lg font-bold tabular-nums">{formatCurrency(wonValue)}</p>
-              <p className="text-[10px] text-muted-foreground">{wonCount} orçamentos ganhos</p>
+              <p className="text-[10px] text-muted-foreground">{wonCount} orçamentos ganhos · {formatCurrency(wonValueWithVat)} com IVA</p>
             </div>
             <div className="rounded-md border p-3">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Ticket médio</p>
@@ -272,13 +290,13 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
             <div className="rounded-md border p-3 col-span-2 lg:col-span-2">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pipeline em aberto</p>
               <p className="text-lg font-bold tabular-nums">{formatCurrency(openPipeline)}</p>
-              <p className="text-[10px] text-muted-foreground">Valor em orçamentos ainda em curso</p>
+              <p className="text-[10px] text-muted-foreground">Valor em orçamentos ainda em curso · {formatCurrency(openPipelineWithVat)} com IVA</p>
             </div>
             <div className="rounded-md border p-3">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Perdas</p>
               <p className="text-lg font-bold tabular-nums text-destructive">{formatCurrency(lostSummary.value)}</p>
               <p className="text-[10px] text-muted-foreground">
-                {lostSummary.count} perdidos/rejeitados ({funnelKpis.lostShare}% do total que entrou)
+                {lostSummary.count} perdidos/rejeitados ({funnelKpis.lostShare}% do total que entrou) · {formatCurrency(lostSummary.valueWithVat)} com IVA
               </p>
             </div>
             <div className="rounded-md border p-3">
@@ -350,7 +368,10 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
                     <div className="h-full bg-primary/70 rounded" style={{ width: `${(data.value / maxCommercial) * 100}%` }} />
                   </div>
                   <Badge variant="secondary" className="text-xs">{data.count}</Badge>
-                  <span className="text-xs font-medium tabular-nums w-20 text-right">{formatCurrency(data.value)}</span>
+                  <div className="w-20 text-right">
+                    <span className="text-xs font-medium tabular-nums block">{formatCurrency(data.value)}</span>
+                    <span className="text-[10px] text-muted-foreground tabular-nums block">{formatCurrency(data.valueWithVat)} c/ IVA</span>
+                  </div>
                 </div>
               ))}
               {byCommercial.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sem dados</p>}
@@ -362,16 +383,17 @@ export function QuotesDashboardView({ quotes, isLoading, hasError, errorMessage,
           <CardHeader className="pb-3"><CardTitle className="text-base">Receita por Mês (aceitação)</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-end gap-2 h-40">
-              {byMonth.map(([month, value]) => (
+              {byMonth.map(([month, data]) => (
                 <div
                   key={month}
                   className="flex-1 flex flex-col items-center gap-1"
                   role="img"
-                  aria-label={`${month}: ${formatCurrency(value)}`}
+                  aria-label={`${month}: ${formatCurrency(data.value)} (${formatCurrency(data.valueWithVat)} com IVA)`}
                 >
-                  <span className="text-xs font-medium tabular-nums">{formatCurrency(value)}</span>
+                  <span className="text-xs font-medium tabular-nums">{formatCurrency(data.value)}</span>
+                  <span className="text-[9px] text-muted-foreground tabular-nums">{formatCurrency(data.valueWithVat)} c/ IVA</span>
                   <div className="w-full bg-muted rounded-t overflow-hidden flex-1 flex items-end">
-                    <div className="w-full bg-primary/60 rounded-t transition-all" style={{ height: `${(value / maxMonth) * 100}%` }} />
+                    <div className="w-full bg-primary/60 rounded-t transition-all" style={{ height: `${(data.value / maxMonth) * 100}%` }} />
                   </div>
                   <span className="text-[10px] text-muted-foreground">{month.slice(5)}/{month.slice(2, 4)}</span>
                 </div>

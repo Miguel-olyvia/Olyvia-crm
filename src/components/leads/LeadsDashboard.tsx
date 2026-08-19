@@ -1067,7 +1067,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               icon={UserCheck}
             />
             <KPICard
-              title="Taxa Conversão (coorte)"
+              title={dateRange.isAllTime ? "Taxa de Conversão" : "Taxa Conversão (coorte)"}
               value={formatMetricValue(kpis.conversionRate, "%")}
               subtitle={`${formatMetricValue(kpis.cohortConversions)} dos ${formatMetricValue(kpis.leadsInPeriod)} novos converteram`}
               icon={Target}

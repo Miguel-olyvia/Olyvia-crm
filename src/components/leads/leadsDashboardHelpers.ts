@@ -244,9 +244,19 @@ export function deriveDashboardKpis({
   const avgLeadsPerDay =
     leadsInPeriod === null || dateRange.isAllTime ? null : roundToOneDecimal(leadsInPeriod / daysInRange);
 
+  // Cohort conversions require a bounded p_date_from/p_date_to (see
+  // buildDashboardScopedRpcParams) — the RPC's cohort_conversions column is
+  // always 0 under "Todos" (isAllTime), because "created and converted
+  // within the same period" is undefined without a period. Rather than
+  // showing a misleading "0 dos 5306 novos converteram" on the all-time
+  // view, fall back to the unconditional converted count there — the rate
+  // stops being a strict same-cohort figure in that case, but a real
+  // non-zero number beats a structurally-guaranteed zero.
+  const effectiveConversions = dateRange.isAllTime ? convertedLeads : cohortConversions;
+
   let conversionRate: string | null = null;
-  if (leadsInPeriod && leadsInPeriod > 0 && cohortConversions !== null) {
-    conversionRate = ((cohortConversions / leadsInPeriod) * 100).toFixed(1);
+  if (leadsInPeriod && leadsInPeriod > 0 && effectiveConversions !== null) {
+    conversionRate = ((effectiveConversions / leadsInPeriod) * 100).toFixed(1);
   }
 
   return {
@@ -260,7 +270,7 @@ export function deriveDashboardKpis({
     qualifiedLeads:
       readNumber(stats?.resolved_stage_counts?.qualified) ?? readStatusCount(stats, ["qualified", "qualificado"]),
     convertedLeads,
-    cohortConversions,
+    cohortConversions: effectiveConversions,
     conversionRate,
     totalContactAttempts,
     avgLeadsPerDay,

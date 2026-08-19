@@ -412,7 +412,7 @@ const ClientContracts = () => {
       const runBaseQuery = (creatorBatch: string[] | null) => {
         let q: any = (supabase as any)
           .from("client_contracts")
-          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total) )`)
+          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
           .in("organization_id", subtreeIds)
           .is("deleted_at", null)
           .order("created_at", { ascending: false });
