@@ -1999,13 +1999,16 @@ const Proposals = () => {
     const now = new Date();
     const total = filteredProposals.length;
     const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
+    const totalValueExVat = filteredProposals.reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
 
     const stageCounts: Record<string, number> = {};
     const stageValues: Record<string, number> = {};
+    const stageValuesExVat: Record<string, number> = {};
 
     workflowStages.forEach(stage => {
       stageCounts[stage.id] = 0;
       stageValues[stage.id] = 0;
+      stageValuesExVat[stage.id] = 0;
     });
 
     filteredProposals.forEach(p => {
@@ -2013,12 +2016,16 @@ const Proposals = () => {
       if (stage) {
         stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
         stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
+        stageValuesExVat[stage.id] = (stageValuesExVat[stage.id] || 0) + Number(p.value_sem_iva ?? 0);
       }
     });
 
     const wonValue = filteredProposals
       .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
       .reduce((sum, p) => sum + Number(p.value), 0);
+    const wonValueExVat = filteredProposals
+      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
+      .reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
 
     // Extra KPIs
     const acceptedProposals = filteredProposals.filter(p => {
@@ -2044,6 +2051,7 @@ const Proposals = () => {
       return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
     });
     const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
+    const noResponse5dValueExVat = noResponse5d.reduce((s, p) => s + Number(p.value_sem_iva ?? 0), 0);
 
     const noValidity = filteredProposals.filter(p => {
       const stage = getProposalStage(p);
@@ -2055,7 +2063,7 @@ const Proposals = () => {
       return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
     });
 
-    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
+    return { total, totalValue, totalValueExVat, stageCounts, stageValues, stageValuesExVat, wonValue, wonValueExVat, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noResponse5dValueExVat, noValidity, expired };
   }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
 
   const handleSort = (column: string) => {
@@ -3065,7 +3073,7 @@ const Proposals = () => {
             </Button>
           </div>
           <div className="text-sm text-muted-foreground">
-            Total: {stats.total} · Pipeline: <span className="font-semibold text-foreground">{formatCurrency(stats.totalValue)}</span> · Aceite: <span className="font-bold text-green-600">{formatCurrency(stats.wonValue)}</span>
+            Total: {stats.total} · Pipeline: <span className="font-semibold text-foreground">{formatCurrency(stats.totalValueExVat)}</span> <span className="text-xs text-muted-foreground">({formatCurrency(stats.totalValue)} c/ IVA)</span> · Aceite: <span className="font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</span> <span className="text-xs text-muted-foreground">({formatCurrency(stats.wonValue)} c/ IVA)</span>
           </div>
         </div>
 
@@ -3076,7 +3084,8 @@ const Proposals = () => {
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Total</div>
                 <div className="text-xl font-bold">{stats.total}</div>
-                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValue)} em pipeline</div>
+                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValueExVat)} em pipeline</div>
+                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.totalValue)} com IVA</div>
               </CardContent>
             </Card>
             
@@ -3085,7 +3094,8 @@ const Proposals = () => {
                 <CardContent className="p-3">
                   <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
                   <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>
-                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)}</div>
+                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValuesExVat[stage.id] || 0)}</div>
+                  <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)} com IVA</div>
                 </CardContent>
               </Card>
             ))}
@@ -3093,7 +3103,8 @@ const Proposals = () => {
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Valor Aceite</div>
-                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValue)}</div>
+                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</div>
+                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.wonValue)} com IVA</div>
               </CardContent>
             </Card>
 
