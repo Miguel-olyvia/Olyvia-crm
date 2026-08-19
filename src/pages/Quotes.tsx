@@ -936,9 +936,22 @@ export default function Quotes() {
         a.lineCount++;
         if (line.section_name && !a.sections.includes(line.section_name)) a.sections.push(line.section_name);
       });
+      // quote_lines.total_sem_iva only ever carries each LINE's own discount —
+      // the quote-level "Desconto" (desconto_global_percent, shown as its own
+      // badge below) is applied only to the displayed Total, never persisted
+      // back into the lines. Without factoring it in here too, the margin
+      // stayed identical before/after applying a global discount, even
+      // though less revenue against the same cost is a lower margin.
+      const discountFactorByQuoteId: Record<string, number> = {};
+      quotes.forEach((q: any) => { discountFactorByQuoteId[q.id] = 1 - (q.desconto_global_percent || 0) / 100; });
       Object.values(agg).forEach(a => {
-        // Margem = (venda − custo) / venda × 100, usando apenas linhas com preço de compra definido.
-        a.margin = a.hasCostData && a.totalValueWithCost > 0 ? ((a.totalValueWithCost - a.totalCost) / a.totalValueWithCost) * 100 : 0;
+        const globalDiscountFactor = discountFactorByQuoteId[a.quoteId] ?? 1;
+        const salesAfterGlobalDiscount = a.totalValueWithCost * globalDiscountFactor;
+        // Margem = (venda com desconto global − custo) / venda com desconto global × 100,
+        // usando apenas linhas com preço de compra definido.
+        a.margin = a.hasCostData && salesAfterGlobalDiscount > 0
+          ? ((salesAfterGlobalDiscount - a.totalCost) / salesAfterGlobalDiscount) * 100
+          : 0;
       });
       setLinesAgg(agg);
     };
@@ -1015,7 +1028,18 @@ export default function Quotes() {
     const quotesWithCost = Object.values(linesAgg).filter(a => a.hasCostData);
     const totalCost = quotesWithCost.reduce((s, a) => s + a.totalCost, 0);
     const totalValueWithCost = quotesWithCost.reduce((s, a) => s + a.totalValueWithCost, 0);
-    const avgMargin = totalValueWithCost > 0 ? ((totalValueWithCost - totalCost) / totalValueWithCost) * 100 : 0;
+    // Same fix as fetchLinesAgg's per-quote a.margin: each quote's own
+    // desconto_global_percent must reduce its revenue contribution here too,
+    // otherwise this KPI stayed put even as individual quotes' margins moved
+    // with their discount.
+    const quotesById = new Map(quotes.map((q: any) => [q.id, q]));
+    const totalValueWithCostAfterDiscount = quotesWithCost.reduce((s, a) => {
+      const discountPercent = (quotesById.get(a.quoteId) as any)?.desconto_global_percent || 0;
+      return s + a.totalValueWithCost * (1 - discountPercent / 100);
+    }, 0);
+    const avgMargin = totalValueWithCostAfterDiscount > 0
+      ? ((totalValueWithCostAfterDiscount - totalCost) / totalValueWithCostAfterDiscount) * 100
+      : 0;
     const avgValue = total > 0 ? totalValue / total : 0;
     const taxaAceitacao = total > 0 ? Math.round((aceite / total) * 100) : 0;
     
