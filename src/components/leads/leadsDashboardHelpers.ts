@@ -221,7 +221,17 @@ export function deriveDashboardKpis({
   const leadsInPeriod = readNumber(stats?.leads_in_period);
   const comparisonTotal = readNumber(comparisonStats?.leads_in_period);
   const leadsToday = readNumber(stats?.leads_today);
-  const convertedLeads = readNumber(stats?.resolved_stage_counts?.converted) ?? readNumber(stats?.converted_in_period);
+  // Prefer converted_in_period (matches the status pills' effective_status
+  // classification exactly, always available) over resolved_stage_counts
+  // (rule-driven per-org workflow-stage config via compute_lead_stage_v2) —
+  // the latter can be a genuine, present value of 0 when an org's stage
+  // config is misconfigured (e.g. an impossible-to-satisfy "all" condition
+  // list), which `??` can't distinguish from "not computed". That silently
+  // contradicted the "Won/Converted" pill (built from the same
+  // effective_status as converted_in_period) showing a real non-zero count.
+  // Do NOT touch lead_workflow_stages/stage_reached/compute_lead_stage_v2 —
+  // out of scope, org-specific config to be fixed separately if needed.
+  const convertedLeads = readNumber(stats?.converted_in_period) ?? readNumber(stats?.resolved_stage_counts?.converted);
   const cohortConversions = readNumber(stats?.cohort_conversions);
   const totalContactAttempts =
     readNumber(stats?.contact_attempts_in_period) ?? readNumber(stats?.contact_attempts);
