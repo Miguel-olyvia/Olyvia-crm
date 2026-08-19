@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/input-otp";
 import type { ProposalPortalCommercial } from "@/components/proposals/proposalPortalData";
 import { formatCurrency } from "@/lib/utils";
+import { computeQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 
 interface ProposalPortalDocumentProps {
   proposal: any;
@@ -351,8 +352,11 @@ export function ProposalPortalDocument({
                                   const discountFactor = 1 - globalDiscount / 100;
                                   const discountAmount = sectionSubtotal * globalDiscount / 100;
                                   const discountedSubtotal = sectionSubtotal * discountFactor;
+                                  // `?? 23`, not `|| 23`: a line legitimately taxed at
+                                  // 0% (e.g. auto-liquidação) must stay at 0%, not get
+                                  // silently overridden by the 23% default.
                                   const adjustedTotal = items.reduce((sum: number, item: any) =>
-                                    sum + (item.total_sem_iva || 0) * discountFactor * (1 + (item.iva_percent || 23) / 100), 0);
+                                    sum + (item.total_sem_iva || 0) * discountFactor * (1 + Number(item.iva_percent ?? 23) / 100), 0);
                                   const adjustedIva = adjustedTotal - discountedSubtotal;
                                   return (
                                     <>
@@ -483,51 +487,41 @@ export function ProposalPortalDocument({
     
                       <div className="space-y-1 border-t pt-3 text-sm">
                         {(() => {
-                          const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
-                          const ivaRate = Number(quote.iva_rate || 23);
-                          const productsSubtotal = Number(quote.subtotal) || 0;
-                          const total = Number(quote.total) || 0;
-                          // Try individual fees from quote_fees (authenticated users); fallback to total_fees field (anon/portal)
+                          // Reuses the exact same pure function the PDF is built from
+                          // (src/utils/quotes/computeQuoteTotals.ts), instead of a
+                          // parallel re-implementation. That old version (a) applied
+                          // the global discount to subtotal+fees instead of just the
+                          // subtotal, and (b) fell back to Number(quote.iva_rate || 23)
+                          // — quote.iva_rate is a stale header default, not the real
+                          // per-line VAT config, and `|| 23` also silently overrides a
+                          // legitimate 0% (auto-liquidação) with 23%. Both bugs made
+                          // this preview disagree with the PDF whenever a quote had a
+                          // discount and/or a 0%-VAT fee.
                           const namedFees = quoteFees[quote.id] || [];
-                          const namedFeesSubtotal = namedFees.reduce((s: number, f: any) => s + (Number(f.calculated_value) || 0), 0);
-                          const totalFeesField = Number((quote as any).total_fees) || 0;
-                          const fallbackFeesSubtotal = namedFeesSubtotal === 0 && totalFeesField > 0
-                            ? totalFeesField / (1 + ivaRate / 100)
-                            : 0;
-                          const feesSubtotal = namedFeesSubtotal > 0 ? namedFeesSubtotal : fallbackFeesSubtotal;
-                          const correctedSubtotal = productsSubtotal + feesSubtotal;
-                          const discountAmount = correctedSubtotal * globalDiscount / 100;
-                          const discountedSubtotal = correctedSubtotal * (1 - globalDiscount / 100);
-                          const iva = globalDiscount > 0 ? total - discountedSubtotal : total - correctedSubtotal;
+                          const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                          const totals = computeQuoteTotals(lines, namedFees, globalDiscount);
+                          const total = Number(quote.total) || totals.total;
                           return (
                             <>
                               <div className="flex justify-between">
                                 <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(productsSubtotal)}</span>
+                                <span>{formatCurrency(totals.subtotalBruto)}</span>
                               </div>
-                              {namedFees.length > 0
-                                ? namedFees.map((fee: any) => (
-                                    <div key={fee.id} className="flex justify-between">
-                                      <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
-                                      <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
-                                    </div>
-                                  ))
-                                : feesSubtotal > 0 && (
-                                    <div className="flex justify-between">
-                                      <span className="text-muted-foreground">Taxas de Serviço</span>
-                                      <span>{formatCurrency(feesSubtotal)}</span>
-                                    </div>
-                                  )
-                              }
+                              {namedFees.length > 0 && namedFees.map((fee: any) => (
+                                <div key={fee.id} className="flex justify-between">
+                                  <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
+                                  <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
+                                </div>
+                              ))}
                               {globalDiscount > 0 && (
                                 <div className="flex justify-between text-orange-600 dark:text-orange-400">
                                   <span>Desconto global ({globalDiscount}%)</span>
-                                  <span>-{formatCurrency(discountAmount)}</span>
+                                  <span>-{formatCurrency(totals.discountValue)}</span>
                                 </div>
                               )}
                               <div className="flex justify-between">
-                                <span className="text-muted-foreground">IVA ({ivaRate}%)</span>
-                                <span>{formatCurrency(iva)}</span>
+                                <span className="text-muted-foreground">IVA</span>
+                                <span>{formatCurrency(totals.totalIva)}</span>
                               </div>
                               <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
                                 <span>Total</span>
@@ -845,7 +839,9 @@ export function ProposalPortalDocument({
               const namedFees = quoteFees[q.id] || [];
               const namedFeesSubtotal = namedFees.reduce((s: number, f: any) => s + (Number(f.calculated_value) || 0), 0);
               const totalFeesField = Number(q?.total_fees) || 0;
-              const ivaRate = Number(q?.iva_rate || 23);
+              // `?? 23`, not `|| 23` — see comment on the single-quote footer above:
+              // a legitimate 0% (auto-liquidação) must not be overridden by the default.
+              const ivaRate = Number(q?.iva_rate ?? 23);
               const feesSubtotal = namedFeesSubtotal > 0
                 ? namedFeesSubtotal
                 : (totalFeesField > 0 ? totalFeesField / (1 + ivaRate / 100) : 0);
