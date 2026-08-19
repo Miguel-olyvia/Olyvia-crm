@@ -269,6 +269,10 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       // query entirely rather than silently omitting the organization filter (never leak
       // cross-tenant data). Same guard as ClientsValueView.tsx / ClientsRetentionView.tsx.
       const orgScopeBlocked = !activeCompany?.id;
+
+      // Per-client contract map (known/converted clients only): feeds noContact30dValue and
+      // other per-entity analytics that only make sense for entities already formally
+      // registered as clients. Intentionally restricted to entityIds from scopedClients.
       if (entityIds.length > 0 && !contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
         const organizationId = activeCompany.id;
         const contractBatches: string[][] = [];
@@ -293,26 +297,46 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         for (const contracts of contractResults) {
           for (const c of contracts) {
             const val = (c as any).total_value_sem_iva ?? 0;
-            const valWithVat = (c as any).total_value ?? 0;
             const eid = (c as any).entity_id;
             const isActive = (c as any).status === "active" || (c as any).status === "signed";
-            const clientIsActive = activeEntityIdSet.has(eid);
-            if (isActive && clientIsActive) {
-              activeContracts++;
-              totalContractValue += val;
-              totalContractValueWithVat += valWithVat;
-              if ((c as any).end_date) {
-                const endDate = new Date((c as any).end_date);
-                const daysUntilExpiry = differenceInDays(endDate, now);
-                if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {
-                  contractsExpiring30d++;
-                  contractsExpiring30dValue += val;
-                }
-              }
-            }
             const existing = entityContractMap.get(eid) || { activeCount: 0, totalValue: 0 };
             if (isActive) { existing.activeCount++; existing.totalValue += val; }
             entityContractMap.set(eid, existing);
+          }
+        }
+      }
+
+      // Org-wide aggregate totals for the top KPI cards ("Valor Contratos", "Contratos
+      // Activos", "A Expirar"): these MUST reflect every signed/active contract for this
+      // organization — independent of entityIds/scopedClients — so they always reconcile
+      // with the Contratos module's own total for the same organization_id/status filter.
+      // A failed lead→client conversion (missing anew_clients row) must never make a real
+      // signed contract silently disappear from these totals. Not gated on entityIds.length,
+      // since orphaned/unconverted entities have no entry in scopedClients at all.
+      if (!contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
+        const organizationId = activeCompany.id;
+        const orgWideQuery = supabase.from("client_contracts")
+          .select("id, entity_id, status, total_value, total_value_sem_iva, end_date")
+          .eq("organization_id", organizationId)
+          .in("status", ["signed", "active"])
+          .is("deleted_at", null);
+        const scopedOrgWideQuery = contractCreatorFilter ? orgWideQuery.in("created_by", contractCreatorFilter) : orgWideQuery;
+        const { data: orgWideContracts, error: orgWideError } = await scopedOrgWideQuery;
+        if (orgWideError) {
+          console.error("Error loading org-wide signed contracts for clients dashboard:", orgWideError);
+        } else {
+          for (const c of orgWideContracts || []) {
+            totalContractValue += (c as any).total_value_sem_iva ?? 0;
+            totalContractValueWithVat += (c as any).total_value ?? 0;
+            activeContracts++;
+            if ((c as any).end_date) {
+              const endDate = new Date((c as any).end_date);
+              const daysUntilExpiry = differenceInDays(endDate, now);
+              if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {
+                contractsExpiring30d++;
+                contractsExpiring30dValue += (c as any).total_value_sem_iva ?? 0;
+              }
+            }
           }
         }
       }
