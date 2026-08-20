@@ -1302,7 +1302,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           entityId={client.entity_id} entityName={fullName}
           organizationId={client.organization_id || ""}
           onInteractionSaved={async (now) => {
-            await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", client.id);
+            await supabase.from("anew_clients").update({ last_interaction_at: now } as any).eq("id", client.id);
           }}
           onCallRegistered={handleRefresh}
           onOpenWhatsApp={() => { setShowCallDialog(false); handleWhatsApp(); }}

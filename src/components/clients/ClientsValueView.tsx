@@ -323,15 +323,21 @@ export function ClientsValueView({
       const interaction = interactions.get(eid);
       const name = identityMap[eid]?.display_name || "N/A";
       const initials = name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
+      // Display value stays "com IVA" (unchanged, matches the main table/client card
+      // convention). The comparison against avgValue below must NOT use this — avgValue
+      // is derived from kpis.totalRevenue, which is "sem IVA" — so the comparison uses
+      // clientValueSemIva instead, keeping both sides of every `<`/subtraction on the
+      // same base.
       const clientValue = contract?.totalValue || 0;
+      const clientValueSemIva = contract?.totalValueSemIva || 0;
 
       // 1. Only 1 contract and below average
-      if (contract && contract.activeCount === 1 && clientValue < avgValue) {
+      if (contract && contract.activeCount === 1 && clientValueSemIva < avgValue) {
         opportunities.push({
           entityId: eid, name, initials, value: clientValue,
-          reason: `Só 1 contrato · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValue)}`,
+          reason: `Só 1 contrato · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValueSemIva)}`,
           action: "deal",
-          potentialValue: avgValue - clientValue,
+          potentialValue: avgValue - clientValueSemIva,
         });
         continue;
       }
