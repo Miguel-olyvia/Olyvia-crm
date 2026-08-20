@@ -6,6 +6,14 @@ import { isInactiveClientStatus } from '@/lib/clientStatus';
 export interface ClientContractInfo {
   activeCount: number;
   totalValue: number;
+  /**
+   * Sum of total_value_sem_iva for active contracts. Optional (rather than
+   * required) so existing call sites that build a ClientContractInfo without
+   * this column (e.g. ClientDetailsDialog's health-score computation) don't
+   * need updating — consumers that need it (see ClientsValueView's upselling
+   * comparison) must fall back to 0 when absent.
+   */
+  totalValueSemIva?: number;
   expiringContracts: { id: string; end_date: string; total_value: number }[];
 }
 
@@ -167,21 +175,30 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
       const contractMap = new Map<string, ClientContractInfo>();
       for (let i = 0; i < entityIds.length; i += 100) {
         const batch = entityIds.slice(i, i + 100);
-        const { data: contractData, error: contractError } = await supabase.from('client_contracts')
-          .select('id, entity_id, status, total_value, end_date')
+        // (supabase as any): total_value_sem_iva is a real client_contracts column (already
+        // relied on elsewhere, e.g. ClientsValueView.tsx/AnewClientsDashboard.tsx) but the
+        // generated Supabase types haven't been regenerated to include it yet, which makes
+        // supabase-js's select-string type checker treat this whole query as a
+        // SelectQueryError. Casting here (matching the (supabase as any) idiom already used
+        // throughout this codebase for the same class of stale-types gap) avoids that false
+        // positive without running `supabase gen types` (requires separate approval).
+        const { data: contractData, error: contractError } = await (supabase as any).from('client_contracts')
+          .select('id, entity_id, status, total_value, total_value_sem_iva, end_date')
           .eq('organization_id', organizationId)
-          .in('entity_id', batch);
+          .in('entity_id', batch)
+          .in('status', ['signed', 'active']);
         if (contractError) {
           console.error('Error loading client contracts:', contractError);
           setError('Falha ao carregar contratos dos clientes.');
         }
         if (contractData) {
           for (const c of contractData) {
-            const info = contractMap.get(c.entity_id!) || { activeCount: 0, totalValue: 0, expiringContracts: [] };
+            const info = contractMap.get(c.entity_id!) || { activeCount: 0, totalValue: 0, totalValueSemIva: 0, expiringContracts: [] };
             const isActive = c.status === 'active' || c.status === 'signed';
             if (isActive) {
               info.activeCount++;
               info.totalValue += c.total_value || 0;
+              info.totalValueSemIva = (info.totalValueSemIva || 0) + ((c as any).total_value_sem_iva || 0);
               if (c.end_date) {
                 const endDate = new Date(c.end_date);
                 if (differenceInDays(endDate, now) >= 0 && differenceInDays(endDate, now) <= 30) {

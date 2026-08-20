@@ -280,9 +280,17 @@ const AnewClients = () => {
 
   // Stable org scope array for Value/Retention views — avoids a new array
   // literal on every render, which would otherwise retrigger their fetch effects.
+  // Must resolve the currently SELECTED organization (companyFilter dropdown) the same
+  // way the rest of the page does — falling back to activeCompany.id only means "no
+  // explicit choice made", never the other way around. Previously this always used
+  // activeCompany.id alone, so Value/Retention's org-wide totals silently ignored the
+  // "Empresa" filter and kept showing the whole org's data.
   const activeCompanyScopeOrgIds = useMemo(
-    () => (activeCompany?.id ? [activeCompany.id] : []),
-    [activeCompany?.id]
+    () => {
+      if (companyFilter !== "all") return [companyFilter];
+      return activeCompany?.id ? [activeCompany.id] : [];
+    },
+    [companyFilter, activeCompany?.id]
   );
 
   // Enriched data for paginated list
@@ -327,11 +335,55 @@ const AnewClients = () => {
   } = useClientEnrichedData(allEntityIds, allIdentityMapForEnrichment, allStatusMapForEnrichment, activeListOrganizationId);
 
   // Use allClients data when available for analytics, fallback to paginated
-  const analyticsClients = allClientsLoaded ? allClients : clients;
+  const analyticsClientsBase = allClientsLoaded ? allClients : clients;
   const analyticsContractMap = allClientsLoaded ? allContractMap : contractMap;
   const analyticsInteractionMap = allClientsLoaded ? allInteractionMap : interactionMap;
   const analyticsHealthScores = allClientsLoaded ? allHealthScores : healthScores;
   const analyticsTagMap = allClientsLoaded ? allTagMap : tagMap;
+
+  // Shared health/last-contact/"only mine"/sales-rep narrowing — the SAME logic
+  // dashboardScopedClients (KPI bar) applies below. Extracted so analyticsClients (which
+  // feeds the Dashboard/Value/Retention tabs) can never again drift from the KPI cards
+  // when one of these 4 filters is active — previously analyticsClients ignored them
+  // entirely, so the 3 analytic tabs kept showing every client while the KPI bar above
+  // them was already narrowed.
+  const applyClientAnalyticsFilters = useCallback((list: ClientRecord[]) => {
+    let filtered = list;
+
+    if (healthFilter !== "all") {
+      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
+    }
+
+    if (lastContactFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(c => {
+        const int = analyticsInteractionMap.get(c.entity_id);
+        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
+        switch (lastContactFilter) {
+          case "7d": return days <= 7;
+          case "30d": return days <= 30;
+          case "30d+": return days > 30;
+          case "60d+": return days > 60;
+          default: return true;
+        }
+      });
+    }
+
+    if (onlyMine && scopeAnewUserId) {
+      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
+    }
+
+    if (salesRepFilter !== "all") {
+      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
+    }
+
+    return filtered;
+  }, [healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap]);
+
+  const analyticsClients = useMemo(
+    () => applyClientAnalyticsFilters(analyticsClientsBase),
+    [analyticsClientsBase, applyClientAnalyticsFilters]
+  );
 
   // Compute alert data
   const alertData = useMemo(() => {
@@ -390,6 +442,7 @@ const AnewClients = () => {
       const interaction = analyticsInteractionMap.get(c.entity_id);
       const days = interaction?.lastInteractionAt ? differenceInDays(now, new Date(interaction.lastInteractionAt)) : 999;
       return {
+        entityId: c.entity_id,
         name: getIdentity(c.entity_id)?.display_name || 'N/A',
         value: analyticsContractMap.get(c.entity_id)?.totalValue || 0,
         detail: `sem contacto há ${days} dias`,
@@ -399,44 +452,17 @@ const AnewClients = () => {
     return { noContactClients, expiringContracts, upsellClients, avgValue, vipAtRisk };
   }, [analyticsClients, analyticsHealthScores, analyticsContractMap, analyticsInteractionMap, analyticsTagMap, getIdentity]);
 
-  // Clients feeding the dashboard KPI cards — always a filtered subset of analyticsClients
-  // (org+permission+search+date scoped), narrowed by the same predicates the main list uses,
+  // Clients feeding the dashboard KPI cards — a filtered subset of analyticsClients
+  // (org+permission+search+date scoped, and now already narrowed by health/last-contact/
+  // "only mine"/sales-rep via applyClientAnalyticsFilters above), narrowed further by
+  // statusFilter (the KPI-card drill-down, e.g. "no_contact_30d"/"expiring_contracts"),
   // so KPI cards and the paginated table can never disagree.
   const dashboardScopedClients = useMemo(() => {
     const noContactEntityIds = new Set(alertData.noContactClients.map(c => c.entityId).filter(Boolean));
-    let filtered = analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
+    return analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
       getIdentity, contractMap: analyticsContractMap, noContactEntityIds,
     }));
-
-    if (healthFilter !== "all") {
-      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
-    }
-
-    if (lastContactFilter !== "all") {
-      const now = new Date();
-      filtered = filtered.filter(c => {
-        const int = analyticsInteractionMap.get(c.entity_id);
-        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
-        switch (lastContactFilter) {
-          case "7d": return days <= 7;
-          case "30d": return days <= 30;
-          case "30d+": return days > 30;
-          case "60d+": return days > 60;
-          default: return true;
-        }
-      });
-    }
-
-    if (onlyMine && scopeAnewUserId) {
-      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
-    }
-
-    if (salesRepFilter !== "all") {
-      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
-    }
-
-    return filtered;
-  }, [analyticsClients, statusFilter, healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap, analyticsContractMap, alertData, getIdentity]);
+  }, [analyticsClients, statusFilter, analyticsContractMap, alertData, getIdentity]);
 
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
@@ -1012,7 +1038,7 @@ const AnewClients = () => {
         }
       }
       // Auto-resolve notifications for inactive/lost clients
-      const inactiveStatuses = ["lost", "inactive", "churned", "lost_definitive"];
+      const inactiveStatuses = INACTIVE_CLIENT_STATUSES;
       if (inactiveStatuses.includes(bulkNewStatus)) {
         await resolveClientNotifications(ids);
       }
@@ -1800,6 +1826,8 @@ const AnewClients = () => {
           onFilterChange={setStatusFilter}
           activeView={activeView}
           healthScoresMap={analyticsHealthScores}
+          companyFilter={companyFilter}
+          retentionCohortClients={analyticsClients}
         />
 
 
@@ -1812,7 +1840,15 @@ const AnewClients = () => {
             }))}
             upsellCount={alertData.upsellClients.length}
             upsellValue={alertData.upsellClients.reduce((sum, c) => sum + (alertData.avgValue - c.value), 0)}
-            onCallVip={() => {}}
+            onCallVip={(vip) => {
+              if (!vip.entityId) return;
+              const client = [...clients, ...allClients].find(c => c.entity_id === vip.entityId);
+              if (client) {
+                const identity = getIdentity(client.entity_id);
+                setCallTarget({ entityId: client.entity_id, name: identity?.display_name || vip.name, phone: identity?.phone || "", clientId: client.id });
+                setShowCallDialog(true);
+              }
+            }}
             onRenewContract={() => setStatusFilter("expiring_contracts")}
             onViewUpsell={() => setActiveView("value")}
           />
@@ -2609,7 +2645,7 @@ const AnewClients = () => {
             organizationId={activeCompany?.id || ""}
             onInteractionSaved={async (now) => {
               if (callTarget.clientId) {
-                await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", callTarget.clientId);
+                await supabase.from("anew_clients").update({ last_interaction_at: now } as any).eq("id", callTarget.clientId);
               }
             }}
             onCallRegistered={() => { setShowCallDialog(false); setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1); }}

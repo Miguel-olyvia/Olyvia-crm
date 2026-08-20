@@ -4,10 +4,40 @@ import { supabase } from "@/integrations/supabase/client";
 import { Eye, UserCheck, UserX, TrendingUp, FileText, AlertTriangle, ShieldCheck, HeartPulse, DollarSign, Clock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { formatCurrency } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
+import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
+
+const NEUTRAL_ORIGIN_COLOR = "#94a3b8";
+
+interface OriginBySource {
+  source_id: string | null;
+  name: string;
+  color: string | null;
+  icon: string | null;
+  client_count: number;
+  value_sem_iva: number;
+}
+
+interface OriginByCampaign {
+  campaign_id: string | null;
+  name: string;
+  client_count: number;
+  value_sem_iva: number;
+}
+
+interface OriginDistribution {
+  total_clients: number;
+  unknown_count: number;
+  by_source: OriginBySource[];
+  by_campaign: OriginByCampaign[];
+}
+
+const DEFAULT_ORIGIN: OriginDistribution = { total_clients: 0, unknown_count: 0, by_source: [], by_campaign: [] };
 
 interface ScopedClientRecord {
   id: string;
@@ -26,6 +56,20 @@ interface AnewClientsDashboardProps {
   activeView?: string;
   /** Per-client health scores (entity_id -> { score }). When provided, avgHealthScore = arithmetic mean. */
   healthScoresMap?: Map<string, { score: number } | any>;
+  /** "Empresa" dropdown value from AnewClients.tsx ("all" or a specific organization id) — the
+   * organization actually selected by the user, which must win over activeCompany.id whenever set. */
+  companyFilter?: string;
+  /**
+   * Population for the "Taxa Retenção" cohort calc — must be analyticsClients (org+permission+
+   * search+date+health/last-contact/"only mine"/sales-rep scoped, but NOT narrowed by the
+   * statusFilter KPI-bar drill-down), the SAME population ClientsRetentionView.tsx uses for its
+   * own retentionRate. A churned/inactive client has to remain in this cohort to be counted as
+   * lost — narrowing it by statusFilter (as scopedClients is, e.g. when the "Ativos" pill is
+   * active) would silently exclude every client capable of showing up as "lost", making the
+   * rate trend towards 100% regardless of real churn. Falls back to scopedClients so this prop
+   * is optional for any other caller.
+   */
+  retentionCohortClients?: ScopedClientRecord[];
 }
 
 interface DashboardStats {
@@ -122,7 +166,8 @@ const DEFAULT_STATS: DashboardStats = {
 const DASHBOARD_STALE_TIME_MS = 5 * 60 * 1000;
 const DASHBOARD_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
-export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChange, activeView = "list", healthScoresMap }: AnewClientsDashboardProps) {
+export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChange, activeView = "list", healthScoresMap, companyFilter = "all", retentionCohortClients }: AnewClientsDashboardProps) {
+  const retentionCohortSource = retentionCohortClients ?? scopedClients;
   const { activeCompany } = useCompany();
   // KPIs feed on client_contracts directly (below), which has its own permission scope —
   // distinct from (and potentially narrower than) the clients.view scope already applied to
@@ -137,13 +182,43 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
     [scopedClients]
   );
 
+  // The organization actually selected by the user: the "Empresa" dropdown (companyFilter)
+  // wins over activeCompany.id whenever it's set to a specific org, never the other way
+  // around. Feeds both rpc_client_contract_stats and rpc_client_origin_distribution below.
+  const contractStatsOrgId = companyFilter && companyFilter !== "all" ? companyFilter : activeCompany?.id;
+
+  // client_contracts.view scope: NONE → skip entirely; OWNED/TEAM → restrict to allowed
+  // creators (fail closed to an empty set when unresolved, never fall back to "all").
+  // Hoisted out of loadDashboardData so the resolved creator scope can also feed the
+  // useQuery queryKey below — otherwise a team-membership/role change wouldn't invalidate
+  // the cached KPIs.
+  const contractViewScope: ScopeLevel = getPermissionScope("client_contracts.view");
+  const contractCreatorFilter = useMemo<string[] | null>(() => {
+    if (contractViewScope === "OWNED") return scopeAnewUserId ? [scopeAnewUserId] : [];
+    if (contractViewScope === "TEAM") {
+      const allowed = new Set<string>();
+      if (scopeAnewUserId) allowed.add(scopeAnewUserId);
+      teamMemberIds.forEach((id) => allowed.add(id));
+      return Array.from(allowed);
+    }
+    if (contractViewScope === "NONE") return [];
+    return null; // ORG — no creator restriction
+  }, [contractViewScope, scopeAnewUserId, teamMemberIds]);
+  const contractScopeBlocked =
+    contractScopeLoading ||
+    contractViewScope === "NONE" ||
+    ((contractViewScope === "OWNED" || contractViewScope === "TEAM") && (contractCreatorFilter?.length ?? 0) === 0);
+
   // scopedClients is already a stable useMemo reference from the parent, so depending on
   // it directly (rather than a hand-rolled id-only signature) refetches whenever any field
   // the stats depend on (status, assigned_to, created_at, ...) actually changes — not just
   // when the set of ids changes. Cached across remounts within staleTime, so revisiting this
   // dashboard tab reuses the previous fetch instead of discarding it and starting over.
+  // companyFilter and contractCreatorFilter are included so switching the "Empresa" dropdown,
+  // or a team/role change resolving a different OWNED/TEAM creator scope, both invalidate the
+  // cache — previously missing, which could leave the dashboard showing stale totals.
   const { data: stats = DEFAULT_STATS, isLoading: loading, refetch } = useQuery({
-    queryKey: ["clients-dashboard", activeCompany?.id, scopedClients, contractScopeLoading],
+    queryKey: ["clients-dashboard", activeCompany?.id, companyFilter, scopedClients, retentionCohortSource, contractScopeLoading, contractCreatorFilter],
     queryFn: () => loadDashboardData(),
     staleTime: DASHBOARD_STALE_TIME_MS,
     // Safety-net polling every 5 min while this view is visible (realtime channel below is
@@ -156,10 +231,62 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
     refetchOnWindowFocus: false,
   });
 
-  // Realtime: refresh dashboard on any change to clients/contracts/interactions in scope
+  // Task 9 — "Origem dos Clientes": same org/entity scope resolved above, via the new
+  // rpc_client_origin_distribution RPC. Kept as its own query (distinct shape/refresh
+  // cadence from the contract KPIs) but shares contractStatsOrgId/entityIds so it can
+  // never disagree with the rest of this dashboard about which organization is selected.
+  const { data: originData = DEFAULT_ORIGIN, isLoading: originLoading } = useQuery({
+    queryKey: ["clients-origin-distribution", contractStatsOrgId, entityIds],
+    queryFn: async (): Promise<OriginDistribution> => {
+      if (!contractStatsOrgId) return DEFAULT_ORIGIN;
+      const { data, error } = await (supabase as any).rpc("rpc_client_origin_distribution", {
+        p_organization_id: contractStatsOrgId,
+        p_entity_ids: entityIds.length > 0 ? entityIds : null,
+      });
+      if (error) {
+        console.error("Error loading rpc_client_origin_distribution:", error);
+        return DEFAULT_ORIGIN;
+      }
+      const row = Array.isArray(data) ? data[0] : data;
+      return (row as OriginDistribution) ?? DEFAULT_ORIGIN;
+    },
+    staleTime: DASHBOARD_STALE_TIME_MS,
+    refetchOnWindowFocus: false,
+  });
+
+  const originPieData = useMemo(() => {
+    const slices = (originData.by_source || []).map((s) => ({
+      key: s.source_id ?? s.name,
+      name: s.name,
+      client_count: s.client_count,
+      value_sem_iva: s.value_sem_iva,
+      color: s.color || NEUTRAL_ORIGIN_COLOR,
+    }));
+    if (originData.unknown_count > 0) {
+      slices.push({
+        key: "unknown",
+        name: "Desconhecida",
+        client_count: originData.unknown_count,
+        value_sem_iva: 0,
+        color: NEUTRAL_ORIGIN_COLOR,
+      });
+    }
+    return slices;
+  }, [originData]);
+
+  const topOriginCampaigns = useMemo(
+    () => [...(originData.by_campaign || [])].sort((a, b) => b.client_count - a.client_count).slice(0, 5),
+    [originData.by_campaign]
+  );
+
+  // Realtime: refresh dashboard on any change to clients/contracts/interactions in scope.
+  // Uses contractStatsOrgId (companyFilter-aware), not activeCompany.id alone — otherwise a
+  // realtime change to a client/contract under the sub-company selected via "Empresa" would
+  // never match orgSet and silently fail to trigger a refresh (masked in practice by the 5min
+  // poll interval, but real-time updates would lag behind for the selected sub-company).
   useEffect(() => {
     if (loading) return;
-    const orgIds = activeCompany?.id ? [activeCompany.id] : [];
+    const orgIds = contractStatsOrgId ? [contractStatsOrgId] : [];
     if (orgIds.length === 0) return;
     const orgSet = new Set(orgIds);
     let timer: number | null = null;
@@ -203,7 +330,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       if (timer) window.clearTimeout(timer);
       supabase.removeChannel(channel);
     };
-  }, [loading, activeCompany?.id, entityIds, refetch]);
+  }, [loading, contractStatsOrgId, entityIds, refetch]);
 
   const loadDashboardData = async (): Promise<DashboardStats> => {
     try {
@@ -214,7 +341,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       const now = new Date();
 
       const totalClients = list.length;
-      const INACTIVE_STATUSES = ["inactive", "churned", "lost", "lost_definitive"];
+      const INACTIVE_STATUSES: readonly string[] = INACTIVE_CLIENT_STATUSES;
       const activeClientsList = list.filter((c: any) => !INACTIVE_STATUSES.includes(c.status));
       const activeClients = activeClientsList.length;
       const inactiveClients = list.filter((c: any) => INACTIVE_STATUSES.includes(c.status)).length;
@@ -246,35 +373,24 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         return results;
       };
 
-      // client_contracts.view scope: NONE → skip entirely; OWNED/TEAM → restrict to allowed
-      // creators (fail closed to an empty set when unresolved, never fall back to "all").
-      const contractViewScope: ScopeLevel = getPermissionScope("client_contracts.view");
-      let contractCreatorFilter: string[] | null = null; // null = ORG (no creator restriction)
-      if (contractViewScope === "OWNED") {
-        contractCreatorFilter = scopeAnewUserId ? [scopeAnewUserId] : [];
-      } else if (contractViewScope === "TEAM") {
-        const allowed = new Set<string>();
-        if (scopeAnewUserId) allowed.add(scopeAnewUserId);
-        teamMemberIds.forEach((id) => allowed.add(id));
-        contractCreatorFilter = Array.from(allowed);
-      } else if (contractViewScope === "NONE") {
-        contractCreatorFilter = [];
-      }
-      const contractScopeBlocked =
-        contractScopeLoading ||
-        contractViewScope === "NONE" ||
-        ((contractViewScope === "OWNED" || contractViewScope === "TEAM") && contractCreatorFilter?.length === 0);
+      // contractViewScope/contractCreatorFilter/contractScopeBlocked are resolved once at
+      // component scope above (also feed the useQuery queryKey) — reused here as-is.
 
-      // organization scope: activeCompany not resolved yet → fail closed, skip the contract
-      // query entirely rather than silently omitting the organization filter (never leak
-      // cross-tenant data). Same guard as ClientsValueView.tsx / ClientsRetentionView.tsx.
-      const orgScopeBlocked = !activeCompany?.id;
+      // organization scope: neither the selected "Empresa" filter nor activeCompany resolved
+      // yet → fail closed, skip the contract query entirely rather than silently omitting the
+      // organization filter (never leak cross-tenant data). Same guard as ClientsValueView.tsx
+      // / ClientsRetentionView.tsx. Uses contractStatsOrgId (companyFilter-aware, resolved at
+      // component scope above) — previously this fell back to activeCompany.id directly, so
+      // selecting a different "Empresa" here left this per-entity contract map (feeds
+      // noContact30dValue) querying the wrong organization_id and silently returning 0 rows
+      // for entities whose contracts live under the sub-company actually selected.
+      const orgScopeBlocked = !contractStatsOrgId;
 
       // Per-client contract map (known/converted clients only): feeds noContact30dValue and
       // other per-entity analytics that only make sense for entities already formally
       // registered as clients. Intentionally restricted to entityIds from scopedClients.
-      if (entityIds.length > 0 && !contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
-        const organizationId = activeCompany.id;
+      if (entityIds.length > 0 && !contractScopeBlocked && !orgScopeBlocked && contractStatsOrgId) {
+        const organizationId = contractStatsOrgId;
         const contractBatches: string[][] = [];
         for (let i = 0; i < entityIds.length; i += 100) {
           contractBatches.push(entityIds.slice(i, i + 100));
@@ -306,37 +422,28 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
       }
 
-      // Org-wide aggregate totals for the top KPI cards ("Valor Contratos", "Contratos
-      // Activos", "A Expirar"): these MUST reflect every signed/active contract for this
-      // organization — independent of entityIds/scopedClients — so they always reconcile
-      // with the Contratos module's own total for the same organization_id/status filter.
-      // A failed lead→client conversion (missing anew_clients row) must never make a real
-      // signed contract silently disappear from these totals. Not gated on entityIds.length,
-      // since orphaned/unconverted entities have no entry in scopedClients at all.
-      if (!contractScopeBlocked && !orgScopeBlocked && activeCompany?.id) {
-        const organizationId = activeCompany.id;
-        const orgWideQuery = supabase.from("client_contracts")
-          .select("id, entity_id, status, total_value, total_value_sem_iva, end_date")
-          .eq("organization_id", organizationId)
-          .in("status", ["signed", "active"])
-          .is("deleted_at", null);
-        const scopedOrgWideQuery = contractCreatorFilter ? orgWideQuery.in("created_by", contractCreatorFilter) : orgWideQuery;
-        const { data: orgWideContracts, error: orgWideError } = await scopedOrgWideQuery;
-        if (orgWideError) {
-          console.error("Error loading org-wide signed contracts for clients dashboard:", orgWideError);
+      // Contract totals for the top KPI cards ("Valor Contratos", "Contratos Activos",
+      // "A Expirar"): sourced from rpc_client_contract_stats, scoped to the organization
+      // CURRENTLY SELECTED by the user (companyFilter when set, else activeCompany — see
+      // contractStatsOrgId above) and to the same entity population as scopedClients — so
+      // avgValuePerClient's numerator (value_sem_iva) and denominator (activeClients right
+      // below) always describe the same filtered population instead of mixing an org-wide
+      // total with a filtered count.
+      if (!contractScopeBlocked && contractStatsOrgId) {
+        const { data: rpcStats, error: rpcError } = await (supabase as any).rpc("rpc_client_contract_stats", {
+          p_organization_id: contractStatsOrgId,
+          p_entity_ids: entityIds.length > 0 ? entityIds : null,
+          p_creator_ids: contractCreatorFilter,
+        });
+        if (rpcError) {
+          console.error("Error loading rpc_client_contract_stats for clients dashboard:", rpcError);
         } else {
-          for (const c of orgWideContracts || []) {
-            totalContractValue += (c as any).total_value_sem_iva ?? 0;
-            totalContractValueWithVat += (c as any).total_value ?? 0;
-            activeContracts++;
-            if ((c as any).end_date) {
-              const endDate = new Date((c as any).end_date);
-              const daysUntilExpiry = differenceInDays(endDate, now);
-              if (daysUntilExpiry >= 0 && daysUntilExpiry <= 30) {
-                contractsExpiring30d++;
-                contractsExpiring30dValue += (c as any).total_value_sem_iva ?? 0;
-              }
-            }
+          const row: any = Array.isArray(rpcStats) ? rpcStats[0] : rpcStats;
+          if (row) {
+            totalContractValue = row.value_sem_iva ?? 0;
+            totalContractValueWithVat = row.value_com_iva ?? 0;
+            activeContracts = row.active_count ?? 0;
+            contractsExpiring30d = row.expiring_soon_count ?? 0;
           }
         }
       }
@@ -378,9 +485,16 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
       }
 
-      // Retention: cohort 90d — clientes que já existiam há ≥90 dias e continuam activos
+      // Retention: cohort 90d — clientes que já existiam há ≥90 dias e continuam activos.
+      // Deliberately sourced from retentionCohortSource (analyticsClients), NOT `list`
+      // (scopedClients/statusFilter-narrowed): a churned/inactive client must remain in this
+      // cohort to be counted as lost, so this can never again silently trend towards 100%
+      // just because the KPI-bar's status pill (e.g. "Ativos") is active. Matches the same
+      // population/formula ClientsRetentionView.tsx uses for its own "Taxa de Retenção", so
+      // the two tabs can never again disagree about this number (see "Meta de Retenção: 80%"
+      // there and the tooltip below — same target, same population, everywhere on this page).
       const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-      const cohort = list.filter((c: any) => new Date(c.created_at) <= ninetyDaysAgo);
+      const cohort = retentionCohortSource.filter((c: any) => new Date(c.created_at) <= ninetyDaysAgo);
       const stillActiveCohort = cohort.filter((c: any) => !INACTIVE_STATUSES.includes(c.status));
       const retentionRate = cohort.length > 0
         ? Math.round((stillActiveCohort.length / cohort.length) * 100)
@@ -490,6 +604,83 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
               </div>
             } />
         </div>
+      )}
+
+      {/* Row 3: Origem dos Clientes */}
+      {showExtendedKPIs && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              🌐 Origem dos Clientes
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {originLoading ? (
+              <div className="h-[160px] flex items-center justify-center">
+                <Skeleton className="h-32 w-32 rounded-full" />
+              </div>
+            ) : originPieData.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-6 text-center">Sem dados de origem suficientes</p>
+            ) : (
+              <div className="flex flex-col lg:flex-row gap-6">
+                {/* Donut + legend */}
+                <div className="flex items-center gap-6 flex-1 min-w-0">
+                  <div className="relative w-[160px] h-[160px] shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={originPieData} cx="50%" cy="50%" outerRadius={70} paddingAngle={2} dataKey="client_count" nameKey="name">
+                          {originPieData.map((entry, i) => (
+                            <Cell key={i} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip
+                          formatter={(value: number, name: string) => [`${value} clientes`, name]}
+                          contentStyle={{
+                            backgroundColor: "hsl(var(--background))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: "8px",
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-lg font-bold">{originData.total_clients}</span>
+                      <span className="text-[10px] text-muted-foreground">Clientes</span>
+                    </div>
+                  </div>
+                  <div className="flex-1 grid grid-cols-2 gap-2 min-w-0">
+                    {originPieData.map((entry, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm min-w-0">
+                        <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+                        <span className="text-muted-foreground truncate">{entry.name}</span>
+                        <span className="font-semibold ml-auto shrink-0">{entry.client_count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Top 5 campaigns */}
+                {topOriginCampaigns.length > 0 && (
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Por Campanha (top 5)</p>
+                    {topOriginCampaigns.map((c, i) => (
+                      <div key={c.campaign_id || i} className="flex items-center gap-2 text-sm">
+                        <span className="flex-1 truncate">{c.name}</span>
+                        <span className="text-muted-foreground shrink-0">{c.client_count} cliente{c.client_count !== 1 ? "s" : ""}</span>
+                        <span className="font-semibold w-24 text-right shrink-0">{formatCurrency(c.value_sem_iva)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {!originLoading && originData.unknown_count > 0 && (
+              <p className="text-xs text-muted-foreground mt-3 text-center">
+                {originData.unknown_count} cliente{originData.unknown_count !== 1 ? "s" : ""} sem origem conhecida
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

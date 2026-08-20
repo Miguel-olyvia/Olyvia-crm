@@ -7,6 +7,7 @@ import { Phone, Mail, UserPlus, Pencil, Send, Check, AlertTriangle } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { differenceInDays, format } from "date-fns";
+import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
@@ -185,7 +186,7 @@ export function ClientsRetentionView({
   }, [clients, scopeOrgIds, contractScopeLoading, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const now = new Date();
-  const INACTIVE_STATUSES = ["inactive", "lost", "churned", "lost_definitive"];
+  const INACTIVE_STATUSES: readonly string[] = INACTIVE_CLIENT_STATUSES;
   const activeClients = useMemo(() => clients.filter(c => !INACTIVE_STATUSES.includes(c.status)), [clients]);
 
   // ── KPIs ──
@@ -594,8 +595,15 @@ export function ClientsRetentionView({
                 <p className="text-muted-foreground">
                   {kpis.lostCount} cliente{kpis.lostCount !== 1 ? "s" : ""} perdido{kpis.lostCount !== 1 ? "s" : ""} nos últimos 90 dias
                 </p>
+                {/* Unified with the "Taxa Retenção" tooltip target in AnewClientsDashboard.tsx
+                    (both now compute retentionRate over the same population — analyticsClients,
+                    not narrowed by the KPI-bar's statusFilter drill-down — see
+                    retentionCohortClients in that file). Previously this said "Meta: 95%" while
+                    the dashboard tooltip said "Abaixo de 80% requer atenção" for what was
+                    presented as the same metric; 80% was kept since it was already the
+                    dashboard's documented threshold. */}
                 <p className="text-muted-foreground">
-                  <strong>Meta: 95%</strong>
+                  <strong>Meta de Retenção: 80%</strong>
                 </p>
               </div>
             </div>
@@ -799,7 +807,7 @@ export function ClientsRetentionView({
               ))}
             </div>
             <p className="text-sm text-muted-foreground text-center mt-4">
-              {healthDistribution.goodPct}% dos clientes com saúde boa ou excelente · <strong>Meta: 80%</strong>
+              {healthDistribution.goodPct}% dos clientes com saúde boa ou excelente · <strong>Meta de Saúde: 80%</strong>
             </p>
           </CardContent>
         </Card>
