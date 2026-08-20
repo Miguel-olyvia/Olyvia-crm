@@ -222,13 +222,13 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       const [interactionsRes, tagsRes, leadRes] = await Promise.all([
         supabase.from("entity_interactions").select("*").eq("entity_id", entityId).order("interaction_at", { ascending: false }).limit(20),
         supabase.from("contact_tags").select("id, tag, color").eq("entity_id", entityId),
-        contact.source_lead_id ? supabase.from("anew_leads").select("id, source, campaign_id, created_at").eq("id", contact.source_lead_id).maybeSingle() : Promise.resolve({ data: null }),
+        contact.source_lead_id ? supabase.from("anew_leads").select("id, source, campaign_id, created_at, campaigns:campaigns!anew_leads_campaign_id_fkey(name)").eq("id", contact.source_lead_id).maybeSingle() : Promise.resolve({ data: null }),
       ]);
 
       setInteractions(interactionsRes.data || []);
       setTags(tagsRes.data || []);
       if (leadRes.data) {
-        setSourceLead({ ...leadRes.data, source_type: leadRes.data.source, campaign: leadRes.data.campaign_id });
+        setSourceLead({ ...leadRes.data, source_type: leadRes.data.source, campaign: (leadRes.data as any).campaigns?.name || null });
       } else {
         setSourceLead(null);
       }

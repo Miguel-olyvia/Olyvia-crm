@@ -294,12 +294,14 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setTags(tagsRes.data || []);
       setContracts(contractsRes.data || []);
 
-      // Try to find source lead
-      if (client.source_lead_id || client.source_id) {
-        const leadId = client.source_lead_id || client.source_id;
-        const { data: leadData } = await supabase.from("anew_leads").select("id, source, campaign_id, created_at").eq("id", leadId).maybeSingle();
-        if (leadData) setSourceLead({ ...leadData, source_type: leadData.source, campaign: leadData.campaign_id });
-        else setSourceLead(null);
+      // Origin of this client (from anew_clients.origin_* columns, not a live lead join)
+      if (client.origin_source || client.origin_source_id || client.origin_campaign_id) {
+        let campaignName: string | null = null;
+        if (client.origin_campaign_id) {
+          const { data: campaignData } = await supabase.from("campaigns").select("name").eq("id", client.origin_campaign_id).maybeSingle();
+          campaignName = campaignData?.name || null;
+        }
+        setSourceLead({ source_type: client.origin_source, campaign: campaignName, created_at: null });
       } else {
         setSourceLead(null);
       }
@@ -547,7 +549,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       events.push({
         id: "client-created", type: "conversion",
         title: "Convertido para Cliente",
-        description: sourceLead ? "Convertido de Lead" : null,
+        description: sourceLead ? `Origem: ${client.origin_source || "desconhecida"}` : null,
         date: client.client_since || client.created_at, actor: null,
       });
     }
