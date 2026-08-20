@@ -893,7 +893,7 @@ export default function Services() {
                     <Input
                       ref={fileInputRef}
                       type="file"
-                      accept=".csv"
+                      accept=".xlsx,.xls,.csv"
                       multiple
                       onChange={handleImport}
                       disabled={importing}
