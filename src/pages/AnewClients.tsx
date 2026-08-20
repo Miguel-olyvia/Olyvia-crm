@@ -650,7 +650,10 @@ const AnewClients = () => {
         query = query.in("entity_id", matchedIds);
       }
 
-      query = query.order("updated_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
+      // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
+      // e travar o scroll infinito num loop de "A carregar mais...".
+      query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
       if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
@@ -679,12 +682,19 @@ const AnewClients = () => {
         });
       }
 
+      let uniqueNewCount = newClients.length;
       if (isInitial) setClients(newClients);
       else setClients(prev => {
         const existingIds = new Set(prev.map(c => c.id));
-        return [...prev, ...newClients.filter(c => !existingIds.has(c.id))];
+        const uniqueNew = newClients.filter(c => !existingIds.has(c.id));
+        uniqueNewCount = uniqueNew.length;
+        return [...prev, ...uniqueNew];
       });
-      setHasMore(newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
+      // Rede de segurança: se a página veio cheia mas nenhum registo era novo, a
+      // paginação está a repetir-se (ex.: empates de ordenação não previstos) — parar
+      // em vez de continuar a pedir a mesma página para sempre.
+      const madeNoProgress = !isInitial && newClients.length === PAGE_SIZE && uniqueNewCount === 0;
+      setHasMore(!madeNoProgress && newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
     } catch (error: unknown) {
       if (abortController?.signal.aborted || (isInitial && requestId !== clientsRequestIdRef.current)) return;
       const message = error instanceof Error ? error.message : "Erro inesperado.";
@@ -777,7 +787,7 @@ const AnewClients = () => {
         if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
         if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
         if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-        query = query.order("updated_at", { ascending: false }).range(offset, offset + BATCH - 1);
+        query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
         const { data, error } = await query;
         if (error) throw error;
         const batch = (data || []) as ClientRecord[];
