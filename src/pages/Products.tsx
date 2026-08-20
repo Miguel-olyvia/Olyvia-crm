@@ -363,16 +363,19 @@ export default function Products() {
       }
 
       // Apply sorting and pagination
+      // Em todos os ramos junta-se um desempate por "id": sem ele, produtos com o
+      // mesmo valor na coluna de ordenação (ou, no caso do SKU, nenhuma ordenação de
+      // BD) podiam saltar ou repetir-se entre páginas.
       if (filters.sortField === 'brand_name') {
         query = query.order('brands(name)', {
           ascending: filters.sortDirection === 'asc',
           nullsFirst: false,
-        }).range(from, to);
+        }).order('id', { ascending: true }).range(from, to);
       } else if (filters.sortField === 'sku') {
         // Fetch without DB sort for SKU — sort numerically client-side
-        query = query.range(from, to);
+        query = query.order('id', { ascending: true }).range(from, to);
       } else {
-        query = query.order(filters.sortField, { ascending: filters.sortDirection === 'asc' }).range(from, to);
+        query = query.order(filters.sortField, { ascending: filters.sortDirection === 'asc' }).order('id', { ascending: true }).range(from, to);
       }
 
       const result = await query;
@@ -407,7 +410,10 @@ export default function Products() {
       if (reset) {
         setProducts(newProducts);
       } else {
-        setProducts(prev => [...prev, ...newProducts]);
+        setProducts(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          return [...prev, ...newProducts.filter(p => !existingIds.has(p.id))];
+        });
       }
 
       setHasMore(newProducts.length === PAGE_SIZE);

@@ -443,7 +443,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       const effectiveCompanyId = getEffectiveCompanyId();
       const orgIds = await resolveOrgScope(effectiveCompanyId);
       const baseQuery = buildBaseQuery(false, orgIds);
-      const { data, error } = await baseQuery.order("name").range(from, to);
+      const { data, error } = await baseQuery.order("name").order("id").range(from, to);
       if (error) throw error;
 
       const rows = (data || []) as any[];

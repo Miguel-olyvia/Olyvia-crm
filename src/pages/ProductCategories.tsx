@@ -139,6 +139,7 @@ export default function ProductCategories() {
         .is("parent_id", null)
         .is("deleted_at", null)
         .order("path")
+        .order("id")
         .range(from, to);
 
 
