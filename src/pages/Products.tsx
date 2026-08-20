@@ -585,7 +585,11 @@ export default function Products() {
     onSuccess: loadData,
     softDelete: false,
     organizationId: activeCompany?.id,
-    bulkStatusRpc: "rpc_bulk_status_product",
+    // NÃO ligar bulkStatusRpc a rpc_bulk_status_product: essa RPC só altera a coluna
+    // booleana is_active, mas o diálogo "Alterar Estado" oferece draft/active/discontinued
+    // (coluna de texto `status`, a mesma usada em rpc_update_product na edição individual).
+    // Sem bulkStatusRpc, o hook cai no fallback que grava `status` corretamente — ver
+    // supabase/migrations/20260816020000_products_bulk_rpcs.sql ("Status column note").
     bulkDeleteRpc: "rpc_bulk_delete_product",
     bulkOrgRpc: "rpc_bulk_org_product",
     bulkOrgRpcNewOrgParam: "p_new_organization_id",
