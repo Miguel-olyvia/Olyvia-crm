@@ -188,10 +188,13 @@ const Suppliers = () => {
       setTotalCount(count || 0);
 
       // Build data query
+      // Tiebreaker por "id": sem ele, fornecedores com o mesmo created_at podiam
+      // reaparecer em páginas seguintes e travar o scroll infinito.
       let dataQuery = supabase
         .from("suppliers")
         .select("*, anew_organizations:suppliers_organization_id_fkey(id, name)")
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(offset, offset + PAGE_SIZE - 1);
 
       // Apply company filter — non-system_admin always scoped
@@ -220,13 +223,22 @@ const Suppliers = () => {
 
       if (error) throw error;
 
+      const newSuppliers = (data as Supplier[]) || [];
+      let uniqueNewCount = newSuppliers.length;
       if (reset || offset === 0) {
-        setSuppliers(data as Supplier[] || []);
+        setSuppliers(newSuppliers);
       } else {
-        setSuppliers(prev => [...prev, ...(data as Supplier[] || [])]);
+        setSuppliers(prev => {
+          const existingIds = new Set(prev.map(s => s.id));
+          const uniqueNew = newSuppliers.filter(s => !existingIds.has(s.id));
+          uniqueNewCount = uniqueNew.length;
+          return [...prev, ...uniqueNew];
+        });
       }
 
-      setHasMore((data?.length || 0) >= PAGE_SIZE);
+      // Rede de segurança: página cheia sem nenhum registo novo = paginação a repetir-se — parar.
+      const madeNoProgress = !reset && offset !== 0 && newSuppliers.length >= PAGE_SIZE && uniqueNewCount === 0;
+      setHasMore(!madeNoProgress && newSuppliers.length >= PAGE_SIZE);
     } catch (error: any) {
       toast({
         title: t("suppliers.toast.loadError"),

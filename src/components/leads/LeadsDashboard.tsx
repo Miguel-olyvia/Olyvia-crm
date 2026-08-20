@@ -434,6 +434,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         .eq("status", "negotiation")
         .is("deleted_at", null)
         .order("updated_at", { ascending: true })
+        .order("id", { ascending: true })
         .range(0, NEGOTIATION_LIST_LIMIT - 1);
 
       if (!dateRange.isAllTime) {

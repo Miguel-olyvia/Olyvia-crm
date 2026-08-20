@@ -250,6 +250,7 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         .eq("bundle_components.products.product_prices.price_type", "retail")
         .eq("bundle_components.services.service_prices.price_type", "retail")
         .order("name")
+        .order("id")
         .range(from, to);
 
       const safeSearch = escapePostgrestOrTerm(debouncedSearch);

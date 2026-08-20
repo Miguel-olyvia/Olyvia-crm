@@ -523,7 +523,7 @@ export default function Quotes() {
         adminQuery = adminQuery.eq("organization_id", activeCompany.id);
         adminQuery = applyServerFilters(adminQuery);
 
-        const { data, error } = await adminQuery.order("created_at", { ascending: false }).range(from, to);
+        const { data, error } = await adminQuery.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
         if (error) throw error;
         quotesData = (data || []) as unknown as Quote[];
 

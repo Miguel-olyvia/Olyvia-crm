@@ -71,6 +71,7 @@ import { withAuditContext } from "@/utils/auditContext";
 import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
 import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClientMeetingDialog";
 import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
+import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 
 interface ClientRecord {
   id: string;
@@ -241,6 +242,8 @@ const AnewClients = () => {
   }, [debouncedSearch]);
   const [statusFilter, setStatusFilter] = useState("active");
   const [companyFilter, setCompanyFilter] = useState("all");
+  const [visibleClientColumns, setVisibleClientColumns] = useState<ClientColumnConfig[]>(DEFAULT_CLIENT_COLUMNS.filter(c => c.visible));
+  const isColVisible = (key: string) => visibleClientColumns.some(c => c.key === key);
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1936,6 +1939,7 @@ const AnewClients = () => {
                   </SelectContent>
                 </Select>
               )}
+              <ClientsTableColumns onColumnsChange={setVisibleClientColumns} />
             </div>
             {/* Special filter pills */}
             <div className="flex gap-2 mt-2">
@@ -2013,22 +2017,27 @@ const AnewClients = () => {
                       <TableHead className="w-[40px]">
                         <Checkbox checked={selectedIds.size === displayClients.length && displayClients.length > 0} onCheckedChange={toggleSelectAll} />
                       </TableHead>
+                      {isColVisible('health') && (
                       <TableHead className="w-[60px] cursor-pointer" onClick={() => handleSort("health")}>
                         <div className="flex items-center gap-1">Saúde <ArrowUpDown className="w-3 h-3" /></div>
                       </TableHead>
-                      <TableHead className="w-[40px]" />
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Contratos</TableHead>
+                      )}
+                      {isColVisible('avatar') && <TableHead className="w-[40px]" />}
+                      {isColVisible('client') && <TableHead>Cliente</TableHead>}
+                      {isColVisible('contracts') && <TableHead>Contratos</TableHead>}
+                      {isColVisible('value') && (
                       <TableHead className="cursor-pointer" onClick={() => handleSort("value")}>
                         <div className="flex items-center gap-1">Valor Total <ArrowUpDown className="w-3 h-3" /></div>
                       </TableHead>
-                      <TableHead>Tags</TableHead>
-                      <TableHead>NIF</TableHead>
-                      <TableHead>Comercial</TableHead>
-                      <TableHead>Último Contacto</TableHead>
-                      <TableHead>Sentimento</TableHead>
-                      <TableHead>Cliente Desde</TableHead>
-                      <TableHead>Estado</TableHead>
+                      )}
+                      {isColVisible('tags') && <TableHead>Tags</TableHead>}
+                      {isColVisible('nif') && <TableHead>NIF</TableHead>}
+                      {isColVisible('assigned_to') && <TableHead>Comercial</TableHead>}
+                      {isColVisible('last_contact') && <TableHead>Último Contacto</TableHead>}
+                      {isColVisible('sentiment') && <TableHead>Sentimento</TableHead>}
+                      {isColVisible('client_since') && <TableHead>Cliente Desde</TableHead>}
+                      {isColVisible('origin') && <TableHead>Origem</TableHead>}
+                      {isColVisible('status') && <TableHead>Estado</TableHead>}
                       <TableHead className="text-right">Acções</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2049,9 +2058,12 @@ const AnewClients = () => {
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <Checkbox checked={selectedIds.has(client.id)} onCheckedChange={() => toggleSelectOne(client.id)} />
                           </TableCell>
+                          {isColVisible('health') && (
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             {health && <ClientHealthBadge health={health} size="sm" />}
                           </TableCell>
+                          )}
+                          {isColVisible('avatar') && (
                           <TableCell>
                             <div
                               role="img"
@@ -2068,6 +2080,8 @@ const AnewClients = () => {
                               </span>
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('client') && (
                           <TableCell>
                             <div>
                               <div className="font-medium flex items-center gap-1">
@@ -2084,6 +2098,8 @@ const AnewClients = () => {
                               </div>
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('contracts') && (
                           <TableCell>
                             {contract && contract.activeCount > 0 ? (
                               <div>
@@ -2100,6 +2116,8 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">Sem</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('value') && (
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-purple-600 dark:text-purple-400">
@@ -2117,6 +2135,8 @@ const AnewClients = () => {
                               </div>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('tags') && (
                           <TableCell>
                             <div className="flex gap-1 flex-wrap">
                               {clientTags.map(tag => (
@@ -2129,6 +2149,8 @@ const AnewClients = () => {
                               ))}
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('nif') && (
                           <TableCell>
                             {identity?.vat ? (
                               <span className="text-xs font-mono">{identity.vat}</span>
@@ -2136,6 +2158,8 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">—</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('assigned_to') && (
                           <TableCell>
                             {client.assigned_to && assignedUserMap.get(client.assigned_to) ? (
                               <div className="flex items-center gap-1.5">
@@ -2148,12 +2172,16 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">Sem</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('last_contact') && (
                           <TableCell>
                             <span className={`text-sm font-medium ${lastContact.color}`}>
                               {lastContact.text}
                               {lastContact.warning && " ⚠"}
                             </span>
                           </TableCell>
+                          )}
+                          {isColVisible('sentiment') && (
                           <TableCell>
                             {sentimentEmoji ? (
                               <TooltipProvider><Tooltip><TooltipTrigger asChild>
@@ -2169,12 +2197,26 @@ const AnewClients = () => {
                               </TooltipContent></Tooltip></TooltipProvider>
                             ) : <span className="text-muted-foreground">—</span>}
                           </TableCell>
+                          )}
+                          {isColVisible('client_since') && (
                           <TableCell>
                             <span className="text-xs text-muted-foreground">{(() => { const d = new Date(client.created_at); return isValid(d) ? format(d, 'dd/MM/yyyy') : '—'; })()}</span>
                           </TableCell>
+                          )}
+                          {isColVisible('origin') && (
+                          <TableCell>
+                            {client.origin_source ? (
+                              <span className="text-xs">{client.origin_source}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/60 italic">—</span>
+                            )}
+                          </TableCell>
+                          )}
+                          {isColVisible('status') && (
                           <TableCell>
                             <Badge className={statusDisplay.className}>{statusDisplay.label}</Badge>
                           </TableCell>
+                          )}
                           <TableCell className="text-right">
                             <div className="flex gap-0.5 justify-end" onClick={(e) => e.stopPropagation()}>
                               {/* Quick actions */}
@@ -2340,7 +2382,7 @@ const AnewClients = () => {
                     })}
                   {loadingMore && (
                     <TableRow>
-                      <TableCell colSpan={14} className="text-center py-4">
+                      <TableCell colSpan={2 + visibleClientColumns.length} className="text-center py-4">
                         <div className="flex items-center justify-center gap-2">
                           <OlyviaLoader size={20} inline />
                           <span className="text-sm text-muted-foreground">{t('clients.loadingMore')}</span>
