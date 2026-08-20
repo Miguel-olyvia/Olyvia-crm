@@ -490,7 +490,11 @@ export async function parseServicesCSV(
           if (orgLinkError) throw orgLinkError;
         }
       } finally {
-        await supabase.rpc("clear_audit_context").catch(() => {});
+        try {
+          await supabase.rpc("clear_audit_context");
+        } catch {
+          // ignore cleanup errors
+        }
       }
     } catch (err: any) {
       report.errors.push({
