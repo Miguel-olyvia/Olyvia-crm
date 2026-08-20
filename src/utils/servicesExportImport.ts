@@ -295,15 +295,10 @@ export async function parseServicesCSV(
     throw new Error("Colunas obrigatórias em falta: SKU, Nome");
   }
 
-  // Resolve business user id (anew_users.id) — required by RLS on service_prices.created_by
-  const { data: anewUser, error: anewUserError } = await supabase
-    .from("anew_users")
-    .select("id")
-    .eq("auth_user_id", userId)
-    .maybeSingle();
-  if (anewUserError) throw new Error(`Erro ao resolver identidade do utilizador: ${anewUserError.message}`);
-  if (!anewUser?.id) throw new Error("Perfil de utilizador não encontrado (anew_users). Verifique se o utilizador está registado.");
-  const businessUserId = anewUser.id;
+  // userId já é o anew_users.id (business id), resolvido pelo chamador via
+  // resolveCurrentBusinessUserId() — required by RLS on service_prices.created_by
+  if (!userId) throw new Error("Perfil de utilizador não encontrado (anew_users). Verifique se o utilizador está registado.");
+  const businessUserId = userId;
 
   // Pre-load categories & subcategories for this org
   const { data: categoriesData } = await supabase
