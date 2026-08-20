@@ -250,6 +250,9 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       const row = Array.isArray(data) ? data[0] : data;
       return (row as OriginDistribution) ?? DEFAULT_ORIGIN;
     },
+    // Card only renders on the "Dashboard" tab (see activeView === "dashboard" below) — no
+    // point paying for this RPC call while the user is on Lista/Valor/Retenção.
+    enabled: activeView === "dashboard",
     staleTime: DASHBOARD_STALE_TIME_MS,
     refetchOnWindowFocus: false,
   });
@@ -606,8 +609,9 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         </div>
       )}
 
-      {/* Row 3: Origem dos Clientes */}
-      {showExtendedKPIs && (
+      {/* Row 3: Origem dos Clientes — só na aba "Dashboard", ao contrário das Rows 1/2 (que
+          também aparecem na "Lista" via showExtendedKPIs). Pedido explícito do utilizador. */}
+      {activeView === "dashboard" && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
