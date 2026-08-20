@@ -87,6 +87,9 @@ interface ClientRecord {
   updated_at?: string | null;
   last_interaction_at?: string | null;
   custom_fields?: Record<string, unknown> | null;
+  origin_source?: string | null;
+  origin_source_id?: string | null;
+  origin_campaign_id?: string | null;
 }
 
 interface AnewUserNameRow { id: string; name: string | null }
@@ -590,7 +593,7 @@ const AnewClients = () => {
     try {
       const viewScope = getPermissionScope("clients.view");
 
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields", { count: 'exact' }).is("deleted_at", null);
+      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
       else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
       // When searching, ignore status filter so inactive/churned/lost clients still appear
@@ -713,7 +716,7 @@ const AnewClients = () => {
       let fetchedClient: ClientRecord | null = null;
       const { data: byId } = await (supabase as any)
         .from("anew_clients")
-        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
         .eq("id", openId)
         .eq("organization_id", activeCompany.id)
         .maybeSingle();
@@ -722,7 +725,7 @@ const AnewClients = () => {
       if (!fetchedClient) {
         const { data: byEntityInActiveOrg } = await (supabase as any)
           .from("anew_clients")
-          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
           .eq("entity_id", openId)
           .eq("organization_id", activeCompany.id)
           .maybeSingle();
@@ -763,7 +766,7 @@ const AnewClients = () => {
       let offset = 0;
       let hasMore = true;
       while (hasMore) {
-        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at").is("deleted_at", null);
+        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id").is("deleted_at", null);
         if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
         else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
         const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
@@ -1380,7 +1383,7 @@ const AnewClients = () => {
         setDetailsOpen(true);
       } else {
         (async () => {
-          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
+          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
           if (data) {
             setSelectedClient(data);
             setDetailsOpen(true);
@@ -1659,7 +1662,7 @@ const AnewClients = () => {
             if (!found) {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
-                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
                 .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
@@ -1707,7 +1710,7 @@ const AnewClients = () => {
             if (!found) {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
-                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
                 .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
