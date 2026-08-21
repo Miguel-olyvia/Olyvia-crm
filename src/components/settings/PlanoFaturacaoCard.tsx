@@ -88,21 +88,27 @@ const PlanoFaturacaoCard = ({ organizationId }: PlanoFaturacaoCardProps) => {
   };
 
   const handleBuyPackage = async (pkg: AiCreditPackage) => {
-    if (!organizationId) return;
+    if (!organizationId || buyingPackageId) return;
 
     setBuyingPackageId(pkg.id);
     try {
-      const { error } = await (supabase as any).from("invoices").insert({
-        organization_id: organizationId,
-        type: "creditos",
-        package_id: pkg.id,
-        amount: pkg.price_sale,
-        status: "pendente",
-        description: t('settingsPage.billing.purchaseDescription', { name: pkg.name }),
+      const { data, error } = await supabase.functions.invoke('stripe-create-checkout-session', {
+        body: {
+          organization_id: organizationId,
+          type: 'creditos',
+          package_id: pkg.id,
+        },
       });
 
       if (error) throw error;
+      if (data?.error) throw data;
 
+      if (data?.mode === 'stripe' && data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+
+      // mode === 'manual' (ou resposta desconhecida): comportamento igual ao anterior
       toast.success(t('settingsPage.billing.buySuccess'));
       loadData(organizationId);
     } catch (error: any) {

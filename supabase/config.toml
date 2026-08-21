@@ -85,3 +85,9 @@ verify_jwt = false
 
 [functions.export-data]
 verify_jwt = true
+
+[functions.stripe-create-checkout-session]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false
