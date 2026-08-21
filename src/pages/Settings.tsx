@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { useTranslation } from "@/hooks/useTranslation";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import PlanoFaturacaoCard from "@/components/settings/PlanoFaturacaoCard";
 
 interface CustomField {
   id: string;
@@ -1083,6 +1084,9 @@ const Settings = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* Plan & Billing Card - Only visible to company admins */}
+        {isCompanyAdmin && <PlanoFaturacaoCard organizationId={userCompanyId} />}
 
         {/* Channel Types Card - Only visible to admins */}
         {isAdmin && (

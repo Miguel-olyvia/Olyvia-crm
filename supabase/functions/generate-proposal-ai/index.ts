@@ -6,6 +6,8 @@ import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -26,16 +28,21 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
     // Scoped client — carries the caller's own JWT, so identity resolution,
     // org-scope validation and every business-data read below run under the
     // caller's real RLS/permissions (has_anew_permission, get_user_visible_org_ids,
     // is_entity_in_user_scope), exactly as if the frontend had called them directly.
-    // No rate-limit table use in this function, so no residual service-role
-    // client is needed.
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+    });
+    // Residual service-role client — ONLY for the AI-credits RPCs
+    // (fn_check_and_consume_ai_credits / fn_refund_ai_credits), which are
+    // billing operations not meant to run under the caller's own RLS.
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
     });
 
     let caller;
@@ -161,16 +168,35 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
       ? `Gera uma proposta personalizada. Contexto: ${extra_context}`
       : "Gera uma proposta personalizada com base no histórico completo.";
 
-    const response = await callAiGateway({
-      model: "gemini-3.5-flash-lite",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.7,
-    });
+    // AI credits — billing gate, scoped to the (already org-scope-validated)
+    // organization_id. See _shared/aiCredits.ts for the atomic
+    // debit/refund-on-failure mechanics behind the try/catch below.
+    const creditsResult = await checkAndConsumeAiCredits(
+      supabaseAdmin,
+      organization_id,
+      AI_CREDIT_COSTS["generate-proposal-ai"],
+    );
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+
+    let response;
+    try {
+      response = await callAiGateway({
+        model: "gemini-3.5-flash-lite",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.7,
+      });
+    } catch (gatewayError) {
+      await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["generate-proposal-ai"]);
+      throw gatewayError;
+    }
 
     if (!response.ok) {
+      await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["generate-proposal-ai"]);
       const errorText = await response.text();
       throw new Error(`AI gateway error: ${response.status} - ${errorText}`);
     }

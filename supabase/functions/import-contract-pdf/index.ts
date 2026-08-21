@@ -93,6 +93,21 @@ serve(async (req) => {
       ? pdfBase64
       : `data:application/pdf;base64,${pdfBase64}`;
 
+    // NOTE (AI credits): unlike the other 6 callers of callAiGateway, this
+    // function has no reliable organization_id to charge here. The request
+    // body (requestSchema above) carries only fileName/pdfBase64 — the
+    // frontend caller (src/components/contracts/TemplateFileImport.tsx)
+    // never sends an organization_id, and resolveCallerIdentity()/auth.ts
+    // only resolves the caller's anew_users.id, not which organization they
+    // are currently acting in (a user can belong to several). Deriving an
+    // org from the caller's anew_memberships would be guessing at an
+    // "active org" this repo has no stored concept of, so the AI-credits
+    // check (see _shared/aiCredits.ts, added to the other 6 functions) was
+    // deliberately NOT added here rather than picking a possibly-wrong org
+    // to charge. If organization_id becomes available on this request (the
+    // frontend would need to start sending it, matching the pattern already
+    // used by generate-proposal-ai/leads-dashboard-ai-report/etc.), wire the
+    // same checkAndConsumeAiCredits/refundAiCredits calls in here too.
     const response = await callAiGateway({
         model: "gemini-3.5-flash-lite",
         temperature: 0.1,
