@@ -3,11 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CreditCard, Loader2 } from "lucide-react";
+import { CreditCard, Loader2, Sparkles } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { cn } from "@/lib/utils";
 
 interface AiCreditPackage {
   id: string;
@@ -15,6 +16,7 @@ interface AiCreditPackage {
   credits: number;
   price_sale: number;
   active: boolean;
+  is_popular: boolean;
 }
 
 interface Invoice {
@@ -62,7 +64,7 @@ const PlanoFaturacaoCard = ({ organizationId }: PlanoFaturacaoCardProps) => {
           .maybeSingle(),
         (supabase as any)
           .from("ai_credit_packages")
-          .select("id, name, credits, price_sale, active")
+          .select("id, name, credits, price_sale, active, is_popular")
           .eq("active", true)
           .order("credits"),
         (supabase as any)
@@ -176,32 +178,73 @@ const PlanoFaturacaoCard = ({ organizationId }: PlanoFaturacaoCardProps) => {
               {t('settingsPage.billing.noPackages')}
             </p>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {packages.map((pkg) => (
-                <div key={pkg.id} className="border rounded-lg p-4 space-y-2 flex flex-col justify-between">
-                  <div>
-                    <p className="font-semibold">{pkg.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {pkg.credits} {t('settingsPage.billing.creditsUnit')}
-                    </p>
-                    <p className="text-lg font-bold">{formatEUR(pkg.price_sale)}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => handleBuyPackage(pkg)}
-                    disabled={buyingPackageId === pkg.id}
-                  >
-                    {buyingPackageId === pkg.id ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        {t('settingsPage.billing.buying')}
-                      </>
-                    ) : (
-                      t('settingsPage.billing.buy')
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+              {packages.map((pkg) => {
+                const isPopular = pkg.is_popular;
+                return (
+                  <Card
+                    key={pkg.id}
+                    className={cn(
+                      "relative flex flex-col overflow-visible transition-all duration-200 hover:-translate-y-1",
+                      isPopular
+                        ? "border-2 border-primary shadow-md hover:shadow-xl"
+                        : "hover:shadow-md",
                     )}
-                  </Button>
-                </div>
-              ))}
+                  >
+                    {isPopular && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
+                        <Badge className="gap-1 px-3 py-1 shadow-sm whitespace-nowrap">
+                          <Sparkles className="w-3 h-3" />
+                          {t('settingsPage.billing.mostPopular')}
+                        </Badge>
+                      </div>
+                    )}
+                    <CardContent
+                      className={cn(
+                        "flex flex-col items-center justify-between gap-5 p-5 text-center h-full",
+                        isPopular ? "pt-7" : "pt-6",
+                      )}
+                    >
+                      <div className="space-y-3">
+                        <p
+                          className={cn(
+                            "font-semibold tracking-tight",
+                            isPopular ? "text-primary" : "text-foreground",
+                          )}
+                        >
+                          {pkg.name}
+                        </p>
+                        <div>
+                          <p className="text-3xl font-bold leading-none tracking-tight">
+                            {pkg.credits}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {t('settingsPage.billing.creditsUnit')}
+                          </p>
+                        </div>
+                        <p className="text-xl font-bold text-foreground">
+                          {formatEUR(pkg.price_sale)}
+                        </p>
+                      </div>
+                      <Button
+                        className="w-full"
+                        variant={isPopular ? "default" : "outline"}
+                        onClick={() => handleBuyPackage(pkg)}
+                        disabled={buyingPackageId === pkg.id}
+                      >
+                        {buyingPackageId === pkg.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            {t('settingsPage.billing.buying')}
+                          </>
+                        ) : (
+                          t('settingsPage.billing.buy')
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </div>
