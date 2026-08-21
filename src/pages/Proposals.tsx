@@ -164,6 +164,25 @@ interface QuoteItem {
   estado: string;
 }
 
+// Explicit column list for the list query — same as `proposals.*` but WITHOUT
+// published_snapshot / decided_snapshot / template_snapshot (all JSONB full
+// document snapshots). Those 3 columns alone blew the list query up to ~7.8MB
+// for ~500 proposals (confirmed via Network tab), none of it used by the list
+// or by ProposalDetailsDialog — only proposalPortalData.ts reads
+// template_snapshot, and it always does its own separate by-id fetch, so
+// dropping these here doesn't affect it. Keep in sync with the `proposals`
+// table schema (supabase gen types) if columns are added/removed later.
+const PROPOSALS_LIST_SELECT =
+  "id, deal_id, title, description, value, value_sem_iva, status, valid_until, document_url, notes, " +
+  "created_by, created_at, updated_at, client_id, currency, sent_at, viewed_at, accepted_at, rejected_at, " +
+  "acceptance_ip, acceptance_user_agent, client_contract_id, stage_id, request_date, delivered_at, " +
+  "delivery_time_hours, probability, template_id, public_token, public_link_enabled, rejection_reason, " +
+  "rejection_reason_code, rejection_notes, tracking_token, last_viewed_at, view_count, organization_id, " +
+  "entity_id, root_organization_id, proposal_number, rejection_reason_id, is_deleted, deleted_at, deleted_by, " +
+  "signature_image, assigned_to, published_at, published_snapshot_hash, has_unpublished_changes, " +
+  "decided_snapshot_hash, decided_published_at, " +
+  "deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)";
+
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -680,7 +699,7 @@ const Proposals = () => {
         const [proposalsRes, dealsRes] = await Promise.all([
           (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+            .select(PROPOSALS_LIST_SELECT)
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .order("created_at", { ascending: false }),
@@ -733,7 +752,7 @@ const Proposals = () => {
           if (dealIds.length > 0) {
             const { data: proposalsRes, error } = await (supabase
               .from("proposals") as any)
-              .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+              .select(PROPOSALS_LIST_SELECT)
               .eq("organization_id", activeCompany.id)
               .is("deleted_at", null)
               .in("deal_id", dealIds)
@@ -748,7 +767,7 @@ const Proposals = () => {
         if (proposalsData.length === 0 || viewScope === "TEAM") {
           const { data: ownedProposals } = await (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+            .select(PROPOSALS_LIST_SELECT)
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .in("created_by", Array.from(allowedUserIds))
