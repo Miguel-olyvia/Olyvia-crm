@@ -7,6 +7,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -303,32 +305,53 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
   "tips": ["dica 1", "dica 2"]
 }`;
 
-    const response = await callAiGateway({
-      model: "gemini-3.5-flash-lite",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: query },
-      ],
-      temperature: 0.7,
-    });
+    // AI credits — billing gate, scoped to the (already org-scope-validated)
+    // effective_org_id. See _shared/aiCredits.ts for the atomic
+    // debit/refund-on-failure mechanics behind the error branches below.
+    const creditsResult = await checkAndConsumeAiCredits(
+      supabaseAdmin,
+      effective_org_id as string,
+      AI_CREDIT_COSTS["quote-ai-assistant"],
+    );
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+
+    let response;
+    try {
+      response = await callAiGateway({
+        model: "gemini-3.5-flash-lite",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: query },
+        ],
+        temperature: 0.7,
+      });
+    } catch (gatewayError) {
+      await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+      throw gatewayError;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("AI Gateway error:", response.status, errorText);
-      
+
       if (response.status === 429) {
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded, please try again later" }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (response.status === 402) {
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
         return new Response(
           JSON.stringify({ error: "Payment required, please add credits" }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      
+
+      await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
       throw new Error(`AI gateway error: ${response.status}`);
     }
 
