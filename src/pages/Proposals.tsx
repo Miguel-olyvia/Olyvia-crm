@@ -768,88 +768,97 @@ const Proposals = () => {
       // Load pipeline links for proposals
       if (proposalsData.length > 0) {
         const proposalIds = proposalsData.map(p => p.id);
-        const { data: links } = await (supabase.from("pipeline_links") as any)
-          .select("id, proposal_id, deal_id, quote_id, contract_id, status")
-          .in("proposal_id", proposalIds)
-          .eq("organization_id", activeCompany?.id);
-        
+
+        // Quotes already come embedded in the proposals select above
+        // (quotes!proposal_id(desconto_global_percent)) — derive "has quotes"
+        // directly from that instead of round-tripping to `quotes` again.
+        const quotesSet = new Set<string>();
+        proposalsData.forEach((p: any) => {
+          if (p.quotes && p.quotes.length > 0) quotesSet.add(p.id);
+        });
+        setProposalsWithQuotes(quotesSet);
+
+        // Resolve entity names for proposals (including from deals as fallback)
+        const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
+        const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
+
+        // pipeline_links, client_portal_users and deals(entity_id) are all
+        // independent of each other and of the queries above — run them in
+        // parallel instead of serially.
+        const [linksRes, portalUsersRes, dealEntitiesRes] = await Promise.all([
+          (supabase.from("pipeline_links") as any)
+            .select("id, proposal_id, deal_id, quote_id, contract_id, status")
+            .in("proposal_id", proposalIds)
+            .eq("organization_id", activeCompany?.id),
+          (supabase as any)
+            .from("client_portal_users")
+            .select("proposal_id, portal_status")
+            .eq("organization_id", activeCompany.id)
+            .in("proposal_id", proposalIds),
+          dealIds.length > 0
+            ? supabase.from("deals").select("id, entity_id").in("id", dealIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        const links = linksRes.data;
         const linksMap: Record<string, any> = {};
         (links || []).forEach((l: any) => {
           linksMap[l.proposal_id] = l;
         });
         setPipelineLinks(linksMap);
 
-        // Load contract statuses for linked contracts (no FK between pipeline_links.contract_id
-        // and client_contracts, so this must be a separate query, not an embed).
-        const contractIds = Array.from(new Set((links || []).map((l: any) => l.contract_id).filter(Boolean)));
-        if (contractIds.length > 0) {
-          const { data: linkedContracts } = await (supabase.from("client_contracts") as any)
-            .select("id, status")
-            .in("id", contractIds);
-          const contractStatusMap: Record<string, string> = {};
-          (linkedContracts || []).forEach((c: any) => {
-            contractStatusMap[c.id] = c.status;
-          });
-          setContractStatuses(contractStatusMap);
-        } else {
-          setContractStatuses({});
-        }
-
-        // Check which proposals have quotes directly linked (via quotes.proposal_id)
-        const { data: quotesLinked } = await (supabase.from("quotes") as any)
-          .select("proposal_id")
-          .in("proposal_id", proposalIds)
-          .eq("organization_id", activeCompany?.id)
-          .not("proposal_id", "is", null);
-        const quotesSet = new Set<string>();
-        (quotesLinked || []).forEach((q: any) => {
-          if (q.proposal_id) quotesSet.add(q.proposal_id);
-        });
-        setProposalsWithQuotes(quotesSet);
-
-        // Load portal statuses for proposals
-        const { data: portalUsers } = await (supabase as any)
-          .from("client_portal_users")
-          .select("proposal_id, portal_status")
-          .eq("organization_id", activeCompany.id)
-          .in("proposal_id", proposalIds);
-        
+        const portalUsers = portalUsersRes.data;
         const statusMap: Record<string, string> = {};
         (portalUsers || []).forEach((pu: any) => {
           if (pu.proposal_id) statusMap[pu.proposal_id] = pu.portal_status;
         });
         setPortalStatuses(statusMap);
 
-        // Resolve entity names for proposals (including from deals as fallback)
-        const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
-        const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
-        
         // Fetch deal entity_ids for proposals without entity_id
         const dealEntityMap: Record<string, string> = {};
-        if (dealIds.length > 0) {
-          const { data: dealEntities } = await supabase
-            .from("deals")
-            .select("id, entity_id")
-            .in("id", dealIds);
-          (dealEntities || []).forEach((d: any) => {
-            if (d.entity_id) dealEntityMap[d.id] = d.entity_id;
-          });
-        }
+        (dealEntitiesRes.data || []).forEach((d: any) => {
+          if (d.entity_id) dealEntityMap[d.id] = d.entity_id;
+        });
+
+        // Load contract statuses for linked contracts (no FK between pipeline_links.contract_id
+        // and client_contracts, so this must be a separate query, not an embed).
+        // This depends on `links` above, so it can only start now — but it runs
+        // alongside the entity lookups below instead of blocking them.
+        const contractIds = Array.from(new Set((links || []).map((l: any) => l.contract_id).filter(Boolean)));
+        const contractsPromise = contractIds.length > 0
+          ? (supabase.from("client_contracts") as any).select("id, status").in("id", contractIds)
+          : Promise.resolve({ data: [] as any[] });
 
         const allEntityIds = [...new Set([
           ...directEntityIds,
           ...Object.values(dealEntityMap),
         ])];
 
-        if (allEntityIds.length > 0) {
-          const [entRes, emailRes, phoneRes, interactionRes] = await Promise.all([
-            supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
-            supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
-            supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
-            // Ordered desc so the forEach below (which only ever keeps the
-            // first value seen per entity_id) naturally keeps the latest one.
-            supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
-          ]);
+        const entitiesPromise = allEntityIds.length > 0
+          ? Promise.all([
+              supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
+              supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
+              supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
+              // Ordered desc so the forEach below (which only ever keeps the
+              // first value seen per entity_id) naturally keeps the latest one.
+              supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
+            ])
+          : null;
+
+        const [contractsRes, entityResults] = await Promise.all([
+          contractsPromise,
+          entitiesPromise ?? Promise.resolve(null),
+        ]);
+
+        const linkedContracts = contractsRes.data;
+        const contractStatusMap: Record<string, string> = {};
+        (linkedContracts || []).forEach((c: any) => {
+          contractStatusMap[c.id] = c.status;
+        });
+        setContractStatuses(contractStatusMap);
+
+        if (entityResults) {
+          const [entRes, emailRes, phoneRes, interactionRes] = entityResults;
           const nameMap: Record<string, string> = {};
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
