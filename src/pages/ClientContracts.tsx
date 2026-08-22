@@ -320,49 +320,19 @@ const ClientContracts = () => {
         }
       } catch { /* fallback to just activeCompany */ }
 
-      // Resolve allowed creator IDs by scope. OWNED → self; TEAM → self + subordinates.
-      let creatorBatches: string[][] | null = null;
-      if (viewScope === "OWNED") {
-        if (!scopeAnewUserId) return [];
-        creatorBatches = [[scopeAnewUserId]];
-      } else if (viewScope === "TEAM") {
-        const allowed = new Set<string>();
-        if (scopeAnewUserId) allowed.add(scopeAnewUserId);
-        teamMemberIds.forEach(id => allowed.add(id));
-        if (allowed.size === 0) return [];
-        const all = Array.from(allowed);
-        const BATCH = 200;
-        creatorBatches = [];
-        for (let i = 0; i < all.length; i += BATCH) creatorBatches.push(all.slice(i, i + BATCH));
-      }
-
-      const runBaseQuery = (creatorBatch: string[] | null) => {
-        let q: any = (supabase as any)
-          .from("client_contracts")
-          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
-          .in("organization_id", subtreeIds)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false });
-        if (creatorBatch) q = q.in("created_by", creatorBatch);
-        return q;
-      };
-
-      let data: any[] = [];
-      if (creatorBatches === null) {
-        const { data: rows, error } = await runBaseQuery(null);
-        if (error) throw error;
-        data = rows || [];
-      } else {
-        const dedup = new Map<string, any>();
-        for (const batch of creatorBatches) {
-          const { data: rows, error } = await runBaseQuery(batch);
-          if (error) throw error;
-          (rows || []).forEach((r: any) => { if (!dedup.has(r.id)) dedup.set(r.id, r); });
-        }
-        data = Array.from(dedup.values()).sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-      }
+      // Visibilidade por ÁREA/organização: quem tem acesso à org (subárvore da
+      // empresa ativa) vê TODOS os contratos dela, independentemente de quem os
+      // criou. O scope OWNED/TEAM deixa de esconder contratos assinados nesta
+      // lista — o botão "Só meus" (onlyMine) continua disponível como opção do
+      // utilizador, e a RLS do Supabase mantém-se como fronteira de segurança.
+      const { data: rows, error } = await (supabase as any)
+        .from("client_contracts")
+        .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
+        .in("organization_id", subtreeIds)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      let data: any[] = rows || [];
 
       const entityIds = data.map((c: any) => c.entity_id).filter(Boolean);
       if (entityIds.length > 0) {

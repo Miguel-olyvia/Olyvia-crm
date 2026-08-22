@@ -60,3 +60,6 @@ migrations_disabled_local/
 test-results/
 playwright-report/
 tests/.auth/
+
+# Local secrets
+env
