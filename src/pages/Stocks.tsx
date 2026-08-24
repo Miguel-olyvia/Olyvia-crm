@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
@@ -41,9 +41,11 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
-  products?: { name: string };
+  products?: { name: string; category_id?: string | null; product_categories?: { name: string } | null };
   warehouses?: { name: string };
 };
+
+const UNCATEGORIZED_LABEL = "Sem categoria";
 
 const stockSchema = z.object({
   product_id: z.string().trim().min(1, "O produto é obrigatório."),
@@ -81,6 +83,27 @@ const Stocks = () => {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
 
+  // Group stocks by the product's category, sorted alphabetically (uncategorized
+  // last); products within a category sorted alphabetically too. Purely a render
+  // grouping — doesn't change what fetchStocks loads or how edit/delete work.
+  const groupedStocks = useMemo(() => {
+    const groups = new Map<string, Stock[]>();
+    for (const stock of stocks) {
+      const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
+      const list = groups.get(categoryName) || [];
+      list.push(stock);
+      groups.set(categoryName, list);
+    }
+    for (const list of groups.values()) {
+      list.sort((a, b) => (a.products?.name || "").localeCompare(b.products?.name || ""));
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === UNCATEGORIZED_LABEL) return 1;
+      if (b === UNCATEGORIZED_LABEL) return -1;
+      return a.localeCompare(b);
+    });
+  }, [stocks]);
+
   useEffect(() => {
     if (activeCompany?.id) {
       fetchStocks();
@@ -97,7 +120,7 @@ const Stocks = () => {
         .from("stocks")
         .select(`
           *,
-          products(name),
+          products(name, category_id, product_categories!category_id(name)),
           warehouses(name)
         `)
         .eq("organization_id", activeCompany.id)
@@ -317,6 +340,7 @@ const Stocks = () => {
     downloadStandardXlsx({
       sheetName: "Stocks",
       columns: [
+        { key: "category", header: "Categoria", width: 22 },
         { key: "product", header: t('stocks.table.product'), width: 30 },
         { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
         { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
@@ -326,6 +350,7 @@ const Stocks = () => {
         { key: "location", header: t('stocks.table.location'), width: 24 },
       ],
       rows: stocks.map((stock) => ({
+        category: stock.products?.product_categories?.name || UNCATEGORIZED_LABEL,
         product: stock.products?.name,
         warehouse: stock.warehouses?.name,
         quantity: stock.quantity,
@@ -734,66 +759,75 @@ const Stocks = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                stocks.map((stock) => (
-                  <TableRow key={stock.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Package className="w-4 h-4 text-muted-foreground" />
-                        {stock.products?.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>{stock.warehouses?.name}</TableCell>
-                    <TableCell>{stock.location || "-"}</TableCell>
-                    <TableCell className="text-right">
-                      {stock.quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.minimum_quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.maximum_quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.reorder_point}
-                    </TableCell>
-                    <TableCell>{getStockStatus(stock)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {showDeleted ? (
-                          <PermissionGate permission="stocks.delete">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRestore(stock.id)}
-                            >
-                              {t('stocks.restore') || 'Restaurar'}
-                            </Button>
-                          </PermissionGate>
-                        ) : (
-                          <>
-                            <PermissionGate permission="stocks.edit">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditDialog(stock)}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <PermissionGate permission="stocks.delete">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(stock.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                groupedStocks.map(([categoryName, categoryStocks]) => (
+                  <Fragment key={categoryName}>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableCell colSpan={9} className="font-semibold text-sm">
+                        {categoryName} <span className="font-normal text-muted-foreground">({categoryStocks.length})</span>
+                      </TableCell>
+                    </TableRow>
+                    {categoryStocks.map((stock) => (
+                      <TableRow key={stock.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2 pl-4">
+                            <Package className="w-4 h-4 text-muted-foreground" />
+                            {stock.products?.name}
+                          </div>
+                        </TableCell>
+                        <TableCell>{stock.warehouses?.name}</TableCell>
+                        <TableCell>{stock.location || "-"}</TableCell>
+                        <TableCell className="text-right">
+                          {stock.quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {stock.minimum_quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {stock.maximum_quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {stock.reorder_point}
+                        </TableCell>
+                        <TableCell>{getStockStatus(stock)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {showDeleted ? (
+                              <PermissionGate permission="stocks.delete">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleRestore(stock.id)}
+                                >
+                                  {t('stocks.restore') || 'Restaurar'}
+                                </Button>
+                              </PermissionGate>
+                            ) : (
+                              <>
+                                <PermissionGate permission="stocks.edit">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditDialog(stock)}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                                <PermissionGate permission="stocks.delete">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDelete(stock.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </Fragment>
                 ))
               )}
             </TableBody>
