@@ -235,6 +235,16 @@ const PurchaseOrders = () => {
       const companyId = activeCompany.id;
       console.log("loadData: Loading purchase orders for company:", companyId, activeCompany.name);
 
+      const productColumns = `
+            id,
+            sku,
+            name,
+            description,
+            supplier_id,
+            product_categories!category_id(name),
+            brands(name)
+          `;
+
       const [
         ordersRes,
         suppliersRes,
@@ -257,7 +267,19 @@ const PurchaseOrders = () => {
               .order("created_at", { ascending: false })),
         supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
         supabase.from("product_organizations").select("product_id").eq("organization_id", companyId),
-        supabase.from("products").select("id").eq("organization_id", companyId).is("deleted_at", null),
+        // Direct match: products owned by this org. Filtered server-side (no client-side
+        // id list needed) — this is the bulk of the catalog (2000+ products for orgs like
+        // Mudelar). Fetching these via .in("id", [...]) instead (as before) built a query
+        // string with thousands of UUIDs and failed outright with net::ERR_FAILED once
+        // the products.supplier_id exclusion (which used to shrink this list to ~6% of
+        // the catalog) was removed.
+        supabase
+          .from("products")
+          .select(productColumns)
+          .eq("organization_id", companyId)
+          .eq("is_active", true)
+          .eq("is_purchasable", true)
+          .is("deleted_at", null),
         supabase
           .from("services")
           .select(`
@@ -283,45 +305,48 @@ const PurchaseOrders = () => {
       setOrders((ordersRes.data as PurchaseOrder[]) || []);
       setSuppliers(suppliersRes.data || []);
 
-      // Load products: organization_id OR product_organizations
-      const junctionProductIds = companyProductsRes.data?.map((p: any) => p.product_id) || [];
-      const directProductIds = directProductsRes.data?.map((p: any) => p.id) || [];
-      const companyProductIds = [...new Set([...junctionProductIds, ...directProductIds])];
+      // Shared products: linked via product_organizations to this org but owned
+      // (products.organization_id) by a DIFFERENT org — not covered by the direct query
+      // above. This set is expected to be small (cross-org sharing is the exception, not
+      // the rule), so a .in() over just these leftover ids stays well within URL limits.
+      const directProductsData = directProductsRes.data || [];
+      const directProductIds = new Set(directProductsData.map((p: any) => p.id));
+      const junctionOnlyIds = (companyProductsRes.data || [])
+        .map((p: any) => p.product_id)
+        .filter((id: string) => id && !directProductIds.has(id));
 
-      let productsData: any[] = [];
-      if (companyProductIds.length > 0) {
-        const productsRes = await supabase
+      let sharedProductsData: any[] = [];
+      if (junctionOnlyIds.length > 0) {
+        const sharedRes = await supabase
           .from("products")
-          .select(`
-            id,
-            sku,
-            name,
-            description,
-            supplier_id,
-            product_categories!category_id(name),
-            brands(name)
-          `)
+          .select(productColumns)
           .eq("is_active", true)
           .eq("is_purchasable", true)
           .is("deleted_at", null)
-          // NOT filtered by products.supplier_id anymore (deprecated, single-supplier
-          // model) — eligibility per selected supplier is resolved separately from
-          // item_suppliers (supplierProductRefs/supplierServiceRefs above).
-          .in("id", companyProductIds);
-
-        if (productsRes.error) throw productsRes.error;
-        productsData = productsRes.data || [];
+          .in("id", junctionOnlyIds);
+        if (sharedRes.error) throw sharedRes.error;
+        sharedProductsData = sharedRes.data || [];
       }
 
-      // Fetch product prices
+      const productsData: any[] = [...directProductsData, ...sharedProductsData];
+
+      // Fetch product prices — batched (same BATCH=200 pattern as AddItemsDialog.tsx):
+      // a single .in("product_id", productIds) with thousands of ids builds a query
+      // string that fails outright with net::ERR_FAILED for large catalogs.
       const productIds = productsData?.map((p: any) => p.id) || [];
-      const { data: productPrices } = productIds.length
-        ? await supabase
-            .from("product_prices")
-            .select("product_id, price, vat_rate")
-            .eq("price_type", "purchase")
-            .in("product_id", productIds)
-        : { data: [] as any[] };
+      const PRICE_BATCH = 200;
+      const productPrices: any[] = [];
+      for (let i = 0; i < productIds.length; i += PRICE_BATCH) {
+        const batch = productIds.slice(i, i + PRICE_BATCH);
+        if (batch.length === 0) continue;
+        const { data: batchPrices, error: batchError } = await supabase
+          .from("product_prices")
+          .select("product_id, price, vat_rate")
+          .eq("price_type", "purchase")
+          .in("product_id", batch);
+        if (batchError) throw batchError;
+        productPrices.push(...(batchPrices || []));
+      }
 
       const productPriceEntries: Array<[string, PriceInfo]> = (productPrices || [])
         .filter((p: any) => typeof p.product_id === "string")
@@ -349,15 +374,21 @@ const PurchaseOrders = () => {
       // Fetch product attributes
       await fetchProductAttributes();
 
-      // Fetch service prices
+      // Fetch service prices — same batching as product_prices above, for consistency
+      // (services catalogs are usually much smaller, but no reason to risk it).
       const serviceIds = servicesRes.data?.map((s: any) => s.id) || [];
-      const { data: servicePrices } = serviceIds.length
-        ? await supabase
-            .from("service_prices")
-            .select("service_id, price, vat_rate")
-            .eq("price_type", "purchase")
-            .in("service_id", serviceIds)
-        : { data: [] as any[] };
+      const servicePrices: any[] = [];
+      for (let i = 0; i < serviceIds.length; i += PRICE_BATCH) {
+        const batch = serviceIds.slice(i, i + PRICE_BATCH);
+        if (batch.length === 0) continue;
+        const { data: batchPrices, error: batchError } = await supabase
+          .from("service_prices")
+          .select("service_id, price, vat_rate")
+          .eq("price_type", "purchase")
+          .in("service_id", batch);
+        if (batchError) throw batchError;
+        servicePrices.push(...(batchPrices || []));
+      }
 
       const servicePriceEntries: Array<[string, PriceInfo]> = (servicePrices || [])
         .filter((p: any) => typeof p.service_id === "string")
