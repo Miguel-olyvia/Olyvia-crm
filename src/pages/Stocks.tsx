@@ -47,6 +47,12 @@ type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
 
 const UNCATEGORIZED_LABEL = "Sem categoria";
 
+function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
+  if (stock.quantity <= stock.reorder_point) return "low";
+  if (stock.quantity >= stock.maximum_quantity) return "overstock";
+  return "normal";
+}
+
 const stockSchema = z.object({
   product_id: z.string().trim().min(1, "O produto é obrigatório."),
   warehouse_id: z.string().trim().min(1, "O armazém é obrigatório."),
@@ -82,13 +88,47 @@ const Stocks = () => {
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [warehouseFilter, setWarehouseFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
+
+  // Categories actually present in the currently loaded stocks — derived from the
+  // data itself so the dropdown never lists a category with zero stock rows.
+  const availableCategories = useMemo(() => {
+    const names = new Set<string>();
+    for (const stock of stocks) {
+      names.add(stock.products?.product_categories?.name || UNCATEGORIZED_LABEL);
+    }
+    return Array.from(names).sort((a, b) => {
+      if (a === UNCATEGORIZED_LABEL) return 1;
+      if (b === UNCATEGORIZED_LABEL) return -1;
+      return a.localeCompare(b);
+    });
+  }, [stocks]);
+
+  // Client-side filter over the already-loaded stocks (no extra query — this page
+  // loads the whole org's stocks upfront, same as before this change).
+  const filteredStocks = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return stocks.filter((stock) => {
+      if (term && !(stock.products?.name || "").toLowerCase().includes(term)) return false;
+      if (categoryFilter !== "all") {
+        const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
+        if (categoryName !== categoryFilter) return false;
+      }
+      if (warehouseFilter !== "all" && stock.warehouse_id !== warehouseFilter) return false;
+      if (statusFilter !== "all" && getStockStatusCode(stock) !== statusFilter) return false;
+      return true;
+    });
+  }, [stocks, searchTerm, categoryFilter, warehouseFilter, statusFilter]);
 
   // Group stocks by the product's category, sorted alphabetically (uncategorized
   // last); products within a category sorted alphabetically too. Purely a render
   // grouping — doesn't change what fetchStocks loads or how edit/delete work.
   const groupedStocks = useMemo(() => {
     const groups = new Map<string, Stock[]>();
-    for (const stock of stocks) {
+    for (const stock of filteredStocks) {
       const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
       const list = groups.get(categoryName) || [];
       list.push(stock);
@@ -102,7 +142,7 @@ const Stocks = () => {
       if (b === UNCATEGORIZED_LABEL) return -1;
       return a.localeCompare(b);
     });
-  }, [stocks]);
+  }, [filteredStocks]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -327,13 +367,10 @@ const Stocks = () => {
   };
 
   const getStockStatus = (stock: Stock) => {
-    if (stock.quantity <= stock.reorder_point) {
-      return <Badge variant="destructive">{t('stocks.status.lowStock')}</Badge>;
-    } else if (stock.quantity >= stock.maximum_quantity) {
-      return <Badge variant="outline">{t('stocks.status.overstock')}</Badge>;
-    } else {
-      return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
-    }
+    const code = getStockStatusCode(stock);
+    if (code === "low") return <Badge variant="destructive">{t('stocks.status.lowStock')}</Badge>;
+    if (code === "overstock") return <Badge variant="outline">{t('stocks.status.overstock')}</Badge>;
+    return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
   };
 
   const handleExport = () => {
@@ -730,6 +767,65 @@ const Stocks = () => {
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
+            placeholder="Pesquisar por produto..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-xs"
+          />
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas as categorias</SelectItem>
+              {availableCategories.map((name) => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder={t('stocks.table.warehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os armazéns</SelectItem>
+              {warehouses.map((warehouse) => (
+                <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder={t('stocks.table.status')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os estados</SelectItem>
+              <SelectItem value="low">{t('stocks.status.lowStock')}</SelectItem>
+              <SelectItem value="normal">{t('stocks.status.normal')}</SelectItem>
+              <SelectItem value="overstock">{t('stocks.status.overstock')}</SelectItem>
+            </SelectContent>
+          </Select>
+          {(searchTerm || categoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchTerm("");
+                setCategoryFilter("all");
+                setWarehouseFilter("all");
+                setStatusFilter("all");
+              }}
+            >
+              Limpar filtros
+            </Button>
+          )}
+          <span className="text-sm text-muted-foreground ml-auto">
+            {filteredStocks.length} de {stocks.length}
+          </span>
+        </div>
+
         <div className="border rounded-lg">
           <Table>
             <TableHeader>
@@ -756,6 +852,12 @@ const Stocks = () => {
                 <TableRow>
                   <TableCell colSpan={9} className="text-center">
                     {t('stocks.noStocks')}
+                  </TableCell>
+                </TableRow>
+              ) : filteredStocks.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                    Nenhum stock corresponde aos filtros aplicados.
                   </TableCell>
                 </TableRow>
               ) : (
