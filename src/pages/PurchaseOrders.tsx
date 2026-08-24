@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -105,6 +105,12 @@ const PurchaseOrders = () => {
   const [selectedCatalogItems, setSelectedCatalogItems] = useState<string[]>([]);
   const [selectedItemType, setSelectedItemType] = useState<'product' | 'service'>('product');
   const [productAttributes, setProductAttributes] = useState<Map<string, ProductAttribute[]>>(new Map());
+  // product_id/service_id -> { purchase_price, supplier_sku } for the SELECTED supplier,
+  // resolved from item_suppliers (Fase 1). Determines which catalog items are eligible
+  // to add to this order and at what price — replaces the deprecated
+  // products.supplier_id/services.supplier_id single-supplier match.
+  const [supplierProductRefs, setSupplierProductRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
+  const [supplierServiceRefs, setSupplierServiceRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
   const [selectedItemAttributes, setSelectedItemAttributes] = useState<Record<string, Record<string, string>>>({});
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -162,106 +168,54 @@ const PurchaseOrders = () => {
     loadFormSuppliers();
   }, [organizationSelection.companyId]);
 
-  // Load products when company and supplier selection changes in the form
+  // Resolve which products/services the SELECTED supplier can actually supply, via
+  // item_suppliers (Fase 1 do plano de fornecedores) — substitui o antigo
+  // products.supplier_id/services.supplier_id (deprecated, só guarda 1 fornecedor
+  // por artigo). products/services em si continuam a vir de loadData(), que já
+  // carrega o catálogo completo da organização; este efeito só resolve, para o
+  // fornecedor escolhido no cabeçalho da encomenda, QUAIS desses artigos ele
+  // fornece e a que preço/referência — não volta a fazer fetch de products/services.
   useEffect(() => {
-    const loadFormProducts = async () => {
+    const loadSupplierItemRefs = async () => {
       const companyId = organizationSelection.companyId;
       const supplierId = formData.supplier_id;
 
-      console.log("Loading products for company:", companyId, "supplier:", supplierId);
-
-      if (!companyId) {
-        setProducts([]);
+      if (!companyId || !supplierId) {
+        setSupplierProductRefs(new Map());
+        setSupplierServiceRefs(new Map());
         return;
       }
 
       try {
-        // Products can be linked either directly (products.organization_id) or via product_organizations
-        const [companyProductsRes, directProductsRes] = await Promise.all([
-          supabase.from("product_organizations").select("product_id").eq("organization_id", companyId),
-          supabase.from("products").select("id").eq("organization_id", companyId).is("deleted_at", null),
-        ]);
-
-        if (companyProductsRes.error) throw companyProductsRes.error;
-        if (directProductsRes.error) throw directProductsRes.error;
-
-        const junctionProductIds = companyProductsRes.data?.map((p: any) => p.product_id) || [];
-        const directProductIds = directProductsRes.data?.map((p: any) => p.id) || [];
-        const companyProductIds = [...new Set([...junctionProductIds, ...directProductIds])];
-
-        if (companyProductIds.length === 0) {
-          setProducts([]);
-          return;
-        }
-
-        // Only purchasable products AND with supplier associated
-        let query = supabase
-          .from("products")
-          .select(
-            `
-              id,
-              sku,
-              name,
-              description,
-              supplier_id,
-              product_categories!category_id(name),
-              brands(name)
-            `
-          )
+        const { data, error } = await (supabase as any)
+          .from("item_suppliers")
+          .select("product_id, service_id, purchase_price, supplier_sku")
+          .eq("organization_id", companyId)
+          .eq("supplier_id", supplierId)
           .eq("is_active", true)
-          .eq("is_purchasable", true)
-          .is("deleted_at", null)
-          .not("supplier_id", "is", null)
-          .in("id", companyProductIds);
+          .is("deleted_at", null);
 
-        // Filter by supplier if selected (strict match)
-        if (supplierId) {
-          query = query.eq("supplier_id", supplierId);
-        }
-
-        const { data: productsData, error } = await query;
         if (error) throw error;
 
-        // Fetch product purchase prices
-        const productIds = productsData?.map((p: any) => p.id) || [];
-        const { data: productPrices } = productIds.length
-          ? await supabase
-              .from("product_prices")
-              .select("product_id, price, vat_rate")
-              .eq("price_type", "purchase")
-              .in("product_id", productIds)
-          : { data: [] as any[] };
+        const productMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
+        const serviceMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
 
-        const productPriceEntries: Array<[string, PriceInfo]> = (productPrices || [])
-          .filter((p: any) => typeof p.product_id === "string")
-          .map((p: any) => [p.product_id, { price: p.price ?? null, vat_rate: p.vat_rate ?? null }]);
-
-        const productPricesMap = new Map<string, PriceInfo>(productPriceEntries);
-
-        const mappedProducts: ProductCatalogItem[] = (productsData || []).map((product: any) => {
-          const priceInfo = productPricesMap.get(product.id);
-          return {
-            id: product.id,
-            name: product.name,
-            description: product.description,
-            sku: product.sku,
-            supplier_id: product.supplier_id,
-            category_name: product.product_categories?.name || null,
-            brand_name: product.brands?.name || null,
-            purchase_price: priceInfo?.price ?? null,
-            vat_rate: priceInfo?.vat_rate ?? 23,
-          };
+        (data || []).forEach((row: any) => {
+          const info = { purchase_price: row.purchase_price ?? null, supplier_sku: row.supplier_sku ?? null };
+          if (row.product_id) productMap.set(row.product_id, info);
+          if (row.service_id) serviceMap.set(row.service_id, info);
         });
 
-        console.log("Loaded products:", mappedProducts.length);
-        setProducts(mappedProducts);
+        setSupplierProductRefs(productMap);
+        setSupplierServiceRefs(serviceMap);
       } catch (error: any) {
-        console.error("Error loading products:", error);
-        setProducts([]);
+        console.error("Error loading supplier item references:", error);
+        setSupplierProductRefs(new Map());
+        setSupplierServiceRefs(new Map());
       }
     };
 
-    loadFormProducts();
+    loadSupplierItemRefs();
   }, [organizationSelection.companyId, formData.supplier_id]);
 
   useEffect(() => {
@@ -350,7 +304,9 @@ const PurchaseOrders = () => {
           .eq("is_active", true)
           .eq("is_purchasable", true)
           .is("deleted_at", null)
-          .not("supplier_id", "is", null)
+          // NOT filtered by products.supplier_id anymore (deprecated, single-supplier
+          // model) — eligibility per selected supplier is resolved separately from
+          // item_suppliers (supplierProductRefs/supplierServiceRefs above).
           .in("id", companyProductIds);
 
         if (productsRes.error) throw productsRes.error;
@@ -596,14 +552,33 @@ const PurchaseOrders = () => {
     };
   };
 
-  const getAvailableItems = () => {
+  // Products/services the selected supplier actually supplies, per item_suppliers,
+  // with purchase_price overridden to the supplier-specific price when it has one
+  // (falls back to the product_prices-derived price otherwise). Single source used
+  // both by getAvailableItems() (confirm/add) and the two tab lists in the items
+  // dialog (render) — kept as one computation so they can never disagree.
+  const availableProductsForSupplier = useMemo(() => {
     if (!formData.supplier_id) return [];
-    
-    if (selectedItemType === 'product') {
-      return products.filter(p => p.supplier_id === formData.supplier_id);
-    } else {
-      return services.filter(s => s.supplier_id === formData.supplier_id);
-    }
+    return products
+      .filter(p => supplierProductRefs.has(p.id))
+      .map(p => {
+        const ref = supplierProductRefs.get(p.id);
+        return ref?.purchase_price != null ? { ...p, purchase_price: ref.purchase_price } : p;
+      });
+  }, [products, supplierProductRefs, formData.supplier_id]);
+
+  const availableServicesForSupplier = useMemo(() => {
+    if (!formData.supplier_id) return [];
+    return services
+      .filter(s => supplierServiceRefs.has(s.id))
+      .map(s => {
+        const ref = supplierServiceRefs.get(s.id);
+        return ref?.purchase_price != null ? { ...s, purchase_price: ref.purchase_price } : s;
+      });
+  }, [services, supplierServiceRefs, formData.supplier_id]);
+
+  const getAvailableItems = () => {
+    return selectedItemType === 'product' ? availableProductsForSupplier : availableServicesForSupplier;
   };
 
   const handleAddCatalogItems = () => {
@@ -1482,7 +1457,7 @@ const PurchaseOrders = () => {
             </TabsList>
             
             <TabsContent value="product" className="space-y-4 max-h-[50vh] overflow-y-auto">
-              {products.filter(p => p.supplier_id === formData.supplier_id).map((product) => (
+              {availableProductsForSupplier.map((product) => (
                 <div key={product.id} className="flex items-start gap-4 p-4 border rounded-lg">
                   <Checkbox
                     checked={selectedCatalogItems.includes(product.id)}
@@ -1564,7 +1539,7 @@ const PurchaseOrders = () => {
             </TabsContent>
             
             <TabsContent value="service" className="space-y-4 max-h-[50vh] overflow-y-auto">
-              {services.filter(s => s.supplier_id === formData.supplier_id).map((service) => (
+              {availableServicesForSupplier.map((service) => (
                 <div key={service.id} className="flex items-start gap-4 p-4 border rounded-lg">
                   <Checkbox
                     checked={selectedCatalogItems.includes(service.id)}
