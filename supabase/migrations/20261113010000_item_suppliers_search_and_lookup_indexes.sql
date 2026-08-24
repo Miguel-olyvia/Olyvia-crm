@@ -7,7 +7,10 @@
 -- só aparece em 20260615130000_baseline_new_database.sql). O padrão de referência real para
 -- índices trigram de pesquisa é o próprio baseline: idx_anew_leads_search_text_trgm,
 -- idx_fiscal_entities_nif_trgm, idx_anew_entities_display_name_trgm, todos
--- `USING gin (coluna gin_trgm_ops)` (extensão pg_trgm já instalada em 20260615130000, linha 24).
+-- `USING gin (coluna "extensions"."gin_trgm_ops")` (extensão pg_trgm instalada no schema
+-- `extensions`, não em `public` — confirmado ao vivo via pg_extension; o operador tem de
+-- vir qualificado com o schema, como o baseline já faz, senão falha com
+-- "operator class gin_trgm_ops does not exist for access method gin").
 -- Este ficheiro segue esse mesmo padrão.
 --
 -- Pesquisa por referência do fornecedor (supplier_sku) + "melhor referência por
@@ -15,7 +18,7 @@
 -- AddItemsDialog.tsx (Fase 2 do plano).
 
 CREATE INDEX IF NOT EXISTS idx_item_suppliers_supplier_sku_trgm
-  ON public.item_suppliers USING gin (supplier_sku gin_trgm_ops)
+  ON public.item_suppliers USING gin (supplier_sku extensions.gin_trgm_ops)
   WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_item_suppliers_product_pref_price
