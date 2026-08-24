@@ -251,6 +251,66 @@ function applyOwnerScope(query: any, auth: AuthorizationContext): any {
   return query.or(`created_by.in.(${ids.join(",")}),assigned_to.in.(${ids.join(",")})`);
 }
 
+/**
+ * PostgREST serialises `.in()` into the query string, and the gateway rejects
+ * URLs past roughly 12 kB. Measured against this project: 300 ids (~11 kB)
+ * succeed, 400 (~15 kB) fail outright at the connection level.
+ *
+ * Exporting an organization with 5418 leads built a ~200 kB URL, so every
+ * lookup here failed and the whole export returned 500. Smaller organizations
+ * stayed under the limit, which is why leads broke while clients and contacts
+ * kept working — the defect was invisible until a tenant grew.
+ *
+ * 200 ids per request is ~7.5 kB, leaving room for the rest of the URL and the
+ * headers.
+ */
+const IN_CHUNK_SIZE = 200;
+
+/**
+ * PostgREST caps every response at `db-max-rows`, 1000 on this project, and
+ * does so silently — `.limit(10001)` still returns 1000 rows with no error and
+ * no indication that anything was dropped. An organization with 5418 leads was
+ * therefore exporting 1000 of them, which is worse than failing outright.
+ *
+ * Pages through the result instead, rebuilding the query each time because
+ * `.range()` needs a fresh builder. The caller's query must carry a
+ * deterministic ORDER BY or pages can overlap.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows(build: () => any): Promise<any[]> {
+  const rows: any[] = [];
+  for (let from = 0; from <= MAX_EXPORT_ROWS; from += PAGE_SIZE) {
+    const { data, error } = await build().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    // A short page means the end of the result set.
+    if (data.length < PAGE_SIZE) break;
+    // One row past the cap is enough for the caller's limit check to trip.
+    if (rows.length > MAX_EXPORT_ROWS) break;
+  }
+  return rows;
+}
+
+async function selectInChunks(
+  ids: string[],
+  build: (chunk: string[]) => any,
+): Promise<any[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK_SIZE) {
+    chunks.push(ids.slice(i, i + IN_CHUNK_SIZE));
+  }
+  const results = await Promise.all(chunks.map((chunk) => build(chunk)));
+  const rows: any[] = [];
+  for (const result of results) {
+    if (result.error) throw result.error;
+    if (result.data) rows.push(...result.data);
+  }
+  return rows;
+}
+
 async function resolveIdentityMaps(
   admin: any,
   entityIds: string[],
@@ -264,40 +324,46 @@ async function resolveIdentityMaps(
   const vat = new Map<string, string>();
   if (uniqueIds.length === 0) return { identity, email, phone, vat };
 
-  const { data: entities, error: entityError } = await admin
-    .from("anew_entities")
-    .select("id, display_name, type, first_name, last_name")
-    .in("id", uniqueIds);
-  if (entityError) throw entityError;
-  for (const entity of entities || []) identity.set(entity.id, entity);
+  const entities = await selectInChunks(uniqueIds, (chunk) =>
+    admin
+      .from("anew_entities")
+      .select("id, display_name, type, first_name, last_name")
+      .in("id", chunk),
+  );
+  for (const entity of entities) identity.set(entity.id, entity);
 
   if (!includeSensitive) return { identity, email, phone, vat };
 
-  const [emailsResult, phonesResult, fiscalLinksResult] = await Promise.all([
-    admin
-      .from("anew_entity_emails")
-      .select("entity_id, email, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
-    admin
-      .from("anew_entity_phones")
-      .select("entity_id, phone_number, country_code, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
-    admin
-      .from("anew_entity_fiscal_entities")
-      .select("entity_id, fiscal_entity_id, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
+  // Chunks are split by entity id, so every row for a given entity lands in the
+  // same request and the is_primary ordering below still holds per entity.
+  const [emailRows, phoneRows, fiscalLinkRows] = await Promise.all([
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_emails")
+        .select("entity_id, email, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_phones")
+        .select("entity_id, phone_number, country_code, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_fiscal_entities")
+        .select("entity_id, fiscal_entity_id, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
   ]);
-  if (emailsResult.error) throw emailsResult.error;
-  if (phonesResult.error) throw phonesResult.error;
-  if (fiscalLinksResult.error) throw fiscalLinksResult.error;
 
-  for (const item of emailsResult.data || []) {
+  for (const item of emailRows) {
     if (!email.has(item.entity_id)) email.set(item.entity_id, item.email);
   }
-  for (const item of phonesResult.data || []) {
+  for (const item of phoneRows) {
     if (!phone.has(item.entity_id)) {
       phone.set(
         item.entity_id,
@@ -306,18 +372,16 @@ async function resolveIdentityMaps(
     }
   }
 
-  const fiscalLinks = fiscalLinksResult.data || [];
+  const fiscalLinks = fiscalLinkRows;
   const fiscalIds = Array.from(
     new Set(fiscalLinks.map((link: any) => link.fiscal_entity_id).filter(Boolean)),
-  );
+  ) as string[];
   if (fiscalIds.length > 0 && decKey) {
-    const { data: fiscalEntities, error: fiscalError } = await admin
-      .from("fiscal_entities")
-      .select("id, nif_encrypted")
-      .in("id", fiscalIds);
-    if (fiscalError) throw fiscalError;
+    const fiscalEntities = await selectInChunks(fiscalIds, (chunk) =>
+      admin.from("fiscal_entities").select("id, nif_encrypted").in("id", chunk),
+    );
     const nifById = new Map<string, string>();
-    for (const item of fiscalEntities || []) {
+    for (const item of fiscalEntities) {
       if (!item.nif_encrypted) continue;
       try {
         nifById.set(item.id, await decryptNif(item.nif_encrypted, decKey));
@@ -417,17 +481,21 @@ async function exportLeads(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_leads")
-    .select("entity_id, status, source_id, assigned_to, created_by, created_at")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  // Rebuilt per page: `.range()` has to be applied to a fresh builder, and the
+  // id ordering makes the paging deterministic (without an ORDER BY, PostgREST
+  // may repeat or skip rows across pages).
+  const buildLeadsQuery = () => {
+    let query = admin
+      .from("anew_leads")
+      .select("entity_id, status, source_id, assigned_to, created_by, created_at")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildLeadsQuery);
   const sourceIds = Array.from(
     new Set(records.map((r: any) => r.source_id).filter(Boolean)),
   );
