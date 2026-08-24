@@ -253,6 +253,23 @@ const injectLinkedInTag = (partnerId: string) => {
   console.log('[Tracking] LinkedIn Insight Tag injected:', partnerId);
 };
 
+// The embed lives on the client's own domain, so the form's own origin is never a
+// valid targetOrigin for messages sent to the parent — the browser silently drops them.
+// Derive the parent origin from the referrer the browser sets on the framed document.
+// Which pages may frame the form at all is enforced separately by the frame-ancestors CSP.
+const getParentTargetOrigin = (): string => {
+  const referrer = typeof document !== 'undefined' ? document.referrer : '';
+  // No referrer (parent used referrerpolicy="no-referrer") or a malformed one: broadcast
+  // rather than drop the message. Payloads carry only form/lead identifiers, and
+  // frame-ancestors already limits who can embed the form.
+  if (!referrer) return '*';
+  try {
+    return new URL(referrer).origin;
+  } catch {
+    return '*';
+  }
+};
+
 // Push event to all tracking platforms
 const pushTrackingEvent = (eventName: string, eventData: Record<string, any> = {}, pixels: TrackingPixel[] = []) => {
   const timestamp = new Date().toISOString();
@@ -280,7 +297,7 @@ const pushTrackingEvent = (eventName: string, eventData: Record<string, any> = {
         event: eventName,
         data: eventData,
         timestamp,
-      }, window.location.origin);
+      }, getParentTargetOrigin());
       console.log('[postMessage to parent]', eventName, eventData);
     } catch (e) {
       // Cross-origin or blocked - silently fail
@@ -739,7 +756,7 @@ export default function PublicLeadForm() {
         window.parent.postMessage({
           type: 'IFRAME_RESIZE',
           height: height,
-        }, window.location.origin);
+        }, getParentTargetOrigin());
       } catch {
         // Cross-origin error - silently fail
       }
@@ -792,8 +809,8 @@ export default function PublicLeadForm() {
 
       // 4) Notify parent if in iframe (support both message types)
       try {
-        window.parent?.postMessage({ type: 'lovable_scroll_top' }, window.location.origin);
-        window.parent?.postMessage({ type: 'scroll_top' }, window.location.origin);
+        window.parent?.postMessage({ type: 'lovable_scroll_top' }, getParentTargetOrigin());
+        window.parent?.postMessage({ type: 'scroll_top' }, getParentTargetOrigin());
       } catch {
         // Ignore cross-origin errors
       }
@@ -1151,7 +1168,7 @@ export default function PublicLeadForm() {
           window.parent.postMessage({
             type: 'FORM_VALIDATION_ERROR',
             fieldKey,
-          }, window.location.origin);
+          }, getParentTargetOrigin());
         } catch (e) {
           // Cross-origin - silently fail
         }
