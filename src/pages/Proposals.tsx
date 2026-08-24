@@ -1890,6 +1890,18 @@ const Proposals = () => {
       console.error("Erro ao rejeitar orçamentos ligados à proposta:", quotesError);
     }
 
+    // Recalcular explicitamente proposals.value: a cascata acima muda
+    // quotes.estado, que passa a disparar o trigger de sincronização, mas
+    // forçamos aqui também o recálculo imediato (defesa em profundidade,
+    // sem depender só da ordem de commits do trigger) para nunca deixar
+    // proposals.value desatualizado depois de uma rejeição.
+    const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
+      p_proposal_id: proposal.id,
+    });
+    if (recalcError) {
+      console.error("Erro ao recalcular valor da proposta após rejeição:", recalcError);
+    }
+
     let workflowFailed = false;
     try {
       const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
@@ -1940,6 +1952,19 @@ const Proposals = () => {
         rejection_notes: null,
       }).eq("id", proposal.id);
       if (reopenError) throw reopenError;
+
+      // Reabrir só toca colunas da proposta — nenhum quote é alterado, logo o
+      // trigger de sincronização não dispara aqui. Recalcular explicitamente
+      // proposals.value a partir dos orçamentos reais para não deixar um
+      // valor desatualizado (ex.: herdado do estado rejeitado) até à próxima
+      // associação de orçamento.
+      const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
+        p_proposal_id: proposal.id,
+      });
+      if (recalcError) {
+        console.error("Erro ao recalcular valor da proposta após reabertura:", recalcError);
+      }
+
       let workflowFailed = false;
       try {
         const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
