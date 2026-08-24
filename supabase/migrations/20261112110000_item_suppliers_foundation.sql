@@ -587,6 +587,17 @@ GRANT EXECUTE ON FUNCTION public.rpc_restore_item_supplier(uuid) TO authenticate
 -- ON CONFLICT ... WHERE ... DO NOTHING dá idempotência caso esta migration
 -- seja corrida mais do que uma vez sobre a mesma base (defesa-em-
 -- profundidade; não deveria ser necessário em condições normais).
+--
+-- NOT EXISTS acrescentado (confirmado ao vivo, supabase db query --linked):
+-- esta base já tinha 141 linhas em item_suppliers seedadas manualmente antes
+-- desta migration correr via CLI, várias delas já correspondendo exatamente
+-- ao par (product_id/service_id, supplier_id) que o backfill ia tentar
+-- recriar. O ON CONFLICT sozinho não chega para esses casos: o trigger
+-- "1 só preferencial por artigo" corre em BEFORE INSERT, antes da resolução
+-- do conflito, e rejeita a tentativa mesmo quando a linha seria idêntica à
+-- já existente. O NOT EXISTS filtra esses pares fora do próprio SELECT, para
+-- o INSERT nunca chegar a tentar recriá-los — o trigger nem chega a avaliar
+-- essas linhas. Não altera a regra de negócio nem o trigger.
 
 INSERT INTO public.item_suppliers
   (organization_id, business_unit_id, item_type, product_id, supplier_id, is_preferred, is_active, created_by)
@@ -595,6 +606,12 @@ FROM public.products p
 WHERE p.supplier_id IS NOT NULL
   AND p.is_deleted = false
   AND p.organization_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.item_suppliers isup
+    WHERE isup.product_id = p.id
+      AND isup.supplier_id = p.supplier_id
+      AND isup.deleted_at IS NULL
+  )
 ON CONFLICT (product_id, supplier_id) WHERE deleted_at IS NULL AND product_id IS NOT NULL DO NOTHING;
 
 INSERT INTO public.item_suppliers
@@ -604,6 +621,12 @@ FROM public.services s
 WHERE s.supplier_id IS NOT NULL
   AND s.is_deleted = false
   AND s.organization_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.item_suppliers isup
+    WHERE isup.service_id = s.id
+      AND isup.supplier_id = s.supplier_id
+      AND isup.deleted_at IS NULL
+  )
 ON CONFLICT (service_id, supplier_id) WHERE deleted_at IS NULL AND service_id IS NOT NULL DO NOTHING;
 
 
