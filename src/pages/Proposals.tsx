@@ -291,9 +291,6 @@ const Proposals = () => {
   });
   const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
   const [originalStageId, setOriginalStageId] = useState<string | null>(null);
-  // When editing a proposal already "Enviada", only the Orçamentos section stays
-  // editable — the rest of the form is locked (visually disabled).
-  const [editingProposalIsSent, setEditingProposalIsSent] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   
   const [dealSearch, setDealSearch] = useState("");
@@ -1011,8 +1008,6 @@ const Proposals = () => {
   }, [proposals, comercialNamesMap]);
 
   const handleEdit = async (proposal: Proposal) => {
-    const editStageName = getStageName(proposal);
-    setEditingProposalIsSent(editStageName === "sent" || editStageName === "enviada");
     setEditingId(proposal.id);
     const currentStageId = proposal.stage_id || proposal.proposal_workflow_stages?.id || workflowStages[0]?.id || "";
     setOriginalStageId(currentStageId);
@@ -1720,7 +1715,6 @@ const Proposals = () => {
   const resetForm = () => {
     setEditingId(null);
     setOriginalStageId(null);
-    setEditingProposalIsSent(false);
     setFormData({ title: "", description: "", value: "", deal_id: "", valid_until: "", notes: "", stage_id: workflowStages[0]?.id || "", template_id: "", assigned_to: "" });
     setSelectedDeal(null);
     setSelectedEntity(null);
@@ -2599,7 +2593,7 @@ const Proposals = () => {
                 </PermissionGate>
                 <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle>{editingProposalIsSent ? "Adicionar orçamento" : editingId ? t('proposals.editProposal') : t('proposals.newProposal')}</DialogTitle>
+                    <DialogTitle>{editingId ? t('proposals.editProposal') : t('proposals.newProposal')}</DialogTitle>
                   </DialogHeader>
                   {editingId && (
                     <div className="px-1 mb-4">
@@ -2610,23 +2604,22 @@ const Proposals = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="title">{t('proposals.form.title')} *</Label>
-                        <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required disabled={editingProposalIsSent} className={fieldErrors.title ? "border-destructive" : ""} />
+                        <Input id="title" value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} required className={fieldErrors.title ? "border-destructive" : ""} />
                         {fieldErrors.title && <p className="text-sm text-destructive">{fieldErrors.title}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="value">{t('proposals.form.value')} *</Label>
-                        <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required disabled={editingProposalIsSent} />
+                        <Input id="value" type="number" step="0.01" value={formData.value} onChange={(e) => setFormData({ ...formData, value: e.target.value })} required />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="valid_until">{t('proposals.form.validUntil')}</Label>
-                        <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} disabled={editingProposalIsSent} />
+                        <Input id="valid_until" type="date" value={formData.valid_until} onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="assigned_to">Comercial</Label>
                         <Select
                           value={formData.assigned_to || "__none__"}
                           onValueChange={(v) => setFormData({ ...formData, assigned_to: v === "__none__" ? "" : v })}
-                          disabled={editingProposalIsSent}
                         >
                           <SelectTrigger><SelectValue placeholder="Sem comercial" /></SelectTrigger>
                           <SelectContent>
@@ -2639,7 +2632,7 @@ const Proposals = () => {
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="stage_id">{t('proposals.form.status')} *</Label>
-                        <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })} disabled={editingProposalIsSent}>
+                        <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })}>
                           <SelectTrigger><SelectValue placeholder={t('proposals.form.selectStatus')} /></SelectTrigger>
                           <SelectContent>
                             {workflowStages.filter(stage => !stage.is_lost).map((stage) => (
@@ -2663,7 +2656,7 @@ const Proposals = () => {
                             <Palette className="h-4 w-4" />
                             Template de Proposta
                           </Label>
-                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })} disabled={editingProposalIsSent}>
+                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
                             <SelectTrigger>
                               <SelectValue placeholder="Template default" />
                             </SelectTrigger>
@@ -2683,7 +2676,7 @@ const Proposals = () => {
                         </div>
                       )}
                       {/* Deal search */}
-                      <div className={cn("col-span-2 space-y-2", editingProposalIsSent && "opacity-50 pointer-events-none")}>
+                      <div className="col-span-2 space-y-2">
                         <Label>{t('proposals.form.deal')}</Label>
                         <div className="relative">
                           {selectedDeal ? (
@@ -2884,7 +2877,7 @@ const Proposals = () => {
 
                       {/* Entity (contact/client) — only shown when no Deal is selected */}
                       {!selectedDeal && !formData.deal_id && (
-                        <div className={cn("col-span-2 space-y-2", editingProposalIsSent && "opacity-50 pointer-events-none")}>
+                        <div className="col-span-2 space-y-2">
                           <Label>Lead ou Cliente</Label>
                           <EntitySearchInput
                             value={selectedEntity}
@@ -3029,7 +3022,7 @@ const Proposals = () => {
                        
                       <div className="col-span-2">
                         {editingId && (
-                          <div className={cn("pt-4 border-t", editingProposalIsSent && "opacity-50 pointer-events-none")}>
+                          <div className="pt-4 border-t">
                             <div className="flex items-center justify-between mb-4">
                               <Label className="text-base font-semibold">Itens Manuais</Label>
                             </div>
@@ -3063,11 +3056,11 @@ const Proposals = () => {
                       
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="description">{t('proposals.form.description')}</Label>
-                        <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={3} disabled={editingProposalIsSent} />
+                        <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} rows={3} />
                       </div>
                       <div className="col-span-2 space-y-2">
                         <Label htmlFor="notes">{t('proposals.form.notes')}</Label>
-                        <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} disabled={editingProposalIsSent} />
+                        <Textarea id="notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
                       </div>
                     </div>
                     <DialogFooter className="flex justify-between sm:justify-between">
@@ -3080,7 +3073,7 @@ const Proposals = () => {
                       </div>
                       <div className="flex gap-2">
                         <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t('proposals.form.cancel')}</Button>
-                        <Button type="submit" disabled={savingProposal}>{editingProposalIsSent ? "Guardar orçamentos" : editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
+                        <Button type="submit" disabled={savingProposal}>{editingId ? t('proposals.form.update') : t('proposals.form.create')}</Button>
                       </div>
                     </DialogFooter>
                   </form>
