@@ -409,17 +409,18 @@ async function exportClients(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_clients")
-    .select("entity_id, status, client_type, created_at, created_by, assigned_to")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  const buildClientsQuery = () => {
+    let query = admin
+      .from("anew_clients")
+      .select("entity_id, status, client_type, created_at, created_by, assigned_to")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildClientsQuery);
   const maps = await resolveIdentityMaps(
     admin,
     records.map((record: any) => record.entity_id),
@@ -444,18 +445,19 @@ async function exportContacts(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_contacts")
-    .select("entity_id, position, status, created_at, created_by, assigned_to")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null)
-    .is("converted_to_client_id", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  const buildContactsQuery = () => {
+    let query = admin
+      .from("anew_contacts")
+      .select("entity_id, position, status, created_at, created_by, assigned_to")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .is("converted_to_client_id", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildContactsQuery);
   const maps = await resolveIdentityMaps(
     admin,
     records.map((record: any) => record.entity_id),
@@ -547,33 +549,34 @@ async function exportQuotes(
   decKey: NifKey | null,
   caller: { anewUserId: string },
 ) {
-  let query = admin
-    .from("quotes")
-    .select(
-      "quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
-    )
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  if (request.filters.status) query = query.eq("estado", request.filters.status);
-  if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
-  if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
-  if (request.filters.assignedTo === "none") {
-    query = query.is("assigned_to", null);
-  } else if (request.filters.assignedTo) {
-    query = query.eq("assigned_to", request.filters.assignedTo);
-  }
-  // "onlyMine" always narrows to the caller's own records — this can never
-  // widen access beyond whatever applyOwnerScope would already allow, since a
-  // caller's own anewUserId is always within their own permitted scope.
-  if (request.filters.onlyMine) {
-    query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
-  } else {
-    query = applyOwnerScope(query, auth);
-  }
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  const buildQuotesQuery = () => {
+    let query = admin
+      .from("quotes")
+      .select(
+        "quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    if (request.filters.status) query = query.eq("estado", request.filters.status);
+    if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
+    if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
+    if (request.filters.assignedTo === "none") {
+      query = query.is("assigned_to", null);
+    } else if (request.filters.assignedTo) {
+      query = query.eq("assigned_to", request.filters.assignedTo);
+    }
+    // "onlyMine" always narrows to the caller's own records — this can never
+    // widen access beyond whatever applyOwnerScope would already allow, since a
+    // caller's own anewUserId is always within their own permitted scope.
+    if (request.filters.onlyMine) {
+      query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
+    } else {
+      query = applyOwnerScope(query, auth);
+    }
+    return query;
+  };
+  const records = await fetchAllRows(buildQuotesQuery);
   const [maps, organizationsResult] = await Promise.all([
     resolveIdentityMaps(
       admin,
