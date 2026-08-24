@@ -38,6 +38,7 @@ import { BundleSelectionTab, type SelectedBundle, type ExpandedBundleLine } from
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { quoteAddItemsSchema } from "@/lib/validations";
+import { escapeIlike, escapePostgrestOrTerm } from "@/lib/clientSearch";
 
 interface ProductAttribute {
   id: string;
@@ -122,6 +123,9 @@ interface Props {
 }
 
 const PAGE_SIZE = 10;
+// Explicit cap on the supplier-reference lookup (plano-referencia-fornecedor-orcamentos.md,
+// secção 2) — matches the pattern already used for entity search (clientSearch.ts).
+const SUPPLIER_SKU_MATCH_LIMIT = 300;
 
 export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initialProducts, services: initialServices, replaceMode = false, replaceItemType, priceContext = PRICE_CONTEXT_CODES.RETAIL }: Props) {
   const [activeTab, setActiveTab] = useState<"products" | "services" | "bundles">("products");
@@ -147,6 +151,9 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
   const [categories, setCategories] = useState<{ id: string; name: string; parent_id: string | null; parent_name: string | null }[]>([]);
   const currentPageRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Caches the supplier-reference id lookup per (term, tab) so paginating within the
+  // same search (append=true) reuses it instead of re-querying item_suppliers per page.
+  const supplierRefIdsCacheRef = useRef<{ term: string; tab: string; ids: string[] } | null>(null);
   
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -283,6 +290,45 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
     return ids;
   }, []);
 
+  // Resolve product/service ids whose active item_suppliers.supplier_sku matches the
+  // search term, so buildBaseQuery can OR them into the name/sku/description/barcode
+  // match (plano-referencia-fornecedor-orcamentos.md, secção 2). Resolved once per
+  // term/tab/org-scope in loadItems and reused for that single query — there is no
+  // separate filtered count query in this dialog to keep in sync with.
+  const resolveSupplierRefIds = useCallback(async (
+    term: string,
+    tab: "products" | "services",
+    orgIds: string[],
+  ): Promise<{ ids: string[]; truncated: boolean }> => {
+    const safe = escapeIlike(term.trim());
+    if (!safe) return { ids: [], truncated: false };
+
+    const col = tab === "products" ? "product_id" : "service_id";
+    let q = (supabase as any)
+      .from("item_suppliers")
+      .select(col)
+      .eq("item_type", tab === "products" ? "product" : "service")
+      .is("deleted_at", null)
+      .ilike("supplier_sku", `%${safe}%`)
+      .limit(SUPPLIER_SKU_MATCH_LIMIT + 1);
+    if (orgIds.length > 0) q = q.in("organization_id", orgIds);
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("Error resolving supplier reference ids:", error);
+      return { ids: [], truncated: false };
+    }
+
+    const rows = data || [];
+    // Truncation is decided on the raw row count against the +1 probe limit, not on
+    // the deduped id count below — several item_suppliers rows (different suppliers)
+    // can share the same product_id/service_id, so deduped length alone can't tell
+    // whether the SQL limit actually cut off further matches.
+    const truncated = rows.length > SUPPLIER_SKU_MATCH_LIMIT;
+    const ids = Array.from(new Set(rows.slice(0, SUPPLIER_SKU_MATCH_LIMIT).map((r: any) => r[col]).filter(Boolean) as string[]));
+    return { ids, truncated };
+  }, []);
+
   // Resolve subcategory ids matching a free-text category filter (matches existing logic)
   const resolveCategoryIds = useCallback((): string[] | null => {
     if (categoryFilter === "all") return null;
@@ -304,7 +350,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
   // Build a base supabase query for the active tab with all "active" + scope filters applied.
   // Products mirror Products.tsx scoping through product_organizations.
-  const buildBaseQuery = useCallback((forCount: boolean, orgIds: string[]) => {
+  const buildBaseQuery = useCallback((forCount: boolean, orgIds: string[], extraIds: string[] = []) => {
     if (activeTab === "products") {
       const productSelect = forCount
         ? (orgIds.length > 0 ? "id, product_organizations!inner(organization_id)" : "id")
@@ -350,9 +396,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
       const term = debouncedSearch.trim();
       if (term) {
-        const safe = term.replace(/[%,()]/g, " ").trim();
-        if (safe) {
-          q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,description.ilike.%${safe}%,barcode.ilike.%${safe}%`);
+        const safe = escapePostgrestOrTerm(term);
+        const extraClause = extraIds.length > 0 ? `,id.in.(${extraIds.join(",")})` : "";
+        if (safe || extraClause) {
+          q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,description.ilike.%${safe}%,barcode.ilike.%${safe}%${extraClause}`);
         }
       }
       return q;
@@ -389,9 +436,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
     const term = debouncedSearch.trim();
     if (term) {
-      const safe = term.replace(/[%,()]/g, " ").trim();
-      if (safe) {
-        q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,short_desc.ilike.%${safe}%`);
+      const safe = escapePostgrestOrTerm(term);
+      const extraClause = extraIds.length > 0 ? `,id.in.(${extraIds.join(",")})` : "";
+      if (safe || extraClause) {
+        q = q.or(`name.ilike.%${safe}%,sku.ilike.%${safe}%,short_desc.ilike.%${safe}%${extraClause}`);
       }
     }
     return q;
@@ -453,7 +501,29 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
     try {
       const effectiveCompanyId = getEffectiveCompanyId();
       const orgIds = await resolveOrgScope(effectiveCompanyId);
-      const baseQuery = buildBaseQuery(false, orgIds);
+
+      const term = debouncedSearch.trim();
+      let extraIds: string[] = [];
+      if (term && (activeTab === "products" || activeTab === "services")) {
+        const cached = supplierRefIdsCacheRef.current;
+        if (cached && cached.term === term && cached.tab === activeTab) {
+          extraIds = cached.ids;
+        } else {
+          const resolved = await resolveSupplierRefIds(term, activeTab, orgIds);
+          extraIds = resolved.ids;
+          supplierRefIdsCacheRef.current = { term, tab: activeTab, ids: extraIds };
+          if (resolved.truncated) {
+            toast({
+              title: "Pesquisa por referência de fornecedor incompleta",
+              description: "Há demasiadas correspondências — refine o termo de pesquisa.",
+            });
+          }
+        }
+      } else {
+        supplierRefIdsCacheRef.current = null;
+      }
+
+      const baseQuery = buildBaseQuery(false, orgIds, extraIds);
       const { data, error } = await baseQuery.order("name").order("id").range(from, to);
       if (error) throw error;
 
@@ -591,7 +661,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeTab, buildBaseQuery, getEffectiveCompanyId, resolveOrgScope, toast]);
+  }, [activeTab, buildBaseQuery, debouncedSearch, getEffectiveCompanyId, resolveOrgScope, resolveSupplierRefIds, toast]);
 
   // Infinite scroll handler
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
