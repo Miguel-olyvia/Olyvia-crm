@@ -850,15 +850,14 @@ const Proposals = () => {
           ...Object.values(dealEntityMap),
         ])];
 
+        // One RPC replaces four parallel queries. Those queries each carried the
+        // whole id list in the query string — ~17 kB, four times over — and half
+        // of this wave's measured time was spent there rather than in the
+        // database. An RPC is a POST, so the ids travel in the body. It also
+        // resolves the latest interaction per entity server-side, which used to
+        // mean shipping every interaction row just to keep the first of each.
         const entitiesPromise = allEntityIds.length > 0
-          ? Promise.all([
-              supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
-              supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
-              supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
-              // Ordered desc so the forEach below (which only ever keeps the
-              // first value seen per entity_id) naturally keeps the latest one.
-              supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
-            ])
+          ? (supabase as any).rpc("get_entity_contact_summary", { _entity_ids: allEntityIds })
           : null;
 
         const [contractsRes, entityResults] = await Promise.all([
@@ -874,16 +873,20 @@ const Proposals = () => {
         setContractStatuses(contractStatusMap);
 
         if (entityResults) {
-          const [entRes, emailRes, phoneRes, interactionRes] = entityResults;
           const nameMap: Record<string, string> = {};
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
           const lastInteractionMap: Record<string, string> = {};
-          (entRes.data || []).forEach((e: any) => { nameMap[e.id] = e.display_name; });
-          (emailRes.data || []).forEach((e: any) => { emailMap[e.entity_id] = e.email; });
-          (phoneRes.data || []).forEach((e: any) => { phoneMap[e.entity_id] = e.phone_number; });
-          (interactionRes.data || []).forEach((i: any) => {
-            if (i.entity_id && !lastInteractionMap[i.entity_id]) lastInteractionMap[i.entity_id] = i.interaction_at;
+          // The RPC returns one row per visible entity. Email, phone and last
+          // interaction are only recorded when present, so an entity without
+          // them stays absent from those maps exactly as it did when each came
+          // from its own query.
+          ((entityResults as any)?.data || []).forEach((row: any) => {
+            if (!row?.entity_id) return;
+            nameMap[row.entity_id] = row.display_name;
+            if (row.email) emailMap[row.entity_id] = row.email;
+            if (row.phone_number) phoneMap[row.entity_id] = row.phone_number;
+            if (row.last_interaction_at) lastInteractionMap[row.entity_id] = row.last_interaction_at;
           });
 
           // Map deal entity data to proposal keys using deal_id
