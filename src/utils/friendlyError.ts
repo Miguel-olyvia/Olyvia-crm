@@ -48,6 +48,11 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /network|failed to fetch|load failed/i, key: "friendlyError.network" },
   { match: /invalid.*email|email.*invalid/i, key: "friendlyError.invalidEmail" },
   { match: /duplicate|already exists|unique/i, key: "friendlyError.duplicate" },
+  // Mensagens da Edge Function export-data. Sem estas, mapFriendly devolvia o
+  // texto cru em ingles ("Unable to generate export") a um utilizador com a
+  // interface em portugues.
+  { match: /unable to generate export/i, key: "friendlyError.exportFailed" },
+  { match: /export (not authorized|exceeds)/i, key: "friendlyError.exportFailed" },
   { match: /Edge Function returned a non-2xx/i, key: "friendlyError.serverError" },
 ];
 
