@@ -510,6 +510,108 @@ Deno.serve(async (req) => {
           }
         }
       }
+
+      // --- Address: persist to anew_addresses + anew_entity_addresses ---
+      // create-lead already does this, but it only runs on the FIRST step of a
+      // multi-step form. Address fields typically live on a later step, so by
+      // the time they arrive the entity already exists and only update-lead is
+      // called — which used to write them to anew_leads.field_values and
+      // nowhere else. Every surface that reads the entity's address (quote and
+      // proposal PDFs, client detail) therefore showed nothing.
+      //
+      // Same rules as create-lead's reused-entity backfill: additive only
+      // (never touches an entity that already has an address), and never
+      // persists a half address — street without postal code, or the reverse.
+      try {
+        const contactMappingToKey: Record<string, string> = {};
+        for (const def of definitions) {
+          if (def.contact_field_mapping && def.field_key) {
+            contactMappingToKey[def.contact_field_mapping] = def.field_key;
+          }
+        }
+        const resolveContact = (prop: string, ...aliases: string[]): unknown => {
+          const mappedKey = contactMappingToKey[prop];
+          if (mappedKey && updatedFieldValues?.[mappedKey]) return updatedFieldValues[mappedKey];
+          if (updatedFieldValues?.[prop]) return updatedFieldValues[prop];
+          for (const alias of aliases) {
+            if (updatedFieldValues?.[alias]) return updatedFieldValues[alias];
+          }
+          return null;
+        };
+
+        const street = String(resolveContact("address", "po_morada", "morada") || "").trim();
+        const postalCode = String(resolveContact("postal_code", "po_codigo_postal", "codigo_postal") || "").trim();
+        const city = String(resolveContact("city", "po_localidade", "localidade", "cidade") || "").trim();
+
+        if (street && postalCode) {
+          const { count: addressCount, error: addressCountError } = await supabase
+            .from("anew_entity_addresses")
+            .select("id", { count: "exact", head: true })
+            .eq("entity_id", existingLead.entity_id);
+
+          if (addressCountError) {
+            console.error("[update-lead] address count lookup failed (continuing):", addressCountError);
+          } else if (!addressCount) {
+            // address_key format matches create_entity_with_contacts_and_roles
+            // and create-lead: lower(concat_ws('|', street, postal, city)).
+            const addressKey = [street, postalCode, city].join("|").toLowerCase();
+            const createdBy = existingLead.created_by || null;
+
+            let addressId: string | null = null;
+            const { data: existingAddress, error: existingAddressError } = await supabase
+              .from("anew_addresses")
+              .select("id")
+              .eq("address_key", addressKey)
+              .maybeSingle();
+            if (existingAddressError) {
+              console.error("[update-lead] address_key lookup failed (continuing):", existingAddressError);
+            }
+
+            if (existingAddress?.id) {
+              addressId = existingAddress.id;
+            } else {
+              const { data: newAddress, error: addressInsertError } = await supabase
+                .from("anew_addresses")
+                .insert({
+                  address_key: addressKey,
+                  street,
+                  number: "",
+                  postal_code: postalCode,
+                  city: city || "",
+                  country: "PT",
+                  created_by: createdBy,
+                })
+                .select("id")
+                .single();
+              if (addressInsertError) {
+                console.error("[update-lead] address insert failed (continuing):", addressInsertError);
+              } else {
+                addressId = newAddress?.id || null;
+              }
+            }
+
+            if (addressId) {
+              const { error: entityAddressInsertError } = await supabase
+                .from("anew_entity_addresses")
+                .insert({
+                  entity_id: existingLead.entity_id,
+                  address_id: addressId,
+                  address_type: "primary",
+                  is_primary: true,
+                  created_by: createdBy,
+                });
+              if (entityAddressInsertError) {
+                console.error("[update-lead] entity_address insert failed (continuing):", entityAddressInsertError);
+              } else {
+                console.log("Persisted lead address to entity:", existingLead.entity_id);
+              }
+            }
+          }
+        }
+      } catch (addressErr) {
+        // Never fail the form submission because of the address side-write.
+        console.error("[update-lead] address persistence failed (continuing):", addressErr);
+      }
     }
 
     // Update the lead

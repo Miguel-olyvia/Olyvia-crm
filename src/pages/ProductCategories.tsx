@@ -120,7 +120,7 @@ export default function ProductCategories() {
     loadTenantCompanies();
   }, [filterTenantId]);
 
-  const loadData = useCallback(async (reset = true) => {
+  const loadData = useCallback(async (reset = true, pageArg?: number) => {
     try {
       if (reset) {
         setLoading(true);
@@ -129,7 +129,7 @@ export default function ProductCategories() {
         setLoadingMore(true);
       }
 
-      const currentPage = reset ? 0 : page;
+      const currentPage = reset ? 0 : (pageArg ?? 0);
       const from = currentPage * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
 
@@ -139,6 +139,7 @@ export default function ProductCategories() {
         .is("parent_id", null)
         .is("deleted_at", null)
         .order("path")
+        .order("id")
         .range(from, to);
 
 
@@ -242,7 +243,7 @@ export default function ProductCategories() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [activeCompany?.id, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm, page, t, toast]);
+  }, [activeCompany?.id, filterCompanyId, filterTenantId, tenantCompanyIds, filterStatus, debouncedSearchTerm, t, toast]);
 
   // Bulk actions hook
   const bulkActions = useBulkActions({
@@ -277,7 +278,7 @@ export default function ProductCategories() {
   // Load more on page change
   useEffect(() => {
     if (page > 0) {
-      loadData(false);
+      loadData(false, page);
     }
   }, [page, loadData]);
 

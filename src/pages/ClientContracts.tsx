@@ -288,7 +288,7 @@ const ClientContracts = () => {
       // pelo html2pdf) encavalite o último parágrafo da página.
       const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
 
-      await html2pdf()
+      const pdfWorker = html2pdf()
         .set({
           margin: [marginTop, marginRight, marginBottom, marginLeft],
 
@@ -320,9 +320,9 @@ const ClientContracts = () => {
             ],
           },
         })
-        .from(pageElement)
-        .save();
+        .from(pageElement);
 
+      await pdfWorker.save();
       toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
@@ -362,7 +362,7 @@ const ClientContracts = () => {
   const viewScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.view");
   const teamMemberIdsKey = teamMemberIds.join(",");
 
-  const { data: contracts = [], isLoading } = useQuery({
+  const { data: contracts = [], isLoading, isFetched } = useQuery({
     queryKey: ["client-contracts", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
@@ -412,7 +412,7 @@ const ClientContracts = () => {
       const runBaseQuery = (creatorBatch: string[] | null) => {
         let q: any = (supabase as any)
           .from("client_contracts")
-          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total) )`)
+          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
           .in("organization_id", subtreeIds)
           .is("deleted_at", null)
           .order("created_at", { ascending: false });
@@ -466,15 +466,17 @@ const ClientContracts = () => {
         });
       }
 
-      // Resolve assigned user names (created_by is anew_users.id per identity boundary)
-      const userIds = [...new Set(data.map((c: any) => c.created_by).filter(Boolean))];
+      // Resolve assigned user names (assigned_to/created_by are anew_users.id per identity boundary).
+      // Prefer assigned_to (the actual commercial responsible, e.g. inherited from the
+      // proposal/quote) and fall back to created_by only when no assignment exists.
+      const userIds = [...new Set(data.flatMap((c: any) => [c.assigned_to, c.created_by]).filter(Boolean))];
       if (userIds.length > 0) {
         const { data: users } = await (supabase as any)
           .from("anew_users")
           .select("id, name")
           .in("id", userIds);
         const userMap = new Map((users || []).map((u: any) => [u.id, u.name]));
-        data.forEach((c: any) => { c.assigned_to_name = userMap.get(c.created_by) || null; });
+        data.forEach((c: any) => { c.assigned_to_name = userMap.get(c.assigned_to) || userMap.get(c.created_by) || null; });
       }
 
       return data as ClientContract[];
@@ -653,6 +655,52 @@ const ClientContracts = () => {
       setSearchParams(searchParams, { replace: true });
     }
   }, [searchParams, setSearchParams]);
+
+  // Handle "open contract" URL param (?open=<id>) — used by Propostas' "Ver
+  // contrato" button/dropdown item and the AI assistant's search results.
+  // Reuses handleEdit (the exact same handler triggered by the "Ver contrato"
+  // Eye icon below) so the contract opens in the same ContractDetailDialog,
+  // with the same PDF preview/layout — never a bespoke view. Waits for the
+  // contracts query to have actually run at least once before looking the id
+  // up: `isLoading` alone is NOT enough — while the query is still `enabled:
+  // false` (activeCompany/permission scope not resolved yet on first mount),
+  // TanStack Query v5 reports `isLoading` as false too (it's `isPending &&
+  // isFetching`), so relying on it fired this effect immediately against an
+  // empty `contracts` default and showed a false "Contrato não encontrado."
+  // `isFetched` only flips true once a real fetch has completed, so it's the
+  // reliable signal here.
+  // When accompanied by &viewPdf=1 (only set once the contract is signed —
+  // see Propostas' "Ver contrato"), triggers the exact same PDF download as
+  // the "Descarregar" button (handleDownloadPdf) instead of opening the edit
+  // dialog. Deliberately NOT a new-tab/inline preview: a new tab is subject
+  // to the browser's pop-up blocker (blocked even for a same-tick
+  // window.open once a user has told the browser to always block pop-ups
+  // for this site), and an inline <iframe>/<object> preview is blocked by
+  // this app's own CSP (`frame-src 'none'; object-src 'none'` in
+  // vercel.json) — a real download sidesteps both. Without viewPdf,
+  // behaviour is unchanged so notifications/AI search links that use bare
+  // ?open= keep opening the edit dialog.
+  useEffect(() => {
+    const openContractId = searchParams.get("open");
+    const viewPdf = searchParams.get("viewPdf");
+    if (!openContractId) return;
+    if (!isFetched || isLoading) return;
+
+    const target = contracts.find((c) => c.id === openContractId);
+    if (target) {
+      if (viewPdf === "1") {
+        handleDownloadPdf(target);
+      } else {
+        handleEdit(target);
+      }
+    } else {
+      toast.error("Contrato não encontrado.");
+    }
+
+    searchParams.delete("open");
+    searchParams.delete("viewPdf");
+    setSearchParams(searchParams, { replace: true });
+  }, [searchParams, setSearchParams, contracts, isLoading, isFetched]);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-active", activeCompany?.id],
@@ -1872,7 +1920,7 @@ const ClientContracts = () => {
                           {(contract.status === "signed" || contract.status === "active") && (
                             <>
                               <Button variant="ghost" size="icon" title="Ver contrato" onClick={() => handleEdit(contract)}><Eye className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" title="PDF"><Download className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" title="PDF" onClick={() => handleDownloadPdf(contract)}><Download className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => navigate("/clients")}>
                                 <User className="h-4 w-4" />
                               </Button>

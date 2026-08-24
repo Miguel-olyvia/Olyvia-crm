@@ -12,6 +12,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -144,6 +146,12 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Tracked outside the try block (which owns `supabase`/`ctx`) so the catch
+  // below can still issue a refund if AI processing fails AFTER credits were
+  // already consumed. Stays null unless/until a real, non-blocked debit
+  // happens. See _shared/aiCredits.ts for the atomic debit/refund mechanics.
+  let pendingCreditsRefund: { supabase: any; organizationId: string; amount: number } | null = null;
+
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -208,6 +216,24 @@ Deno.serve(async (req) => {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, rateLimitIdentifier);
+
+    // AI credits — billing gate (distinct from the abuse-prevention rate
+    // limit above). Charged ONCE per request here, before any callAiGateway
+    // call below, even though the tool-calling loop may invoke the gateway
+    // several times internally for this single user message. Blocked
+    // requests never reach callAiGateway, so no tokens are spent on them.
+    // If the AI processing below fails after this point, the credit is
+    // refunded — see the try/catch around it and _shared/aiCredits.ts for
+    // why the debit already happened by now.
+    const creditsResult = await checkAndConsumeAiCredits(
+      supabase,
+      ctx.organizationId as string,
+      AI_CREDIT_COSTS["ai-assistant"],
+    );
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+    pendingCreditsRefund = { supabase, organizationId: ctx.organizationId as string, amount: AI_CREDIT_COSTS["ai-assistant"] };
 
     // The full tool catalog (names, descriptions, parameter schemas) is
     // already sent to Gemini via the `tools` field on every callAiGateway
@@ -419,12 +445,20 @@ Deno.serve(async (req) => {
 
       if (!response.ok) {
         if (response.status === 429) {
+          // Provider-side failure (not the caller's fault) after the credit
+          // was already debited above — refund it before returning.
+          if (pendingCreditsRefund) {
+            await refundAiCredits(pendingCreditsRefund.supabase, pendingCreditsRefund.organizationId, pendingCreditsRefund.amount);
+          }
           return new Response(
             JSON.stringify({ error: "Limite de pedidos excedido. Tenta novamente em breve." }),
             { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
           );
         }
         if (response.status === 402) {
+          if (pendingCreditsRefund) {
+            await refundAiCredits(pendingCreditsRefund.supabase, pendingCreditsRefund.organizationId, pendingCreditsRefund.amount);
+          }
           return new Response(
             JSON.stringify({ error: "Créditos insuficientes. Contacta o administrador." }),
             { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -797,6 +831,12 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error("AI assistant error:", e);
     await captureError(e, { function: "ai-assistant" });
+    // A credit was already debited (checkAndConsumeAiCredits above) but AI
+    // processing failed somewhere after that — refund it. See
+    // _shared/aiCredits.ts for why the debit happens before this point.
+    if (pendingCreditsRefund) {
+      await refundAiCredits(pendingCreditsRefund.supabase, pendingCreditsRefund.organizationId, pendingCreditsRefund.amount);
+    }
     return new Response(
       JSON.stringify({ error: e instanceof Error ? e.message : "Erro desconhecido" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },

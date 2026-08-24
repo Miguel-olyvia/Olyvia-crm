@@ -16,6 +16,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway } from "../_shared/aiGateway.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -497,28 +499,50 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
   }
 ]`;
 
-    const aiResponse = await callAiGateway({
-      model: "gemini-3.5-flash-lite",
-      messages: [
-        { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.3
-    });
+    // AI credits — billing gate, scoped to the (already org-scope-validated)
+    // organization_id. Placed AFTER the no-GEMINI_API_KEY fallback above so
+    // the non-AI path never touches credits. See _shared/aiCredits.ts for
+    // the atomic debit/refund-on-failure mechanics behind the branches below.
+    const creditsResult = await checkAndConsumeAiCredits(
+      supabaseAdmin,
+      organization_id,
+      AI_CREDIT_COSTS["suggest-schedule-assignee"],
+    );
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+
+    let aiResponse;
+    try {
+      aiResponse = await callAiGateway({
+        model: "gemini-3.5-flash-lite",
+        messages: [
+          { role: "system", content: systemPrompt + " Responde apenas com JSON válido, sem markdown." },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0.3
+      });
+    } catch (gatewayError) {
+      await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["suggest-schedule-assignee"]);
+      throw gatewayError;
+    }
 
     if (!aiResponse.ok) {
       if (aiResponse.status === 429) {
+        await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["suggest-schedule-assignee"]);
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (aiResponse.status === 402) {
+        await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["suggest-schedule-assignee"]);
         return new Response(
           JSON.stringify({ error: "Payment required. Please add credits." }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+      await refundAiCredits(supabaseAdmin, organization_id, AI_CREDIT_COSTS["suggest-schedule-assignee"]);
       throw new Error(`AI gateway error: ${aiResponse.status}`);
     }
 

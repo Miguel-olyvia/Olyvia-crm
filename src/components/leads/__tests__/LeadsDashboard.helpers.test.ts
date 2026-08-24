@@ -156,4 +156,61 @@ describe("deriveDashboardKpis", () => {
     expect(kpis.convertedLeads).toBeNull();
     expect(kpis.conversionRate).toBeNull();
   });
+
+  it("falls back to the unconditional converted count on the all-time view, instead of a structural zero", () => {
+    // cohort_conversions requires bounded p_date_from/p_date_to (see
+    // resolveDashboardDateRange/buildDashboardScopedRpcParams) — the RPC
+    // always returns 0 for it under isAllTime, since "created and converted
+    // within the same period" is undefined without a period.
+    const kpis = deriveDashboardKpis({
+      stats: {
+        active_pipeline: 5306,
+        leads_in_period: 5306,
+        converted_in_period: 53,
+        cohort_conversions: 0,
+        status_counts: {},
+      },
+      comparisonStats: null,
+      dateRange: {
+        from: new Date("2006-08-19T00:00:00.000Z"),
+        to: new Date("2026-08-19T23:59:59.999Z"),
+        isAllTime: true,
+      },
+    });
+
+    expect(kpis.convertedLeads).toBe(53);
+    expect(kpis.cohortConversions).toBe(53);
+    expect(kpis.conversionRate).toBe("1.0");
+  });
+
+  it("prefers converted_in_period over a misconfigured resolved_stage_counts.converted of 0", () => {
+    // Real production case: an org's lead_workflow_stages "Won/Converted"
+    // reached_when config was self-contradictory (required signals that can
+    // never all be true simultaneously for an actually-converted lead), so
+    // compute_lead_stage_v2 resolved NO stage at all for every converted
+    // lead — resolved_stage_counts.converted came back as a genuine (not
+    // absent) 0, even though 53 leads were really converted (same
+    // effective_status the "Won/Converted" status pill already counts
+    // correctly via converted_in_period). `??` can't tell "not computed"
+    // apart from "computed to zero", so it must not be trusted over the
+    // simpler, always-reliable converted_in_period.
+    const kpis = deriveDashboardKpis({
+      stats: {
+        active_pipeline: 5254,
+        leads_in_period: 5307,
+        converted_in_period: 53,
+        cohort_conversions: 0,
+        resolved_stage_counts: { qualified: 946, negotiation: 30, converted: 0, lost: 772 },
+        status_counts: {},
+      },
+      comparisonStats: null,
+      dateRange: {
+        from: new Date("2006-08-19T00:00:00.000Z"),
+        to: new Date("2026-08-19T23:59:59.999Z"),
+        isAllTime: true,
+      },
+    });
+
+    expect(kpis.convertedLeads).toBe(53);
+  });
 });

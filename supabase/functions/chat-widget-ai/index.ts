@@ -4,6 +4,8 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -508,32 +510,51 @@ IMPORTANTE:
 - is_complete=true APENAS quando todos os campos obrigatórios estiverem preenchidos (modo lead_capture) OU quando já mostrou as informações do cliente (modo client_lookup)
 - Se o cliente foi encontrado e já viu as suas propostas/visitas, marca is_complete=true`;
 
-    const response = await callAiGateway({
-      model: "gemini-3.5-flash-lite",
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages
-      ],
-      temperature: 0.7,
-    });
+    // AI credits — billing gate (distinct from the IP-based rate limit
+    // above), scoped to the form's organization (companyId, resolved and
+    // validated above — the campaign lookup already 404s if it were empty).
+    // See _shared/aiCredits.ts for the atomic debit/refund-on-failure
+    // mechanics that the try/catch and error branches below implement.
+    const creditsResult = await checkAndConsumeAiCredits(supabase, companyId, AI_CREDIT_COSTS["chat-widget-ai"]);
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+
+    let response;
+    try {
+      response = await callAiGateway({
+        model: "gemini-3.5-flash-lite",
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages
+        ],
+        temperature: 0.7,
+      });
+    } catch (gatewayError) {
+      await refundAiCredits(supabase, companyId, AI_CREDIT_COSTS["chat-widget-ai"]);
+      throw gatewayError;
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
       console.error("AI Gateway error:", response.status, errorText);
-      
+
       if (response.status === 429) {
+        await refundAiCredits(supabase, companyId, AI_CREDIT_COSTS["chat-widget-ai"]);
         return new Response(
           JSON.stringify({ error: "Rate limit exceeded, please try again later" }),
           { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       if (response.status === 402) {
+        await refundAiCredits(supabase, companyId, AI_CREDIT_COSTS["chat-widget-ai"]);
         return new Response(
           JSON.stringify({ error: "Payment required" }),
           { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
-      
+
+      await refundAiCredits(supabase, companyId, AI_CREDIT_COSTS["chat-widget-ai"]);
       throw new Error(`AI gateway error: ${response.status}`);
     }
 

@@ -12,6 +12,7 @@ import {
   getDealStageKey,
   getDealStageLabel,
   isWonStage,
+  isLostStage,
   type StageLike,
 } from "@/lib/dealStageUtils";
 import {
@@ -25,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
+import { DealLostReasonDialog } from "@/components/deals/DealLostReasonDialog";
 
 interface Deal {
   id: string;
@@ -63,7 +65,7 @@ interface Stage {
 interface DealsKanbanViewProps {
   deals: Deal[];
   stages: Stage[];
-  onStageDrop: (dealId: string, newStageId: string, oldStageId: string) => Promise<void>;
+  onStageDrop: (dealId: string, newStageId: string, oldStageId: string, lostReason?: string) => Promise<void>;
   onViewDetails: (deal: Deal) => void;
   formatCurrency: (value: number) => string;
 }
@@ -80,6 +82,12 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
     message: string;
   } | null>(null);
   const [emailDeal, setEmailDeal] = useState<{ id: string; entityId: string; name: string; email: string; orgId: string; leadId: string | null } | null>(null);
+  const [lostReasonDialog, setLostReasonDialog] = useState<{
+    dealId: string;
+    dealTitle: string;
+    newStageId: string;
+    oldStageId: string;
+  } | null>(null);
 
   const dealsByStage = useMemo(() => {
     const map: Record<string, Deal[]> = {};
@@ -119,6 +127,21 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
     if (source.droppableId === destination.droppableId) return;
 
     const newStage = stages.find(s => s.id === destination.droppableId);
+
+    // Moving into a "lost" stage requires a disqualification reason — handled
+    // via its own dialog, separate from the qualification/is_won automation
+    // warnings below (which must keep behaving exactly as before).
+    if (newStage && isLostStage(newStage)) {
+      const deal = deals.find(d => d.id === draggableId);
+      setLostReasonDialog({
+        dealId: draggableId,
+        dealTitle: deal?.title || "",
+        newStageId: destination.droppableId,
+        oldStageId: source.droppableId,
+      });
+      return;
+    }
+
     const warning = newStage ? getAutomationWarning(newStage) : null;
 
     if (warning) {
@@ -141,6 +164,12 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
     if (!confirmDialog) return;
     await onStageDrop(confirmDialog.dealId, confirmDialog.newStageId, confirmDialog.oldStageId);
     setConfirmDialog(null);
+  };
+
+  const handleLostReasonConfirm = async (reason: string) => {
+    if (!lostReasonDialog) return;
+    await onStageDrop(lostReasonDialog.dealId, lostReasonDialog.newStageId, lostReasonDialog.oldStageId, reason);
+    setLostReasonDialog(null);
   };
 
   return (
@@ -268,6 +297,14 @@ export function DealsKanbanView({ deals, stages, onStageDrop, onViewDetails, for
         organizationId={emailDeal?.orgId}
         leadId={emailDeal?.leadId ?? undefined}
         onSent={() => setEmailDeal(null)}
+      />
+
+      {/* Lost/disqualification reason dialog */}
+      <DealLostReasonDialog
+        open={!!lostReasonDialog}
+        onOpenChange={(open) => { if (!open) setLostReasonDialog(null); }}
+        onConfirm={handleLostReasonConfirm}
+        dealTitle={lostReasonDialog?.dealTitle}
       />
 
       {/* Workflow confirmation dialog */}

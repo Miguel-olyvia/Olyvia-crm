@@ -245,7 +245,12 @@ const ClientPortalProposalDetail = () => {
       await signProposalAfterOtp();
       setOtpStep("verified");
     } catch (err: any) {
-      setOtpError("Ocorreu um erro ao verificar o código. Tente novamente.");
+      // Was previously always "Ocorreu um erro ao verificar o código." here,
+      // even when the OTP was correct and the failure was actually downstream
+      // (sign_proposal rejected, or a network/CORS failure) — that message
+      // wrongly told the client the code they entered was wrong. Now shows the
+      // real reason propagated from signProposalAfterOtp()/client-portal-action.
+      setOtpError(err.message || "Ocorreu um erro ao assinar a proposta. Tente novamente.");
       setOtpStep("input");
       setOtpCode("");
     }
@@ -269,10 +274,27 @@ const ClientPortalProposalDetail = () => {
         clientIp = ipData.ip;
       } catch {}
 
-      const { error: invokeError } = await supabase.functions.invoke("client-portal-action", {
+      const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
         body: { action: "sign_proposal", proposal_id: id, signature_image: "OTP_SMS_VERIFIED", client_ip: clientIp, selected_quote_ids: selectedQuoteIds },
       });
-      if (invokeError) throw new Error(invokeError.message);
+      if (invokeError) {
+        // Surface the real reason (e.g. otp_required/Forbidden, or a network/CORS
+        // failure message) instead of letting a generic SDK message reach the
+        // catch below, which used to always blame the SMS code.
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message) friendly = body.message;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message) friendly = body.message;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
+      if (data?.error) throw new Error(data.message || data.error);
 
       toast({
         title: "Proposta assinada com sucesso! 🎉",
@@ -394,7 +416,25 @@ const ClientPortalProposalDetail = () => {
           onSelectedQuotesChange={setSelectedQuoteIds}
           onDownloadPdf={async () => {
             try {
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
+              // The generator builds the proposal PDF by merging its quotes'
+              // PDFs, and RLS keeps portal users out of `quotes`/`quote_lines`
+              // — so calling it directly always found zero quotes and threw,
+              // and the button did nothing. The data comes from the Edge
+              // Function instead, already stripped of cost and margin columns,
+              // and is handed to the very same generator the CRM uses.
+              const { data, error } = await supabase.functions.invoke("client-portal-action", {
+                body: { action: "get_proposal_pdf_data", params: { proposal_id: proposal.id } },
+              });
+              if (error) throw error;
+              if (!data?.quotes?.length) {
+                toast({
+                  title: "Sem conteúdo para gerar o PDF",
+                  description: "Esta proposta não tem orçamentos associados.",
+                  variant: "destructive",
+                });
+                return;
+              }
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, data);
               downloadBlob(blob, fileName);
             } catch (e: any) {
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });

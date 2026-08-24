@@ -31,14 +31,38 @@ export async function generateQuotePdfBlob(
     hideTotals?: boolean;
     /** Multi-quote proposal PDFs: render the aggregated totals block instead. */
     totalsOverride?: AggregatedTotals;
+    /**
+     * Quote row, lines and fees already loaded by the caller.
+     *
+     * Used by the client portal: RLS keeps portal users out of `quotes` and
+     * `quote_lines`, so the data arrives from the client-portal-action Edge
+     * Function (already stripped of cost/margin columns) instead of being
+     * queried here. Everything downstream — layout, totals, template — stays
+     * identical, so the client's PDF is the same document as the CRM's.
+     */
+    prefetched?: { quote: any; lines: any[]; fees: any[] };
   } = {},
 ): Promise<{ blob: Blob; fileName: string }> {
-  const { data: quoteData, error: quoteError } = await (supabase as any)
-    .from('quotes').select('*').eq('id', quoteId).single();
-  if (quoteError) throw quoteError;
+  let quoteData: any;
+  let linesData: any[] | null;
+  let feesData: any[] | null;
 
-  const { data: linesData } = await supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quoteId).order('ordem');
-  const { data: feesData } = await supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quoteId);
+  if (options.prefetched) {
+    quoteData = options.prefetched.quote;
+    linesData = options.prefetched.lines;
+    feesData = options.prefetched.fees;
+    if (!quoteData) throw new Error('Dados do orçamento em falta para gerar o PDF.');
+  } else {
+    const { data: fetchedQuote, error: quoteError } = await (supabase as any)
+      .from('quotes').select('*').eq('id', quoteId).single();
+    if (quoteError) throw quoteError;
+    quoteData = fetchedQuote;
+
+    const { data: fetchedLines } = await supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quoteId).order('ordem');
+    const { data: fetchedFees } = await supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quoteId);
+    linesData = fetchedLines;
+    feesData = fetchedFees;
+  }
 
   // Logo em base64 para embed no PDF (mantém comportamento atual)
   let logoBase64: string | null = null;

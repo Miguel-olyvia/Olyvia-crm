@@ -16,11 +16,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
 import { 
-  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter, 
+  Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, Eye, Settings2,
   Copy, History, Link2, Paintbrush, Palette,
   CheckSquare, Send, Mail, MoreHorizontal, Phone, MessageSquare, KeyRound,
-  RotateCcw, BarChart3, Columns3, LayoutList, Download
+  RotateCcw, BarChart3, Columns3, LayoutList, Download, HelpCircle
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -118,6 +118,7 @@ interface Proposal {
   title: string;
   description: string | null;
   value: number;
+  value_sem_iva: number | null;
   probability: number | null;
   status: string;
   stage_id: string | null;
@@ -163,6 +164,25 @@ interface QuoteItem {
   estado: string;
 }
 
+// Explicit column list for the list query — same as `proposals.*` but WITHOUT
+// published_snapshot / decided_snapshot / template_snapshot (all JSONB full
+// document snapshots). Those 3 columns alone blew the list query up to ~7.8MB
+// for ~500 proposals (confirmed via Network tab), none of it used by the list
+// or by ProposalDetailsDialog — only proposalPortalData.ts reads
+// template_snapshot, and it always does its own separate by-id fetch, so
+// dropping these here doesn't affect it. Keep in sync with the `proposals`
+// table schema (supabase gen types) if columns are added/removed later.
+const PROPOSALS_LIST_SELECT =
+  "id, deal_id, title, description, value, value_sem_iva, status, valid_until, document_url, notes, " +
+  "created_by, created_at, updated_at, client_id, currency, sent_at, viewed_at, accepted_at, rejected_at, " +
+  "acceptance_ip, acceptance_user_agent, client_contract_id, stage_id, request_date, delivered_at, " +
+  "delivery_time_hours, probability, template_id, public_token, public_link_enabled, rejection_reason, " +
+  "rejection_reason_code, rejection_notes, tracking_token, last_viewed_at, view_count, organization_id, " +
+  "entity_id, root_organization_id, proposal_number, rejection_reason_id, is_deleted, deleted_at, deleted_by, " +
+  "signature_image, assigned_to, published_at, published_snapshot_hash, has_unpublished_changes, " +
+  "decided_snapshot_hash, decided_published_at, " +
+  "deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)";
+
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -180,6 +200,11 @@ const Proposals = () => {
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
   const [rejectReasonDialogOpen, setRejectReasonDialogOpen] = useState(false);
+  // Drag-and-drop no kanban para uma stage `is_lost`: guarda a proposta e o
+  // stage de destino enquanto se pede o motivo de rejeição (mesmo diálogo
+  // usado no "Rejeitar (com motivo)" do dropdown).
+  const [kanbanRejectTarget, setKanbanRejectTarget] = useState<{ proposal: Proposal; stageId: string } | null>(null);
+  const [kanbanRejectDialogOpen, setKanbanRejectDialogOpen] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -353,16 +378,17 @@ const Proposals = () => {
         // For deals, keep showing only drafts (the typical "ready to attach" set)
         q = q.eq("deal_id", dealId).eq("estado", "rascunho");
       } else if (entityId) {
-        // For a contact/client, surface ALL their quotes not yet linked to a proposal,
-        // regardless of state (rascunho/enviado/aceite/...).
-        q = q.eq("entity_id", entityId);
+        // Surface only relevant quotes: drafts, or quotes already assigned to the
+        // same commercial as the proposal being edited.
+        const assignedTo = formData.assigned_to;
+        q = q.eq("entity_id", entityId).or(assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`);
       }
       const { data } = await q;
       if (cancelled) return;
       setSuggestedQuotes((data || []).map((r: any) => ({ id: r.id, quote_number: r.quote_number, total: r.total, estado: r.estado })));
     })();
     return () => { cancelled = true; };
-  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length]);
+  }, [selectedDeal?.id, formData.deal_id, selectedEntity?.entityId, activeCompany?.id, selectedQuotes.length, formData.assigned_to]);
 
   // Pre-fill "Comercial" in create mode based on selected client/contact/deal.
   // Never overrides a manual choice; falls back to current business user when no entity/deal.
@@ -464,12 +490,15 @@ const Proposals = () => {
     const orgId = activeCompany?.id;
     if (!orgId) return;
     const like = `%${val}%`;
+    const assignedTo = formData.assigned_to;
+    const relevanceFilter = assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`;
 
     const directPromise = supabase
       .from("quotes")
       .select("id, quote_number, total, estado, title, created_at")
       .eq("organization_id", orgId)
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
+      .or(relevanceFilter)
       .is("proposal_id", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -499,6 +528,7 @@ const Proposals = () => {
         .select("id, quote_number, total, estado, title, created_at")
         .eq("organization_id", orgId)
         .in("entity_id", entityIds)
+        .or(relevanceFilter)
         .is("proposal_id", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -511,13 +541,16 @@ const Proposals = () => {
       new Map([...(directData || []), ...byEntity].map((q: any) => [q.id, q])).values()
     );
     setQuoteSearchResults(merged.map(toQuoteItem));
-  }, [activeCompany?.id, toQuoteItem]);
+  }, [activeCompany?.id, toQuoteItem, formData.assigned_to]);
 
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
   const [bulkNewStatus, setBulkNewStatus] = useState("");
+  // Bulk status change para uma stage `is_lost`: pede motivo de rejeição
+  // (aplicado a todas as propostas selecionadas) em vez de gravar direto.
+  const [bulkRejectDialogOpen, setBulkRejectDialogOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [isBulkStatusChanging, setIsBulkStatusChanging] = useState(false);
   const [duplicatingProposalId, setDuplicatingProposalId] = useState<string | null>(null);
@@ -546,12 +579,46 @@ const Proposals = () => {
 
   // Pipeline data for proposals
   const [pipelineLinks, setPipelineLinks] = useState<Record<string, any>>({});
+  const [contractStatuses, setContractStatuses] = useState<Record<string, string>>({});
   const [proposalsWithQuotes, setProposalsWithQuotes] = useState<Set<string>>(new Set());
   const [portalStatuses, setPortalStatuses] = useState<Record<string, string>>({});
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
   const [dealEntityIds, setDealEntityIds] = useState<Record<string, string>>({}); // deal_id -> entity_id, for proposals without a direct entity_id
+  // Most recent entity_interactions.interaction_at per entity (same key
+  // convention as entityPhones/entityNames: raw entity_id, or `deal:${proposalId}`
+  // for proposals resolved via a deal). Used so "Registar atividade" actually
+  // resets the "sem resposta" follow-up indicator instead of it blinking
+  // forever regardless of how many calls/contacts are logged.
+  const [entityLastInteraction, setEntityLastInteraction] = useState<Record<string, string>>({});
+
+  // Configurable "sem resposta" threshold (Definições > Alertas > "Sem
+  // resposta após envio"), instead of a hardcoded 5 — see alert_settings /
+  // useAlertSettings. Declared this early (before filteredProposals/stats
+  // below) since those useMemo callbacks run during render and would
+  // otherwise reference this const before its declaration.
+  const getFollowUpThresholdDays = () => alertSettings.get("proposal_no_response", 5).days_threshold;
+
+  // Days since whichever is more recent: the proposal being sent, or the last
+  // activity logged for its entity ("Registar atividade" / calls / WhatsApp,
+  // all written to entity_interactions). Using only `created_at` meant
+  // registering a follow-up call had zero effect on the "sem resposta"
+  // indicator — it kept blinking forever regardless of how many contacts
+  // were logged, since created_at never changes.
+  const getFollowUpDaysOld = (proposal: Proposal): number => {
+    const directEntityId = (proposal as any).entity_id as string | null;
+    const lastInteractionAt = directEntityId
+      ? entityLastInteraction[directEntityId]
+      : entityLastInteraction[`deal:${proposal.id}`];
+    const sentAt = (proposal as any).sent_at as string | null | undefined;
+    const baseline = parseISO(sentAt || proposal.created_at);
+    const reference = lastInteractionAt && parseISO(lastInteractionAt) > baseline
+      ? parseISO(lastInteractionAt)
+      : baseline;
+    return differenceInDays(new Date(), reference);
+  };
+
   const submitLockRef = useRef(false);
   const acceptProposalLockRef = useRef(false);
   const [isAcceptingProposal, setIsAcceptingProposal] = useState(false);
@@ -629,7 +696,7 @@ const Proposals = () => {
         const [proposalsRes, dealsRes] = await Promise.all([
           (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+            .select(PROPOSALS_LIST_SELECT)
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .order("created_at", { ascending: false }),
@@ -682,7 +749,7 @@ const Proposals = () => {
           if (dealIds.length > 0) {
             const { data: proposalsRes, error } = await (supabase
               .from("proposals") as any)
-              .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+              .select(PROPOSALS_LIST_SELECT)
               .eq("organization_id", activeCompany.id)
               .is("deleted_at", null)
               .in("deal_id", dealIds)
@@ -697,7 +764,7 @@ const Proposals = () => {
         if (proposalsData.length === 0 || viewScope === "TEAM") {
           const { data: ownedProposals } = await (supabase
             .from("proposals") as any)
-            .select("*, deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)")
+            .select(PROPOSALS_LIST_SELECT)
             .eq("organization_id", activeCompany.id)
             .is("deleted_at", null)
             .in("created_by", Array.from(allowedUserIds))
@@ -717,76 +784,108 @@ const Proposals = () => {
       // Load pipeline links for proposals
       if (proposalsData.length > 0) {
         const proposalIds = proposalsData.map(p => p.id);
-        const { data: links } = await (supabase.from("pipeline_links") as any)
-          .select("id, proposal_id, deal_id, quote_id, contract_id, status")
-          .in("proposal_id", proposalIds)
-          .eq("organization_id", activeCompany?.id);
-        
+
+        // Quotes already come embedded in the proposals select above
+        // (quotes!proposal_id(desconto_global_percent)) — derive "has quotes"
+        // directly from that instead of round-tripping to `quotes` again.
+        const quotesSet = new Set<string>();
+        proposalsData.forEach((p: any) => {
+          if (p.quotes && p.quotes.length > 0) quotesSet.add(p.id);
+        });
+        setProposalsWithQuotes(quotesSet);
+
+        // Resolve entity names for proposals (including from deals as fallback)
+        const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
+        const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
+
+        // pipeline_links, client_portal_users and deals(entity_id) are all
+        // independent of each other and of the queries above — run them in
+        // parallel instead of serially.
+        const [linksRes, portalUsersRes, dealEntitiesRes] = await Promise.all([
+          (supabase.from("pipeline_links") as any)
+            .select("id, proposal_id, deal_id, quote_id, contract_id, status")
+            .in("proposal_id", proposalIds)
+            .eq("organization_id", activeCompany?.id),
+          (supabase as any)
+            .from("client_portal_users")
+            .select("proposal_id, portal_status")
+            .eq("organization_id", activeCompany.id)
+            .in("proposal_id", proposalIds),
+          dealIds.length > 0
+            ? supabase.from("deals").select("id, entity_id").in("id", dealIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        const links = linksRes.data;
         const linksMap: Record<string, any> = {};
         (links || []).forEach((l: any) => {
           linksMap[l.proposal_id] = l;
         });
         setPipelineLinks(linksMap);
 
-        // Check which proposals have quotes directly linked (via quotes.proposal_id)
-        const { data: quotesLinked } = await (supabase.from("quotes") as any)
-          .select("proposal_id")
-          .in("proposal_id", proposalIds)
-          .eq("organization_id", activeCompany?.id)
-          .not("proposal_id", "is", null);
-        const quotesSet = new Set<string>();
-        (quotesLinked || []).forEach((q: any) => {
-          if (q.proposal_id) quotesSet.add(q.proposal_id);
-        });
-        setProposalsWithQuotes(quotesSet);
-
-        // Load portal statuses for proposals
-        const { data: portalUsers } = await (supabase as any)
-          .from("client_portal_users")
-          .select("proposal_id, portal_status")
-          .eq("organization_id", activeCompany.id)
-          .in("proposal_id", proposalIds);
-        
+        const portalUsers = portalUsersRes.data;
         const statusMap: Record<string, string> = {};
         (portalUsers || []).forEach((pu: any) => {
           if (pu.proposal_id) statusMap[pu.proposal_id] = pu.portal_status;
         });
         setPortalStatuses(statusMap);
 
-        // Resolve entity names for proposals (including from deals as fallback)
-        const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
-        const dealIds = proposalsData.filter((p: any) => !p.entity_id && p.deal_id).map((p: any) => p.deal_id);
-        
         // Fetch deal entity_ids for proposals without entity_id
         const dealEntityMap: Record<string, string> = {};
-        if (dealIds.length > 0) {
-          const { data: dealEntities } = await supabase
-            .from("deals")
-            .select("id, entity_id")
-            .in("id", dealIds);
-          (dealEntities || []).forEach((d: any) => {
-            if (d.entity_id) dealEntityMap[d.id] = d.entity_id;
-          });
-        }
+        (dealEntitiesRes.data || []).forEach((d: any) => {
+          if (d.entity_id) dealEntityMap[d.id] = d.entity_id;
+        });
+
+        // Load contract statuses for linked contracts (no FK between pipeline_links.contract_id
+        // and client_contracts, so this must be a separate query, not an embed).
+        // This depends on `links` above, so it can only start now — but it runs
+        // alongside the entity lookups below instead of blocking them.
+        const contractIds = Array.from(new Set((links || []).map((l: any) => l.contract_id).filter(Boolean)));
+        const contractsPromise = contractIds.length > 0
+          ? (supabase.from("client_contracts") as any).select("id, status").in("id", contractIds)
+          : Promise.resolve({ data: [] as any[] });
 
         const allEntityIds = [...new Set([
           ...directEntityIds,
           ...Object.values(dealEntityMap),
         ])];
 
-        if (allEntityIds.length > 0) {
-          const [entRes, emailRes, phoneRes] = await Promise.all([
-            supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
-            supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
-            supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
-          ]);
+        const entitiesPromise = allEntityIds.length > 0
+          ? Promise.all([
+              supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
+              supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
+              supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
+              // Ordered desc so the forEach below (which only ever keeps the
+              // first value seen per entity_id) naturally keeps the latest one.
+              supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
+            ])
+          : null;
+
+        const [contractsRes, entityResults] = await Promise.all([
+          contractsPromise,
+          entitiesPromise ?? Promise.resolve(null),
+        ]);
+
+        const linkedContracts = contractsRes.data;
+        const contractStatusMap: Record<string, string> = {};
+        (linkedContracts || []).forEach((c: any) => {
+          contractStatusMap[c.id] = c.status;
+        });
+        setContractStatuses(contractStatusMap);
+
+        if (entityResults) {
+          const [entRes, emailRes, phoneRes, interactionRes] = entityResults;
           const nameMap: Record<string, string> = {};
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
+          const lastInteractionMap: Record<string, string> = {};
           (entRes.data || []).forEach((e: any) => { nameMap[e.id] = e.display_name; });
           (emailRes.data || []).forEach((e: any) => { emailMap[e.entity_id] = e.email; });
           (phoneRes.data || []).forEach((e: any) => { phoneMap[e.entity_id] = e.phone_number; });
-          
+          (interactionRes.data || []).forEach((i: any) => {
+            if (i.entity_id && !lastInteractionMap[i.entity_id]) lastInteractionMap[i.entity_id] = i.interaction_at;
+          });
+
           // Map deal entity data to proposal keys using deal_id
           proposalsData.forEach((p: any) => {
             if (!p.entity_id && p.deal_id && dealEntityMap[p.deal_id]) {
@@ -794,18 +893,21 @@ const Proposals = () => {
               if (nameMap[entityId]) nameMap[`deal:${p.id}`] = nameMap[entityId];
               if (emailMap[entityId]) emailMap[`deal:${p.id}`] = emailMap[entityId];
               if (phoneMap[entityId]) phoneMap[`deal:${p.id}`] = phoneMap[entityId];
+              if (lastInteractionMap[entityId]) lastInteractionMap[`deal:${p.id}`] = lastInteractionMap[entityId];
             }
           });
-          
+
           setEntityNames(nameMap);
           setEntityEmails(emailMap);
           setEntityPhones(phoneMap);
           setDealEntityIds(dealEntityMap);
+          setEntityLastInteraction(lastInteractionMap);
         } else {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
           setDealEntityIds({});
+          setEntityLastInteraction({});
         }
       }
 
@@ -1109,6 +1211,37 @@ const Proposals = () => {
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
+      setBulkNewStatus("");
+      loadData();
+    } catch (error: any) {
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setIsBulkStatusChanging(false);
+    }
+  };
+
+  // Bulk status change para uma stage `is_lost`: em vez de gravar direto,
+  // pede o motivo (uma vez) e aplica-o a todas as propostas selecionadas,
+  // reutilizando `rejectProposalCore` — cada proposta herda a mesma cascata
+  // para os seus orçamentos. Loop sequencial, seguindo o padrão já usado em
+  // `handleBulkDelete`.
+  const handleBulkRejectConfirm = async (reason: ProposalRejectionDecision) => {
+    if (!bulkNewStatus) return;
+    setIsBulkStatusChanging(true);
+    try {
+      const targets = filteredProposals.filter(p => selectedIds.includes(p.id));
+      let anyWorkflowFailed = false;
+      for (const proposal of targets) {
+        const { workflowFailed } = await rejectProposalCore(proposal, reason, bulkNewStatus);
+        if (workflowFailed) anyWorkflowFailed = true;
+      }
+      toast({
+        title: t('common.statusUpdated'),
+        description: anyWorkflowFailed ? t('proposals.toast.workflowWarning') : `${targets.length} propostas atualizadas.`,
+      });
+      setSelectedIds([]);
+      setBulkStatusDialogOpen(false);
+      setBulkRejectDialogOpen(false);
       setBulkNewStatus("");
       loadData();
     } catch (error: any) {
@@ -1705,37 +1838,72 @@ const Proposals = () => {
     }
   };
 
+  /**
+   * Núcleo da rejeição de uma proposta: atualiza stage/status/motivo na
+   * proposta e faz cascata do MESMO motivo para os orçamentos (`quotes`)
+   * ligados que ainda estejam em rascunho/enviado. Orçamentos já aceites ou
+   * já rejeitados não são tocados. Não mostra toast nem fecha diálogos —
+   * cada caminho de chamada (dropdown, drag no kanban, bulk) decide isso.
+   * `stageIdOverride` permite indicar o stage `is_lost` exato de destino
+   * (ex.: drag-and-drop no kanban ou bulk); sem isso, resolve o stage
+   * "Rejeitada" pelo nome, como sempre fez.
+   */
+  const rejectProposalCore = async (
+    proposal: Proposal,
+    reason: ProposalRejectionDecision,
+    stageIdOverride?: string,
+  ): Promise<{ workflowFailed: boolean }> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+    const rejectedStage = stageIdOverride
+      ? workflowStages.find(s => s.id === stageIdOverride)
+      : workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
+    if (!rejectedStage) throw new Error("Estágio 'Rejeitada' não encontrado");
+    const oldStageId = proposal.stage_id;
+    const businessUserIdReject = await resolveCurrentBusinessUserId();
+    if (!businessUserIdReject) throw new Error("Utilizador não identificado");
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
+    const { error } = await supabase.from("proposals").update({
+      stage_id: rejectedStage.id,
+      status: "rejected",
+      rejected_at: new Date().toISOString(),
+      rejection_reason_id: reason.reasonId,
+      rejection_reason_code: reason.code,
+      rejection_reason: reason.label,
+      rejection_notes: reason.notes,
+    }).eq("id", proposal.id);
+    if (error) throw error;
+
+    // Cascata: orçamentos ligados a esta proposta que ainda estejam em
+    // rascunho/enviado herdam o mesmo motivo e passam a rejeitado. Um erro
+    // aqui não desfaz a rejeição da proposta (já persistida) — só é
+    // registado, para não bloquear o fluxo principal por uma falha lateral.
+    const { error: quotesError } = await supabase
+      .from("quotes")
+      .update({ estado: "rejeitado", lost_reason: reason.label } as any)
+      .eq("proposal_id", proposal.id)
+      .in("estado", ["rascunho", "enviado"]);
+    if (quotesError) {
+      console.error("Erro ao rejeitar orçamentos ligados à proposta:", quotesError);
+    }
+
+    let workflowFailed = false;
+    try {
+      const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
+        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
+      });
+      if (workflowError) throw workflowError;
+    } catch (workflowError) {
+      console.error("Workflow execution error:", workflowError);
+      workflowFailed = true;
+    }
+    return { workflowFailed };
+  };
+
   const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not authenticated");
-      const rejectedStage = workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
-      if (!rejectedStage) { toast({ title: "Erro", description: "Estágio 'Rejeitada' não encontrado", variant: "destructive" }); return; }
-      const oldStageId = selectedProposal.stage_id;
-      const businessUserIdReject = await resolveCurrentBusinessUserId();
-      if (!businessUserIdReject) { toast({ title: 'Utilizador não identificado', variant: 'destructive' }); return; }
-      await supabase.rpc('set_audit_context', { p_user_id: businessUserIdReject, p_source: 'ui' });
-      const { error } = await supabase.from("proposals").update({
-        stage_id: rejectedStage.id,
-        status: "rejected",
-        rejected_at: new Date().toISOString(),
-        rejection_reason_id: reason.reasonId,
-        rejection_reason_code: reason.code,
-        rejection_reason: reason.label,
-        rejection_notes: reason.notes,
-      }).eq("id", selectedProposal.id);
-      if (error) throw error;
-      let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: selectedProposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      const { workflowFailed } = await rejectProposalCore(selectedProposal, reason);
       toast({
         title: "Proposta recusada",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
@@ -1810,9 +1978,21 @@ const Proposals = () => {
     return stage?.name || proposal.status || "";
   }, [getProposalStage]);
 
+  // A linked contract is only viewable once it has actually been signed.
+  // Matches the "signed" / "active" convention used throughout ClientContracts.tsx.
+  const isContractSigned = (contractId?: string | null) =>
+    !!contractId && (contractStatuses[contractId] === "signed" || contractStatuses[contractId] === "active");
+
+  // Opens the contract's real PDF. Navigates to ClientContracts.tsx, which
+  // generates the PDF and shows it inline (iframe in a dialog) — no
+  // window.open involved, so it can never be blocked as a pop-up.
+  const openContractPdf = (contractId?: string | null) => {
+    if (!isContractSigned(contractId)) return;
+    navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
+  };
+
   // Filter and sort
   const filteredProposals = useMemo(() => {
-    const now = new Date();
     return proposals
       .filter(proposal => {
         // "Só os meus" — filter to proposals assigned to the current user.
@@ -1828,7 +2008,7 @@ const Proposals = () => {
 
         if (noResponseFilter) {
           const sn = getStageName(proposal);
-          if (!((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5)) return false;
+          if (!((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays())) return false;
         }
 
         if (expiredFilter) {
@@ -1883,13 +2063,16 @@ const Proposals = () => {
     const now = new Date();
     const total = filteredProposals.length;
     const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
+    const totalValueExVat = filteredProposals.reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
 
     const stageCounts: Record<string, number> = {};
     const stageValues: Record<string, number> = {};
+    const stageValuesExVat: Record<string, number> = {};
 
     workflowStages.forEach(stage => {
       stageCounts[stage.id] = 0;
       stageValues[stage.id] = 0;
+      stageValuesExVat[stage.id] = 0;
     });
 
     filteredProposals.forEach(p => {
@@ -1897,12 +2080,16 @@ const Proposals = () => {
       if (stage) {
         stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
         stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
+        stageValuesExVat[stage.id] = (stageValuesExVat[stage.id] || 0) + Number(p.value_sem_iva ?? 0);
       }
     });
 
     const wonValue = filteredProposals
       .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
       .reduce((sum, p) => sum + Number(p.value), 0);
+    const wonValueExVat = filteredProposals
+      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
+      .reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
 
     // Extra KPIs
     const acceptedProposals = filteredProposals.filter(p => {
@@ -1925,9 +2112,10 @@ const Proposals = () => {
 
     const noResponse5d = filteredProposals.filter(p => {
       const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(p.created_at)) > 5;
+      return (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(p) > getFollowUpThresholdDays();
     });
     const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
+    const noResponse5dValueExVat = noResponse5d.reduce((s, p) => s + Number(p.value_sem_iva ?? 0), 0);
 
     const noValidity = filteredProposals.filter(p => {
       const stage = getProposalStage(p);
@@ -1939,7 +2127,7 @@ const Proposals = () => {
       return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
     });
 
-    return { total, totalValue, stageCounts, stageValues, wonValue, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noValidity, expired };
+    return { total, totalValue, totalValueExVat, stageCounts, stageValues, stageValuesExVat, wonValue, wonValueExVat, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noResponse5dValueExVat, noValidity, expired };
   }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
 
   const handleSort = (column: string) => {
@@ -1985,8 +2173,9 @@ const Proposals = () => {
     if (stage?.is_lost) {
       return { text: "❌ Rejeitada", color: "text-red-500" };
     }
-    if ((sn === "sent" || sn === "enviada") && daysOld > 5) {
-      return { text: `⏰ Enviada há ${daysOld} dias sem resposta — follow-up urgente`, color: "text-orange-600" };
+    const followUpDaysOld = getFollowUpDaysOld(proposal);
+    if ((sn === "sent" || sn === "enviada") && followUpDaysOld > getFollowUpThresholdDays()) {
+      return { text: `⏰ Sem atividade há ${followUpDaysOld} dias — follow-up urgente`, color: "text-orange-600" };
     }
     if ((sn === "draft" || sn === "rascunho") && daysOld > 2) {
       return { text: `📝 Rascunho há ${daysOld} dias — enviar?`, color: "text-muted-foreground" };
@@ -2042,12 +2231,11 @@ const Proposals = () => {
   };
 
   const getRowBg = (proposal: Proposal): string => {
-    const now = new Date();
     const stage = getProposalStage(proposal);
     const sn = getStageName(proposal);
     if (stage?.is_won) return "bg-green-50/50 dark:bg-green-950/20";
     if (stage?.is_lost) return "bg-red-50/30 dark:bg-red-950/10 opacity-75";
-    if ((sn === "sent" || sn === "enviada") && differenceInDays(now, parseISO(proposal.created_at)) > 5) return "bg-amber-50/50 dark:bg-amber-950/20";
+    if ((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays()) return "bg-amber-50/50 dark:bg-amber-950/20";
     if (sn === "draft" || sn === "rascunho") return "bg-muted/30";
     return "";
   };
@@ -2056,9 +2244,7 @@ const Proposals = () => {
   const getQuickActions = (proposal: Proposal) => {
     const sn = getStageName(proposal);
     const stage = getProposalStage(proposal);
-    const now = new Date();
-    const daysOld = differenceInDays(now, parseISO(proposal.created_at));
-    const isNoResponse = (sn === "sent" || sn === "enviada") && daysOld > 5;
+    const isNoResponse = (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays();
 
     if (sn === "draft" || sn === "rascunho") {
       return (
@@ -2084,6 +2270,9 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setSendProposal(proposal); setSendDialogOpen(true); }} title="Reenviar">
             <Mail className="w-3.5 h-3.5" />
           </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleEdit(proposal)} title="Adicionar orçamento">
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
@@ -2096,8 +2285,10 @@ const Proposals = () => {
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleViewDetails(proposal)} title="Ver">
             <Eye className="w-3.5 h-3.5" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600" title="Ver contrato"
-            onClick={() => { const link = pipelineLinks[proposal.id]; if (link?.contract_id) navigate(`/contracts?open=${link.contract_id}`); }}>
+          <Button size="icon" variant="ghost" className="h-7 w-7 text-green-600"
+            disabled={!isContractSigned(pipelineLinks[proposal.id]?.contract_id)}
+            title={isContractSigned(pipelineLinks[proposal.id]?.contract_id) ? "Ver contrato" : "Contrato ainda não assinado"}
+            onClick={() => openContractPdf(pipelineLinks[proposal.id]?.contract_id)}>
             <FileText className="w-3.5 h-3.5" />
           </Button>
           <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => handleReopenProposal(proposal)} title="Reabrir">
@@ -2250,16 +2441,17 @@ const Proposals = () => {
         <DropdownMenuItem disabled={!proposal.deal_id} onClick={() => proposal.deal_id && navigate(`/deals?open=${proposal.deal_id}`)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver pedido {!proposal.deal_id && <span className="text-[10px] text-muted-foreground ml-1">(não existe)</span>}
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!link?.contract_id} onClick={() => link?.contract_id && navigate(`/contracts?open=${link.contract_id}`)}>
+        <DropdownMenuItem disabled={!isContractSigned(link?.contract_id)} onClick={() => openContractPdf(link?.contract_id)}>
           <FileText className="w-3.5 h-3.5 mr-2" /> Ver contrato {!link?.contract_id && <span className="text-[10px] text-muted-foreground ml-1">(não criado)</span>}
+          {link?.contract_id && !isContractSigned(link?.contract_id) && <span className="text-[10px] text-muted-foreground ml-1">(ainda não assinado)</span>}
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
-        {(sn === "draft" || sn === "rascunho") && (
+        {(sn === "draft" || sn === "rascunho" || sn === "sent" || sn === "enviada") && (
           <PermissionGate permission="proposals.edit">
             <DropdownMenuItem onClick={() => handleEdit(proposal)}>
-              <Pencil className="w-3.5 h-3.5 mr-2" /> Editar proposta
+              <Pencil className="w-3.5 h-3.5 mr-2" /> {(sn === "sent" || sn === "enviada") ? "Adicionar orçamento" : "Editar proposta"}
             </DropdownMenuItem>
           </PermissionGate>
         )}
@@ -2443,7 +2635,7 @@ const Proposals = () => {
                         <Select value={formData.stage_id} onValueChange={(value) => setFormData({ ...formData, stage_id: value })}>
                           <SelectTrigger><SelectValue placeholder={t('proposals.form.selectStatus')} /></SelectTrigger>
                           <SelectContent>
-                            {workflowStages.map((stage) => (
+                            {workflowStages.filter(stage => !stage.is_lost).map((stage) => (
                               <SelectItem key={stage.id} value={stage.id}>
                                 <div className="flex items-center gap-2">
                                   <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -2453,6 +2645,9 @@ const Proposals = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Para rejeitar, usa a ação "Rejeitar (com motivo)" no menu.
+                        </p>
                       </div>
                       {/* Template de proposta */}
                       {proposalTemplates.length > 0 && (
@@ -2705,6 +2900,14 @@ const Proposals = () => {
                               <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setShowQuoteDropdown(!showQuoteDropdown)}>
                                 🔗 Associar existente
                               </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-3.5 w-3.5 text-muted-foreground inline-block ml-1 align-middle cursor-help" />
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs text-xs">
+                                  Mostra orçamentos em rascunho ou já atribuídos ao mesmo comercial desta proposta.
+                                </TooltipContent>
+                              </Tooltip>
                               {showQuoteDropdown && (
                                 <div className="absolute z-50 top-8 left-0 w-80 bg-popover border rounded-lg shadow-lg p-2">
                                   <Input
@@ -2931,7 +3134,7 @@ const Proposals = () => {
             </Button>
           </div>
           <div className="text-sm text-muted-foreground">
-            Total: {stats.total} · Pipeline: <span className="font-semibold text-foreground">{formatCurrency(stats.totalValue)}</span> · Aceite: <span className="font-bold text-green-600">{formatCurrency(stats.wonValue)}</span>
+            Total: {stats.total} · Pipeline: <span className="font-semibold text-foreground">{formatCurrency(stats.totalValueExVat)}</span> <span className="text-xs text-muted-foreground">({formatCurrency(stats.totalValue)} c/ IVA)</span> · Aceite: <span className="font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</span> <span className="text-xs text-muted-foreground">({formatCurrency(stats.wonValue)} c/ IVA)</span>
           </div>
         </div>
 
@@ -2942,7 +3145,8 @@ const Proposals = () => {
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Total</div>
                 <div className="text-xl font-bold">{stats.total}</div>
-                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValue)} em pipeline</div>
+                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValueExVat)} em pipeline</div>
+                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.totalValue)} com IVA</div>
               </CardContent>
             </Card>
             
@@ -2951,7 +3155,8 @@ const Proposals = () => {
                 <CardContent className="p-3">
                   <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
                   <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>
-                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)}</div>
+                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValuesExVat[stage.id] || 0)}</div>
+                  <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)} com IVA</div>
                 </CardContent>
               </Card>
             ))}
@@ -2959,7 +3164,8 @@ const Proposals = () => {
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Valor Aceite</div>
-                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValue)}</div>
+                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</div>
+                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.wonValue)} com IVA</div>
               </CardContent>
             </Card>
 
@@ -3040,6 +3246,12 @@ const Proposals = () => {
                 toast({ title: "Proposta movida" });
                 loadData();
               }
+            }}
+            onLostStageDrop={(proposalId, stageId) => {
+              const proposal = filteredProposals.find(p => p.id === proposalId);
+              if (!proposal) return;
+              setKanbanRejectTarget({ proposal, stageId });
+              setKanbanRejectDialogOpen(true);
             }}
             onViewProposal={(p) => { setSelectedProposal(p as any); setDetailsOpen(true); }}
           />
@@ -3217,6 +3429,11 @@ const Proposals = () => {
                                 <div className="flex items-center gap-2">
                                   <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: stage?.color || 'transparent' }} />
                                   <div>
+                                    {proposal.proposal_number && (
+                                      <div className="text-[11px] text-muted-foreground font-mono leading-none mb-0.5">
+                                        {proposal.proposal_number}
+                                      </div>
+                                    )}
                                     <span className="font-medium text-sm">{proposal.title}</span>
                                     {subtitle && (
                                       <div className={cn("text-[11px] mt-0.5", subtitle.color)}>{subtitle.text}</div>
@@ -3350,6 +3567,36 @@ const Proposals = () => {
         onConfirm={handleRejectProposal}
       />
 
+      {/* Drag-and-drop no kanban para uma stage "is_lost": pede o motivo
+          antes de gravar, reutilizando o mesmo diálogo/lógica de rejeição. */}
+      <ProposalRejectReasonDialog
+        open={kanbanRejectDialogOpen}
+        onOpenChange={(open) => {
+          setKanbanRejectDialogOpen(open);
+          if (!open) setKanbanRejectTarget(null);
+        }}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={async (reason) => {
+          if (!kanbanRejectTarget) return;
+          try {
+            const { workflowFailed } = await rejectProposalCore(
+              kanbanRejectTarget.proposal,
+              reason,
+              kanbanRejectTarget.stageId,
+            );
+            toast({
+              title: "Proposta movida",
+              description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
+            });
+            setKanbanRejectDialogOpen(false);
+            setKanbanRejectTarget(null);
+            loadData();
+          } catch (error: any) {
+            toast({ title: "Erro", description: error.message, variant: "destructive" });
+          }
+        }}
+      />
+
       <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -3473,10 +3720,29 @@ const Proposals = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)} disabled={isBulkStatusChanging}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={!bulkNewStatus || isBulkStatusChanging}>{t('common.save')}</Button>
+            <Button
+              onClick={() => {
+                const targetStage = workflowStages.find(s => s.id === bulkNewStatus);
+                if (targetStage?.is_lost) {
+                  setBulkRejectDialogOpen(true);
+                } else {
+                  handleBulkStatusChange();
+                }
+              }}
+              disabled={!bulkNewStatus || isBulkStatusChanging}
+            >{t('common.save')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk status change para uma stage "is_lost": pede o motivo (uma vez,
+          aplicado a todas as selecionadas) em vez de gravar direto. */}
+      <ProposalRejectReasonDialog
+        open={bulkRejectDialogOpen}
+        onOpenChange={setBulkRejectDialogOpen}
+        organizationId={activeCompany?.id ?? null}
+        onConfirm={handleBulkRejectConfirm}
+      />
 
       <AIProposalGeneratorDialog
         open={aiGeneratorOpen}

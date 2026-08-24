@@ -291,6 +291,7 @@ export default function ProductSubcategories() {
         .not("parent_id", "is", null)
         .is("deleted_at", null)
         .order("path")
+        .order("id")
         .range(from, to);
 
       // ALWAYS require org filter — no unscoped queries allowed

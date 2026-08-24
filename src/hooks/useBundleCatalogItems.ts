@@ -126,6 +126,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
           .eq("status", "active")
           .is("deleted_at", null)
           .order("name")
+          .order("id")
           .range(offset, offset + PAGE_SIZE - 1);
 
         const safeSearch = escapePostgrestOrTerm(search);
@@ -166,6 +167,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
           .eq("is_active", true)
           .is("deleted_at", null)
           .order("name")
+          .order("id")
           .range(offset, offset + PAGE_SIZE - 1);
 
         if (searchLower) {

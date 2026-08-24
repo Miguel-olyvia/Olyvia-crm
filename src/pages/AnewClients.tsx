@@ -44,6 +44,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { buildContactScopeOrFilter, getContactScopeUserIds } from "@/lib/contacts/scope";
 import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -70,6 +71,7 @@ import { withAuditContext } from "@/utils/auditContext";
 import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
 import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClientMeetingDialog";
 import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
+import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 
 interface ClientRecord {
   id: string;
@@ -86,6 +88,9 @@ interface ClientRecord {
   updated_at?: string | null;
   last_interaction_at?: string | null;
   custom_fields?: Record<string, unknown> | null;
+  origin_source?: string | null;
+  origin_source_id?: string | null;
+  origin_campaign_id?: string | null;
 }
 
 interface AnewUserNameRow { id: string; name: string | null }
@@ -173,6 +178,16 @@ const AnewClients = () => {
   );
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { resolveEntities, getIdentity } = useEntityIdentity();
+  // Full comercial roster for this org (scoped to the viewer's permission scope) —
+  // independent of which clients happen to be loaded, so the filter/bulk-assign
+  // dropdowns always list every assignable comercial, not just the ones with a
+  // client in the currently-loaded page.
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: clientsViewScope,
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
   const { alerts: clientAlerts, dismissAlert: dismissClientAlert } = useModuleAlerts('client', activeCompany?.id);
 
   const [assignedUserMap, setAssignedUserMap] = useState<Map<string, string>>(new Map());
@@ -227,6 +242,8 @@ const AnewClients = () => {
   }, [debouncedSearch]);
   const [statusFilter, setStatusFilter] = useState("active");
   const [companyFilter, setCompanyFilter] = useState("all");
+  const [visibleClientColumns, setVisibleClientColumns] = useState<ClientColumnConfig[]>(DEFAULT_CLIENT_COLUMNS.filter(c => c.visible));
+  const isColVisible = (key: string) => visibleClientColumns.some(c => c.key === key);
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -263,9 +280,17 @@ const AnewClients = () => {
 
   // Stable org scope array for Value/Retention views — avoids a new array
   // literal on every render, which would otherwise retrigger their fetch effects.
+  // Must resolve the currently SELECTED organization (companyFilter dropdown) the same
+  // way the rest of the page does — falling back to activeCompany.id only means "no
+  // explicit choice made", never the other way around. Previously this always used
+  // activeCompany.id alone, so Value/Retention's org-wide totals silently ignored the
+  // "Empresa" filter and kept showing the whole org's data.
   const activeCompanyScopeOrgIds = useMemo(
-    () => (activeCompany?.id ? [activeCompany.id] : []),
-    [activeCompany?.id]
+    () => {
+      if (companyFilter !== "all") return [companyFilter];
+      return activeCompany?.id ? [activeCompany.id] : [];
+    },
+    [companyFilter, activeCompany?.id]
   );
 
   // Enriched data for paginated list
@@ -310,11 +335,55 @@ const AnewClients = () => {
   } = useClientEnrichedData(allEntityIds, allIdentityMapForEnrichment, allStatusMapForEnrichment, activeListOrganizationId);
 
   // Use allClients data when available for analytics, fallback to paginated
-  const analyticsClients = allClientsLoaded ? allClients : clients;
+  const analyticsClientsBase = allClientsLoaded ? allClients : clients;
   const analyticsContractMap = allClientsLoaded ? allContractMap : contractMap;
   const analyticsInteractionMap = allClientsLoaded ? allInteractionMap : interactionMap;
   const analyticsHealthScores = allClientsLoaded ? allHealthScores : healthScores;
   const analyticsTagMap = allClientsLoaded ? allTagMap : tagMap;
+
+  // Shared health/last-contact/"only mine"/sales-rep narrowing — the SAME logic
+  // dashboardScopedClients (KPI bar) applies below. Extracted so analyticsClients (which
+  // feeds the Dashboard/Value/Retention tabs) can never again drift from the KPI cards
+  // when one of these 4 filters is active — previously analyticsClients ignored them
+  // entirely, so the 3 analytic tabs kept showing every client while the KPI bar above
+  // them was already narrowed.
+  const applyClientAnalyticsFilters = useCallback((list: ClientRecord[]) => {
+    let filtered = list;
+
+    if (healthFilter !== "all") {
+      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
+    }
+
+    if (lastContactFilter !== "all") {
+      const now = new Date();
+      filtered = filtered.filter(c => {
+        const int = analyticsInteractionMap.get(c.entity_id);
+        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
+        switch (lastContactFilter) {
+          case "7d": return days <= 7;
+          case "30d": return days <= 30;
+          case "30d+": return days > 30;
+          case "60d+": return days > 60;
+          default: return true;
+        }
+      });
+    }
+
+    if (onlyMine && scopeAnewUserId) {
+      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
+    }
+
+    if (salesRepFilter !== "all") {
+      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
+    }
+
+    return filtered;
+  }, [healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap]);
+
+  const analyticsClients = useMemo(
+    () => applyClientAnalyticsFilters(analyticsClientsBase),
+    [analyticsClientsBase, applyClientAnalyticsFilters]
+  );
 
   // Compute alert data
   const alertData = useMemo(() => {
@@ -373,6 +442,7 @@ const AnewClients = () => {
       const interaction = analyticsInteractionMap.get(c.entity_id);
       const days = interaction?.lastInteractionAt ? differenceInDays(now, new Date(interaction.lastInteractionAt)) : 999;
       return {
+        entityId: c.entity_id,
         name: getIdentity(c.entity_id)?.display_name || 'N/A',
         value: analyticsContractMap.get(c.entity_id)?.totalValue || 0,
         detail: `sem contacto há ${days} dias`,
@@ -382,44 +452,17 @@ const AnewClients = () => {
     return { noContactClients, expiringContracts, upsellClients, avgValue, vipAtRisk };
   }, [analyticsClients, analyticsHealthScores, analyticsContractMap, analyticsInteractionMap, analyticsTagMap, getIdentity]);
 
-  // Clients feeding the dashboard KPI cards — always a filtered subset of analyticsClients
-  // (org+permission+search+date scoped), narrowed by the same predicates the main list uses,
+  // Clients feeding the dashboard KPI cards — a filtered subset of analyticsClients
+  // (org+permission+search+date scoped, and now already narrowed by health/last-contact/
+  // "only mine"/sales-rep via applyClientAnalyticsFilters above), narrowed further by
+  // statusFilter (the KPI-card drill-down, e.g. "no_contact_30d"/"expiring_contracts"),
   // so KPI cards and the paginated table can never disagree.
   const dashboardScopedClients = useMemo(() => {
     const noContactEntityIds = new Set(alertData.noContactClients.map(c => c.entityId).filter(Boolean));
-    let filtered = analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
+    return analyticsClients.filter(c => matchesStatusFilter(c, statusFilter, {
       getIdentity, contractMap: analyticsContractMap, noContactEntityIds,
     }));
-
-    if (healthFilter !== "all") {
-      filtered = filtered.filter(c => analyticsHealthScores.get(c.entity_id)?.level === healthFilter);
-    }
-
-    if (lastContactFilter !== "all") {
-      const now = new Date();
-      filtered = filtered.filter(c => {
-        const int = analyticsInteractionMap.get(c.entity_id);
-        const days = int?.lastInteractionAt ? differenceInDays(now, new Date(int.lastInteractionAt)) : 999;
-        switch (lastContactFilter) {
-          case "7d": return days <= 7;
-          case "30d": return days <= 30;
-          case "30d+": return days > 30;
-          case "60d+": return days > 60;
-          default: return true;
-        }
-      });
-    }
-
-    if (onlyMine && scopeAnewUserId) {
-      filtered = filtered.filter(c => c.assigned_to === scopeAnewUserId || c.created_by === scopeAnewUserId);
-    }
-
-    if (salesRepFilter !== "all") {
-      filtered = filtered.filter(c => c.assigned_to === salesRepFilter);
-    }
-
-    return filtered;
-  }, [analyticsClients, statusFilter, healthFilter, lastContactFilter, onlyMine, salesRepFilter, scopeAnewUserId, analyticsHealthScores, analyticsInteractionMap, analyticsContractMap, alertData, getIdentity]);
+  }, [analyticsClients, statusFilter, analyticsContractMap, alertData, getIdentity]);
 
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
@@ -488,16 +531,6 @@ const AnewClients = () => {
     return max || 1;
   }, [contractMap]);
 
-  // Unique sales reps for filter
-  const salesReps = useMemo(() => {
-    const reps = new Map<string, string>();
-    clients.forEach(c => {
-      if (c.assigned_to && assignedUserMap.has(c.assigned_to)) {
-        reps.set(c.assigned_to, assignedUserMap.get(c.assigned_to)!);
-      }
-    });
-    return Array.from(reps.entries());
-  }, [clients, assignedUserMap]);
 
   // Load organizations (same pattern)
   useEffect(() => {
@@ -589,7 +622,7 @@ const AnewClients = () => {
     try {
       const viewScope = getPermissionScope("clients.view");
 
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields", { count: 'exact' }).is("deleted_at", null);
+      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
       if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
       else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
       // When searching, ignore status filter so inactive/churned/lost clients still appear
@@ -616,6 +649,7 @@ const AnewClients = () => {
 
       if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
       if (dateTo) query = query.lte("created_at", dateTo.toISOString());
+      if (salesRepFilter !== "all") query = query.eq("assigned_to", salesRepFilter);
       if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
       } else {
@@ -642,7 +676,10 @@ const AnewClients = () => {
         query = query.in("entity_id", matchedIds);
       }
 
-      query = query.order("updated_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
+      // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
+      // e travar o scroll infinito num loop de "A carregar mais...".
+      query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
       if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
@@ -671,12 +708,19 @@ const AnewClients = () => {
         });
       }
 
+      let uniqueNewCount = newClients.length;
       if (isInitial) setClients(newClients);
       else setClients(prev => {
         const existingIds = new Set(prev.map(c => c.id));
-        return [...prev, ...newClients.filter(c => !existingIds.has(c.id))];
+        const uniqueNew = newClients.filter(c => !existingIds.has(c.id));
+        uniqueNewCount = uniqueNew.length;
+        return [...prev, ...uniqueNew];
       });
-      setHasMore(newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
+      // Rede de segurança: se a página veio cheia mas nenhum registo era novo, a
+      // paginação está a repetir-se (ex.: empates de ordenação não previstos) — parar
+      // em vez de continuar a pedir a mesma página para sempre.
+      const madeNoProgress = !isInitial && newClients.length === PAGE_SIZE && uniqueNewCount === 0;
+      setHasMore(!madeNoProgress && newClients.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
     } catch (error: unknown) {
       if (abortController?.signal.aborted || (isInitial && requestId !== clientsRequestIdRef.current)) return;
       const message = error instanceof Error ? error.message : "Erro inesperado.";
@@ -688,11 +732,11 @@ const AnewClients = () => {
         setLoadingMore(false);
       }
     }
-  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, alertData, resolveEntities, getIdentity, toast, t]);
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, alertData, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
-  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
+  }, [effectiveSearch, statusFilter, companyFilter, dateFrom, dateTo, salesRepFilter, activeCompany?.id, orgOptions, isParentOrg, scopeAnewUserId, scopeLoading, loadClients]);
 
   useEffect(() => {
     const openId = searchParams.get("open");
@@ -711,7 +755,7 @@ const AnewClients = () => {
       let fetchedClient: ClientRecord | null = null;
       const { data: byId } = await (supabase as any)
         .from("anew_clients")
-        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+        .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
         .eq("id", openId)
         .eq("organization_id", activeCompany.id)
         .maybeSingle();
@@ -720,7 +764,7 @@ const AnewClients = () => {
       if (!fetchedClient) {
         const { data: byEntityInActiveOrg } = await (supabase as any)
           .from("anew_clients")
-          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+          .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
           .eq("entity_id", openId)
           .eq("organization_id", activeCompany.id)
           .maybeSingle();
@@ -761,7 +805,7 @@ const AnewClients = () => {
       let offset = 0;
       let hasMore = true;
       while (hasMore) {
-        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at").is("deleted_at", null);
+        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id").is("deleted_at", null);
         if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
         else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
         const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
@@ -769,7 +813,7 @@ const AnewClients = () => {
         if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
         if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
         if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-        query = query.order("updated_at", { ascending: false }).range(offset, offset + BATCH - 1);
+        query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
         const { data, error } = await query;
         if (error) throw error;
         const batch = (data || []) as ClientRecord[];
@@ -994,7 +1038,7 @@ const AnewClients = () => {
         }
       }
       // Auto-resolve notifications for inactive/lost clients
-      const inactiveStatuses = ["lost", "inactive", "churned", "lost_definitive"];
+      const inactiveStatuses = INACTIVE_CLIENT_STATUSES;
       if (inactiveStatuses.includes(bulkNewStatus)) {
         await resolveClientNotifications(ids);
       }
@@ -1378,7 +1422,7 @@ const AnewClients = () => {
         setDetailsOpen(true);
       } else {
         (async () => {
-          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
+          const { data } = await (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id, anew_entities!anew_clients_entity_id_fkey(*)").eq("id", match.id).eq("organization_id", activeCompany?.id).single();
           if (data) {
             setSelectedClient(data);
             setDetailsOpen(true);
@@ -1657,7 +1701,7 @@ const AnewClients = () => {
             if (!found) {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
-                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
                 .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
@@ -1705,7 +1749,7 @@ const AnewClients = () => {
             if (!found) {
               const { data: fetchedClient } = await supabase
                 .from("anew_clients")
-                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at")
+                .select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id")
                 .eq("organization_id", activeCompany.id)
                 .or(`id.eq.${alertRef},entity_id.eq.${alertRef}`)
                 .maybeSingle();
@@ -1782,6 +1826,8 @@ const AnewClients = () => {
           onFilterChange={setStatusFilter}
           activeView={activeView}
           healthScoresMap={analyticsHealthScores}
+          companyFilter={companyFilter}
+          retentionCohortClients={analyticsClients}
         />
 
 
@@ -1794,7 +1840,15 @@ const AnewClients = () => {
             }))}
             upsellCount={alertData.upsellClients.length}
             upsellValue={alertData.upsellClients.reduce((sum, c) => sum + (alertData.avgValue - c.value), 0)}
-            onCallVip={() => {}}
+            onCallVip={(vip) => {
+              if (!vip.entityId) return;
+              const client = [...clients, ...allClients].find(c => c.entity_id === vip.entityId);
+              if (client) {
+                const identity = getIdentity(client.entity_id);
+                setCallTarget({ entityId: client.entity_id, name: identity?.display_name || vip.name, phone: identity?.phone || "", clientId: client.id });
+                setShowCallDialog(true);
+              }
+            }}
             onRenewContract={() => setStatusFilter("expiring_contracts")}
             onViewUpsell={() => setActiveView("value")}
           />
@@ -1883,12 +1937,12 @@ const AnewClients = () => {
               <Button size="sm" variant={onlyMine ? "default" : "outline"} onClick={() => setOnlyMine(!onlyMine)} className="gap-1.5 h-9">
                 <User className="w-3.5 h-3.5" />Só os meus
               </Button>
-              {salesReps.length > 0 && (
+              {comercialUsers.length > 0 && (
                 <Select value={salesRepFilter} onValueChange={setSalesRepFilter}>
                   <SelectTrigger className="w-[140px] h-9"><SelectValue placeholder="Comercial" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Comercial</SelectItem>
-                    {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                    {comercialUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               )}
@@ -1931,6 +1985,7 @@ const AnewClients = () => {
                   </SelectContent>
                 </Select>
               )}
+              <ClientsTableColumns onColumnsChange={setVisibleClientColumns} />
             </div>
             {/* Special filter pills */}
             <div className="flex gap-2 mt-2">
@@ -2008,22 +2063,27 @@ const AnewClients = () => {
                       <TableHead className="w-[40px]">
                         <Checkbox checked={selectedIds.size === displayClients.length && displayClients.length > 0} onCheckedChange={toggleSelectAll} />
                       </TableHead>
+                      {isColVisible('health') && (
                       <TableHead className="w-[60px] cursor-pointer" onClick={() => handleSort("health")}>
                         <div className="flex items-center gap-1">Saúde <ArrowUpDown className="w-3 h-3" /></div>
                       </TableHead>
-                      <TableHead className="w-[40px]" />
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Contratos</TableHead>
+                      )}
+                      {isColVisible('avatar') && <TableHead className="w-[40px]" />}
+                      {isColVisible('client') && <TableHead>Cliente</TableHead>}
+                      {isColVisible('contracts') && <TableHead>Contratos</TableHead>}
+                      {isColVisible('value') && (
                       <TableHead className="cursor-pointer" onClick={() => handleSort("value")}>
                         <div className="flex items-center gap-1">Valor Total <ArrowUpDown className="w-3 h-3" /></div>
                       </TableHead>
-                      <TableHead>Tags</TableHead>
-                      <TableHead>NIF</TableHead>
-                      <TableHead>Comercial</TableHead>
-                      <TableHead>Último Contacto</TableHead>
-                      <TableHead>Sentimento</TableHead>
-                      <TableHead>Cliente Desde</TableHead>
-                      <TableHead>Estado</TableHead>
+                      )}
+                      {isColVisible('tags') && <TableHead>Tags</TableHead>}
+                      {isColVisible('nif') && <TableHead>NIF</TableHead>}
+                      {isColVisible('assigned_to') && <TableHead>Comercial</TableHead>}
+                      {isColVisible('last_contact') && <TableHead>Último Contacto</TableHead>}
+                      {isColVisible('sentiment') && <TableHead>Sentimento</TableHead>}
+                      {isColVisible('client_since') && <TableHead>Cliente Desde</TableHead>}
+                      {isColVisible('origin') && <TableHead>Origem</TableHead>}
+                      {isColVisible('status') && <TableHead>Estado</TableHead>}
                       <TableHead className="text-right">Acções</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -2044,9 +2104,12 @@ const AnewClients = () => {
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             <Checkbox checked={selectedIds.has(client.id)} onCheckedChange={() => toggleSelectOne(client.id)} />
                           </TableCell>
+                          {isColVisible('health') && (
                           <TableCell onClick={(e) => e.stopPropagation()}>
                             {health && <ClientHealthBadge health={health} size="sm" />}
                           </TableCell>
+                          )}
+                          {isColVisible('avatar') && (
                           <TableCell>
                             <div
                               role="img"
@@ -2063,6 +2126,8 @@ const AnewClients = () => {
                               </span>
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('client') && (
                           <TableCell>
                             <div>
                               <div className="font-medium flex items-center gap-1">
@@ -2079,6 +2144,8 @@ const AnewClients = () => {
                               </div>
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('contracts') && (
                           <TableCell>
                             {contract && contract.activeCount > 0 ? (
                               <div>
@@ -2095,6 +2162,8 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">Sem</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('value') && (
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <span className="font-semibold text-purple-600 dark:text-purple-400">
@@ -2112,6 +2181,8 @@ const AnewClients = () => {
                               </div>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('tags') && (
                           <TableCell>
                             <div className="flex gap-1 flex-wrap">
                               {clientTags.map(tag => (
@@ -2124,6 +2195,8 @@ const AnewClients = () => {
                               ))}
                             </div>
                           </TableCell>
+                          )}
+                          {isColVisible('nif') && (
                           <TableCell>
                             {identity?.vat ? (
                               <span className="text-xs font-mono">{identity.vat}</span>
@@ -2131,6 +2204,8 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">—</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('assigned_to') && (
                           <TableCell>
                             {client.assigned_to && assignedUserMap.get(client.assigned_to) ? (
                               <div className="flex items-center gap-1.5">
@@ -2143,12 +2218,16 @@ const AnewClients = () => {
                               <span className="text-xs text-muted-foreground/60 italic">Sem</span>
                             )}
                           </TableCell>
+                          )}
+                          {isColVisible('last_contact') && (
                           <TableCell>
                             <span className={`text-sm font-medium ${lastContact.color}`}>
                               {lastContact.text}
                               {lastContact.warning && " ⚠"}
                             </span>
                           </TableCell>
+                          )}
+                          {isColVisible('sentiment') && (
                           <TableCell>
                             {sentimentEmoji ? (
                               <TooltipProvider><Tooltip><TooltipTrigger asChild>
@@ -2164,12 +2243,26 @@ const AnewClients = () => {
                               </TooltipContent></Tooltip></TooltipProvider>
                             ) : <span className="text-muted-foreground">—</span>}
                           </TableCell>
+                          )}
+                          {isColVisible('client_since') && (
                           <TableCell>
                             <span className="text-xs text-muted-foreground">{(() => { const d = new Date(client.created_at); return isValid(d) ? format(d, 'dd/MM/yyyy') : '—'; })()}</span>
                           </TableCell>
+                          )}
+                          {isColVisible('origin') && (
+                          <TableCell>
+                            {client.origin_source ? (
+                              <span className="text-xs">{client.origin_source}</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/60 italic">—</span>
+                            )}
+                          </TableCell>
+                          )}
+                          {isColVisible('status') && (
                           <TableCell>
                             <Badge className={statusDisplay.className}>{statusDisplay.label}</Badge>
                           </TableCell>
+                          )}
                           <TableCell className="text-right">
                             <div className="flex gap-0.5 justify-end" onClick={(e) => e.stopPropagation()}>
                               {/* Quick actions */}
@@ -2335,7 +2428,7 @@ const AnewClients = () => {
                     })}
                   {loadingMore && (
                     <TableRow>
-                      <TableCell colSpan={14} className="text-center py-4">
+                      <TableCell colSpan={2 + visibleClientColumns.length} className="text-center py-4">
                         <div className="flex items-center justify-center gap-2">
                           <OlyviaLoader size={20} inline />
                           <span className="text-sm text-muted-foreground">{t('clients.loadingMore')}</span>
@@ -2508,7 +2601,7 @@ const AnewClients = () => {
               <Select value={bulkAssignUserId} onValueChange={setBulkAssignUserId}>
                 <SelectTrigger><SelectValue placeholder="Selecionar comercial" /></SelectTrigger>
                 <SelectContent>
-                  {salesReps.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                  {comercialUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <div className="flex justify-end gap-2">
@@ -2552,7 +2645,7 @@ const AnewClients = () => {
             organizationId={activeCompany?.id || ""}
             onInteractionSaved={async (now) => {
               if (callTarget.clientId) {
-                await supabase.from("anew_contacts").update({ last_interaction_at: now } as any).eq("id", callTarget.clientId);
+                await supabase.from("anew_clients").update({ last_interaction_at: now } as any).eq("id", callTarget.clientId);
               }
             }}
             onCallRegistered={() => { setShowCallDialog(false); setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1); }}

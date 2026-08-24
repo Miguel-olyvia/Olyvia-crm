@@ -616,7 +616,9 @@ const AnewContacts = () => {
       if (viewScope === "NONE") { if (isInitial && requestId === loadRequestIdRef.current) setContacts([]); setHasMore(false); setLoading(false); return; }
       const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
       if (scopeFilter) query = query.or(scopeFilter);
-      query = query.order("created_at", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+      // Tiebreaker por "id": sem ele, contactos com o mesmo created_at (ex. import em
+      // massa) podiam reaparecer em páginas seguintes e travar o scroll infinito.
+      query = query.order("created_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
       if (abortController) query = query.abortSignal(abortController.signal);
       const { data, error, count } = await query;
       if (error) throw error;
@@ -647,13 +649,18 @@ const AnewContacts = () => {
       }
       if (statusFilter === "deals") newContacts = newContacts.filter(c => dealsEntityIds.has(c.entity_id));
 
+      let uniqueNewCount = newContacts.length;
       if (isInitial || offset === 0) setContacts(newContacts);
       else setContacts(prev => {
         const existingIds = new Set(prev.map(c => c.id));
-        return [...prev, ...newContacts.filter(c => !existingIds.has(c.id))];
+        const uniqueNew = newContacts.filter(c => !existingIds.has(c.id));
+        uniqueNewCount = uniqueNew.length;
+        return [...prev, ...uniqueNew];
       });
       if (isInitial && count !== null) setTotalCount(count);
-      setHasMore(newContacts.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
+      // Rede de segurança: página cheia sem nenhum registo novo = paginação a repetir-se — parar.
+      const madeNoProgress = !isInitial && offset !== 0 && newContacts.length === PAGE_SIZE && uniqueNewCount === 0;
+      setHasMore(!madeNoProgress && newContacts.length === PAGE_SIZE && (count ? offset + PAGE_SIZE < count : true));
       hasLoadedContactsRef.current = true;
     } catch (error: any) {
       if (isInitial && requestId !== loadRequestIdRef.current) return;

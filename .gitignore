@@ -49,3 +49,9 @@ supabase/seed.sql
 migrations_disabled_local/
 .vercel
 .env*
+
+# Screenshots e dumps de sessoes de teste que aterram na raiz do repo
+/*.png
+/_hdr*.txt
+/_body*.json
+.mcp.json

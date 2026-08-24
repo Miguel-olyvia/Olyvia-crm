@@ -65,6 +65,7 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { DealNeedsSection } from "@/components/deals/DealNeedsSection";
 import { CatalogItemPicker, CatalogLineItem } from "@/components/clients/detail/CatalogItemPicker";
 import { DealsKanbanView } from "@/components/deals/DealsKanbanView";
+import { DealLostReasonDialog } from "@/components/deals/DealLostReasonDialog";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
 import { DealsDashboardView } from "@/components/deals/DealsDashboardView";
 import { LayoutList, Columns3, BarChart3, Download, TrendingUp, Timer, AlertCircle } from "lucide-react";
@@ -148,6 +149,7 @@ const Deals = () => {
   const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
   const [originalStageId, setOriginalStageId] = useState<string | null>(null);
   const [showWorkflowConfig, setShowWorkflowConfig] = useState(false);
+  const [bulkLostReasonDialogOpen, setBulkLostReasonDialogOpen] = useState(false);
   const [dealLineItems, setDealLineItems] = useState<CatalogLineItem[]>([]);
   const { toast } = useToast();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
@@ -231,8 +233,10 @@ const Deals = () => {
     bulkDeleteRpc: "rpc_bulk_delete_deal",
   });
 
-  // Custom bulk stage change for deals (uses stage_id instead of status)
-  const handleBulkStageChange = async () => {
+  // Custom bulk stage change for deals (uses stage_id instead of status).
+  // Takes an optional disqualification reason, required only when
+  // `bulkNewStatus` resolves to a "lost" stage — see handleBulkStageChange below.
+  const runBulkStageChange = async (lostReason?: string) => {
     if (selectedIds.size === 0 || !bulkNewStatus) return;
     setProcessing(true);
 
@@ -246,9 +250,13 @@ const Deals = () => {
       }
 
       const { error } = await withAuditContext(supabase, bulkBusinessUserId, () =>
-        supabase.rpc("bulk_update_deal_stage", {
+        // Cast to `any`: p_lost_reason is a new RPC parameter added by a migration
+        // not yet reflected in the generated Supabase types (regenerating types
+        // is a DB-touching step outside this change's scope).
+        (supabase as any).rpc("bulk_update_deal_stage", {
           p_deal_ids: dealIds,
           p_stage_id: bulkNewStatus,
+          p_lost_reason: lostReason ?? null,
         }) as Promise<{ error: any }>
       );
 
@@ -304,6 +312,7 @@ const Deals = () => {
       });
       clearSelection();
       setBulkStatusDialogOpen(false);
+      setBulkLostReasonDialogOpen(false);
       loadData();
     } catch (error: any) {
       toast({
@@ -314,6 +323,25 @@ const Deals = () => {
     } finally {
       setProcessing(false);
     }
+  };
+
+  // Entry point wired to the Bulk Status dialog's "Confirm" button. When the
+  // target stage is a "lost" one, intercepts before touching the RPC and asks
+  // for the disqualification reason via DealLostReasonDialog instead — for
+  // every other stage, behavior is unchanged (calls runBulkStageChange directly).
+  const handleBulkStageChange = () => {
+    if (selectedIds.size === 0 || !bulkNewStatus) return;
+    const targetStage = stages.find(s => s.id === bulkNewStatus);
+    if (targetStage && isLostStage(targetStage)) {
+      setBulkStatusDialogOpen(false);
+      setBulkLostReasonDialogOpen(true);
+      return;
+    }
+    runBulkStageChange();
+  };
+
+  const handleBulkLostReasonConfirm = async (reason: string) => {
+    await runBulkStageChange(reason);
   };
 
   // Status options for bulk change
@@ -569,6 +597,11 @@ const Deals = () => {
   const isDisqualifiedStage = useMemo(() => {
     const selectedStage = stages.find(s => s.id === formData.stage_id);
     if (!selectedStage) return false;
+    // Real "lost" flag first (matches isLostStage used by Kanban/bulk, e.g.
+    // "Fechado Perdido"/closedLost) — the literal 'disqualified' stage_key/name
+    // below never matches any stage actually configured in this system, but is
+    // kept as a fallback in case some other org config still uses it.
+    if ((selectedStage as any).is_lost) return true;
     if (selectedStage.stage_key) return selectedStage.stage_key === 'disqualified';
     return selectedStage.name === 'Desqualificado';
   }, [stages, formData.stage_id]);
@@ -664,6 +697,7 @@ const Deals = () => {
         .select(`id, title, value, value_max, stage_id, probability, expected_close_date, description, assigned_to, created_by, created_at, closed_at, lost_reason, lead_id, client_id, organization_id, entity_id, contact_id, deal_stages(id, name, stage_key, color, is_won, is_lost, is_final)`)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, to);
 
       if (scopeOrgIdsArr.length > 0) {
@@ -1275,7 +1309,7 @@ const Deals = () => {
   const hasActiveFilters = searchTerm || stageFilter !== "all" || dateFrom || dateTo;
 
   // Kanban drag handler
-  const handleKanbanStageDrop = useCallback(async (dealId: string, newStageId: string, oldStageId: string) => {
+  const handleKanbanStageDrop = useCallback(async (dealId: string, newStageId: string, oldStageId: string, lostReason?: string) => {
     // Guard: activeCompany?.id can be undefined; passing undefined to .eq() causes Supabase JS v2
     // to coerce it to the string "undefined", producing a silent no-op update.
     if (!activeCompany?.id) return;
@@ -1287,10 +1321,14 @@ const Deals = () => {
         toast({ title: 'Erro ao mover pedido', description: 'Identidade do utilizador nao resolvida.', variant: 'destructive' });
         return;
       }
-      const { error: stageError } = await supabase.rpc("rpc_update_deal_stage", {
+      // Cast to `any`: p_lost_reason is a new RPC parameter added by a migration
+      // not yet reflected in the generated Supabase types (regenerating types
+      // is a DB-touching step outside this change's scope).
+      const { error: stageError } = await (supabase as any).rpc("rpc_update_deal_stage", {
         p_deal_id: dealId,
         p_new_stage_id: newStageId,
         p_organization_id: activeCompany.id,
+        p_lost_reason: lostReason ?? null,
       });
       if (stageError) throw stageError;
 
@@ -1583,6 +1621,16 @@ const Deals = () => {
       return;
     }
     setFieldErrors({});
+
+    if (isDisqualifiedStage && !formData.lost_reason?.trim()) {
+      setFieldErrors(prev => ({ ...prev, lost_reason: "Motivo obrigatório ao desqualificar" }));
+      toast({
+        title: t('deals.toast.validationError'),
+        description: "Motivo obrigatório ao desqualificar",
+        variant: "destructive",
+      });
+      return;
+    }
 
     submitLockRef.current = true;
     setSavingDeal(true);
@@ -2785,6 +2833,14 @@ const Deals = () => {
         onConfirm={handleBulkStageChange}
         processing={processing}
         statusOptions={stageStatusOptions}
+      />
+
+      {/* Bulk lost/disqualification reason dialog */}
+      <DealLostReasonDialog
+        open={bulkLostReasonDialogOpen}
+        onOpenChange={setBulkLostReasonDialogOpen}
+        onConfirm={handleBulkLostReasonConfirm}
+        description={`${selectedIds.size} ${selectedIds.size === 1 ? 'pedido selecionado será marcado' : 'pedidos selecionados serão marcados'} como desqualificado(s). Indique o motivo.`}
       />
 
       {/* Bulk Delete Dialog */}

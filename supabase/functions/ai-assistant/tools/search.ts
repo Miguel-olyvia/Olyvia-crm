@@ -201,7 +201,7 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
             id: row.id,
             label: row.contract_number ?? row.id,
             secondary: row.status ?? null,
-            link: `/contracts?open=${row.id}`,
+            link: `/client-contracts?open=${row.id}`,
           })),
         ),
     );

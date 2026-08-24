@@ -1,4 +1,4 @@
-import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays } from "date-fns";
+import { differenceInDays, endOfDay, format, isValid, parseISO, startOfDay, subDays, subYears } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
 
@@ -28,6 +28,18 @@ export interface LeadsDashboardQuery {
 export interface DashboardDateRange {
   from: Date;
   to: Date;
+  /**
+   * true when no explicit dateFrom/dateTo was chosen (e.g. on the Lista tab)
+   * and this range is only a wide structural placeholder for `from`/`to`
+   * (used by the calendar pickers and secondary queries below). Callers must
+   * check this flag and send p_date_from/p_date_to as NULL to the RPC (and
+   * skip any .gte/.lte on created_at) instead of using `from`/`to` literally
+   * — see buildDashboardScopedRpcParams. Without this, the dashboard KPI
+   * cards silently applied a hidden "last 30 days" default while the status
+   * pills (get_lead_status_counts) already defaulted to all-time, making the
+   * two disagree on the same unfiltered view.
+   */
+  isAllTime?: boolean;
 }
 
 export interface AvgDaysToQualify {
@@ -99,6 +111,16 @@ function toDate(value: Date | string | null | undefined): Date | null {
 export function resolveDashboardDateRange(filters?: LeadsDashboardFilters, now = new Date()): DashboardDateRange {
   const rawTo = filters?.dateTo;
   const rawFrom = filters?.dateFrom;
+
+  if (toDate(rawFrom) === null && toDate(rawTo) === null) {
+    // No date filter chosen on the Lista tab -- show everything, matching
+    // the status pills (get_lead_status_counts already defaults to
+    // all-time). `from`/`to` here are only a wide structural placeholder for
+    // the calendar pickers; isAllTime is what callers must actually branch
+    // on (RPC params, secondary .gte/.lte queries).
+    return { from: startOfDay(subYears(now, 20)), to: endOfDay(now), isAllTime: true };
+  }
+
   const resolvedTo = toDate(rawTo) ?? now;
   const resolvedFrom = toDate(rawFrom) ?? subDays(resolvedTo, 30);
   const to = rawTo instanceof Date ? endOfDay(resolvedTo) : resolvedTo;
@@ -107,6 +129,7 @@ export function resolveDashboardDateRange(filters?: LeadsDashboardFilters, now =
   return {
     from,
     to,
+    isAllTime: false,
   };
 }
 
@@ -134,8 +157,8 @@ export function buildDashboardScopedRpcParams(query: LeadsDashboardQuery, dateRa
     p_scope: resolveDashboardScope(query),
     p_anew_user_id: query.anewUserId ?? null,
     p_auth_user_id: query.authUserId ?? null,
-    p_date_from: dateRange.from.toISOString(),
-    p_date_to: dateRange.to.toISOString(),
+    p_date_from: dateRange.isAllTime ? null : dateRange.from.toISOString(),
+    p_date_to: dateRange.isAllTime ? null : dateRange.to.toISOString(),
   };
 
   const search = normalizeFilterValue(filters.search ?? null);
@@ -198,7 +221,17 @@ export function deriveDashboardKpis({
   const leadsInPeriod = readNumber(stats?.leads_in_period);
   const comparisonTotal = readNumber(comparisonStats?.leads_in_period);
   const leadsToday = readNumber(stats?.leads_today);
-  const convertedLeads = readNumber(stats?.resolved_stage_counts?.converted) ?? readNumber(stats?.converted_in_period);
+  // Prefer converted_in_period (matches the status pills' effective_status
+  // classification exactly, always available) over resolved_stage_counts
+  // (rule-driven per-org workflow-stage config via compute_lead_stage_v2) —
+  // the latter can be a genuine, present value of 0 when an org's stage
+  // config is misconfigured (e.g. an impossible-to-satisfy "all" condition
+  // list), which `??` can't distinguish from "not computed". That silently
+  // contradicted the "Won/Converted" pill (built from the same
+  // effective_status as converted_in_period) showing a real non-zero count.
+  // Do NOT touch lead_workflow_stages/stage_reached/compute_lead_stage_v2 —
+  // out of scope, org-specific config to be fixed separately if needed.
+  const convertedLeads = readNumber(stats?.converted_in_period) ?? readNumber(stats?.resolved_stage_counts?.converted);
   const cohortConversions = readNumber(stats?.cohort_conversions);
   const totalContactAttempts =
     readNumber(stats?.contact_attempts_in_period) ?? readNumber(stats?.contact_attempts);
@@ -213,12 +246,27 @@ export function deriveDashboardKpis({
     }
   }
 
+  // "Average per day" is meaningless against the all-time placeholder range
+  // (from/to span ~20 years here, see resolveDashboardDateRange) — it would
+  // silently render as a near-zero, misleading figure instead of the real
+  // per-day rate for whatever period is actually being shown.
   const daysInRange = differenceInDays(dateRange.to, dateRange.from) + 1;
-  const avgLeadsPerDay = leadsInPeriod === null ? null : roundToOneDecimal(leadsInPeriod / daysInRange);
+  const avgLeadsPerDay =
+    leadsInPeriod === null || dateRange.isAllTime ? null : roundToOneDecimal(leadsInPeriod / daysInRange);
+
+  // Cohort conversions require a bounded p_date_from/p_date_to (see
+  // buildDashboardScopedRpcParams) — the RPC's cohort_conversions column is
+  // always 0 under "Todos" (isAllTime), because "created and converted
+  // within the same period" is undefined without a period. Rather than
+  // showing a misleading "0 dos 5306 novos converteram" on the all-time
+  // view, fall back to the unconditional converted count there — the rate
+  // stops being a strict same-cohort figure in that case, but a real
+  // non-zero number beats a structurally-guaranteed zero.
+  const effectiveConversions = dateRange.isAllTime ? convertedLeads : cohortConversions;
 
   let conversionRate: string | null = null;
-  if (leadsInPeriod && leadsInPeriod > 0 && cohortConversions !== null) {
-    conversionRate = ((cohortConversions / leadsInPeriod) * 100).toFixed(1);
+  if (leadsInPeriod && leadsInPeriod > 0 && effectiveConversions !== null) {
+    conversionRate = ((effectiveConversions / leadsInPeriod) * 100).toFixed(1);
   }
 
   return {
@@ -232,7 +280,7 @@ export function deriveDashboardKpis({
     qualifiedLeads:
       readNumber(stats?.resolved_stage_counts?.qualified) ?? readStatusCount(stats, ["qualified", "qualificado"]),
     convertedLeads,
-    cohortConversions,
+    cohortConversions: effectiveConversions,
     conversionRate,
     totalContactAttempts,
     avgLeadsPerDay,

@@ -30,6 +30,7 @@ interface FullContract {
   entity_id: string | null;
   status: string;
   total_value: number | null;
+  total_value_sem_iva: number | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;
@@ -54,6 +55,13 @@ export function ClientsValueView({
   onOpenClient, onCreateDeal,
 }: ClientsValueViewProps) {
   const [allContracts, setAllContracts] = useState<FullContract[]>([]);
+  // Org-wide revenue-status contracts, independent of entityIds/clients (i.e. independent of
+  // whether the entity was ever formally converted to an anew_clients row). Feeds ONLY the
+  // top-level "Receita Total"/"Valor Médio" aggregate below — never the per-client listings
+  // (top clients, monthly revenue, distribution, upselling), which stay scoped to `clients`
+  // on purpose. A signed contract must never silently disappear from the org total just
+  // because a lead→client conversion failed to create the anew_clients row.
+  const [orgWideRevenueContracts, setOrgWideRevenueContracts] = useState<FullContract[]>([]);
   const [loadingContracts, setLoadingContracts] = useState(true);
 
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: contractScopeLoading } = usePermissionScope();
@@ -87,27 +95,48 @@ export function ClientsValueView({
         // scopeOrgIds must always be non-empty to query: an empty scope means the
         // active organization isn't resolved yet, never "no org filter at all".
         const orgScopeBlocked = scopeOrgIds.length === 0;
-        if (entityIds.length === 0 || contractScopeBlocked || orgScopeBlocked) {
-          if (!cancelled) setAllContracts([]);
+        if (contractScopeBlocked || orgScopeBlocked) {
+          if (!cancelled) { setAllContracts([]); setOrgWideRevenueContracts([]); }
           return;
         }
+
+        // Per-client contracts (known/converted clients only) — feeds the per-client
+        // analytics below (top clients, monthly revenue, distribution, upselling).
         const all: FullContract[] = [];
-        for (let i = 0; i < entityIds.length; i += 100) {
-          const batch = entityIds.slice(i, i + 100);
-          let q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, start_date, end_date, created_at, payment_terms, notes")
-            .in("entity_id", batch)
-            .is("deleted_at", null)
-            .in("organization_id", scopeOrgIds);
-          if (contractCreatorFilter) q = q.in("created_by", contractCreatorFilter);
-          const { data, error } = await q;
-          if (error) {
-            console.error("Error loading contracts batch for value view:", error);
-            continue;
+        if (entityIds.length > 0) {
+          for (let i = 0; i < entityIds.length; i += 100) {
+            const batch = entityIds.slice(i, i + 100);
+            let q = supabase.from("client_contracts")
+              .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
+              .in("entity_id", batch)
+              .is("deleted_at", null)
+              .in("organization_id", scopeOrgIds);
+            if (contractCreatorFilter) q = q.in("created_by", contractCreatorFilter);
+            const { data, error } = await q;
+            if (error) {
+              console.error("Error loading contracts batch for value view:", error);
+              continue;
+            }
+            if (data) all.push(...(data as FullContract[]));
           }
-          if (data) all.push(...(data as FullContract[]));
         }
         if (!cancelled) setAllContracts(all);
+
+        // Org-wide revenue contracts — NOT restricted by entity_id, so contracts belonging
+        // to entities missing from `clients` (failed lead→client conversion) are still counted.
+        let orgWideQuery = supabase.from("client_contracts")
+          .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
+          .in("organization_id", scopeOrgIds)
+          .in("status", Array.from(REVENUE_STATUSES))
+          .is("deleted_at", null);
+        if (contractCreatorFilter) orgWideQuery = orgWideQuery.in("created_by", contractCreatorFilter);
+        const { data: orgWideData, error: orgWideError } = await orgWideQuery;
+        if (orgWideError) {
+          console.error("Error loading org-wide revenue contracts for value view:", orgWideError);
+          if (!cancelled) setOrgWideRevenueContracts([]);
+        } else if (!cancelled) {
+          setOrgWideRevenueContracts((orgWideData as FullContract[]) || []);
+        }
       } catch (err) {
         console.error("Error loading contracts for value view:", err);
       } finally {
@@ -130,10 +159,22 @@ export function ClientsValueView({
     // from expired/lost clients into a denominator that only counts active
     // ones, inflating the reported average.
     const activeEntityIds = new Set(clients.filter(c => c.status === "active").map(c => c.entity_id));
-    const activeRevenueContracts = revenueContracts.filter(c => c.entity_id && activeEntityIds.has(c.entity_id));
-    const totalRevenue = activeRevenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const knownEntityIds = new Set(clients.map(c => c.entity_id));
+    // "Receita Total" is the org-wide aggregate (must reconcile with the Contratos
+    // module's total for the same organization_id/status filter): for entities already
+    // known as clients, keep the pre-existing "active clients only" rule; for entities
+    // with no anew_clients row at all (failed lead→client conversion), their signed/active
+    // contracts still count — they are real revenue, not a "listagem por cliente" concern.
+    const totalRevenueContracts = orgWideRevenueContracts.filter(c => {
+      if (!c.entity_id) return true;
+      if (knownEntityIds.has(c.entity_id)) return activeEntityIds.has(c.entity_id);
+      return true;
+    });
+    const totalRevenue = totalRevenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const totalRevenueWithVat = totalRevenueContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
     const clientCount = clients.filter(c => c.status === "active").length;
     const avgPerClient = clientCount > 0 ? totalRevenue / clientCount : 0;
+    const avgPerClientWithVat = clientCount > 0 ? totalRevenueWithVat / clientCount : 0;
 
     // Recurring: contracts with payment_terms containing "mensal", "monthly", "recorrente"
     const recurringContracts = revenueContracts.filter(c => {
@@ -142,23 +183,31 @@ export function ClientsValueView({
       return pt.includes("mensal") || pt.includes("monthly") || pt.includes("recorrente") ||
         notes.includes("recorrente") || notes.includes("mensal");
     });
-    const recurringRevenue = recurringContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const recurringRevenue = recurringContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const recurringRevenueWithVat = recurringContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
 
     // Lifetime value: total committed revenue / distinct entities with revenue contracts
     const revenueEntities = new Set(revenueContracts.map(c => c.entity_id).filter(Boolean));
-    const totalLifetime = revenueContracts.reduce((sum, c) => sum + (c.total_value || 0), 0);
+    const totalLifetime = revenueContracts.reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
+    const totalLifetimeWithVat = revenueContracts.reduce((sum, c) => sum + (c.total_value ?? 0), 0);
     const avgLifetime = revenueEntities.size > 0 ? totalLifetime / revenueEntities.size : 0;
+    const avgLifetimeWithVat = revenueEntities.size > 0 ? totalLifetimeWithVat / revenueEntities.size : 0;
 
-    return { totalRevenue, avgPerClient, recurringRevenue, recurringCount: recurringContracts.length, avgLifetime, clientCount };
-  }, [revenueContracts, clients]);
+    return {
+      totalRevenue, totalRevenueWithVat, avgPerClient, avgPerClientWithVat,
+      recurringRevenue, recurringRevenueWithVat, recurringCount: recurringContracts.length,
+      avgLifetime, avgLifetimeWithVat, clientCount,
+    };
+  }, [revenueContracts, clients, orgWideRevenueContracts]);
 
   // ── Top 10 Clients ──
   const topClients = useMemo(() => {
-    const entityValueMap = new Map<string, { totalValue: number; contractCount: number; clientSince: string; tags: string[] }>();
+    const entityValueMap = new Map<string, { totalValue: number; totalValueWithVat: number; contractCount: number; clientSince: string; tags: string[] }>();
     for (const c of revenueContracts) {
       if (!c.entity_id) continue;
-      const existing = entityValueMap.get(c.entity_id) || { totalValue: 0, contractCount: 0, clientSince: c.created_at, tags: [] };
-      existing.totalValue += c.total_value || 0;
+      const existing = entityValueMap.get(c.entity_id) || { totalValue: 0, totalValueWithVat: 0, contractCount: 0, clientSince: c.created_at, tags: [] };
+      existing.totalValue += c.total_value_sem_iva ?? 0;
+      existing.totalValueWithVat += c.total_value ?? 0;
       existing.contractCount++;
       if (c.created_at < existing.clientSince) existing.clientSince = c.created_at;
       entityValueMap.set(c.entity_id, existing);
@@ -210,7 +259,7 @@ export function ClientsValueView({
           const d = new Date(c.start_date || c.created_at);
           return d >= start && d <= end;
         })
-        .reduce((sum, c) => sum + (c.total_value || 0), 0);
+        .reduce((sum, c) => sum + (c.total_value_sem_iva ?? 0), 0);
       months.push({
         month: monthDate,
         label: format(monthDate, "MMM", { locale: pt }).charAt(0).toUpperCase() + format(monthDate, "MMM", { locale: pt }).slice(1),
@@ -240,7 +289,7 @@ export function ClientsValueView({
     for (const c of revenueContracts) {
       const category = c.payment_terms || c.notes?.split(" ")[0] || "Outros";
       const label = category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
-      categoryMap.set(label, (categoryMap.get(label) || 0) + (c.total_value || 0));
+      categoryMap.set(label, (categoryMap.get(label) || 0) + (c.total_value_sem_iva ?? 0));
     }
     // If too many categories, keep top 5 and group rest as "Outros"
     const entries = Array.from(categoryMap.entries()).sort((a, b) => b[1] - a[1]);
@@ -274,15 +323,21 @@ export function ClientsValueView({
       const interaction = interactions.get(eid);
       const name = identityMap[eid]?.display_name || "N/A";
       const initials = name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
+      // Display value stays "com IVA" (unchanged, matches the main table/client card
+      // convention). The comparison against avgValue below must NOT use this — avgValue
+      // is derived from kpis.totalRevenue, which is "sem IVA" — so the comparison uses
+      // clientValueSemIva instead, keeping both sides of every `<`/subtraction on the
+      // same base.
       const clientValue = contract?.totalValue || 0;
+      const clientValueSemIva = contract?.totalValueSemIva || 0;
 
       // 1. Only 1 contract and below average
-      if (contract && contract.activeCount === 1 && clientValue < avgValue) {
+      if (contract && contract.activeCount === 1 && clientValueSemIva < avgValue) {
         opportunities.push({
           entityId: eid, name, initials, value: clientValue,
-          reason: `Só 1 contrato · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValue)}`,
+          reason: `Só 1 contrato · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValueSemIva)}`,
           action: "deal",
-          potentialValue: avgValue - clientValue,
+          potentialValue: avgValue - clientValueSemIva,
         });
         continue;
       }
@@ -360,6 +415,7 @@ export function ClientsValueView({
               </UITooltip>
             </p>
             <p className="text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{formatCurrency(kpis.totalRevenue)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.totalRevenueWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
               <TrendingUp className="w-3 h-3 text-green-500" />
               {kpis.clientCount} clientes activos
@@ -370,6 +426,7 @@ export function ClientsValueView({
           <CardContent className="pt-5 pb-4">
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Valor Médio / Cliente</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(kpis.avgPerClient)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.avgPerClientWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
               <Users className="w-3 h-3" />
               {kpis.clientCount} clientes
@@ -390,6 +447,7 @@ export function ClientsValueView({
               </UITooltip>
             </p>
             <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(kpis.recurringRevenue)}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.recurringRevenueWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5">{kpis.recurringCount} contratos recorrentes</p>
           </CardContent>
         </Card>
@@ -397,6 +455,7 @@ export function ClientsValueView({
           <CardContent className="pt-5 pb-4">
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Lifetime Value Médio</p>
             <p className="text-2xl font-bold mt-1">{formatCurrency(kpis.avgLifetime)}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.avgLifetimeWithVat)} com IVA</p>
             <p className="text-xs text-muted-foreground mt-0.5">Desde que são clientes</p>
           </CardContent>
         </Card>
@@ -462,6 +521,7 @@ export function ClientsValueView({
                   {/* Value + bar */}
                   <div className="text-right shrink-0 w-28">
                     <p className="text-sm font-bold text-green-600 dark:text-green-400">{formatCurrency(client.totalValue)}</p>
+                    <p className="text-[10px] text-muted-foreground">{formatCurrency(client.totalValueWithVat)} c/ IVA</p>
                     <div className="w-full bg-muted rounded-full h-1.5 mt-1">
                       <div
                         className="bg-gradient-to-r from-purple-500 to-purple-400 h-1.5 rounded-full transition-all"

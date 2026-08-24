@@ -101,6 +101,7 @@ export function ProposalPortalPreview({ open, onOpenChange, proposalId }: Propos
                     template={portalData.template}
                     quotes={portalData.quotes}
                     quoteLines={portalData.quoteLines}
+                    quoteFees={portalData.quoteFees}
                     commercial={portalData.commercial}
                     company={portalData.company}
                     mode="preview"

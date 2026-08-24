@@ -7,6 +7,8 @@ interface SuggestionClient {
   name: string;
   value: number;
   detail: string;
+  /** Present on vipAtRisk entries — lets onCallVip open the dialer for this specific client. */
+  entityId?: string;
 }
 
 interface ClientSmartSuggestionProps {
@@ -14,7 +16,7 @@ interface ClientSmartSuggestionProps {
   expiringContracts: SuggestionClient[];
   upsellCount: number;
   upsellValue: number;
-  onCallVip?: () => void;
+  onCallVip?: (vip: SuggestionClient) => void;
   onRenewContract?: () => void;
   onViewUpsell?: () => void;
 }
@@ -32,7 +34,7 @@ export function ClientSmartSuggestion({
   }
   if (expiringContracts.length > 0) {
     const e = expiringContracts[0];
-    parts.push(`A **${e.name}** tem contrato de ${formatCurrency(e.value)} ${e.detail} — enviar renovação agora aumenta **3×** a taxa de renovação.`);
+    parts.push(`A **${e.name}** tem contrato de ${formatCurrency(e.value)} ${e.detail} — enviar a renovação agora reduz o risco de perda.`);
   }
   if (upsellCount > 0) {
     parts.push(`E tens **${upsellCount} clientes** com apenas 1 contrato — potencial de upselling de ${formatCurrency(upsellValue)}.`);
@@ -50,7 +52,7 @@ export function ClientSmartSuggestion({
       </div>
       <div className="flex gap-2 shrink-0 flex-wrap">
         {vipAtRisk.length > 0 && (
-          <Button size="sm" variant="destructive" onClick={onCallVip} className="gap-1.5">
+          <Button size="sm" variant="destructive" onClick={() => onCallVip?.(vipAtRisk[0])} className="gap-1.5">
             <Phone className="w-3.5 h-3.5" />Ligar à {vipAtRisk[0].name.split(' ')[0]}
           </Button>
         )}

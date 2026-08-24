@@ -49,6 +49,8 @@ interface ProposalsKanbanViewProps {
   workflowStages: WorkflowStage[];
   getProposalStage: (p: Proposal) => WorkflowStage | null;
   onMoveStage: (proposalId: string, newStageId: string) => void;
+  /** Drop numa stage `is_lost`: o pai deve pedir o motivo (não grava direto). */
+  onLostStageDrop: (proposalId: string, stageId: string) => void;
   onViewProposal: (p: Proposal) => void;
 }
 
@@ -57,6 +59,7 @@ export function ProposalsKanbanView({
   workflowStages,
   getProposalStage,
   onMoveStage,
+  onLostStageDrop,
   onViewProposal,
 }: ProposalsKanbanViewProps) {
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -95,6 +98,8 @@ export function ProposalsKanbanView({
         oldStageId: source.droppableId,
         stageName: targetStage.label,
       });
+    } else if (targetStage.is_lost) {
+      onLostStageDrop(draggableId, destination.droppableId);
     } else {
       onMoveStage(draggableId, destination.droppableId);
     }

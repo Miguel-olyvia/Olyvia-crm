@@ -57,6 +57,7 @@ import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn, formatCurrency } from "@/lib/utils";
+import { QUOTE_LOST_REASONS } from "@/lib/quoteReasons";
 import { format, parseISO, startOfDay, endOfDay, isWithinInterval, differenceInDays, addDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -99,7 +100,7 @@ interface Quote {
   updated_at?: string;
   validade_dias?: number | null;
   accepted_at?: string | null;
-  observacoes?: string | null;
+  lost_reason?: string | null;
   desconto_global?: number | null;
   proposal_id?: string | null;
   title?: string | null;
@@ -221,6 +222,7 @@ export default function Quotes() {
     totalValue: number; avgValue: number; taxaAceitacao: number; avgAcceptTime: number;
     rascunhoValue: number; enviadoValue: number;
     aceiteValue: number; perdidoValue: number; finalizadoValue: number; rejeitadoValue: number; outrosValue: number;
+    totalValueWithVat: number; aceiteValueWithVat: number;
   } | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
@@ -228,7 +230,7 @@ export default function Quotes() {
   // used by the Dashboard view so it always reflects the real DB state — independent of
   // the paginated `quotes` list shown in the Lista view.
   const [allQuotesForDashboard, setAllQuotesForDashboard] = useState<Array<{
-    id: string; estado: string; total: number | null; created_at: string;
+    id: string; estado: string; total: number | null; subtotal: number | null; total_fees: number | null; created_at: string;
     accepted_at: string | null; validade_dias: number | null; assigned_to: string | null;
   }>>([]);
   
@@ -265,6 +267,12 @@ export default function Quotes() {
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
   const [sendQuote, setSendQuote] = useState<Quote | null>(null);
   const [lostReasonDialog, setLostReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
+  // Preenchimento a posteriori do motivo, quando o orçamento já ficou perdido/rejeitado
+  // sem motivo (ex: cliente rejeitou este orçamento no Portal, que não pede motivo) — não
+  // muda o estado, só grava lost_reason no que já está gravado.
+  const [addReasonDialog, setAddReasonDialog] = useState<{ open: boolean; quoteId: string; reason: string } | null>(null);
+  // Motivo exigido quando a alteração de estado em massa (bulk) muda para 'perdido'/'rejeitado'.
+  const [bulkLostReason, setBulkLostReason] = useState("");
   const [sensitiveExportOpen, setSensitiveExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   
@@ -295,14 +303,15 @@ export default function Quotes() {
     setStatsLoading(true);
     setStatsError(null);
     try {
-      // KPIs via RPC — agrega no servidor independentemente do volume de registos
-      // Only status + search are wired here: both are already enforced/matched
-      // by fetchQuotes' own server-side query (estado filter) or mirror the
-      // client-side text search. dateFrom/dateTo/comercialFilter are NOT sent:
-      // the list itself only applies those client-side over the already-loaded
-      // page, so passing them to the KPI RPC would make the KPI cards stricter
-      // than what the list actually queries from the server — a new, opposite
-      // inconsistency. Revisit only once the list filters those server-side too.
+      // KPIs via RPC — agrega no servidor independentemente do volume de registos.
+      //
+      // Datas e comercial SÃO enviados agora. Ficavam de fora de propósito,
+      // porque a lista só os aplicava no cliente sobre a página já carregada e
+      // enviá-los aqui tornaria os cartões mais restritos do que a lista. Essa
+      // condição deixou de existir: o fetchQuotes passou a filtrar estado,
+      // datas e comercial na própria query, portanto os cartões têm de usar o
+      // mesmo conjunto — senão deixam de bater certo com o que está no ecrã,
+      // que é exactamente a queixa que trouxe isto aqui.
       const trimmedSearch = searchTerm.trim();
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
@@ -310,6 +319,9 @@ export default function Quotes() {
           visible_ids: scopeIds,
           status: statusFilter !== "all" ? statusFilter : undefined,
           search: trimmedSearch || undefined,
+          date_from: dateFrom ? startOfDay(dateFrom).toISOString() : undefined,
+          date_to: dateTo ? endOfDay(dateTo).toISOString() : undefined,
+          comercial_id: comercialFilter !== "all" ? comercialFilter : undefined,
         },
       });
       if (kpiError) throw kpiError;
@@ -335,6 +347,8 @@ export default function Quotes() {
         avgValue:        kpi.avgValue        ?? 0,
         taxaAceitacao:   kpi.taxaAceitacao   ?? 0,
         avgAcceptTime:   kpi.avgAcceptTime   ?? 0,
+        totalValueWithVat:  kpi.totalValueWithVat  ?? 0,
+        aceiteValueWithVat: kpi.aceiteValueWithVat ?? 0,
       });
 
       // Query separada com limite para graficos/visualizacoes no dashboard
@@ -342,7 +356,7 @@ export default function Quotes() {
       if (scopeIds === null) {
         const { data: vizData, error: vizError } = await supabase
           .from("quotes")
-          .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+          .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
           .is("deleted_at", null)
           .eq("organization_id", activeCompany.id)
           .order("created_at", { ascending: false })
@@ -353,7 +367,7 @@ export default function Quotes() {
         vizRows = await fetchInBatches(scopeIds, async (chunk) => {
           const { data, error } = await supabase
             .from("quotes")
-            .select("id, estado, total, created_at, accepted_at, validade_dias, assigned_to")
+            .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
             .is("deleted_at", null)
             .eq("organization_id", activeCompany.id)
             .in("id", chunk);
@@ -366,7 +380,7 @@ export default function Quotes() {
       }
       if (fetchRequestIdRef.current !== requestId) return;
       setAllQuotesForDashboard(vizRows.map((q: any) => ({
-        id: q.id, estado: q.estado, total: q.total, created_at: q.created_at,
+        id: q.id, estado: q.estado, total: q.total, subtotal: q.subtotal ?? null, total_fees: q.total_fees ?? null, created_at: q.created_at,
         accepted_at: q.accepted_at ?? null, validade_dias: q.validade_dias ?? null,
         assigned_to: q.assigned_to,
       })));
@@ -380,7 +394,7 @@ export default function Quotes() {
         setStatsLoading(false);
       }
     }
-  }, [activeCompany?.id, statusFilter, searchTerm]);
+  }, [activeCompany?.id, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
@@ -461,6 +475,29 @@ export default function Quotes() {
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
     const searchQuoteNumber = searchTerm.trim().length >= 2 ? escapePostgrestIlike(searchTerm.trim()) : null;
 
+    // Server-side filters. The list is paginated 20 at a time, so a filter that
+    // only runs in the browser can never see past the current page: picking a
+    // status or a date range appeared to do nothing because it was narrowing
+    // 20 rows instead of the whole set. Everything that maps to a plain column
+    // is pushed into the query here and applied to EVERY branch below — the
+    // full-scope list, its count, and the metadata query that decides the page
+    // slice for scoped users — so pagination is computed over filtered rows.
+    //
+    // Scope is untouched: these conditions are added on top of each branch's
+    // own visibility rules (organization, and for OWNED/TEAM the resolved set
+    // of visible quote ids), never instead of them.
+    const dateFromIso = dateFrom ? startOfDay(dateFrom).toISOString() : null;
+    const dateToIso = dateTo ? endOfDay(dateTo).toISOString() : null;
+    const applyServerFilters = (q: any) => {
+      if (statusFilter !== "all") q = q.eq("estado", statusFilter);
+      if (searchQuoteNumber) q = q.ilike("quote_number", `%${searchQuoteNumber}%`);
+      if (dateFromIso) q = q.gte("created_at", dateFromIso);
+      if (dateToIso) q = q.lte("created_at", dateToIso);
+      if (comercialFilter === "none") q = q.is("assigned_to", null);
+      else if (comercialFilter !== "all") q = q.eq("assigned_to", comercialFilter);
+      return q;
+    };
+
     if (!append) {
       let stagesQuery = supabase
         .from("proposal_workflow_stages")
@@ -484,19 +521,17 @@ export default function Quotes() {
           .is("deleted_at", null);
 
         adminQuery = adminQuery.eq("organization_id", activeCompany.id);
-        if (statusFilter !== "all") adminQuery = adminQuery.eq("estado", statusFilter);
-        if (searchQuoteNumber) adminQuery = adminQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+        adminQuery = applyServerFilters(adminQuery);
 
-        const { data, error } = await adminQuery.order("created_at", { ascending: false }).range(from, to);
+        const { data, error } = await adminQuery.order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to);
         if (error) throw error;
         quotesData = (data || []) as unknown as Quote[];
 
         if (fetchRequestIdRef.current !== requestId) return;
 
         if (!append) {
-          let countQuery = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
-          if (statusFilter !== "all") countQuery = countQuery.eq("estado", statusFilter);
-          if (searchQuoteNumber) countQuery = countQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+          let countQuery: any = supabase.from("quotes").select("*", { count: 'exact', head: true }).is("deleted_at", null).eq("organization_id", activeCompany.id);
+          countQuery = applyServerFilters(countQuery);
           const { count } = await countQuery;
           if (fetchRequestIdRef.current !== requestId) return;
           setTotalCount(count || 0);
@@ -627,8 +662,7 @@ export default function Quotes() {
                 .eq("organization_id", activeCompany.id)
                 .in("id", chunk)
                 .is("deleted_at", null);
-              if (statusFilter !== "all") metaQuery = metaQuery.eq("estado", statusFilter);
-              if (searchQuoteNumber) metaQuery = metaQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              metaQuery = applyServerFilters(metaQuery);
               const { data, error } = await metaQuery;
               if (error) throw error;
               return (data as any[]) || [];
@@ -669,8 +703,7 @@ export default function Quotes() {
                 .eq("organization_id", activeCompany.id)
                 .in("id", pageIds)
                 .is("deleted_at", null);
-              if (statusFilter !== "all") pageQuery = pageQuery.eq("estado", statusFilter);
-              if (searchQuoteNumber) pageQuery = pageQuery.ilike("quote_number", `%${searchQuoteNumber}%`);
+              pageQuery = applyServerFilters(pageQuery);
               const { data, error } = await pageQuery;
               if (error) throw error;
               if (fetchRequestIdRef.current !== requestId) return;
@@ -703,7 +736,7 @@ export default function Quotes() {
         setLoadingMore(false);
       }
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Resolve entity names
   useEffect(() => {
@@ -903,18 +936,33 @@ export default function Quotes() {
         a.lineCount++;
         if (line.section_name && !a.sections.includes(line.section_name)) a.sections.push(line.section_name);
       });
+      // quote_lines.total_sem_iva only ever carries each LINE's own discount —
+      // the quote-level "Desconto" (desconto_global_percent, shown as its own
+      // badge below) is applied only to the displayed Total, never persisted
+      // back into the lines. Without factoring it in here too, the margin
+      // stayed identical before/after applying a global discount, even
+      // though less revenue against the same cost is a lower margin.
+      const discountFactorByQuoteId: Record<string, number> = {};
+      quotes.forEach((q: any) => { discountFactorByQuoteId[q.id] = 1 - (q.desconto_global_percent || 0) / 100; });
       Object.values(agg).forEach(a => {
-        // Margem = (venda − custo) / venda × 100, usando apenas linhas com preço de compra definido.
-        a.margin = a.hasCostData && a.totalValueWithCost > 0 ? ((a.totalValueWithCost - a.totalCost) / a.totalValueWithCost) * 100 : 0;
+        const globalDiscountFactor = discountFactorByQuoteId[a.quoteId] ?? 1;
+        const salesAfterGlobalDiscount = a.totalValueWithCost * globalDiscountFactor;
+        // Margem = (venda com desconto global − custo) / venda com desconto global × 100,
+        // usando apenas linhas com preço de compra definido.
+        a.margin = a.hasCostData && salesAfterGlobalDiscount > 0
+          ? ((salesAfterGlobalDiscount - a.totalCost) / salesAfterGlobalDiscount) * 100
+          : 0;
       });
       setLinesAgg(agg);
     };
     fetchLinesAgg();
   }, [quotes]);
 
+  // fetchQuotes is memoised on every filter it sends to the server, so this
+  // refetches (and resets to page 0) whenever one of them changes.
   useEffect(() => {
     if (activeCompany?.id) fetchQuotes();
-  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm]);
+  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Limpa qualquer rascunho de novo orçamento ao entrar na página de listagem
   // (evita reabrir o Quote Builder automaticamente).
@@ -980,7 +1028,18 @@ export default function Quotes() {
     const quotesWithCost = Object.values(linesAgg).filter(a => a.hasCostData);
     const totalCost = quotesWithCost.reduce((s, a) => s + a.totalCost, 0);
     const totalValueWithCost = quotesWithCost.reduce((s, a) => s + a.totalValueWithCost, 0);
-    const avgMargin = totalValueWithCost > 0 ? ((totalValueWithCost - totalCost) / totalValueWithCost) * 100 : 0;
+    // Same fix as fetchLinesAgg's per-quote a.margin: each quote's own
+    // desconto_global_percent must reduce its revenue contribution here too,
+    // otherwise this KPI stayed put even as individual quotes' margins moved
+    // with their discount.
+    const quotesById = new Map(quotes.map((q: any) => [q.id, q]));
+    const totalValueWithCostAfterDiscount = quotesWithCost.reduce((s, a) => {
+      const discountPercent = (quotesById.get(a.quoteId) as any)?.desconto_global_percent || 0;
+      return s + a.totalValueWithCost * (1 - discountPercent / 100);
+    }, 0);
+    const avgMargin = totalValueWithCostAfterDiscount > 0
+      ? ((totalValueWithCostAfterDiscount - totalCost) / totalValueWithCostAfterDiscount) * 100
+      : 0;
     const avgValue = total > 0 ? totalValue / total : 0;
     const taxaAceitacao = total > 0 ? Math.round((aceite / total) * 100) : 0;
     
@@ -1102,8 +1161,12 @@ export default function Quotes() {
     }
   };
 
+  // Mesmas regras de motivo obrigatório do "Marcar como Perdido" individual, aplicadas ao bulk.
+  const bulkStatusRequiresReason = bulkNewStatus === 'perdido' || bulkNewStatus === 'rejeitado';
+
   const handleBulkStatusChange = async () => {
     if (selectedIds.size === 0 || !bulkNewStatus || !activeCompany?.id) return;
+    if (bulkStatusRequiresReason && !bulkLostReason) return;
     setProcessing(true);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -1117,10 +1180,11 @@ export default function Quotes() {
         p_ids: idsArr,
         p_organization_id: activeCompany.id,
         p_estado: bulkNewStatus,
-      });
+        p_lost_reason: bulkStatusRequiresReason ? bulkLostReason : null,
+      } as any);
       if (error) throw error;
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.size} ${t('quotes.records')} ${t('common.updated')}.` });
-      clearSelection(); setBulkStatusDialogOpen(false); fetchQuotes();
+      clearSelection(); setBulkStatusDialogOpen(false); setBulkLostReason(""); fetchQuotes();
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
@@ -1228,7 +1292,7 @@ export default function Quotes() {
       return;
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-    const { error } = await supabase.from("quotes").update({ estado: 'perdido', observacoes: reason } as any).eq("id", quoteId);
+    const { error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
@@ -1236,6 +1300,26 @@ export default function Quotes() {
     toast({ title: t('quotes.toast.markedAsLost') });
     fetchQuotes();
     setLostReasonDialog(null);
+  };
+
+  // Preenche o motivo a posteriori, sem tocar no estado (o orçamento já está
+  // perdido/rejeitado — normalmente porque o cliente rejeitou no Portal, que
+  // não pede motivo nenhum ao cliente).
+  const handleAddLostReason = async (quoteId: string, reason: string) => {
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) {
+      toast({ title: t('quotes.toast.userNotIdentified'), variant: 'destructive' });
+      return;
+    }
+    await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+    const { error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId);
+    if (error) {
+      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Motivo guardado" });
+    fetchQuotes();
+    setAddReasonDialog(null);
   };
 
   const handleDuplicateQuote = async (quote: Quote, applyDiscountPercent?: number) => {
@@ -1334,10 +1418,12 @@ export default function Quotes() {
       enviado: { icon: <Send className="w-3 h-3 mr-1" />, color: "bg-blue-500/20 text-blue-600 dark:text-blue-400" },
       aceite: { icon: <CheckCircle2 className="w-3 h-3 mr-1" />, color: "bg-green-500/20 text-green-600 dark:text-green-400" },
       perdido: { icon: <FileX className="w-3 h-3 mr-1" />, color: "bg-destructive/20 text-destructive" },
+      rejeitado: { icon: <FileX className="w-3 h-3 mr-1" />, color: "bg-red-500/20 text-red-600 dark:text-red-400" },
     };
     const statusLabels: Record<string, string> = {
       rascunho: t('quotes.status.draft'), enviado: t('quotes.status.sent'),
       aceite: t('quotes.status.accepted'), perdido: t('quotes.status.lost'),
+      rejeitado: "Rejeitado",
     };
     const cfg = config[status] || config.rascunho;
     return <Badge className={cn("flex items-center", cfg.color)}>{cfg.icon}{statusLabels[status] || status}</Badge>;
@@ -1353,12 +1439,13 @@ export default function Quotes() {
     if (quote.estado === 'enviado' && daysOld > 5) return `Enviado há ${daysOld} dias — sem resposta`;
     if (agg?.hasCostData && agg.margin < 15 && agg.totalValue > 0) return `⚠ Margem abaixo do target (${agg.margin.toFixed(0)}%)`;
     if (quote.estado === 'perdido') return `❌ Perdido`;
+    if (quote.estado === 'rejeitado') return `❌ Rejeitado`;
     return null;
   };
 
   const getRowColorClass = (quote: Quote): string => {
     if (quote.estado === 'aceite') return "bg-green-50/50 dark:bg-green-950/10";
-    if (quote.estado === 'perdido') return "bg-red-50/50 dark:bg-red-950/10";
+    if (quote.estado === 'perdido' || quote.estado === 'rejeitado') return "bg-red-50/50 dark:bg-red-950/10";
     if (quote.estado === 'rascunho') return "bg-muted/20";
     if (quote.estado === 'enviado' && differenceInDays(new Date(), parseISO(quote.created_at)) > 5) return "bg-amber-50/50 dark:bg-amber-950/10";
     return "";
@@ -1504,10 +1591,10 @@ export default function Quotes() {
               const ds = dashboardStats;
               const s = stats;
               const cardData = [
-                { key: "all", label: "TOTAL ORÇAMENTOS", count: ds?.total ?? s.total, subtitle: `${formatCurrency(ds?.totalValue ?? s.totalValue)} total`, icon: FileText, color: "text-primary" },
+                { key: "all", label: "TOTAL ORÇAMENTOS", count: ds?.total ?? s.total, subtitle: `${formatCurrency(ds?.totalValue ?? s.totalValue)} total`, subtitle2: ds ? `com IVA: ${formatCurrency(ds.totalValueWithVat)}` : undefined, icon: FileText, color: "text-primary" },
                 { key: "rascunho", label: "RASCUNHO", count: ds?.rascunho ?? s.rascunho, subtitle: "A aguardar envio", icon: FileClock, color: "text-muted-foreground" },
                 { key: "enviado", label: "ENVIADO", count: ds?.enviado ?? s.enviado, subtitle: "A aguardar resposta", icon: Send, color: "text-blue-500" },
-                { key: "aceite", label: "ACEITE", count: ds?.aceite ?? s.aceite, subtitle: (ds?.aceite ?? s.aceite) > 0 ? `${formatCurrency(ds?.aceiteValue ?? 0)}` : formatCurrency(0), icon: CheckCircle2, color: "text-green-500", bgTint: (ds?.aceite ?? s.aceite) > 0 ? "bg-green-50/50 dark:bg-green-950/20" : "" },
+                { key: "aceite", label: "ACEITE", count: ds?.aceite ?? s.aceite, subtitle: (ds?.aceite ?? s.aceite) > 0 ? `${formatCurrency(ds?.aceiteValue ?? 0)}` : formatCurrency(0), subtitle2: ds && (ds.aceite > 0) ? `com IVA: ${formatCurrency(ds.aceiteValueWithVat)}` : undefined, icon: CheckCircle2, color: "text-green-500", bgTint: (ds?.aceite ?? s.aceite) > 0 ? "bg-green-50/50 dark:bg-green-950/20" : "" },
                 { key: "perdido", label: "PERDIDO", count: ds?.perdido ?? s.perdido, subtitle: (ds?.perdido ?? s.perdido) > 0 ? `${formatCurrency(ds?.perdidoValue ?? 0)}` : formatCurrency(0), icon: FileX, color: "text-red-500", bgTint: (ds?.perdido ?? s.perdido) > 0 ? "bg-red-50/50 dark:bg-red-950/20" : "" },
                 ...((ds?.finalizado ?? 0) > 0 ? [{ key: "finalizado", label: "FINALIZADO", count: ds!.finalizado, subtitle: formatCurrency(ds!.finalizadoValue), icon: FileCheck, color: "text-green-600", bgTint: "bg-green-50/50 dark:bg-green-950/20" }] : []),
                 ...((ds?.rejeitado ?? 0) > 0 ? [{ key: "rejeitado", label: "REJEITADO", count: ds!.rejeitado, subtitle: formatCurrency(ds!.rejeitadoValue), icon: FileX, color: "text-orange-500", bgTint: "bg-orange-50/50 dark:bg-orange-950/20" }] : []),
@@ -1517,7 +1604,7 @@ export default function Quotes() {
                 { key: "_taxaAceitacao", label: "TAXA ACEITAÇÃO", count: null, displayValue: `${ds?.taxaAceitacao ?? s.taxaAceitacao}%`, subtitle: `${ds?.aceite ?? s.aceite} de ${ds?.total ?? s.total} aceites`, icon: BarChart3, color: "text-green-600", bgTint: "bg-green-50/50 dark:bg-green-950/20" },
                 { key: "_avgAcceptTime", label: "TEMPO MÉDIO ACEITAÇÃO", count: null, displayValue: `${ds?.avgAcceptTime ?? s.avgAcceptTime}d`, subtitle: "Da criação à aceitação", icon: Timer, color: "text-primary" },
               ];
-              return cardData.map(({ key, label, count, displayValue, subtitle, icon: Icon, color, bgTint }) => (
+              return cardData.map(({ key, label, count, displayValue, subtitle, subtitle2, icon: Icon, color, bgTint }) => (
               <Card 
                 key={key}
                 className={cn(
@@ -1535,6 +1622,7 @@ export default function Quotes() {
                     {displayValue || count}
                   </div>
                   {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
+                  {subtitle2 && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{subtitle2}</p>}
                 </CardContent>
               </Card>
             ));
@@ -1663,6 +1751,8 @@ export default function Quotes() {
               accepted_at: q.accepted_at,
               validade_dias: q.validade_dias,
               total: q.total,
+              subtotal: q.subtotal,
+              total_fees: q.total_fees,
               assigned_to_name: q.assigned_to ? (comercialNamesMap[q.assigned_to] || undefined) : undefined,
             }))}
             isLoading={statsLoading}
@@ -1751,14 +1841,14 @@ export default function Quotes() {
                             {/* Number + subtitle */}
                             <TableCell>
                               <div className="flex flex-col gap-0.5">
-                                <span className={cn("font-semibold text-sm", quote.estado === 'perdido' && "line-through text-muted-foreground")}>
+                                <span className={cn("font-semibold text-sm", (quote.estado === 'perdido' || quote.estado === 'rejeitado') && "line-through text-muted-foreground")}>
                                   {quote.quote_number || '-'}
                                 </span>
                                 {contextSub && (
                                   <span className={cn(
                                     "text-[10px] leading-tight",
                                     quote.estado === 'aceite' ? "text-green-600 dark:text-green-400" :
-                                    quote.estado === 'perdido' ? "text-destructive" :
+                                    (quote.estado === 'perdido' || quote.estado === 'rejeitado') ? "text-destructive" :
                                     contextSub.includes("⚠") ? "text-amber-600" : "text-muted-foreground"
                                   )}>
                                     {contextSub}
@@ -1952,6 +2042,17 @@ export default function Quotes() {
                                       </>
                                     )}
 
+                                    {/* Motivo em falta — normalmente porque o cliente rejeitou/perdeu este
+                                        orçamento no Portal, que não pede motivo. Não muda o estado. */}
+                                    {(quote.estado === 'perdido' || quote.estado === 'rejeitado') && !(quote as any).lost_reason && (
+                                      <>
+                                        <DropdownMenuItem onClick={() => setAddReasonDialog({ open: true, quoteId: quote.id, reason: '' })}>
+                                          <FileX className="w-3.5 h-3.5 mr-2" />Adicionar motivo
+                                        </DropdownMenuItem>
+                                        <DropdownMenuSeparator />
+                                      </>
+                                    )}
+
                                     {/* RELACIONADOS */}
                                     <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">🔗 Relacionados</DropdownMenuLabel>
                                     {quote.deals ? (
@@ -2069,11 +2170,9 @@ export default function Quotes() {
             <Select value={lostReasonDialog?.reason || ''} onValueChange={(v) => setLostReasonDialog(prev => prev ? { ...prev, reason: v } : null)}>
               <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="Preço elevado">Preço elevado</SelectItem>
-                <SelectItem value="Concorrência">Concorrência</SelectItem>
-                <SelectItem value="Sem resposta">Sem resposta</SelectItem>
-                <SelectItem value="Desistência do cliente">Desistência do cliente</SelectItem>
-                <SelectItem value="Outro">Outro</SelectItem>
+                {QUOTE_LOST_REASONS.map((reason) => (
+                  <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -2081,6 +2180,32 @@ export default function Quotes() {
             <Button variant="outline" onClick={() => setLostReasonDialog(null)}>Cancelar</Button>
             <Button variant="destructive" onClick={() => lostReasonDialog && handleMarkAsLost(lostReasonDialog.quoteId, lostReasonDialog.reason)} disabled={!lostReasonDialog?.reason}>
               Marcar como Perdido
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add-reason-after-the-fact dialog */}
+      <Dialog open={!!addReasonDialog?.open} onOpenChange={() => setAddReasonDialog(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Adicionar motivo</DialogTitle>
+            <DialogDescription>Este orçamento já está perdido/rejeitado sem motivo registado — normalmente porque o cliente rejeitou no Portal. Indique o motivo.</DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={addReasonDialog?.reason || ''} onValueChange={(v) => setAddReasonDialog(prev => prev ? { ...prev, reason: v } : null)}>
+              <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
+              <SelectContent>
+                {QUOTE_LOST_REASONS.map((reason) => (
+                  <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddReasonDialog(null)}>Cancelar</Button>
+            <Button variant="destructive" onClick={() => addReasonDialog && handleAddLostReason(addReasonDialog.quoteId, addReasonDialog.reason)} disabled={!addReasonDialog?.reason}>
+              Guardar motivo
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2274,12 +2399,12 @@ export default function Quotes() {
                         </>
                       )}
                     </div>
-                    {detailQuote.observacoes && (
+                    {detailQuote.lost_reason && (
                       <>
                         <Separator />
                         <div>
-                          <label className="text-xs font-medium text-muted-foreground">{t('quotes.observations')}</label>
-                          <p className="text-sm mt-1 whitespace-pre-wrap">{detailQuote.observacoes}</p>
+                          <label className="text-xs font-medium text-muted-foreground">{t('quotes.lostReason')}</label>
+                          <p className="text-sm mt-1 whitespace-pre-wrap">{detailQuote.lost_reason}</p>
                         </div>
                       </>
                     )}
@@ -2328,14 +2453,14 @@ export default function Quotes() {
       />
 
       {/* Bulk Status Change */}
-      <Dialog open={bulkStatusDialogOpen} onOpenChange={setBulkStatusDialogOpen}>
+      <Dialog open={bulkStatusDialogOpen} onOpenChange={(open) => { setBulkStatusDialogOpen(open); if (!open) setBulkLostReason(""); }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('common.changeStatus')}</DialogTitle>
             <DialogDescription>{t('common.bulkStatusDescription', { count: selectedIds.size })}</DialogDescription>
           </DialogHeader>
-          <div className="py-4">
-            <Select value={bulkNewStatus} onValueChange={setBulkNewStatus}>
+          <div className="py-4 space-y-4">
+            <Select value={bulkNewStatus} onValueChange={(v) => { setBulkNewStatus(v); setBulkLostReason(""); }}>
               <SelectTrigger><SelectValue placeholder={t('quotes.selectStatus')} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="rascunho">{t('quotes.status.draft')}</SelectItem>
@@ -2344,10 +2469,20 @@ export default function Quotes() {
                 <SelectItem value="perdido">{t('quotes.status.lost')}</SelectItem>
               </SelectContent>
             </Select>
+            {bulkStatusRequiresReason && (
+              <Select value={bulkLostReason} onValueChange={setBulkLostReason}>
+                <SelectTrigger><SelectValue placeholder="Motivo..." /></SelectTrigger>
+                <SelectContent>
+                  {QUOTE_LOST_REASONS.map((reason) => (
+                    <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkStatusDialogOpen(false)}>{t('common.cancel')}</Button>
-            <Button onClick={handleBulkStatusChange} disabled={processing || !bulkNewStatus}>{processing ? t('common.processing') : t('common.confirm')}</Button>
+            <Button onClick={handleBulkStatusChange} disabled={processing || !bulkNewStatus || (bulkStatusRequiresReason && !bulkLostReason)}>{processing ? t('common.processing') : t('common.confirm')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

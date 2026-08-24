@@ -418,12 +418,15 @@ serve(async (req) => {
                 // Find if there's an intermediate contact for this entity
                 const { data: intermediateContact } = await supabase.from("anew_contacts").select("id").eq("entity_id", lead.entity_id).eq("organization_id", lead.organization_id).maybeSingle();
                 const sourceContactId = intermediateContact?.id || null;
-                const { data: ec } = await supabase.from("anew_clients").select("id").eq("entity_id", lead.entity_id).eq("organization_id", lead.organization_id).maybeSingle();
+                const { data: ec } = await supabase.from("anew_clients").select("id, origin_source, origin_source_id, origin_campaign_id").eq("entity_id", lead.entity_id).eq("organization_id", lead.organization_id).maybeSingle();
                 let clientId = ec?.id;
                 if (!ec) {
-                  const { data: newClient, error: createClientError } = await supabase.from("anew_clients").insert([{ entity_id: lead.entity_id, organization_id: lead.organization_id, root_organization_id: lead.root_organization_id || lead.organization_id, source_type: sourceContactId ? "contact" : "workflow_automation", source_id: sourceContactId, status: "active", created_by: internalUserId, assigned_to: resolvedAssignedTo }]).select("id").single();
+                  const { data: newClient, error: createClientError } = await supabase.from("anew_clients").insert([{ entity_id: lead.entity_id, organization_id: lead.organization_id, root_organization_id: lead.root_organization_id || lead.organization_id, source_type: sourceContactId ? "contact" : "workflow_automation", source_id: sourceContactId, status: "active", created_by: internalUserId, assigned_to: resolvedAssignedTo, origin_source: lead.source, origin_source_id: lead.source_id, origin_campaign_id: lead.campaign_id }]).select("id").single();
                   if (createClientError) throw createClientError;
                   clientId = newClient?.id;
+                } else if (!ec.origin_source && !ec.origin_source_id && !ec.origin_campaign_id && (lead.source || lead.source_id || lead.campaign_id)) {
+                  // Best-effort backfill: only fill marketing origin on a reused client when still empty.
+                  await supabase.from("anew_clients").update({ origin_source: lead.source, origin_source_id: lead.source_id, origin_campaign_id: lead.campaign_id }).eq("id", ec.id);
                 }
                 // Mark intermediate contact as converted if exists
                 if (sourceContactId && clientId) {
@@ -957,7 +960,57 @@ serve(async (req) => {
           // 3. Try pipeline_links → deals
           if (!eId) { const { data: l } = await supabase.from("pipeline_links").select("lead_id, deal_id").eq("contract_id", contract.id).eq("status", "active").maybeSingle(); if (l?.deal_id) { const { data: d } = await supabase.from("deals").select("entity_id, lead_id").eq("id", l.deal_id).single(); if (d) { eId = d.entity_id; lid = d.lead_id; } } if (l?.lead_id) lid = l.lead_id; }
           if (!lid) lid = await resolveLeadFromPipeline("contract", contract.id);
+          // 4. Fallback: contracts created via the manual "Novo Contrato" form
+          // (rpc_create_client_contract) never write to pipeline_links.contract_id, so
+          // resolveLeadFromPipeline above always returns null for them. Mirror the
+          // entity_id join already used by evaluate_lead_signals_v2's has_signed_contract
+          // signal (anew_leads.entity_id = client_contracts.entity_id) as a last resort.
+          // Only auto-apply when unambiguous (exactly one still-open lead for this
+          // entity, scoped to the contract's own organization); if more than one
+          // candidate exists, log it instead of guessing which lead to convert.
+          if (!lid && eId) {
+            const { data: candidateLeads } = await supabase
+              .from("anew_leads")
+              .select("id, status, created_at")
+              .eq("entity_id", eId)
+              .eq("organization_id", contract.organization_id)
+              .is("deleted_at", null)
+              .not("status", "in", '("converted","archived","rejected")');
+            if (candidateLeads && candidateLeads.length === 1) {
+              lid = candidateLeads[0].id;
+            } else if (candidateLeads && candidateLeads.length > 1) {
+              await logWorkflowExecution({
+                ruleId: null,
+                sourceEntity: "contract",
+                sourceRecordId: contract.id,
+                targetEntity: "lead",
+                targetRecordId: null,
+                actionType: "diagnostic:contract_signed_lead_entity_fallback_ambiguous",
+                status: "success",
+                executionData: {
+                  reason: "entity_id fallback found more than one open lead for this entity; skipped auto-conversion to avoid converting the wrong lead",
+                  entity_id: eId,
+                  candidate_lead_ids: candidateLeads.map((l: any) => l.id),
+                },
+              });
+            }
+          }
           console.log("[execute-workflow] Contract conversion - entity_id:", eId, "lead_id:", lid, "contract_id:", contract.id, "hasConvertToClient:", hasConvertToClient);
+
+          // Resolve marketing origin (source/source_id/campaign_id) for the client
+          // that will be created/reused below: prefer the resolved lead directly,
+          // else fall back to the shared DB resolver (mirrors fn_resolve_client_marketing_origin).
+          let originSource = null, originSourceId = null, originCampaignId = null;
+          if (lid) {
+            const { data: originLead } = await supabase.from("anew_leads").select("source, source_id, campaign_id").eq("id", lid).maybeSingle();
+            if (originLead) { originSource = originLead.source; originSourceId = originLead.source_id; originCampaignId = originLead.campaign_id; }
+          }
+          if (!originSource && !originSourceId && !originCampaignId) {
+            const { data: resolved } = await supabase.rpc("fn_resolve_client_marketing_origin", { p_entity_id: eId, p_organization_id: contract.organization_id });
+            const row = Array.isArray(resolved) ? resolved[0] : resolved;
+            if (row) { originSource = row.origin_source; originSourceId = row.origin_source_id; originCampaignId = row.origin_campaign_id; }
+          }
+
           if (eId && !hasConvertToClient) {
             // No active contract_stage_actions row (org-specific or global) configures
             // convert_to_client for this stage — skip the conversion, but log it clearly
@@ -986,7 +1039,7 @@ serve(async (req) => {
             // Prefer client record in the same organization; fallback to same root org
             const { data: orgClient } = await supabase
               .from("anew_clients")
-              .select("id, status")
+              .select("id, status, origin_source, origin_source_id, origin_campaign_id")
               .eq("entity_id", eId)
               .eq("organization_id", contract.organization_id)
               .maybeSingle();
@@ -996,10 +1049,13 @@ serve(async (req) => {
               if (orgClient.status !== "active") {
                 await supabase.from("anew_clients").update({ status: "active" }).eq("id", orgClient.id);
               }
+              if (!orgClient.origin_source && !orgClient.origin_source_id && !orgClient.origin_campaign_id && (originSource || originSourceId || originCampaignId)) {
+                await supabase.from("anew_clients").update({ origin_source: originSource, origin_source_id: originSourceId, origin_campaign_id: originCampaignId }).eq("id", orgClient.id);
+              }
             } else {
               const { data: rootClient } = await supabase
                 .from("anew_clients")
-                .select("id, organization_id, status")
+                .select("id, organization_id, status, origin_source, origin_source_id, origin_campaign_id")
                 .eq("entity_id", eId)
                 .eq("root_organization_id", contract.root_organization_id || contract.organization_id)
                 .maybeSingle();
@@ -1016,6 +1072,11 @@ serve(async (req) => {
                   // Keep a single client per root org, but move it to the contract org for visibility
                   clientUpdates.organization_id = contract.organization_id;
                 }
+                if (!rootClient.origin_source && !rootClient.origin_source_id && !rootClient.origin_campaign_id && (originSource || originSourceId || originCampaignId)) {
+                  clientUpdates.origin_source = originSource;
+                  clientUpdates.origin_source_id = originSourceId;
+                  clientUpdates.origin_campaign_id = originCampaignId;
+                }
 
                 if (Object.keys(clientUpdates).length > 0) {
                   await supabase.from("anew_clients").update(clientUpdates).eq("id", rootClient.id);
@@ -1031,6 +1092,9 @@ serve(async (req) => {
                     source_type: "contract",
                     source_id: contract.id,
                     created_by: internalUserId,
+                    origin_source: originSource,
+                    origin_source_id: originSourceId,
+                    origin_campaign_id: originCampaignId,
                   })
                   .select("id")
                   .single();

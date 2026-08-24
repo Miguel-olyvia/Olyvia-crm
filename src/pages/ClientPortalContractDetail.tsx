@@ -21,7 +21,7 @@ import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
-import { injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
+import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
 
 const REJECTION_REASONS = [
   "Condições não adequadas",
@@ -95,6 +95,39 @@ const ClientPortalContractDetail = () => {
 
   const canSign = contract && (contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
   const isSigned = contract?.status === "signed";
+
+  // Descarregar o PDF do contrato. Usa exactamente o mesmo caminho do CRM
+  // (resolveContractDocument + downloadContractDocumentPdf), para o cliente
+  // receber o mesmo documento que a equipa vê — incluindo o bloco de
+  // assinaturas, que reflecte o estado real de cada parte.
+  //
+  // Não precisa de acesso a orçamentos: o corpo do contrato é guardado já
+  // substituído em contract_body_html no momento em que é gerado. As tabelas
+  // que este caminho lê (client_contracts, anew_organizations,
+  // organization_document_settings, client_contract_templates) são todas
+  // legíveis pelo utilizador do portal.
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const handleDownloadContractPdf = async () => {
+    if (!contract?.organization_id) {
+      toast({ title: "Não foi possível gerar o PDF", description: "Contrato sem organização associada.", variant: "destructive" });
+      return;
+    }
+    setDownloadingPdf(true);
+    try {
+      const resolved = await resolveContractDocument(contract, contract.organization_id);
+      if (!resolved) {
+        toast({ title: "Não foi possível gerar o PDF", description: "Este contrato ainda não tem conteúdo.", variant: "destructive" });
+        return;
+      }
+      const label = contract.contract_number || contract.title || "Contrato";
+      await downloadContractDocumentPdf(resolved, label, label);
+    } catch (error: any) {
+      console.error("[portal] contract PDF download failed:", error);
+      toast({ title: "Erro ao gerar o PDF", description: error?.message || "Tente novamente.", variant: "destructive" });
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
   const isRejected = contract?.status === "rejected";
   const isCancelled = contract?.status === "cancelled";
 
@@ -180,7 +213,22 @@ const ClientPortalContractDetail = () => {
       const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
         body: { action: "sign_contract", contract_id: id, signature_image: "OTP_SMS_VERIFIED", client_ip: clientIp },
       });
-      if (invokeError) throw new Error(invokeError.message);
+      if (invokeError) {
+        // Surface the real reason (e.g. otp_required/Forbidden, or a network/CORS
+        // failure message) instead of a generic SDK message that hides the cause.
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message) friendly = body.message;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message) friendly = body.message;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
       if (data?.error) throw new Error(data.message || data.error);
 
       toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });
@@ -366,8 +414,20 @@ const ClientPortalContractDetail = () => {
         {/* Contract Body */}
         {contract.contract_body_html && (
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
               <CardTitle className="text-base">Corpo do Contrato</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 shrink-0"
+                onClick={handleDownloadContractPdf}
+                disabled={downloadingPdf}
+              >
+                {downloadingPdf
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <FileDown className="h-3.5 w-3.5" />}
+                {downloadingPdf ? "A gerar…" : "Descarregar PDF"}
+              </Button>
             </CardHeader>
             <CardContent>
               <div

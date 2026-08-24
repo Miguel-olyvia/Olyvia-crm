@@ -340,7 +340,8 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
           ...withAssigneeOverride(buildDashboardScopedRpcParams(query, dateRange)),
           p_compare_previous: false,
         };
-        const comparisonRange = compareMode ? getComparisonPeriod(dateRange) : null;
+        // No "previous period" makes sense when showing all-time data.
+        const comparisonRange = compareMode && !dateRange.isAllTime ? getComparisonPeriod(dateRange) : null;
         const [mainResult, comparisonResult] = await Promise.all([
           (supabase.rpc as any)("get_lead_dashboard_stats_scoped", mainParams).abortSignal(abortController.signal),
           compareMode && comparisonRange
@@ -432,10 +433,15 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
         .eq("organization_id", query.orgId)
         .eq("status", "negotiation")
         .is("deleted_at", null)
-        .gte("created_at", dateRange.from.toISOString())
-        .lte("created_at", dateRange.to.toISOString())
         .order("updated_at", { ascending: true })
+        .order("id", { ascending: true })
         .range(0, NEGOTIATION_LIST_LIMIT - 1);
+
+      if (!dateRange.isAllTime) {
+        negotiationQuery = negotiationQuery
+          .gte("created_at", dateRange.from.toISOString())
+          .lte("created_at", dateRange.to.toISOString());
+      }
 
       const scopeFilter = buildNegotiationScopeFilter(query, teamMemberIds ?? []);
       if (scopeFilter) {
@@ -573,13 +579,19 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     queryFn: async (): Promise<QualificationHistoryRow[]> => {
       if (!query) return [];
 
-      const { data, error: historyError } = await supabase
+      let historyQuery = supabase
         .from("anew_entity_history")
         .select("entity_id, new_value, created_at")
         .eq("change_type", "qualification_changed")
-        .gte("created_at", dateRange.from.toISOString())
-        .lte("created_at", dateRange.to.toISOString())
         .order("created_at", { ascending: true });
+
+      if (!dateRange.isAllTime) {
+        historyQuery = historyQuery
+          .gte("created_at", dateRange.from.toISOString())
+          .lte("created_at", dateRange.to.toISOString());
+      }
+
+      const { data, error: historyError } = await historyQuery;
 
       if (historyError) {
         throw new Error(historyError.message || "Erro ao carregar histórico de qualificação.");
@@ -792,11 +804,13 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     () => statusDistribution.map((entry) => ({ name: entry.name, value: entry.value })),
     [statusDistribution],
   );
-  const aiReportPeriodLabel = `${format(dateRange.from, "dd/MM/yyyy", { locale: pt })} - ${format(
-    dateRange.to,
-    "dd/MM/yyyy",
-    { locale: pt },
-  )}`;
+  const aiReportPeriodLabel = dateRange.isAllTime
+    ? "Todos os períodos"
+    : `${format(dateRange.from, "dd/MM/yyyy", { locale: pt })} - ${format(
+        dateRange.to,
+        "dd/MM/yyyy",
+        { locale: pt },
+      )}`;
   const aiReportAssigneeName = selectedAssignee ? userMap.get(selectedAssignee)?.name ?? null : null;
   const aiReportKpis = useMemo(
     () => ({
@@ -888,15 +902,15 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="justify-start text-left font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(dateRange.from, "dd/MM/yyyy", { locale: pt })}
+                      {dateRange.isAllTime ? "Todos" : format(dateRange.from, "dd/MM/yyyy", { locale: pt })}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
-                      selected={dateRange.from}
+                      selected={dateRange.isAllTime ? undefined : dateRange.from}
                       onSelect={(date) =>
-                        date && setDateRange((previous) => ({ ...previous, from: startOfDay(date) }))
+                        date && setDateRange((previous) => ({ ...previous, from: startOfDay(date), isAllTime: false }))
                       }
                       initialFocus
                       className="pointer-events-auto"
@@ -908,14 +922,16 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                   <PopoverTrigger asChild>
                     <Button variant="outline" size="sm" className="justify-start text-left font-normal">
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {format(dateRange.to, "dd/MM/yyyy", { locale: pt })}
+                      {dateRange.isAllTime ? "Todos" : format(dateRange.to, "dd/MM/yyyy", { locale: pt })}
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
-                      selected={dateRange.to}
-                      onSelect={(date) => date && setDateRange((previous) => ({ ...previous, to: date }))}
+                      selected={dateRange.isAllTime ? undefined : dateRange.to}
+                      onSelect={(date) =>
+                        date && setDateRange((previous) => ({ ...previous, to: date, isAllTime: false }))
+                      }
                       initialFocus
                       className="pointer-events-auto"
                     />
@@ -923,6 +939,14 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                 </Popover>
               </div>
               <div className="flex items-center gap-1">
+                <Button
+                  variant={dateRange.isAllTime ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setDateRange(resolveDashboardDateRange(undefined))}
+                >
+                  Tudo
+                </Button>
                 {[
                   { label: "Hoje", days: 0 },
                   { label: "7 dias", days: 7 },
@@ -931,6 +955,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                   const now = new Date();
                   const from = days === 0 ? startOfDay(now) : subDays(now, days);
                   const isActive =
+                    !dateRange.isAllTime &&
                     format(dateRange.from, "yyyy-MM-dd") === format(from, "yyyy-MM-dd") &&
                     format(dateRange.to, "yyyy-MM-dd") === format(now, "yyyy-MM-dd");
 
@@ -940,7 +965,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                       variant={isActive ? "default" : "outline"}
                       size="sm"
                       className="h-8 text-xs"
-                      onClick={() => setDateRange({ from, to: now })}
+                      onClick={() => setDateRange({ from, to: now, isAllTime: false })}
                     >
                       {label}
                     </Button>
@@ -948,15 +973,20 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                 })}
               </div>
               <div className="flex items-center gap-2 ml-auto">
-                <Label htmlFor="compare" className="text-sm text-muted-foreground">
+                <Label
+                  htmlFor="compare"
+                  className={`text-sm ${dateRange.isAllTime ? "text-muted-foreground/50" : "text-muted-foreground"}`}
+                  title={dateRange.isAllTime ? "Não aplicável a 'Todos os períodos'" : undefined}
+                >
                   Comparar período anterior
                 </Label>
                 <input
                   type="checkbox"
                   id="compare"
-                  checked={compareMode}
+                  checked={compareMode && !dateRange.isAllTime}
+                  disabled={dateRange.isAllTime}
                   onChange={(event) => setCompareMode(event.target.checked)}
-                  className="rounded border-input"
+                  className="rounded border-input disabled:opacity-50"
                 />
               </div>
             </div>
@@ -1038,7 +1068,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
               icon={UserCheck}
             />
             <KPICard
-              title="Taxa Conversão (coorte)"
+              title={dateRange.isAllTime ? "Taxa de Conversão" : "Taxa Conversão (coorte)"}
               value={formatMetricValue(kpis.conversionRate, "%")}
               subtitle={`${formatMetricValue(kpis.cohortConversions)} dos ${formatMetricValue(kpis.leadsInPeriod)} novos converteram`}
               icon={Target}
@@ -1226,7 +1256,9 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
                   <div>
                     <CardTitle className="text-lg">Evolução de Leads</CardTitle>
                     <CardDescription>
-                      {format(dateRange.from, "dd/MM", { locale: pt })} - {format(dateRange.to, "dd/MM", { locale: pt })}
+                      {dateRange.isAllTime
+                        ? "Todos os períodos"
+                        : `${format(dateRange.from, "dd/MM", { locale: pt })} - ${format(dateRange.to, "dd/MM", { locale: pt })}`}
                     </CardDescription>
                   </div>
                   <Badge variant="secondary" className="font-normal">

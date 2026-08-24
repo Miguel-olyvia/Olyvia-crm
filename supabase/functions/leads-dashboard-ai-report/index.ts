@@ -29,6 +29,8 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
 
@@ -279,27 +281,48 @@ Comenta a distribuição (top / cauda) usando topAssignees. Se vazio, escreve "S
 ## Recomendações
 Exactamente 3 bullets accionáveis para a semana seguinte.`;
 
-    const aiRes = await callAiGateway({
-      model: MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    });
+    // AI credits — billing gate, scoped to the (already org-scope-validated)
+    // organization_id. See _shared/aiCredits.ts for the atomic
+    // debit/refund-on-failure mechanics behind the error branches below.
+    const creditsResult = await checkAndConsumeAiCredits(
+      supabase,
+      organization_id,
+      AI_CREDIT_COSTS["leads-dashboard-ai-report"],
+    );
+    if (creditsResult.blocked) {
+      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
+    }
+
+    let aiRes;
+    try {
+      aiRes = await callAiGateway({
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      });
+    } catch (gatewayError) {
+      await refundAiCredits(supabase, organization_id, AI_CREDIT_COSTS["leads-dashboard-ai-report"]);
+      throw gatewayError;
+    }
 
     if (aiRes.status === 429) {
+      await refundAiCredits(supabase, organization_id, AI_CREDIT_COSTS["leads-dashboard-ai-report"]);
       return new Response(
         JSON.stringify({ error: "rate_limited", message: "Demasiados pedidos. Tenta novamente daqui a instantes." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
     if (aiRes.status === 402) {
+      await refundAiCredits(supabase, organization_id, AI_CREDIT_COSTS["leads-dashboard-ai-report"]);
       return new Response(
         JSON.stringify({ error: "credits_exhausted", message: "Créditos de IA esgotados. Contacta o administrador." }),
         { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
     if (!aiRes.ok) {
+      await refundAiCredits(supabase, organization_id, AI_CREDIT_COSTS["leads-dashboard-ai-report"]);
       const text = await aiRes.text();
       console.error("leads-dashboard-ai-report: AI gateway error", aiRes.status, text);
       return new Response(

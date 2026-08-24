@@ -75,6 +75,31 @@ function validateFieldValues(field_values: Record<string, unknown>): string | nu
   return null;
 }
 
+// create_entity_with_contacts_and_roles (20260821020000) requires a non-null
+// p_created_by when called as service_role with no auth.uid() (this public,
+// anonymous Edge Function never has one). This resolves an org admin the
+// same way insert-lead does. Shared by both the new-entity RPC call and the
+// reused-entity backfill inserts below, so the admin-membership lookup only
+// needs to be written once.
+async function resolveAdminCreatedBy(supabase: any, rootOrgId: string): Promise<string | null> {
+  const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
+  const { data: adminRoleRows } = await supabase
+    .from('anew_roles')
+    .select('id')
+    .in('code', adminRoleCodes);
+  const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
+  if (adminRoleIds.length === 0) return null;
+  const { data: adminMembership } = await supabase
+    .from('anew_memberships')
+    .select('user_id')
+    .eq('organization_id', rootOrgId)
+    .eq('status', 'active')
+    .in('role_id', adminRoleIds)
+    .limit(1)
+    .maybeSingle();
+  return adminMembership?.user_id || null;
+}
+
 /**
  * Public Lead Creation API (Multi-Step Support)
  * 
@@ -616,6 +641,138 @@ Deno.serve(async (req) => {
           await supabase.from('anew_entities').update(nameUpdate).eq('id', entityId);
         }
       }
+
+      // --- Reused-entity backfill: email / phone / address ---
+      // Conservative, additive-only: only inserted when the entity has ZERO
+      // rows in the corresponding table (same pattern as the name backfill
+      // above, applied to "no row" instead of "empty field"). NEVER updates
+      // or overwrites an existing row — a value already on file may have
+      // been corrected manually in the CRM afterward. Every step is
+      // fail-soft: an error here must not block the already-created lead's
+      // success response, so each is wrapped in its own try/catch and only
+      // logged via console.error (same pattern as emitFormResubmissionAlert
+      // and the post-completion emails below).
+      if (leadEmail) {
+        try {
+          const { count: emailCount, error: emailCountError } = await supabase
+            .from('anew_entity_emails')
+            .select('id', { count: 'exact', head: true })
+            .eq('entity_id', entityId);
+          if (emailCountError) {
+            console.error('[create-lead] reused-entity email count lookup failed (continuing):', emailCountError);
+          } else if (!emailCount) {
+            const backfillCreatedBy = await resolveAdminCreatedBy(supabase, rootOrgId);
+            const { error: emailInsertError } = await supabase.from('anew_entity_emails').insert({
+              entity_id: entityId,
+              email: leadEmail.toLowerCase().trim(),
+              email_type: 'personal',
+              is_primary: true,
+              created_by: backfillCreatedBy,
+            });
+            if (emailInsertError) {
+              console.error('[create-lead] reused-entity email backfill insert failed (continuing):', emailInsertError);
+            }
+          }
+        } catch (emailBackfillErr) {
+          console.error('[create-lead] reused-entity email backfill failed (continuing):', emailBackfillErr);
+        }
+      }
+
+      if (leadPhone) {
+        try {
+          const { count: phoneCount, error: phoneCountError } = await supabase
+            .from('anew_entity_phones')
+            .select('id', { count: 'exact', head: true })
+            .eq('entity_id', entityId);
+          if (phoneCountError) {
+            console.error('[create-lead] reused-entity phone count lookup failed (continuing):', phoneCountError);
+          } else if (!phoneCount) {
+            const backfillCreatedBy = await resolveAdminCreatedBy(supabase, rootOrgId);
+            const { error: phoneInsertError } = await supabase.from('anew_entity_phones').insert({
+              entity_id: entityId,
+              phone_number: leadPhone,
+              phone_type: 'mobile',
+              is_primary: true,
+              created_by: backfillCreatedBy,
+            });
+            if (phoneInsertError) {
+              console.error('[create-lead] reused-entity phone backfill insert failed (continuing):', phoneInsertError);
+            }
+          }
+        } catch (phoneBackfillErr) {
+          console.error('[create-lead] reused-entity phone backfill failed (continuing):', phoneBackfillErr);
+        }
+      }
+
+      // Address: reuse the same street/postal/city resolution + placeholder
+      // rules as the new-entity RPC payload below (resolveContact + L19:
+      // never persist with only street or only postal, never 'N/A'/'0000-000').
+      const backfillStreet = String(resolveContact('address', 'po_morada', 'morada') || '').trim();
+      const backfillPostal = String(resolveContact('postal_code', 'po_codigo_postal', 'codigo_postal') || '').trim();
+      const backfillCity = String(resolveContact('city', 'po_localidade', 'localidade', 'cidade') || '').trim();
+      if (backfillStreet && backfillPostal) {
+        try {
+          const { count: addressCount, error: addressCountError } = await supabase
+            .from('anew_entity_addresses')
+            .select('id', { count: 'exact', head: true })
+            .eq('entity_id', entityId);
+          if (addressCountError) {
+            console.error('[create-lead] reused-entity address count lookup failed (continuing):', addressCountError);
+          } else if (!addressCount) {
+            const backfillCreatedBy = await resolveAdminCreatedBy(supabase, rootOrgId);
+            // address_key matches create_entity_with_contacts_and_roles:
+            // lower(concat_ws('|', street, postal, city)) — see migration
+            // 20260821020000_security_definer_identity_from_authuid_fix_record.sql:106.
+            const addressKey = [backfillStreet, backfillPostal, backfillCity].join('|').toLowerCase();
+            let backfillAddressId: string | null = null;
+            const { data: existingAddress, error: existingAddressError } = await supabase
+              .from('anew_addresses')
+              .select('id')
+              .eq('address_key', addressKey)
+              .maybeSingle();
+            if (existingAddressError) {
+              console.error('[create-lead] reused-entity address_key lookup failed (continuing):', existingAddressError);
+            }
+            if (existingAddress?.id) {
+              // Reuse the existing address row instead of creating a duplicate.
+              backfillAddressId = existingAddress.id;
+            } else {
+              const { data: newAddress, error: addressInsertError } = await supabase
+                .from('anew_addresses')
+                .insert({
+                  address_key: addressKey,
+                  street: backfillStreet,
+                  number: '',
+                  postal_code: backfillPostal,
+                  city: backfillCity || '',
+                  country: 'PT',
+                  created_by: backfillCreatedBy,
+                })
+                .select('id')
+                .single();
+              if (addressInsertError) {
+                console.error('[create-lead] reused-entity address backfill insert failed (continuing):', addressInsertError);
+              } else {
+                backfillAddressId = newAddress?.id || null;
+              }
+            }
+            if (backfillAddressId) {
+              const { error: entityAddressInsertError } = await supabase.from('anew_entity_addresses').insert({
+                entity_id: entityId,
+                address_id: backfillAddressId,
+                address_type: 'primary',
+                is_primary: true,
+                created_by: backfillCreatedBy,
+              });
+              if (entityAddressInsertError) {
+                console.error('[create-lead] reused-entity entity_address backfill insert failed (continuing):', entityAddressInsertError);
+              }
+            }
+          }
+        } catch (addressBackfillErr) {
+          console.error('[create-lead] reused-entity address backfill failed (continuing):', addressBackfillErr);
+        }
+      }
     }
 
     // --- Contact/client target: skip anew_leads entirely, upsert form_submissions ---
@@ -732,24 +889,7 @@ Deno.serve(async (req) => {
       // (this public, anonymous Edge Function never has one) - resolve an
       // org admin the same way insert-lead already does, or every brand-new
       // lead submission 500s with "Autenticacao necessaria" (confirmed live).
-      const adminRoleCodes = ['super_admin', 'admin', 'org_admin'];
-      const { data: adminRoleRows } = await supabase
-        .from('anew_roles')
-        .select('id')
-        .in('code', adminRoleCodes);
-      const adminRoleIds = (adminRoleRows || []).map((r: { id: string }) => r.id);
-      let entityCreatedBy: string | null = null;
-      if (adminRoleIds.length > 0) {
-        const { data: adminMembership } = await supabase
-          .from('anew_memberships')
-          .select('user_id')
-          .eq('organization_id', rootOrgId)
-          .eq('status', 'active')
-          .in('role_id', adminRoleIds)
-          .limit(1)
-          .maybeSingle();
-        entityCreatedBy = adminMembership?.user_id || null;
-      }
+      const entityCreatedBy = await resolveAdminCreatedBy(supabase, rootOrgId);
 
       const { data: rpcEntityId, error: rpcError } = await supabase.rpc(
         'create_entity_with_contacts_and_roles',

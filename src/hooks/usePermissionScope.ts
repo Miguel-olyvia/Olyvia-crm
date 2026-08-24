@@ -109,13 +109,24 @@ export function usePermissionScope() {
       }
 
       const roleIds = [...new Set(memberships.map(m => m.role_id))];
-      const membershipIds = memberships.map(m => m.id);
+
+      // Scope overrides come ONLY from memberships in the ACTIVE organization.
+      // Reading them across the ancestor chain let ORG scope granted in a parent
+      // organization leak into every child — the cross-organization escalation
+      // fixed in the database by 20261112120000_scope_resolution_per_org_only.sql
+      // (and, for proposals, by 20261006010000). Role permissions still resolve
+      // across the chain, mirroring the database.
+      const ownMembershipIds = memberships
+        .filter(m => m.organization_id === activeCompany.id)
+        .map(m => m.id);
 
       // PERF-003: parallelize independent queries (roles, role_perms, scope overrides)
       const [rolesRes, rolePermsRes, scopeRes] = await Promise.all([
         supabase.from("anew_roles").select("id, code").in("id", roleIds),
         supabase.from("anew_role_permissions").select("permission_code").in("role_id", roleIds),
-        supabase.from("anew_membership_permission_scopes").select("permission_code, scope_level").in("membership_id", membershipIds),
+        ownMembershipIds.length > 0
+          ? supabase.from("anew_membership_permission_scopes").select("permission_code, scope_level").in("membership_id", ownMembershipIds)
+          : Promise.resolve({ data: [] as { permission_code: string; scope_level: string }[] }),
       ]);
 
       const roles = rolesRes.data;

@@ -30,6 +30,7 @@ import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { findScheduleItemForLead } from "./leadVisitMatching";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
 interface ScheduledVisit {
   id: string;
@@ -532,16 +533,33 @@ export function VisitReassignDialog({
   const loadUsers = async () => {
     try {
       // Get active members from anew_memberships
-      const { data: memberships, error: mError } = await supabase
+      const { data: rawMemberships, error: mError } = await supabase
         .from("anew_memberships")
-        .select("user_id")
+        .select("user_id, role_id")
         .eq("organization_id", companyId)
         .eq("status", "active");
 
       if (mError) throw mError;
 
-      const userIds = [...new Set((memberships || []).map(m => m.user_id))];
-      
+      // anew_memberships também tem linhas "active" para clientes/contactos do
+      // portal (criadas ao enviar propostas/orçamentos/contratos) — sem este
+      // filtro de role, o dropdown mostrava clientes a par dos comerciais.
+      const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase
+          .from("anew_roles")
+          .select("id, code")
+          .in("id", roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || "").toLowerCase(); });
+      }
+      const memberships = (rawMemberships || []).filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
+
+      const userIds = [...new Set(memberships.map(m => m.user_id))];
+
       if (userIds.length === 0) {
         setUsers([]);
         return;
@@ -731,21 +749,17 @@ export function VisitReassignDialog({
         newResourceId = newResource?.id;
       }
 
-      // Update assignee
+      // Update assignee — RPC atómica (delete+insert numa única transação),
+      // evita a janela em que o utilizador perde a visibilidade RLS do item
+      // a meio da troca de recurso.
       if (newResourceId) {
-        // Remove ALL existing assignees for this item
-        await supabase
-          .from("schedule_item_assignees")
-          .delete()
-          .eq("item_id", visit.id);
-
-        // Add new assignee
-        const { error: assigneeError } = await supabase
-          .from("schedule_item_assignees")
-          .insert({
-            item_id: visit.id,
-            resource_id: newResourceId,
-          });
+        const { error: assigneeError } = await supabase.rpc(
+          "rpc_update_schedule_item_assignees",
+          {
+            p_item_id: visit.id,
+            p_resource_ids: [newResourceId],
+          }
+        );
 
         if (assigneeError) throw assigneeError;
       }

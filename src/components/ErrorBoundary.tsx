@@ -24,6 +24,22 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // A stale JS chunk (deploy replaced the asset while this tab was open)
+    // throws here as a normal render error — this ErrorBoundary is a single
+    // instance wrapping the whole app, so React has already unmounted
+    // everything below it by this point; there is no in-memory state left to
+    // save. The one thing we control is how the user experiences it: reload
+    // once automatically (same detection/guard as the module-load handling
+    // in src/main.tsx, kept in sync manually — no shared app-wide error
+    // classifier module exists yet) so they land back on the same URL
+    // instead of being stuck on a scary "Algo correu mal" screen.
+    const isModuleLoadError = /Failed to fetch dynamically imported module|Importing a module script failed/.test(error.message || "");
+    if (isModuleLoadError && !sessionStorage.getItem("olyvia-module-load-retried")) {
+      sessionStorage.setItem("olyvia-module-load-retried", "true");
+      window.location.reload();
+      return;
+    }
+
     console.error("[ErrorBoundary] Caught error:", error);
     console.error("[ErrorBoundary] Component stack:", errorInfo.componentStack);
     Sentry.captureException(error, { extra: { componentStack: errorInfo.componentStack } });

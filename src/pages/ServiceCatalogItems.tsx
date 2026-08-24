@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
+import { parseServicesCSV, downloadServicesTemplate, type ImportReport } from "@/utils/servicesExportImport";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -92,6 +93,9 @@ export default function ServiceCatalogItems() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("all");
   const [showBulkUploadDialog, setShowBulkUploadDialog] = useState(false);
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
@@ -313,17 +317,68 @@ export default function ServiceCatalogItems() {
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadTemplate = () => {
+    try {
+      downloadServicesTemplate();
+    } catch (error: any) {
+      toast({
+        title: t('serviceCatalog.toast.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const inputEl = e.target;
+    const files = inputEl.files;
+    if (!files || files.length === 0) return;
 
-    toast({
-      title: t('serviceCatalog.info'),
-      description: t('serviceCatalog.toast.inDevelopment'),
-      variant: "default",
-    });
+    if (!activeCompany?.id) {
+      toast({
+        title: t('services.toast.companyNotSet'),
+        description: t('services.toast.selectActiveCompanyImport'),
+        variant: "destructive",
+      });
+      if (inputEl) inputEl.value = "";
+      return;
+    }
 
-    setShowBulkUploadDialog(false);
+    setImporting(true);
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) throw new Error("Perfil de utilizador não encontrado");
+
+      const aggregate: ImportReport = {
+        total: 0,
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        errors: [],
+      };
+
+      for (const file of Array.from(files)) {
+        const report = await parseServicesCSV(file, activeCompany.id, businessUserId);
+        aggregate.total += report.total;
+        aggregate.inserted += report.inserted;
+        aggregate.updated += report.updated;
+        aggregate.skipped += report.skipped;
+        aggregate.errors.push(...report.errors);
+      }
+
+      setImportReport(aggregate);
+      setShowBulkUploadDialog(false);
+      loadData();
+    } catch (error: any) {
+      toast({
+        title: t('services.toast.importError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setImporting(false);
+      if (inputEl) inputEl.value = "";
+    }
   };
 
   const SortableHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
@@ -369,12 +424,73 @@ export default function ServiceCatalogItems() {
                     {t('serviceCatalog.bulkUploadDescription')}
                   </DialogDescription>
                 </DialogHeader>
-                <Input type="file" accept=".csv" onChange={handleBulkUpload} />
+                <div className="space-y-4">
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Template
+                    </Button>
+                  </div>
+                  <Input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    multiple
+                    onChange={handleBulkUpload}
+                    disabled={importing}
+                  />
+                  {importing && (
+                    <p className="text-xs text-muted-foreground">A importar…</p>
+                  )}
+                </div>
               </DialogContent>
               </Dialog>
             </PermissionGate>
           </div>
         </div>
+
+        {/* Import report dialog */}
+        <Dialog open={!!importReport} onOpenChange={(o) => { if (!o) setImportReport(null); }}>
+          <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Relatório de Importação</DialogTitle>
+            </DialogHeader>
+            {importReport && (
+              <div className="space-y-4 overflow-y-auto">
+                <div className="grid grid-cols-4 gap-3 text-center">
+                  <div className="rounded-md border p-3">
+                    <div className="text-2xl font-semibold text-primary">{importReport.inserted}</div>
+                    <div className="text-xs text-muted-foreground">Inseridos</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-2xl font-semibold text-primary">{importReport.updated}</div>
+                    <div className="text-xs text-muted-foreground">Atualizados</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-2xl font-semibold text-muted-foreground">{importReport.skipped}</div>
+                    <div className="text-xs text-muted-foreground">Ignorados</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-2xl font-semibold text-destructive">{importReport.errors.length}</div>
+                    <div className="text-xs text-muted-foreground">Erros</div>
+                  </div>
+                </div>
+                {importReport.errors.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium">Erros</h4>
+                    <div className="max-h-60 overflow-y-auto rounded-md border p-2 text-xs space-y-1">
+                      {importReport.errors.map((err, idx) => (
+                        <div key={idx} className="text-destructive">
+                          Linha {err.row} ({err.sku || "—"}): {err.message}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <div className="mb-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

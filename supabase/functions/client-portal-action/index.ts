@@ -15,6 +15,18 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
+// Guards against a slow/unresponsive downstream call keeping this Edge
+// Function alive past its execution limit — when that happens the platform
+// kills the invocation mid-flight with no response body/CORS headers at
+// all, and the browser surfaces a generic "Failed to send a request to
+// the Edge Function" instead of any real error message.
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label}_timeout`)), ms)),
+  ]);
+}
+
 serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -33,9 +45,22 @@ serve(async (req) => {
     }
 
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
-    const { data: { user }, error: userError } = await anonClient.auth.getUser(authHeader.replace("Bearer ", ""));
-    if (userError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+    let user: any;
+    try {
+      const { data, error: userError } = await withTimeout(
+        anonClient.auth.getUser(authHeader.replace("Bearer ", "")),
+        5000,
+        "auth_getUser",
+      );
+      if (userError || !data.user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+      }
+      user = data.user;
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "auth_unavailable", message: "Serviço de autenticação indisponível. Tente novamente." }),
+        { status: 503, headers: corsHeaders },
+      );
     }
 
     const body = await req.json();
@@ -420,6 +445,7 @@ serve(async (req) => {
         await withRetryResult(() => supabase.from("quotes").update({
           estado: "rejeitado",
           client_notes: safeReason,
+          lost_reason: safeReason,
         }).eq("id", quote_id));
 
         const { data: rejQuote } = await supabase.from("quotes").select("quote_number").eq("id", quote_id).maybeSingle();
@@ -430,6 +456,100 @@ serve(async (req) => {
         });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      }
+
+      // Data needed to render the proposal PDF in the client's browser.
+      //
+      // The portal's "download PDF" button used the same generator as the CRM,
+      // which merges the PDFs of the proposal's quotes. Portal users cannot
+      // read `quotes` (RLS), so it always found zero and threw — the button
+      // silently did nothing, for every client.
+      //
+      // Opening RLS on quotes/quote_lines was not an option: quote_lines holds
+      // cost_price, custo_mao_obra_unit, custo_material_unit and
+      // margem_percent — the company's costs and margins. Instead the data is
+      // read here with service_role, stripped of those four columns, and
+      // returned only to a caller that owns the proposal.
+      case "get_proposal_pdf_data": {
+        const { proposal_id } = params;
+        if (!proposal_id) {
+          return new Response(JSON.stringify({ error: "proposal_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("proposal_id", proposal_id))) return forbidden();
+
+        const { data: proposal } = await supabase
+          .from("proposals")
+          .select("id, proposal_number, title, template_id, organization_id")
+          .eq("id", proposal_id)
+          .maybeSingle();
+
+        // Same resolution order as generateProposalPdfBlob: quotes linked
+        // directly, falling back to pipeline_links for the ones whose
+        // quotes.proposal_id was never filled in.
+        let quoteRows: any[] = [];
+        const { data: directQuotes } = await supabase
+          .from("quotes")
+          .select("*")
+          .eq("proposal_id", proposal_id)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: true });
+        quoteRows = directQuotes || [];
+
+        if (quoteRows.length === 0) {
+          const { data: links } = await supabase
+            .from("pipeline_links")
+            .select("quote_id")
+            .eq("proposal_id", proposal_id)
+            .eq("status", "active")
+            .not("quote_id", "is", null);
+          const linkedIds = (links || []).map((l: any) => l.quote_id).filter(Boolean);
+          if (linkedIds.length > 0) {
+            const { data: linkedQuotes } = await supabase
+              .from("quotes")
+              .select("*")
+              .in("id", linkedIds)
+              .is("deleted_at", null)
+              .order("created_at", { ascending: true });
+            quoteRows = linkedQuotes || [];
+          }
+        }
+
+        // Never leaves the server: costs and margins are internal.
+        const SENSITIVE_LINE_COLUMNS = [
+          "cost_price",
+          "custo_mao_obra_unit",
+          "custo_material_unit",
+          "margem_percent",
+        ];
+        const stripCosts = (row: Record<string, unknown>) => {
+          const clean: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(row)) {
+            if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
+          }
+          return clean;
+        };
+
+        const quotes: any[] = [];
+        for (const quote of quoteRows) {
+          const [{ data: lines }, { data: fees }] = await Promise.all([
+            supabase
+              .from("quote_lines")
+              .select("*, products (sku), services (sku)")
+              .eq("quote_id", quote.id)
+              .order("ordem"),
+            supabase
+              .from("quote_fees")
+              .select("*, service_fee_types (name, calculation_type, percentage, fixed_amount)")
+              .eq("quote_id", quote.id),
+          ]);
+          quotes.push({
+            quote,
+            lines: (lines || []).map((l: any) => stripCosts(l)),
+            fees: fees || [],
+          });
+        }
+
+        return new Response(JSON.stringify({ proposal, quotes }), { headers: corsHeaders });
       }
 
       case "sign_proposal": {
@@ -505,6 +625,7 @@ serve(async (req) => {
             .from("client_contracts")
             .select("id")
             .eq("proposal_id", proposal_id)
+            .is("deleted_at", null)
             .limit(1);
 
           if (existingContract && existingContract.length > 0) {
@@ -636,6 +757,15 @@ serve(async (req) => {
           ...(rejectedStageId ? { stage_id: rejectedStageId } : {}),
         }).eq("id", proposal_id));
 
+        // Cascade rejection into quotes still open under this proposal, keeping
+        // the same rejection motive so lost-reason reporting stays consistent.
+        const cascadeReason = safeReasonText || reason_code || null;
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("quotes")
+          .update({ estado: "rejeitado", lost_reason: cascadeReason })
+          .eq("proposal_id", proposal_id)
+          .in("estado", ["rascunho", "enviado"]));
+
         // Freeze the decided snapshot for later change detection — fail-soft,
         // never blocks the rejection flow that already succeeded above.
         try {
@@ -649,12 +779,6 @@ serve(async (req) => {
         } catch (e) {
           console.error("Error recording proposal decision:", e);
         }
-
-        // Rejecting the whole proposal means nothing under it moves forward —
-        // mirrors sign_proposal's handling of unselected quotes, but here every
-        // linked quote is rejected since the proposal itself is dead.
-        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
-        await withRetryResult(() => supabase.from("quotes").update({ estado: "rejeitado" }).eq("proposal_id", proposal_id));
 
         const { data: rejProp } = await supabase.from("proposals").select("proposal_number, title").eq("id", proposal_id).maybeSingle();
         await maybeNotify("client_rejected_proposal", {
@@ -706,6 +830,15 @@ serve(async (req) => {
         // client signature converts the linked contact into a client too —
         // without this, only signatures done manually inside the CRM did.
         try {
+          // Bounded — this is a best-effort automation trigger fired *after*
+          // the contract is already persisted as signed above. Without a
+          // timeout, a slow execute-workflow chain could keep this whole
+          // invocation alive past the platform's execution limit, which
+          // kills it mid-flight with no response at all (the client then
+          // sees a generic "Failed to send a request to the Edge Function"
+          // even though the signature was actually saved).
+          const wfController = new AbortController();
+          const wfTimeout = setTimeout(() => wfController.abort(), 8000);
           const wfResp = await fetch(`${supabaseUrl}/functions/v1/execute-workflow`, {
             method: "POST",
             headers: {
@@ -718,7 +851,9 @@ serve(async (req) => {
               new_stage_id: "signed",
               triggered_by: null,
             }),
+            signal: wfController.signal,
           });
+          clearTimeout(wfTimeout);
           const wfData = await wfResp.json();
           console.log("[client-portal-action] sign_contract execute-workflow response:", wfData);
         } catch (wfErr) {

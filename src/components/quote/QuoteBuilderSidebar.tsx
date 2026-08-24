@@ -142,8 +142,19 @@ export function QuoteBuilderSidebar({
       totalSales += precoDesc * line.qt;
     });
   }
-  const globalMargin = hasCostData && totalSales > 0 ? ((totalSales - totalCost) / totalSales) * 100 : 0;
-  const profit = totalSales - totalCost;
+  // totalSales above only applies each LINE's own discount_percent — it never
+  // accounted for the quote-level "Desconto" (descontoPercent /
+  // desconto_global_percent), the same factor calculateTotals() in
+  // QuoteBuilder.tsx already applies to the Total shown next to this margin.
+  // Without it, applying a global discount visibly lowers the Total but the
+  // Margem stayed exactly the same, which is wrong: less revenue against the
+  // same cost is a lower margin.
+  const globalDiscountFactor = 1 - (descontoPercent || 0) / 100;
+  const totalSalesAfterGlobalDiscount = totalSales * globalDiscountFactor;
+  const globalMargin = hasCostData && totalSalesAfterGlobalDiscount > 0
+    ? ((totalSalesAfterGlobalDiscount - totalCost) / totalSalesAfterGlobalDiscount) * 100
+    : 0;
+  const profit = totalSalesAfterGlobalDiscount - totalCost;
 
   // Calculate inline quote summaries
   const inlineQuoteSummaries = inlineQuotes

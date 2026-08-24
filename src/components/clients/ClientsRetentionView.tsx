@@ -7,6 +7,7 @@ import { Phone, Mail, UserPlus, Pencil, Send, Check, AlertTriangle } from "lucid
 import { supabase } from "@/integrations/supabase/client";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { differenceInDays, format } from "date-fns";
+import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
@@ -29,6 +30,7 @@ interface FullContract {
   entity_id: string | null;
   status: string;
   total_value: number | null;
+  total_value_sem_iva: number | null;
   start_date: string | null;
   end_date: string | null;
   created_at: string;
@@ -160,7 +162,7 @@ export function ClientsRetentionView({
         for (let i = 0; i < entityIds.length; i += 100) {
           const batch = entityIds.slice(i, i + 100);
           let q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, start_date, end_date, created_at, payment_terms, notes")
+            .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
             .in("entity_id", batch)
             .is("deleted_at", null)
             .in("organization_id", scopeOrgIds);
@@ -184,7 +186,7 @@ export function ClientsRetentionView({
   }, [clients, scopeOrgIds, contractScopeLoading, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
   const now = new Date();
-  const INACTIVE_STATUSES = ["inactive", "lost", "churned", "lost_definitive"];
+  const INACTIVE_STATUSES: readonly string[] = INACTIVE_CLIENT_STATUSES;
   const activeClients = useMemo(() => clients.filter(c => !INACTIVE_STATUSES.includes(c.status)), [clients]);
 
   // ── KPIs ──
@@ -212,12 +214,14 @@ export function ClientsRetentionView({
     // Expiring contracts (30 days)
     let expiringCount = 0;
     let expiringValue = 0;
+    let expiringValueWithVat = 0;
     allContracts.forEach(c => {
       if ((c.status === "active" || c.status === "signed") && c.end_date) {
         const days = differenceInDays(new Date(c.end_date), now);
         if (days >= 0 && days <= 30) {
           expiringCount++;
-          expiringValue += c.total_value || 0;
+          expiringValue += c.total_value_sem_iva ?? 0;
+          expiringValueWithVat += c.total_value ?? 0;
         }
       }
     });
@@ -234,7 +238,7 @@ export function ClientsRetentionView({
     return {
       retentionRate, lostCount, totalAtStart: clientsAtStart.length, stillActiveCount: stillActive.length,
       atRiskCount: atRiskClients.length, atRiskValue,
-      expiringCount, expiringValue,
+      expiringCount, expiringValue, expiringValueWithVat,
       avgHealth,
     };
   }, [clients, activeClients, healthScores, contracts, allContracts, now]);
@@ -351,7 +355,8 @@ export function ClientsRetentionView({
           isExpired,
           isUrgent,
           isHealthy: !!isHealthy,
-          value: c.total_value || 0,
+          value: c.total_value_sem_iva ?? 0,
+          valueWithVat: c.total_value ?? 0,
           details: details.join(" · "),
           endDate: c.end_date!,
         };
@@ -361,6 +366,7 @@ export function ClientsRetentionView({
   }, [allContracts, identityMap, healthScores, interactions, tags, now]);
 
   const renewTotalValue = useMemo(() => contractsToRenew.reduce((sum, c) => sum + c.value, 0), [contractsToRenew]);
+  const renewTotalValueWithVat = useMemo(() => contractsToRenew.reduce((sum, c) => sum + c.valueWithVat, 0), [contractsToRenew]);
 
   // ── Health Distribution ──
   const healthDistribution = useMemo(() => {
@@ -554,6 +560,7 @@ export function ClientsRetentionView({
             <p className="text-[11px] font-semibold text-muted-foreground tracking-wider uppercase">Contratos a Expirar</p>
             <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">{kpis.expiringCount}</p>
             <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.expiringValue)} nos próximos 30 dias</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.expiringValueWithVat)} com IVA</p>
           </CardContent>
         </Card>
         <Card>
@@ -588,8 +595,15 @@ export function ClientsRetentionView({
                 <p className="text-muted-foreground">
                   {kpis.lostCount} cliente{kpis.lostCount !== 1 ? "s" : ""} perdido{kpis.lostCount !== 1 ? "s" : ""} nos últimos 90 dias
                 </p>
+                {/* Unified with the "Taxa Retenção" tooltip target in AnewClientsDashboard.tsx
+                    (both now compute retentionRate over the same population — analyticsClients,
+                    not narrowed by the KPI-bar's statusFilter drill-down — see
+                    retentionCohortClients in that file). Previously this said "Meta: 95%" while
+                    the dashboard tooltip said "Abaixo de 80% requer atenção" for what was
+                    presented as the same metric; 80% was kept since it was already the
+                    dashboard's documented threshold. */}
                 <p className="text-muted-foreground">
-                  <strong>Meta: 95%</strong>
+                  <strong>Meta de Retenção: 80%</strong>
                 </p>
               </div>
             </div>
@@ -727,7 +741,10 @@ export function ClientsRetentionView({
 
                     {/* Value + action */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm font-bold">{formatCurrency(contract.value)}</span>
+                      <div className="text-right">
+                        <span className="text-sm font-bold block">{formatCurrency(contract.value)}</span>
+                        <span className="text-[10px] text-muted-foreground block">{formatCurrency(contract.valueWithVat)} c/ IVA</span>
+                      </div>
                       <Button
                         size="sm"
                         variant={contract.isExpired ? "destructive" : contract.isHealthy ? "outline" : "outline"}
@@ -754,6 +771,7 @@ export function ClientsRetentionView({
                   <p className="text-sm font-semibold text-yellow-700 dark:text-yellow-400 flex items-center justify-center gap-2">
                     💰 {formatCurrency(renewTotalValue)} em contratos a renovar nos próximos 45 dias
                   </p>
+                  <p className="text-xs text-yellow-700/80 dark:text-yellow-400/80 mt-0.5">{formatCurrency(renewTotalValueWithVat)} com IVA</p>
                 </div>
               </>
             )}
@@ -789,7 +807,7 @@ export function ClientsRetentionView({
               ))}
             </div>
             <p className="text-sm text-muted-foreground text-center mt-4">
-              {healthDistribution.goodPct}% dos clientes com saúde boa ou excelente · <strong>Meta: 80%</strong>
+              {healthDistribution.goodPct}% dos clientes com saúde boa ou excelente · <strong>Meta de Saúde: 80%</strong>
             </p>
           </CardContent>
         </Card>
