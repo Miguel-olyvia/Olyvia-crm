@@ -1560,7 +1560,14 @@ const AnewClients = () => {
       });
       toast({
         title: "Exportação XLSX concluída",
-        description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+        description: result.includesSensitive
+          ? `${result.rowCount} clientes exportados com campos sensíveis autorizados.`
+          : hasPermission("clients.export_sensitive")
+            // Chose not to include them: nothing was withheld from this user.
+            ? `${result.rowCount} clientes exportados sem campos sensíveis.`
+            // Withheld by permission — say so, or the user distributes an
+            // incomplete file believing it is complete.
+            : `${result.rowCount} clientes exportados. ${t('clients.toast.exportNoSensitive')}`,
       });
     } catch (error: any) {
       toast({ title: t('clients.toast.exportError'), description: error.message, variant: "destructive" });

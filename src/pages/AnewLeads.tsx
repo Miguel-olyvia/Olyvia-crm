@@ -1480,7 +1480,14 @@ export default function AnewLeads() {
       });
       toast({
         title: "Exportação concluída",
-        description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+        description: result.includesSensitive
+          ? `${result.rowCount} leads exportados em XLSX com campos sensíveis autorizados.`
+          : hasPermission("leads.export_sensitive")
+            // Chose not to include them: nothing was withheld from this user.
+            ? `${result.rowCount} leads exportados em XLSX sem campos sensíveis.`
+            // Withheld by permission — say so, or the user distributes an
+            // incomplete file believing it is complete.
+            : `${result.rowCount} leads exportados em XLSX. ${t('leads.toast.exportNoSensitive')}`,
       });
     } catch (error: unknown) {
       const description = await getFriendlyErrorMessage(error);
