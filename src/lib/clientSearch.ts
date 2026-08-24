@@ -1,11 +1,26 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const MAX_MATCHED_IDS = 1000;
-const NAME_MATCH_LIMIT = 200;
 // Must stay <= the search-entities Edge Function's own MAX_LIMIT (100,
 // supabase/functions/search-entities/handler.ts) — sending more trips its
 // zod validation ("Too big: expected number to be <=100") on every call.
 const NIF_SEARCH_LIMIT = 100;
+
+/**
+ * `.in("entity_id", ids)` on a REST `select` sends the ids as a URL query
+ * param, not a POST body — unlike an RPC call. Measured against this
+ * project's gateway: ~300 uuids (~11 kB of query string) pass, ~400
+ * (~15 kB) are rejected at the connection level. Chunking keeps every
+ * request comfortably under that ceiling even after the rest of a page's
+ * filters (org/status/date/scope `.or(...)`) add their own query-string
+ * weight alongside the `entity_id=in.(...)` clause.
+ */
+export const ENTITY_ID_CHUNK_SIZE = 100;
+
+export function chunkIds(ids: readonly string[], size: number = ENTITY_ID_CHUNK_SIZE): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) chunks.push(ids.slice(i, i + size));
+  return chunks;
+}
 
 interface SearchEntitiesResponse {
   success: boolean;
@@ -86,29 +101,31 @@ export async function searchEntityIdsByNif(term: string, limit = NIF_SEARCH_LIMI
   }
 }
 
+/**
+ * Resolves `entity_id`s whose name, email or phone contains `word`, via the
+ * `search_entity_ids_by_word` RPC (see
+ * supabase/migrations/20261113060000_search_entity_ids_by_word_rpc.sql).
+ *
+ * Replaces three separate `.ilike(...).limit(200)` queries with NO
+ * `ORDER BY`, which silently truncated any word with >200 real matches to an
+ * arbitrary 200 — e.g. "mar" (802 real matches) or "silva" (287), causing
+ * clients whose own name contains such a word to disappear from the
+ * AND-across-words intersection entirely. The RPC has no LIMIT.
+ *
+ * SECURITY INVOKER (the RPC's default, kept on purpose): anew_entities,
+ * anew_entity_emails and anew_entity_phones stay under the same RLS the
+ * client already queried them under directly.
+ */
 async function entityIdsByNameEmailPhone(word: string): Promise<Set<string>> {
-  const ids = new Set<string>();
-  const like = `%${word}%`;
+  const { data, error } = await (supabase as any).rpc("search_entity_ids_by_word", { p_word: word });
 
-  const [nameMatches, emailMatches, phoneMatches] = await Promise.all([
-    supabase
-      .from("anew_entities")
-      .select("id")
-      .or(`display_name.ilike.${like},first_name.ilike.${like},last_name.ilike.${like}`)
-      .limit(NAME_MATCH_LIMIT),
-    supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(NAME_MATCH_LIMIT),
-    supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(NAME_MATCH_LIMIT),
-  ]);
+  if (error) {
+    console.error("[clientSearch] search_entity_ids_by_word RPC error:", error);
+    return new Set<string>();
+  }
 
-  (nameMatches.data || []).forEach((r: { id: string }) => ids.add(r.id));
-  (emailMatches.data || []).forEach((r: { entity_id: string | null }) => {
-    if (r.entity_id) ids.add(r.entity_id);
-  });
-  (phoneMatches.data || []).forEach((r: { entity_id: string | null }) => {
-    if (r.entity_id) ids.add(r.entity_id);
-  });
-
-  return ids;
+  const rows = (data || []) as { entity_id: string | null }[];
+  return new Set(rows.map((r) => r.entity_id).filter(Boolean) as string[]);
 }
 
 async function entityIdsForWord(word: string): Promise<Set<string>> {
@@ -121,13 +138,17 @@ async function entityIdsForWord(word: string): Promise<Set<string>> {
 
 export interface SearchEntityIdsResult {
   ids: string[];
-  truncated: boolean;
 }
 
 /**
  * Resolve `entity_id`s that match the search term across name, email, phone and NIF.
  * AND between words (tolerates order); OR between fields per word.
- * Returns up to `MAX_MATCHED_IDS` ids; sets `truncated=true` if more matched.
+ *
+ * Returns the FULL matched set — no arbitrary cap. The previous
+ * `MAX_MATCHED_IDS = 1000` truncation existed only because every id had to
+ * ride in a REST `.in("entity_id", ids)` URL query string; that transport
+ * limit is now handled by the caller via `chunkIds` (see AnewClients.tsx),
+ * so it no longer needs to leak into this function's contract.
  */
 export async function searchEntityIds(search: string): Promise<SearchEntityIdsResult> {
   const words = search
@@ -136,10 +157,10 @@ export async function searchEntityIds(search: string): Promise<SearchEntityIdsRe
     .map(sanitizeWord)
     .filter((w) => w.length > 0);
 
-  if (words.length === 0) return { ids: [], truncated: false };
+  if (words.length === 0) return { ids: [] };
 
   const perWord = await Promise.all(words.map(entityIdsForWord));
-  if (perWord.some((s) => s.size === 0)) return { ids: [], truncated: false };
+  if (perWord.some((s) => s.size === 0)) return { ids: [] };
 
   let intersection = perWord[0];
   for (let i = 1; i < perWord.length; i++) {
@@ -148,13 +169,5 @@ export async function searchEntityIds(search: string): Promise<SearchEntityIdsRe
     intersection = next;
   }
 
-  const all = Array.from(intersection);
-  if (all.length > MAX_MATCHED_IDS) {
-    console.warn(
-      `[clientSearch] matched ${all.length} entities for "${search}"; truncating to ${MAX_MATCHED_IDS}. ` +
-        `Pagination/hasMore will reflect only this subset. Follow-up: dedicated search_clients RPC.`
-    );
-    return { ids: all.slice(0, MAX_MATCHED_IDS), truncated: true };
-  }
-  return { ids: all, truncated: false };
+  return { ids: Array.from(intersection) };
 }
