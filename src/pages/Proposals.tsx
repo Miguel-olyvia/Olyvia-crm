@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+﻿import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,6 +8,22 @@ import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
+import {
+  PROPOSALS_PAGE_SIZE,
+  PROPOSALS_FULL_VIEW_LIMIT,
+  PROPOSALS_ALERT_FEED_LIMIT,
+  buildProposalsRpcArgs,
+  chunkIds,
+  mapProposalAlertFeed,
+  mapProposalsListMetrics,
+  resolveBrowserTimeZone,
+  EMPTY_PROPOSALS_METRICS,
+  type ProposalAlertFeedRow,
+  type ProposalsListFilters,
+  type ProposalsListMetrics,
+  type ProposalsScope,
+} from "@/lib/proposalsListQuery";
 import { MIN_SEARCH_TERM_LENGTH, normalizeSearchTerm } from "@/lib/search/scopedEntitySearch";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -138,12 +154,6 @@ interface Proposal {
   has_unpublished_changes?: boolean | null;
 }
 
-interface Deal {
-  id: string;
-  title: string;
-  probability: number | null;
-}
-
 interface DealSearchResult {
   id: string;
   title: string;
@@ -185,9 +195,24 @@ const PROPOSALS_LIST_SELECT =
 
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [deals, setDeals] = useState<Deal[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(true);
+  // Paginacao com scroll infinito, no mesmo molde da listagem de Leads
+  // (src/pages/AnewLeads.tsx). Antes desta vaga a listagem trazia as 519 linhas
+  // da maior organizacao de uma so vez -- 1,03 MB.
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const currentPageRef = useRef(0);
+  const isLoadingRef = useRef(false);
+  // Metricas dos cartoes de KPI: passam a vir de get_proposals_list_metrics,
+  // que as calcula sobre o CONJUNTO COMPLETO do ambito e dos filtros. Calcula-las
+  // no cliente sobre o array carregado faria cada numero passar a refletir so a
+  // pagina visivel.
+  const [metrics, setMetrics] = useState<ProposalsListMetrics>(EMPTY_PROPOSALS_METRICS);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  // Leitura magra do conjunto completo para as barras de alerta, que sempre
+  // correram sobre todas as propostas e nao sobre a pagina visivel.
+  const [alertFeed, setAlertFeed] = useState<ProposalAlertFeedRow[]>([]);
   const [savingProposal, setSavingProposal] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -560,7 +585,9 @@ const Proposals = () => {
   const [sendProposal, setSendProposal] = useState<any>(null);
 
   const [callDialogOpen, setCallDialogOpen] = useState(false);
-  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string }>({ entityId: "", name: "" });
+  // Guarda tambem a proposta de origem: e por ela que a linha e actualizada
+  // depois de a chamada ficar registada, sem recarregar a lista.
+  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string; proposalId: string | null }>({ entityId: "", name: "", proposalId: null });
 
   const [whatsAppDialogOpen, setWhatsAppDialogOpen] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
@@ -599,6 +626,11 @@ const Proposals = () => {
   // below) since those useMemo callbacks run during render and would
   // otherwise reference this const before its declaration.
   const getFollowUpThresholdDays = () => alertSettings.get("proposal_no_response", 5).days_threshold;
+  // Valor primitivo, e nao o objeto devolvido por useAlertSettings: esse e
+  // recriado a cada render, e ter o objeto nas dependencias de `listFilters`
+  // punha loadData a mudar de identidade em todas as renders -- ciclo infinito
+  // de recarregamentos.
+  const followUpThresholdDays = alertSettings.get("proposal_no_response", 5).days_threshold;
 
   // Days since whichever is more recent: the proposal being sent, or the last
   // activity logged for its entity ("Registar atividade" / calls / WhatsApp,
@@ -629,7 +661,10 @@ const Proposals = () => {
     }
   }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
-  const loadWorkflowStages = useCallback(async () => {
+  // Devolve os estados alem de os guardar no estado do React: a RPC de
+  // paginacao precisa da lista de ids no mesmo tick, e ler `workflowStages`
+  // logo depois do setState devolveria o valor da render anterior.
+  const loadWorkflowStages = useCallback(async (): Promise<WorkflowStage[]> => {
     const { data: orgStages } = await (supabase
       .from("proposal_workflow_stages") as any)
       .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
@@ -639,16 +674,18 @@ const Proposals = () => {
 
     if (orgStages && orgStages.length > 0) {
       setWorkflowStages(orgStages);
-    } else {
-      const { data: globalStages } = await (supabase
-        .from("proposal_workflow_stages") as any)
-        .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
-        .is("organization_id", null)
-        .eq("is_active", true)
-        .order("stage_order");
-      
-      setWorkflowStages(globalStages || []);
+      return orgStages as WorkflowStage[];
     }
+
+    const { data: globalStages } = await (supabase
+      .from("proposal_workflow_stages") as any)
+      .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
+      .is("organization_id", null)
+      .eq("is_active", true)
+      .order("stage_order");
+
+    setWorkflowStages(globalStages || []);
+    return (globalStages || []) as WorkflowStage[];
   }, [activeCompany?.id]);
 
   const loadProposalTemplates = useCallback(async () => {
@@ -663,15 +700,45 @@ const Proposals = () => {
     setProposalTemplates(data || []);
   }, [activeCompany?.id]);
 
+  // Filtros da UI num objeto so, que segue tal e qual para as tres RPCs. Entra
+  // nas dependencias de loadData, por isso mexer num filtro recarrega a partir
+  // da primeira pagina -- e a lista, os cartoes e os alertas nao podem ficar a
+  // olhar para filtros diferentes.
+  const listFilters = useMemo<ProposalsListFilters>(() => ({
+    statusFilter,
+    search: debouncedSearch,
+    searchEntityIds: searchEntityIdSet ? Array.from(searchEntityIdSet) : null,
+    dateFromIso: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+    dateToIso: dateTo ? endOfDay(dateTo).toISOString() : null,
+    comercialFilter,
+    onlyMineUserId: onlyMine && scopeAnewUserId ? scopeAnewUserId : null,
+    noResponse: noResponseFilter,
+    expired: expiredFilter,
+    noValidity: noValidityFilter,
+    followUpDays: followUpThresholdDays,
+  }), [
+    statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo,
+    comercialFilter, onlyMine, scopeAnewUserId, noResponseFilter,
+    expiredFilter, noValidityFilter, followUpThresholdDays,
+  ]);
+
+  // Ambito resolvido na ultima vaga. Guardado para que uma actualizacao de
+  // metricas depois de gravar nao tenha de refazer auth.getUser +
+  // anew_leads -> deals so para chegar aos mesmos ids.
+  const lastScopeRef = useRef<ProposalsScope | null>(null);
+  const lastStageIdsRef = useRef<string[]>([]);
+
   // True once the first successful page load has painted; keeps later
   // refreshes from re-triggering the full-page loader.
   const hasLoadedOnceRef = useRef(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (append = false) => {
     if (!activeCompany?.id || permissionsLoading || scopeLoading) {
       if (!activeCompany?.id) {
         setProposals([]);
-        setDeals([]);
+        setAlertFeed([]);
+        setMetrics(EMPTY_PROPOSALS_METRICS);
+        setMetricsLoading(false);
       }
       setLoading(!!activeCompany?.id);
       return;
@@ -681,36 +748,51 @@ const Proposals = () => {
     // full-page early return further down — so each action was unmounting the
     // whole page and remounting it, losing scroll position and flashing the
     // loader. Subsequent refreshes now update the data in place.
-    if (!hasLoadedOnceRef.current) setLoading(true);
+    if (append) {
+      if (isLoadingRef.current) return;
+      setLoadingMore(true);
+    } else {
+      if (!hasLoadedOnceRef.current) setLoading(true);
+      currentPageRef.current = 0;
+      setMetricsLoading(true);
+    }
+    isLoadingRef.current = true;
     try {
-      await Promise.all([loadWorkflowStages(), loadProposalTemplates()]);
+      // Numa vaga de "carregar mais" os estados do workflow e os modelos sao
+      // os mesmos da pagina anterior. Voltar a pedi-los custava um pedido a
+      // proposal_workflow_stages por cada pagina.
+      let stageIds: string[];
+      if (append && lastStageIdsRef.current.length > 0) {
+        stageIds = lastStageIdsRef.current;
+      } else {
+        const [stages] = await Promise.all([loadWorkflowStages(), loadProposalTemplates()]);
+        stageIds = stages.map(stage => stage.id);
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       const viewScope = getPermissionScope("proposals.view");
 
-      let proposalsData: Proposal[] = [];
-      let dealsData: Deal[] = [];
+      // Âmbito resolvido AQUI, no TypeScript, e depois entregue às RPCs. A
+      // decisão de quem vê o quê não é replicada em SQL de propósito — é onde
+      // nascem os furos de isolamento entre organizações.
+      let scope: ProposalsScope | null = null;
 
       if (viewScope === "ORG" || isSystemAdmin) {
-        // ORG scope or system admin: see all proposals in the organization
-        const [proposalsRes, dealsRes] = await Promise.all([
-          (supabase
-            .from("proposals") as any)
-            .select(PROPOSALS_LIST_SELECT)
-            .eq("organization_id", activeCompany.id)
-            .is("deleted_at", null)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("deals")
-            .select("id, title, probability")
-            .eq("organization_id", activeCompany.id),
-        ]);
-
-        if (proposalsRes.error) throw proposalsRes.error;
-        if (dealsRes.error) throw dealsRes.error;
-
-        proposalsData = proposalsRes.data || [];
-        dealsData = dealsRes.data || [];
+        // ORG scope or system admin: see all proposals in the organization.
+        //
+        // Nao ha aqui consulta a `deals`. A que existia trazia todos os deals
+        // da organizacao -- 911 linhas, ~66 kB -- para alimentar um estado
+        // `deals` que nenhuma parte desta pagina chegava a ler: o seletor de
+        // pedidos do formulario usa `dealSearchResults`, e a listagem usa o
+        // embed `deals(id, title, probability)` que ja vem em cada linha.
+        // Media 1,71 MB do payload de abertura, repetida a cada vaga.
+        scope = {
+          organizationId: activeCompany.id,
+          mode: "ORG",
+          dealIds: null,
+          createdByIds: null,
+          createdByFallbackOnly: false,
+        };
       } else if ((viewScope === "TEAM" || viewScope === "OWNED") && user?.id) {
         // Get anew user id
         const { data: anewUser } = await supabase
@@ -735,51 +817,116 @@ const Proposals = () => {
           .in("assigned_to", Array.from(allowedUserIds));
 
         const leadIds = (userLeads || []).map((l: any) => l.id);
+        let dealIds: string[] = [];
 
         if (leadIds.length > 0) {
+          // So os ids: esta consulta existe para RESOLVER O AMBITO, nao para
+          // alimentar ecra nenhum.
           const { data: userDeals } = await supabase
             .from("deals")
-            .select("id, title, probability")
+            .select("id")
             .eq("organization_id", activeCompany.id)
             .in("lead_id", leadIds);
 
-          const dealIds = (userDeals || []).map(d => d.id);
-          dealsData = userDeals || [];
-
-          if (dealIds.length > 0) {
-            const { data: proposalsRes, error } = await (supabase
-              .from("proposals") as any)
-              .select(PROPOSALS_LIST_SELECT)
-              .eq("organization_id", activeCompany.id)
-              .is("deleted_at", null)
-              .in("deal_id", dealIds)
-              .order("created_at", { ascending: false });
-
-            if (error) throw error;
-            proposalsData = proposalsRes || [];
-          }
+          dealIds = (userDeals || []).map(d => d.id);
         }
 
-        // Also include proposals created by allowed users (fallback)
-        if (proposalsData.length === 0 || viewScope === "TEAM") {
-          const { data: ownedProposals } = await (supabase
-            .from("proposals") as any)
-            .select(PROPOSALS_LIST_SELECT)
-            .eq("organization_id", activeCompany.id)
-            .is("deleted_at", null)
-            .in("created_by", Array.from(allowedUserIds))
-            .order("created_at", { ascending: false });
+        scope = {
+          organizationId: activeCompany.id,
+          mode: "IDS",
+          dealIds: dealIds.length > 0 ? dealIds : null,
+          createdByIds: Array.from(allowedUserIds),
+          // Em OWNED a união por created_by só valia quando a consulta por
+          // deal_id não devolvia nada; em TEAM valia sempre. Mantido igual.
+          createdByFallbackOnly: viewScope === "OWNED",
+        };
+      }
 
-          if (ownedProposals) {
-            const existingIds = new Set(proposalsData.map(p => p.id));
-            for (const p of ownedProposals) {
-              if (!existingIds.has(p.id)) {
-                proposalsData.push(p);
-              }
-            }
+      let proposalsData: Proposal[] = [];
+      let pageRowCount = 0;
+      // Kanban e dashboard são vistas de conjunto: continuam a carregar tudo
+      // (com tecto). A paginação aplica-se à lista, que é a vista por omissão.
+      const pageSize = viewMode === "lista" ? PROPOSALS_PAGE_SIZE : PROPOSALS_FULL_VIEW_LIMIT;
+
+      if (!scope) {
+        setMetrics(EMPTY_PROPOSALS_METRICS);
+        setMetricsLoading(false);
+        setAlertFeed([]);
+        setHasMore(false);
+      } else {
+        // Um único instante por vaga, partilhado pela página e pelos cartões:
+        // "sem resposta" e "tempo médio de fecho" dependem de agora, e com dois
+        // relógios diferentes a lista e os KPIs podiam discordar.
+        const nowIso = new Date().toISOString();
+        const timeZone = resolveBrowserTimeZone();
+        const scopeArgs = {
+          _organization_id: scope.organizationId,
+          _scope_mode: scope.mode,
+          _scope_deal_ids: scope.dealIds,
+          _scope_created_by_ids: scope.createdByIds,
+          _created_by_fallback_only: scope.createdByFallbackOnly,
+          _workflow_stage_ids: stageIds,
+        };
+        lastScopeRef.current = scope;
+        lastStageIdsRef.current = stageIds;
+        const rpcArgs = buildProposalsRpcArgs(scope, listFilters, stageIds, nowIso, timeZone);
+        const offset = currentPageRef.current * pageSize;
+
+        const [pageRes, metricsRes, alertRes] = await Promise.all([
+          (supabase as any).rpc("get_proposals_list_page", {
+            ...rpcArgs,
+            _sort_column: sortColumn,
+            _sort_direction: sortDirection,
+            _limit: pageSize,
+            _offset: offset,
+          }),
+          // As métricas e as barras de alerta cobrem o conjunto completo, não a
+          // página: só são recarregadas quando a vaga não é um "carregar mais".
+          append ? Promise.resolve(null) : (supabase as any).rpc("get_proposals_list_metrics", rpcArgs),
+          append ? Promise.resolve(null) : (supabase as any).rpc("get_proposals_alert_feed", {
+            ...scopeArgs,
+            _limit: PROPOSALS_ALERT_FEED_LIMIT,
+          }),
+        ]);
+
+        if (pageRes.error) throw pageRes.error;
+        const pageIds: string[] = (pageRes.data || []).map((row: any) => row.proposal_id);
+        pageRowCount = pageIds.length;
+
+        if (metricsRes) {
+          if (metricsRes.error) throw metricsRes.error;
+          setMetrics(mapProposalsListMetrics((metricsRes.data || [])[0]));
+          setMetricsLoading(false);
+        }
+        if (alertRes) {
+          if (alertRes.error) throw alertRes.error;
+          setAlertFeed(mapProposalAlertFeed(alertRes.data));
+        }
+
+        if (pageIds.length > 0) {
+          // A RPC devolve só ids; as linhas continuam a vir do PostgREST com o
+          // mesmo select e os mesmos embeds que a página já usava — mas 25 em
+          // vez de 519, que era o 1,03 MB.
+          const rowResults = await Promise.all(
+            chunkIds(pageIds).map(chunk =>
+              (supabase.from("proposals") as any)
+                .select(PROPOSALS_LIST_SELECT)
+                .in("id", chunk)
+            )
+          );
+          const byId = new Map<string, Proposal>();
+          for (const res of rowResults) {
+            if (res.error) throw res.error;
+            for (const row of (res.data || [])) byId.set(row.id, row);
           }
+          // A ordem é a da RPC (determinística), não a que o PostgREST devolveu.
+          proposalsData = pageIds
+            .map(id => byId.get(id))
+            .filter((row): row is Proposal => !!row);
         }
       }
+
+      setHasMore(pageRowCount === pageSize);
 
       // Load pipeline links for proposals
       if (proposalsData.length > 0) {
@@ -792,7 +939,10 @@ const Proposals = () => {
         proposalsData.forEach((p: any) => {
           if (p.quotes && p.quotes.length > 0) quotesSet.add(p.id);
         });
-        setProposalsWithQuotes(quotesSet);
+        // Em "carregar mais" o enriquecimento cobre so a pagina nova, por isso
+        // funde-se com o que ja estava. Substituir apagaria os nomes, emails e
+        // telefones das paginas anteriores, que continuam visiveis.
+        setProposalsWithQuotes(prev => (append ? new Set([...prev, ...quotesSet]) : quotesSet));
 
         // Resolve entity names for proposals (including from deals as fallback)
         const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
@@ -821,14 +971,14 @@ const Proposals = () => {
         (links || []).forEach((l: any) => {
           linksMap[l.proposal_id] = l;
         });
-        setPipelineLinks(linksMap);
+        setPipelineLinks(prev => (append ? { ...prev, ...linksMap } : linksMap));
 
         const portalUsers = portalUsersRes.data;
         const statusMap: Record<string, string> = {};
         (portalUsers || []).forEach((pu: any) => {
           if (pu.proposal_id) statusMap[pu.proposal_id] = pu.portal_status;
         });
-        setPortalStatuses(statusMap);
+        setPortalStatuses(prev => (append ? { ...prev, ...statusMap } : statusMap));
 
         // Fetch deal entity_ids for proposals without entity_id
         const dealEntityMap: Record<string, string> = {};
@@ -870,7 +1020,7 @@ const Proposals = () => {
         (linkedContracts || []).forEach((c: any) => {
           contractStatusMap[c.id] = c.status;
         });
-        setContractStatuses(contractStatusMap);
+        setContractStatuses(prev => (append ? { ...prev, ...contractStatusMap } : contractStatusMap));
 
         if (entityResults) {
           const nameMap: Record<string, string> = {};
@@ -900,12 +1050,12 @@ const Proposals = () => {
             }
           });
 
-          setEntityNames(nameMap);
-          setEntityEmails(emailMap);
-          setEntityPhones(phoneMap);
-          setDealEntityIds(dealEntityMap);
-          setEntityLastInteraction(lastInteractionMap);
-        } else {
+          setEntityNames(prev => (append ? { ...prev, ...nameMap } : nameMap));
+          setEntityEmails(prev => (append ? { ...prev, ...emailMap } : emailMap));
+          setEntityPhones(prev => (append ? { ...prev, ...phoneMap } : phoneMap));
+          setDealEntityIds(prev => (append ? { ...prev, ...dealEntityMap } : dealEntityMap));
+          setEntityLastInteraction(prev => (append ? { ...prev, ...lastInteractionMap } : lastInteractionMap));
+        } else if (!append) {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
@@ -918,8 +1068,15 @@ const Proposals = () => {
         new Map((proposalsData || []).map((proposal) => [proposal.id, proposal])).values()
       );
 
-      setProposals(uniqueProposals);
-      setDeals(dealsData);
+      if (append) {
+        setProposals(prev => {
+          const seen = new Set(prev.map(p => p.id));
+          return [...prev, ...uniqueProposals.filter(p => !seen.has(p.id))];
+        });
+      } else {
+        setProposals(uniqueProposals);
+      }
+      currentPageRef.current += 1;
     } catch (error: any) {
       toast({
         title: t('proposals.toast.loadError'),
@@ -928,7 +1085,9 @@ const Proposals = () => {
       });
     } finally {
       hasLoadedOnceRef.current = true;
+      isLoadingRef.current = false;
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [
     loadWorkflowStages,
@@ -941,7 +1100,188 @@ const Proposals = () => {
     scopeLoading,
     getPermissionScope,
     teamMemberIds,
+    viewMode,
+    sortColumn,
+    sortDirection,
+    listFilters,
   ]);
+
+  // Infinite scroll: pede a pagina seguinte.
+  const loadMoreProposals = useCallback(() => {
+    if (!loading && !loadingMore && hasMore) {
+      loadData(true);
+    }
+  }, [loading, loadingMore, hasMore, loadData]);
+
+  // Para de pedir quando ja se tem tantas linhas quantas a RPC de metricas
+  // contou para o mesmo ambito e filtros.
+  const effectiveHasMore = hasMore && proposals.length < metrics.total;
+
+  const { sentinelRef } = useSentinelInView({
+    onVisible: loadMoreProposals,
+    enabled: effectiveHasMore,
+    isLoading: loading || loadingMore,
+  });
+
+  // Só as métricas e os alertas, sem tocar na lista.
+  //
+  // Os cartões deixaram de ser calculados sobre o array em memória, por isso
+  // uma edição que mexa no valor, no estado ou na validade não se reflete
+  // sozinha neles. Volta-se a chamar a RPC — é uma chamada leve (medida em
+  // ~335 ms como `authenticated`, com RLS) e não duplica em JavaScript as
+  // fórmulas que estão espelhadas em SQL, que é o que aconteceria se se
+  // tentasse aplicar o delta da linha alterada à mão.
+  const refreshMetrics = useCallback(async () => {
+    const scope = lastScopeRef.current;
+    if (!scope) return;
+    const rpcArgs = buildProposalsRpcArgs(
+      scope, listFilters, lastStageIdsRef.current,
+      new Date().toISOString(), resolveBrowserTimeZone(),
+    );
+    const [metricsRes, alertRes] = await Promise.all([
+      (supabase as any).rpc("get_proposals_list_metrics", rpcArgs),
+      (supabase as any).rpc("get_proposals_alert_feed", {
+        _organization_id: scope.organizationId,
+        _scope_mode: scope.mode,
+        _scope_deal_ids: scope.dealIds,
+        _scope_created_by_ids: scope.createdByIds,
+        _created_by_fallback_only: scope.createdByFallbackOnly,
+        _workflow_stage_ids: lastStageIdsRef.current,
+        _limit: PROPOSALS_ALERT_FEED_LIMIT,
+      }),
+    ]);
+    if (!metricsRes?.error) setMetrics(mapProposalsListMetrics((metricsRes?.data || [])[0]));
+    if (!alertRes?.error) setAlertFeed(mapProposalAlertFeed(alertRes?.data));
+  }, [listFilters]);
+
+  // Tira linhas da lista sem refazer a página.
+  const removeProposalsFromList = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    setProposals(prev => prev.filter(p => !gone.has(p.id)));
+    setSelectedIds(prev => prev.filter(id => !gone.has(id)));
+  }, []);
+
+  // Recarrega UMA linha e substitui-a no sítio, mantendo o scroll e as páginas
+  // já carregadas — o padrão de refreshSingleLead em AnewLeads.tsx.
+  //
+  // Sempre a partir do que o servidor devolve, nunca de uma suposição do que a
+  // gravação terá feito: triggers de base de dados e workflows mexem em
+  // `value`, `status` e `sent_at` depois do update, e uma linha optimista
+  // divergiria em silêncio do que ficou realmente gravado.
+  //
+  // Limitação conhecida, igual à de refreshSingleLead: se a alteração fizer a
+  // proposta deixar de corresponder a um filtro activo, a linha continua
+  // visível (com os valores certos) até ao próximo carregamento. O filtro é
+  // avaliado no servidor e não há forma de o perguntar para um id só sem
+  // duplicar aqui o predicado que existe em proposals_list_filtered.
+  const refreshSingleProposal = useCallback(async (proposalId: string) => {
+    if (!activeCompany?.id) return;
+
+    const { data, error } = await (supabase.from("proposals") as any)
+      .select(PROPOSALS_LIST_SELECT)
+      .eq("id", proposalId)
+      .eq("organization_id", activeCompany.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (error) {
+      toast({ title: t('proposals.toast.loadError'), description: error.message, variant: "destructive" });
+      return;
+    }
+
+    // Sem linha: foi apagada, ou saiu do âmbito de quem está a ver.
+    if (!data) {
+      removeProposalsFromList([proposalId]);
+      if (selectedProposal?.id === proposalId) {
+        setSelectedProposal(null);
+        setDetailsOpen(false);
+      }
+      return;
+    }
+
+    const fresh = data as Proposal;
+    setProposals(prev => prev.map(p => (p.id === proposalId ? fresh : p)));
+    if (selectedProposal?.id === proposalId) setSelectedProposal(fresh);
+
+    // O enriquecimento da linha (orçamentos ligados, elo do pipeline, estado do
+    // portal) também pode ter mudado — sobretudo numa mudança de estado, que é
+    // o que cria contratos.
+    setProposalsWithQuotes(prev => {
+      const next = new Set(prev);
+      if ((fresh as any).quotes?.length > 0) next.add(proposalId); else next.delete(proposalId);
+      return next;
+    });
+
+    const [linkRes, portalRes] = await Promise.all([
+      (supabase.from("pipeline_links") as any)
+        .select("id, proposal_id, deal_id, quote_id, contract_id, status")
+        .eq("proposal_id", proposalId)
+        .eq("organization_id", activeCompany.id)
+        .maybeSingle(),
+      (supabase as any)
+        .from("client_portal_users")
+        .select("proposal_id, portal_status")
+        .eq("organization_id", activeCompany.id)
+        .eq("proposal_id", proposalId)
+        .maybeSingle(),
+    ]);
+
+    setPipelineLinks(prev => {
+      const next = { ...prev };
+      if (linkRes?.data) next[proposalId] = linkRes.data; else delete next[proposalId];
+      return next;
+    });
+    setPortalStatuses(prev => {
+      const next = { ...prev };
+      if (portalRes?.data?.portal_status) next[proposalId] = portalRes.data.portal_status;
+      else delete next[proposalId];
+      return next;
+    });
+
+    const contractId = linkRes?.data?.contract_id;
+    if (contractId) {
+      const { data: contract } = await (supabase.from("client_contracts") as any)
+        .select("id, status").eq("id", contractId).maybeSingle();
+      if (contract) setContractStatuses(prev => ({ ...prev, [contract.id]: contract.status }));
+    }
+
+    // A última interação da entidade é o que manda no indicador "sem resposta"
+    // desta linha (getFollowUpDaysOld). Registar uma chamada tem de o apagar
+    // logo, sem esperar por um recarregamento da lista.
+    const directEntityId = (fresh as any).entity_id as string | null;
+    const entityId = directEntityId
+      || (fresh.deal_id ? dealEntityIds[fresh.deal_id] ?? null : null);
+    if (entityId) {
+      const { data: summary } = await (supabase as any)
+        .rpc("get_entity_contact_summary", { _entity_ids: [entityId] });
+      const row = (summary || [])[0];
+      if (row) {
+        const key = directEntityId || `deal:${proposalId}`;
+        setEntityLastInteraction(prev => {
+          const next = { ...prev };
+          if (row.last_interaction_at) next[key] = row.last_interaction_at;
+          else delete next[key];
+          return next;
+        });
+      }
+    }
+  }, [activeCompany?.id, removeProposalsFromList, selectedProposal?.id, dealEntityIds, toast, t]);
+
+  // Ponto único a seguir a qualquer gravação: actualiza as linhas afectadas no
+  // sítio e volta a pedir as métricas. Nenhum destes caminhos recarrega a
+  // lista, por isso a posição de scroll e as páginas já carregadas mantêm-se.
+  const afterProposalMutation = useCallback(async (
+    ids: string[],
+    options?: { removed?: boolean },
+  ) => {
+    if (options?.removed) {
+      removeProposalsFromList(ids);
+    } else {
+      for (const id of ids) await refreshSingleProposal(id);
+    }
+    await refreshMetrics();
+  }, [refreshSingleProposal, removeProposalsFromList, refreshMetrics]);
 
   useEffect(() => {
     if (!permissionsLoading && !scopeLoading) {
@@ -1134,7 +1474,7 @@ const Proposals = () => {
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: deletingId });
       if (error) throw error;
       toast({ title: t('proposals.toast.deleteSuccess'), description: t('proposals.toast.movedToTrashDesc') });
-      loadData();
+      afterProposalMutation([deletingId], { removed: true });
     } catch (error: any) {
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
@@ -1186,10 +1526,11 @@ const Proposals = () => {
         const { error: delErr } = await (supabase as any).rpc('soft_delete_business_entity', { p_kind: 'proposal', p_id: id });
         if (delErr) throw delErr;
       }
+      const deletedIds = [...selectedIds];
       toast({ title: t('common.deleteSuccess'), description: `${selectedIds.length} propostas movidas para o lixo.` });
       setSelectedIds([]);
       setBulkDeleteDialogOpen(false);
-      loadData();
+      afterProposalMutation(deletedIds, { removed: true });
     } catch (error: any) {
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
@@ -1211,11 +1552,12 @@ const Proposals = () => {
         .in("id", selectedIds)
         .eq("organization_id", activeCompany.id);
       if (error) throw error;
+      const changedIds = [...selectedIds];
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
       setBulkNewStatus("");
-      loadData();
+      afterProposalMutation(changedIds);
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
@@ -1242,11 +1584,12 @@ const Proposals = () => {
         title: t('common.statusUpdated'),
         description: anyWorkflowFailed ? t('proposals.toast.workflowWarning') : `${targets.length} propostas atualizadas.`,
       });
+      const rejectedIds = targets.map(p => p.id);
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
       setBulkRejectDialogOpen(false);
       setBulkNewStatus("");
-      loadData();
+      afterProposalMutation(rejectedIds);
     } catch (error: any) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
@@ -1297,8 +1640,9 @@ const Proposals = () => {
         description: `${successCount} enviada(s), ${skipCount} sem email, ${failCount} com erro.`,
         variant: failCount > 0 ? "destructive" : undefined,
       });
+      const sentIds = [...selectedIds];
       setSelectedIds([]);
-      loadData();
+      afterProposalMutation(sentIds);
     } finally {
       setBulkEmailSending(false);
     }
@@ -1699,14 +2043,17 @@ const Proposals = () => {
           description: `A proposta foi gravada mas o(s) seguinte(s) orçamento(s) foi(ram) ignorado(s):\n${list}\n\nCorrija e grave novamente.`,
           variant: "destructive",
         });
-        loadData();
+        if (editingId) afterProposalMutation([editingId]); else loadData();
         // Don't close the dialog — let user fix and re-save.
         return;
       }
 
+      // Editar actualiza a linha no sitio; criar tem mesmo de recarregar,
+      // porque a proposta nova pode cair em qualquer ponto da ordenacao.
+      const editedId = editingId;
       setOpen(false);
       resetForm();
-      loadData();
+      if (editedId) afterProposalMutation([editedId]); else loadData();
     } catch (error: any) {
       toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
     } finally {
@@ -1745,11 +2092,12 @@ const Proposals = () => {
         .update({ valid_until: renewDate })
         .eq("id", renewProposalId);
       if (error) throw error;
+      const renewedId = renewProposalId;
       toast({ title: "Validade renovada com sucesso" });
       setRenewDialogOpen(false);
       setRenewProposalId(null);
       setRenewDate("");
-      loadData();
+      afterProposalMutation([renewedId]);
     } catch (error: any) {
       toast({ title: "Erro ao renovar validade", description: error.message, variant: "destructive" });
     }
@@ -1794,7 +2142,7 @@ const Proposals = () => {
         title: "Proposta marcada como enviada",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      loadData();
+      afterProposalMutation([proposal.id]);
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
@@ -1832,7 +2180,7 @@ const Proposals = () => {
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
       setDetailsOpen(false);
-      loadData();
+      afterProposalMutation([targetProposal.id]);
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
@@ -1895,6 +2243,11 @@ const Proposals = () => {
     // forçamos aqui também o recálculo imediato (defesa em profundidade,
     // sem depender só da ordem de commits do trigger) para nunca deixar
     // proposals.value desatualizado depois de uma rejeição.
+    //
+    // Corre ANTES de quem chamou esta função reler a linha: todos os
+    // chamadores (handleRejectProposal, rejeição em lote e o arrasto no
+    // kanban) só invocam afterProposalMutation depois de isto voltar, senão a
+    // lista e os cartões mostrariam o valor anterior ao recálculo.
     const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
       p_proposal_id: proposal.id,
     });
@@ -1917,6 +2270,7 @@ const Proposals = () => {
 
   const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
+    const rejectedId = selectedProposal.id;
     try {
       const { workflowFailed } = await rejectProposalCore(selectedProposal, reason);
       toast({
@@ -1925,7 +2279,7 @@ const Proposals = () => {
       });
       setRejectReasonDialogOpen(false);
       setDetailsOpen(false);
-      loadData();
+      afterProposalMutation([rejectedId]);
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
@@ -1957,7 +2311,8 @@ const Proposals = () => {
       // trigger de sincronização não dispara aqui. Recalcular explicitamente
       // proposals.value a partir dos orçamentos reais para não deixar um
       // valor desatualizado (ex.: herdado do estado rejeitado) até à próxima
-      // associação de orçamento.
+      // associação de orçamento. Também antes de reler a linha, pela mesma
+      // razão da rejeição.
       const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
         p_proposal_id: proposal.id,
       });
@@ -1979,7 +2334,7 @@ const Proposals = () => {
         title: "Proposta reaberta",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      loadData();
+      afterProposalMutation([proposal.id]);
     } catch (error: any) {
       toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });
     }
@@ -2020,143 +2375,40 @@ const Proposals = () => {
   };
 
   // Filter and sort
-  const filteredProposals = useMemo(() => {
-    return proposals
-      .filter(proposal => {
-        // "Só os meus" — filter to proposals assigned to the current user.
-        // scopeAnewUserId is the anew_users.id of the current user.
-        if (onlyMine && scopeAnewUserId) {
-          if ((proposal as any).assigned_to !== scopeAnewUserId) return false;
-        }
+  // A filtragem e a ordenacao passaram para o servidor (proposals_list_filtered
+  // + get_proposals_list_page). Filtrar no cliente deixou de ser possivel: so
+  // ha 25 linhas em memoria, e filtrar dentro da pagina daria resultados
+  // errados em vez de menos resultados. `proposals` ja vem filtrado e ordenado.
+  const filteredProposals = proposals;
 
-        if (statusFilter !== "all") {
-          const stage = getProposalStage(proposal);
-          if (stage?.id !== statusFilter && proposal.status !== statusFilter) return false;
-        }
+  // Cartoes de KPI: mesma forma de antes, mas alimentada pela RPC. Os campos
+  // que eram arrays (noResponse5d, noValidity, expired) passam a contagens --
+  // a UI so lhes lia o .length.
+  const stats = useMemo(() => ({
+    total: metrics.total,
+    totalValue: metrics.totalValue,
+    totalValueExVat: metrics.totalValueExVat,
+    stageCounts: metrics.stageCounts,
+    stageValues: metrics.stageValues,
+    stageValuesExVat: metrics.stageValuesExVat,
+    wonValue: metrics.wonValue,
+    wonValueExVat: metrics.wonValueExVat,
+    acceptedCount: metrics.acceptedCount,
+    conversionRate: metrics.conversionRate,
+    avgCloseTime: metrics.avgCloseTime,
+    noResponse5dCount: metrics.noResponseCount,
+    noResponse5dValue: metrics.noResponseValue,
+    noResponse5dValueExVat: metrics.noResponseValueExVat,
+    noValidityCount: metrics.noValidityCount,
+    expiredCount: metrics.expiredCount,
+  }), [metrics]);
 
-        if (noResponseFilter) {
-          const sn = getStageName(proposal);
-          if (!((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays())) return false;
-        }
-
-        if (expiredFilter) {
-          if (!(proposal.valid_until && isPast(parseISO(proposal.valid_until)))) return false;
-        }
-
-        if (noValidityFilter) {
-          if (proposal.valid_until) return false;
-        }
-
-        const term = debouncedSearch.trim();
-        const searchLower = term.toLowerCase();
-        const proposalDate = new Date(proposal.created_at);
-        const matchesDateFrom = !dateFrom || proposalDate >= startOfDay(dateFrom);
-        const matchesDateTo = !dateTo || proposalDate <= endOfDay(dateTo);
-
-        // Search: requires >= 3 chars; matches title, deal title, or entity (name/email/phone/NIF)
-        let matchesSearch = true;
-        if (term.length >= 3) {
-          const titleHit = proposal.title?.toLowerCase().includes(searchLower) ||
-            proposal.deals?.title?.toLowerCase().includes(searchLower);
-          const entityHit = searchEntityIdSet
-            ? ((proposal as any).entity_id && searchEntityIdSet.has((proposal as any).entity_id))
-            : false;
-          matchesSearch = !!(titleHit || entityHit);
-        }
-
-        if (comercialFilter !== "all") {
-          if (comercialFilter === "none") {
-            if ((proposal as any).assigned_to) return false;
-          } else if ((proposal as any).assigned_to !== comercialFilter) return false;
-        }
-        return matchesSearch && matchesDateFrom && matchesDateTo;
-      })
-      .sort((a, b) => {
-        let aVal: any, bVal: any;
-        switch (sortColumn) {
-          case "created_at": aVal = new Date(a.created_at).getTime(); bVal = new Date(b.created_at).getTime(); break;
-          case "title": aVal = a.title; bVal = b.title; break;
-          case "value": aVal = a.value; bVal = b.value; break;
-          case "status": aVal = getProposalStage(a)?.stage_order || 0; bVal = getProposalStage(b)?.stage_order || 0; break;
-          case "valid_until": aVal = a.valid_until ? new Date(a.valid_until).getTime() : 0; bVal = b.valid_until ? new Date(b.valid_until).getTime() : 0; break;
-          default: aVal = a.created_at; bVal = b.created_at;
-        }
-        if (typeof aVal === "string" && typeof bVal === "string") return sortDirection === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-        return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
-      });
-  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, getStageName, comercialFilter, onlyMine, scopeAnewUserId]);
-
-  // Stats — computed over filteredProposals so KPI cards reflect active filters
-  const stats = useMemo(() => {
-    const now = new Date();
-    const total = filteredProposals.length;
-    const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
-    const totalValueExVat = filteredProposals.reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
-
-    const stageCounts: Record<string, number> = {};
-    const stageValues: Record<string, number> = {};
-    const stageValuesExVat: Record<string, number> = {};
-
-    workflowStages.forEach(stage => {
-      stageCounts[stage.id] = 0;
-      stageValues[stage.id] = 0;
-      stageValuesExVat[stage.id] = 0;
-    });
-
-    filteredProposals.forEach(p => {
-      const stage = getProposalStage(p);
-      if (stage) {
-        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
-        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
-        stageValuesExVat[stage.id] = (stageValuesExVat[stage.id] || 0) + Number(p.value_sem_iva ?? 0);
-      }
-    });
-
-    const wonValue = filteredProposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value), 0);
-    const wonValueExVat = filteredProposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
-
-    // Extra KPIs
-    const acceptedProposals = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage?.is_won;
-    });
-    const totalSentOrLater = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage && stage.stage_order > 1; // sent or later
-    }).length;
-    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
-
-    // Avg close time (days from created_at to accepted_at for accepted proposals)
-    const closeTimes = acceptedProposals.map(p => {
-      const accepted = (p as any).accepted_at;
-      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
-      return differenceInDays(now, parseISO(p.created_at));
-    }).filter(d => d >= 0);
-    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
-
-    const noResponse5d = filteredProposals.filter(p => {
-      const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(p) > getFollowUpThresholdDays();
-    });
-    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
-    const noResponse5dValueExVat = noResponse5d.reduce((s, p) => s + Number(p.value_sem_iva ?? 0), 0);
-
-    const noValidity = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return !p.valid_until && !stage?.is_lost;
-    });
-
-    const expired = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
-    });
-
-    return { total, totalValue, totalValueExVat, stageCounts, stageValues, stageValuesExVat, wonValue, wonValueExVat, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noResponse5dValueExVat, noValidity, expired };
-  }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
+  // Enquanto as metricas nao chegam mostra-se o loader que a pagina ja usa, e
+  // nao zeros -- um zero num cartao de valor le-se como um numero real.
+  const kpiValue = (node: ReactNode, className?: string) =>
+    metricsLoading
+      ? <div className={cn("flex items-center h-7", className)}><OlyviaLoader size={18} inline /></div>
+      : <div className={className}>{node}</div>;
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -2235,7 +2487,7 @@ const Proposals = () => {
       toast({ title: "Sem entidade associada", description: "Esta proposta não tem um cliente/lead associado.", variant: "destructive" });
       return;
     }
-    setCallTarget({ entityId, name });
+    setCallTarget({ entityId, name, proposalId: proposal.id });
     setCallDialogOpen(true);
   };
 
@@ -2391,7 +2643,7 @@ const Proposals = () => {
         <DropdownMenuItem
           disabled={!proposalEntityId}
           onClick={() => {
-            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName });
+            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName, proposalId: proposal.id });
             setCallDialogOpen(true);
           }}
         >
@@ -3119,18 +3371,7 @@ const Proposals = () => {
         {/* Alert Bars */}
         <div className="flex-shrink-0 px-4 md:px-6 mt-2">
           <ProposalsAlertBars
-            proposals={proposals.map(p => ({
-              id: p.id,
-              title: p.title,
-              value: Number(p.value),
-              status: p.status,
-              stage_name: getProposalStage(p)?.name,
-              valid_until: p.valid_until,
-              created_at: p.created_at,
-              sent_at: (p as any).sent_at ?? null,
-              updated_at: (p as any).updated_at,
-              contract_id: pipelineLinks[p.id]?.contract_id,
-            }))}
+            proposals={alertFeed}
             noResponseDays={alertSettings.get("proposal_no_response", 5).days_threshold}
             noResponseUrgentDays={alertSettings.get("proposal_no_response_urgent", 10).days_threshold}
             noResponseEnabled={alertSettings.get("proposal_no_response", 5).is_active}
@@ -3172,9 +3413,9 @@ const Proposals = () => {
             <Card className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === "all" && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter("all")}>
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Total</div>
-                <div className="text-xl font-bold">{stats.total}</div>
-                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValueExVat)} em pipeline</div>
-                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.totalValue)} com IVA</div>
+                {kpiValue(stats.total, "text-xl font-bold")}
+                {kpiValue(`${formatCurrency(stats.totalValueExVat)} em pipeline`, "text-xs text-muted-foreground")}
+                {kpiValue(`${formatCurrency(stats.totalValue)} com IVA`, "text-[11px] text-muted-foreground")}
               </CardContent>
             </Card>
             
@@ -3182,9 +3423,11 @@ const Proposals = () => {
               <Card key={stage.id} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.id && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.id === statusFilter ? "all" : stage.id)}>
                 <CardContent className="p-3">
                   <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
-                  <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>
-                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValuesExVat[stage.id] || 0)}</div>
-                  <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)} com IVA</div>
+                  {metricsLoading
+                    ? <div className="flex items-center h-7"><OlyviaLoader size={18} inline /></div>
+                    : <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>}
+                  {kpiValue(formatCurrency(stats.stageValuesExVat[stage.id] || 0), "text-xs text-muted-foreground")}
+                  {kpiValue(`${formatCurrency(stats.stageValues[stage.id] || 0)} com IVA`, "text-[11px] text-muted-foreground")}
                 </CardContent>
               </Card>
             ))}
@@ -3192,50 +3435,50 @@ const Proposals = () => {
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Valor Aceite</div>
-                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</div>
-                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.wonValue)} com IVA</div>
+                {kpiValue(formatCurrency(stats.wonValueExVat), "text-xl font-bold text-green-600")}
+                {kpiValue(`${formatCurrency(stats.wonValue)} com IVA`, "text-[11px] text-muted-foreground")}
               </CardContent>
             </Card>
 
             <Card className="min-w-[130px] flex-shrink-0">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Taxa Conversão</div>
-                <div className="text-xl font-bold text-primary">{stats.conversionRate}%</div>
-                <div className="text-xs text-muted-foreground">{filteredProposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
+                {kpiValue(`${stats.conversionRate}%`, "text-xl font-bold text-primary")}
+                {kpiValue(`${stats.acceptedCount} aceites`, "text-xs text-muted-foreground")}
               </CardContent>
             </Card>
 
             <Card className="min-w-[130px] flex-shrink-0">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Tempo Médio Fecho</div>
-                <div className="text-xl font-bold text-primary">{stats.avgCloseTime}d</div>
+                {kpiValue(`${stats.avgCloseTime}d`, "text-xl font-bold text-primary")}
               </CardContent>
             </Card>
 
-            {stats.noResponse5d.length > 0 && (
+            {stats.noResponse5dCount > 0 && (
               <Card className="min-w-[150px] flex-shrink-0 border-orange-200 bg-orange-50/50 dark:bg-orange-950/20 cursor-pointer" onClick={() => setNoResponseFilter(!noResponseFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-orange-600 font-medium uppercase">Sem Resposta +5d</div>
-                  <div className="text-xl font-bold text-orange-600">{stats.noResponse5d.length}</div>
+                  <div className="text-xl font-bold text-orange-600">{stats.noResponse5dCount}</div>
                   <div className="text-xs text-orange-500">{formatCurrency(stats.noResponse5dValue)}</div>
                 </CardContent>
               </Card>
             )}
 
-            {stats.noValidity.length > 0 && (
+            {stats.noValidityCount > 0 && (
               <Card className="min-w-[130px] flex-shrink-0 border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 cursor-pointer" onClick={() => setNoValidityFilter(!noValidityFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-amber-600 font-medium uppercase">Sem Validade</div>
-                  <div className="text-xl font-bold text-amber-600">{stats.noValidity.length}</div>
+                  <div className="text-xl font-bold text-amber-600">{stats.noValidityCount}</div>
                 </CardContent>
               </Card>
             )}
 
-            {stats.expired.length > 0 && (
+            {stats.expiredCount > 0 && (
               <Card className="min-w-[130px] flex-shrink-0 border-red-200 bg-red-50/50 dark:bg-red-950/20 cursor-pointer" onClick={() => setExpiredFilter(!expiredFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-red-600 font-medium uppercase">Expiradas</div>
-                  <div className="text-xl font-bold text-red-600">{stats.expired.length}</div>
+                  <div className="text-xl font-bold text-red-600">{stats.expiredCount}</div>
                 </CardContent>
               </Card>
             )}
@@ -3272,7 +3515,7 @@ const Proposals = () => {
                 toast({ title: "Erro", description: error.message, variant: "destructive" });
               } else {
                 toast({ title: "Proposta movida" });
-                loadData();
+                afterProposalMutation([proposalId]);
               }
             }}
             onLostStageDrop={(proposalId, stageId) => {
@@ -3398,9 +3641,9 @@ const Proposals = () => {
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <FileText className="w-12 h-12 text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-4">
-                    {proposals.length === 0 ? t('proposals.noProposals') : 'Nenhum resultado encontrado'}
+                    {hasActiveFilters ? 'Nenhum resultado encontrado' : t('proposals.noProposals')}
                   </p>
-                  {proposals.length === 0 && (
+                  {!hasActiveFilters && (
                     <PermissionGate permission="proposals.create">
                       <Button onClick={() => setOpen(true)}>
                         <Plus className="w-4 h-4 mr-2" /> {t('proposals.createFirst')}
@@ -3572,6 +3815,16 @@ const Proposals = () => {
                       })}
                     </TableBody>
                   </Table>
+
+                  {/* Sentinela do scroll infinito. Tem de ficar DENTRO deste
+                      `overflow-auto max-h-[...]`, que e o elemento que rola de
+                      facto: colocada fora, ficava permanentemente visivel e
+                      pedia pagina atras de pagina ate esgotar o conjunto. */}
+                  {effectiveHasMore && (
+                    <div ref={sentinelRef} className="flex justify-center py-6">
+                      {loadingMore && <OlyviaLoader size={24} inline />}
+                    </div>
+                  )}
                 </div>
               </Card>
             )}
@@ -3606,6 +3859,7 @@ const Proposals = () => {
         organizationId={activeCompany?.id ?? null}
         onConfirm={async (reason) => {
           if (!kanbanRejectTarget) return;
+          const movedId = kanbanRejectTarget.proposal.id;
           try {
             const { workflowFailed } = await rejectProposalCore(
               kanbanRejectTarget.proposal,
@@ -3618,7 +3872,7 @@ const Proposals = () => {
             });
             setKanbanRejectDialogOpen(false);
             setKanbanRejectTarget(null);
-            loadData();
+            afterProposalMutation([movedId]);
           } catch (error: any) {
             toast({ title: "Erro", description: error.message, variant: "destructive" });
           }
@@ -3695,14 +3949,22 @@ const Proposals = () => {
 
       <ProposalWorkflowConfig open={showWorkflowConfig} onOpenChange={setShowWorkflowConfig} companyId={activeCompany?.id || null} onStagesUpdated={loadWorkflowStages} />
 
-      <SendProposalDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} proposal={sendProposal} onSent={() => loadData()} />
+      <SendProposalDialog
+        open={sendDialogOpen}
+        onOpenChange={setSendDialogOpen}
+        proposal={sendProposal}
+        onSent={() => { if (sendProposal?.id) afterProposalMutation([sendProposal.id]); else loadData(); }}
+      />
       <RegisterCallDialog
         open={callDialogOpen}
         onOpenChange={setCallDialogOpen}
         entityId={callTarget.entityId}
         entityName={callTarget.name}
         organizationId={activeCompany?.id || ""}
-        onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
+        onCallRegistered={() => {
+          setCallDialogOpen(false);
+          if (callTarget.proposalId) afterProposalMutation([callTarget.proposalId]); else loadData();
+        }}
       />
       <WhatsAppSendDialog
         open={whatsAppDialogOpen}
