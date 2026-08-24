@@ -446,7 +446,7 @@ async function exportLeads(
       ? admin.from("lead_sources").select("id, name").in("id", sourceIds)
       : Promise.resolve({ data: [], error: null }),
     assignedIds.length > 0
-      ? admin.from("anew_users").select("id, full_name").in("id", assignedIds)
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (sourcesResult.error) throw sourcesResult.error;
@@ -456,7 +456,7 @@ async function exportLeads(
     (sourcesResult.data || []).map((s: any) => [s.id, s.name]),
   );
   const userNames = new Map(
-    (usersResult.data || []).map((u: any) => [u.id, u.full_name]),
+    (usersResult.data || []).map((u: any) => [u.id, u.name]),
   );
 
   return records.map((r: any) => ({
