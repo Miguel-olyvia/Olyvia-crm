@@ -1575,6 +1575,15 @@ const AnewClients = () => {
       toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
       return;
     }
+    // Until permissions resolve, hasPermission answers false for everything.
+    // Falling through here would silently produce a file stripped of email,
+    // phone and NIF — no dialog, and nothing telling the user their export was
+    // reduced. That is exactly what happened while the permission bootstrap
+    // took a couple of seconds. Wait instead of downgrading.
+    if (permissionsLoading) {
+      toast({ title: t('clients.toast.permissionsLoading'), description: t('clients.toast.permissionsLoadingDesc') });
+      return;
+    }
     if (hasPermission("clients.export_sensitive")) {
       setSensitiveExportOpen(true);
       return;

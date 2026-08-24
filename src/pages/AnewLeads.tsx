@@ -396,7 +396,7 @@ export default function AnewLeads() {
     teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
   
   const [leads, setLeads] = useState<Lead[]>([]);
   const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
@@ -1493,6 +1493,15 @@ export default function AnewLeads() {
   const handleExport = () => {
     if (!activeCompanyId) {
       toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
+      return;
+    }
+    // Until permissions resolve, hasPermission answers false for everything.
+    // Falling through here would silently produce a file stripped of email,
+    // phone and NIF — no dialog, and nothing telling the user their export was
+    // reduced. That is exactly what happened while the permission bootstrap
+    // took a couple of seconds. Wait instead of downgrading.
+    if (permissionsLoading) {
+      toast({ title: t('leads.toast.permissionsLoading'), description: t('leads.toast.permissionsLoadingDesc') });
       return;
     }
     if (hasPermission("leads.export_sensitive")) {
