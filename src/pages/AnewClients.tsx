@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
-import { searchEntityIds } from "@/lib/clientSearch";
+import { searchEntityIds, chunkIds } from "@/lib/clientSearch";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
@@ -219,7 +219,6 @@ const AnewClients = () => {
 
   const PAGE_SIZE = 10;
   const initialLoadDoneRef = useRef(false);
-  const truncatedWarnedRef = useRef<string | null>(null);
   const clientsAbortControllerRef = useRef<AbortController | null>(null);
   const clientsRequestIdRef = useRef(0);
   // Separate abort controller for "load more" (pagination) calls so they never share/abort
@@ -621,69 +620,104 @@ const AnewClients = () => {
     }
     try {
       const viewScope = getPermissionScope("clients.view");
-
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
-      if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-      else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-      // When searching, ignore status filter so inactive/churned/lost clients still appear
-      if (!effectiveSearch) {
-        if (statusFilter === "active") {
-          query = query.not("status", "in", '("inactive","churned","lost")');
-        } else if (statusFilter === "inactive") {
-          query = query.in("status", ["inactive", "churned", "lost"]);
-        } else if (statusFilter !== "all" && statusFilter !== "no_contact_30d" && statusFilter !== "no_contact_60d" && statusFilter !== "expiring_contracts" && statusFilter !== "missing_nif") {
-          query = query.eq("status", statusFilter);
-        }
-        if (statusFilter === "no_contact_30d") {
-          query = query.not("status", "in", '("inactive","churned","lost")');
-          const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
-          if (atRiskIds.length > 0) {
-            query = query.in("entity_id", atRiskIds);
-          } else {
-            // No at-risk clients — force an empty result instead of falling back to
-            // "all non-inactive clients" (matches the pattern used in Deals.tsx).
-            query = query.eq("entity_id", "00000000-0000-0000-0000-000000000000");
-          }
-        }
-      }
-
-      if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
-      if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-      if (salesRepFilter !== "all") query = query.eq("assigned_to", salesRepFilter);
       if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
-      } else {
-        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-        if (scopeFilter) query = query.or(scopeFilter);
       }
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
 
-      // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
-      if (effectiveSearch) {
-        const { ids: matchedIds, truncated } = await searchEntityIds(effectiveSearch);
-        if (isInitial && requestId !== clientsRequestIdRef.current) return;
-        if (truncated && truncatedWarnedRef.current !== effectiveSearch) {
-          truncatedWarnedRef.current = effectiveSearch;
-          toast({
-            title: "Demasiados resultados",
-            description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-          });
+      // Builds a fresh `anew_clients` query with every filter EXCEPT the
+      // entity_id-in/order/range terminal steps, so it can be invoked once
+      // per entity_id chunk (see the search branch below) without any
+      // filter leaking/duplicating between chunk queries — supabase-js
+      // query builders mutate `this`, so each chunk needs its own instance.
+      const buildClientsQuery = () => {
+        let q = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
+        if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
+        else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
+        // When searching, ignore status filter so inactive/churned/lost clients still appear
+        if (!effectiveSearch) {
+          if (statusFilter === "active") {
+            q = q.not("status", "in", '("inactive","churned","lost")');
+          } else if (statusFilter === "inactive") {
+            q = q.in("status", ["inactive", "churned", "lost"]);
+          } else if (statusFilter !== "all" && statusFilter !== "no_contact_30d" && statusFilter !== "no_contact_60d" && statusFilter !== "expiring_contracts" && statusFilter !== "missing_nif") {
+            q = q.eq("status", statusFilter);
+          }
+          if (statusFilter === "no_contact_30d") {
+            q = q.not("status", "in", '("inactive","churned","lost")');
+            const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
+            if (atRiskIds.length > 0) {
+              q = q.in("entity_id", atRiskIds);
+            } else {
+              // No at-risk clients — force an empty result instead of falling back to
+              // "all non-inactive clients" (matches the pattern used in Deals.tsx).
+              q = q.eq("entity_id", "00000000-0000-0000-0000-000000000000");
+            }
+          }
         }
+
+        if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
+        if (dateTo) q = q.lte("created_at", dateTo.toISOString());
+        if (salesRepFilter !== "all") q = q.eq("assigned_to", salesRepFilter);
+        if (scopeFilter) q = q.or(scopeFilter);
+        return q;
+      };
+
+      let data: ClientRecord[] | null;
+      let count: number | null;
+
+      if (!effectiveSearch) {
+        // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
+        // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
+        // e travar o scroll infinito num loop de "A carregar mais...".
+        let query = buildClientsQuery().order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+        if (abortController) query = query.abortSignal(abortController.signal);
+        const result = await query;
+        if (result.error) throw result.error;
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
+        data = result.data;
+        count = result.count;
+      } else {
+        // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
+        const { ids: matchedIds } = await searchEntityIds(effectiveSearch);
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
         if (matchedIds.length === 0) {
           if (isInitial) setClients([]);
           setHasMore(false);
           return;
         }
-        query = query.in("entity_id", matchedIds);
-      }
 
-      // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
-      // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
-      // e travar o scroll infinito num loop de "A carregar mais...".
-      query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
-      if (abortController) query = query.abortSignal(abortController.signal);
-      const { data, error, count } = await query;
-      if (error) throw error;
-      if (isInitial && requestId !== clientsRequestIdRef.current) return;
+        // A single `.in("entity_id", matchedIds)` would put every matched id in the
+        // request's URL query string; with hundreds of matches (e.g. "mar" -> 802)
+        // that blows the gateway's URL-length ceiling (measured: ~300 ids/~11kB
+        // pass, ~400/~15kB fail at the connection level, before any Postgres
+        // involvement). Chunking keeps each request well under that ceiling; since
+        // PostgREST can't paginate a result that's assembled from independent
+        // chunk requests, the merge/sort/page step below happens in JS instead.
+        const idChunks = chunkIds(matchedIds);
+        const chunkResults = await Promise.all(
+          idChunks.map((chunk) => {
+            let chunkQuery = buildClientsQuery().in("entity_id", chunk);
+            if (abortController) chunkQuery = chunkQuery.abortSignal(abortController.signal);
+            return chunkQuery;
+          }),
+        );
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
+        for (const chunkResult of chunkResults) if (chunkResult.error) throw chunkResult.error;
+
+        const mergedById = new Map<string, ClientRecord>();
+        chunkResults.forEach((chunkResult) => {
+          (chunkResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+        });
+        const sorted = Array.from(mergedById.values()).sort((a, b) => {
+          const byUpdatedAt = (b.updated_at || "").localeCompare(a.updated_at || "");
+          if (byUpdatedAt !== 0) return byUpdatedAt;
+          return (b.id || "").localeCompare(a.id || "");
+        });
+
+        count = sorted.length;
+        data = sorted.slice(offset, offset + PAGE_SIZE);
+      }
 
       let newClients = (data || []) as ClientRecord[];
       const eIds = newClients.map(c => c.entity_id).filter(Boolean);
@@ -800,29 +834,62 @@ const AnewClients = () => {
         searchEntityIdsList = ids;
       }
 
-      const BATCH = 500;
-      const all: ClientRecord[] = [];
-      let offset = 0;
-      let hasMore = true;
-      while (hasMore) {
-        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id").is("deleted_at", null);
-        if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-        else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-        if (scopeFilter) query = query.or(scopeFilter);
-        if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
-        if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
-        if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-        query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
-        const { data, error } = await query;
-        if (error) throw error;
-        const batch = (data || []) as ClientRecord[];
-        all.push(...batch);
-        // Resolve identities for new entity IDs
-        const eIds = batch.map(c => c.entity_id).filter(Boolean);
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      const SELECT_COLS = "id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id";
+
+      let all: ClientRecord[];
+      if (searchEntityIdsList) {
+        // searchEntityIdsList is already the FULL, unbounded match set (see
+        // searchEntityIds). Chunk it instead of paginating via offset/range —
+        // a single `.in("entity_id", ids)` with hundreds of ids would blow the
+        // gateway's URL-length ceiling (same measurement as loadClients:
+        // ~300 ids/~11kB pass, ~400/~15kB fail), and each chunk already
+        // covers a disjoint slice of the ids, so no offset loop is needed.
+        const idChunks = chunkIds(searchEntityIdsList);
+        const chunkResults = await Promise.all(
+          idChunks.map((chunk) => {
+            let q = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
+            if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
+            else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
+            if (scopeFilter) q = q.or(scopeFilter);
+            if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
+            if (dateTo) q = q.lte("created_at", dateTo.toISOString());
+            return q.in("entity_id", chunk);
+          }),
+        );
+        for (const chunkResult of chunkResults) if (chunkResult.error) throw chunkResult.error;
+
+        const mergedById = new Map<string, ClientRecord>();
+        chunkResults.forEach((chunkResult) => {
+          (chunkResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+        });
+        all = Array.from(mergedById.values());
+        const eIds = all.map(c => c.entity_id).filter(Boolean);
         if (eIds.length > 0) await resolveEntities(eIds);
-        hasMore = batch.length === BATCH;
-        offset += BATCH;
+      } else {
+        const BATCH = 500;
+        const collected: ClientRecord[] = [];
+        let offset = 0;
+        let hasMoreBatch = true;
+        while (hasMoreBatch) {
+          let query = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
+          if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
+          else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
+          if (scopeFilter) query = query.or(scopeFilter);
+          if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
+          if (dateTo) query = query.lte("created_at", dateTo.toISOString());
+          query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
+          const { data, error } = await query;
+          if (error) throw error;
+          const batch = (data || []) as ClientRecord[];
+          collected.push(...batch);
+          // Resolve identities for new entity IDs
+          const eIds = batch.map(c => c.entity_id).filter(Boolean);
+          if (eIds.length > 0) await resolveEntities(eIds);
+          hasMoreBatch = batch.length === BATCH;
+          offset += BATCH;
+        }
+        all = collected;
       }
       setAllClients(all);
       setAllClientsLoaded(true);
