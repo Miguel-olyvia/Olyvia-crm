@@ -177,7 +177,7 @@ const AnewClients = () => {
     [clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
   );
   const { activeCompany, isLoading: companyLoading } = useCompany();
-  const { resolveEntities, getIdentity } = useEntityIdentity();
+  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   // Full comercial roster for this org (scoped to the viewer's permission scope) —
   // independent of which clients happen to be loaded, so the filter/bulk-assign
   // dropdowns always list every assignable comercial, not just the ones with a
@@ -2532,7 +2532,18 @@ const AnewClients = () => {
         <ClientDetailsDialog
           client={selectedClient} open={detailsOpen && !!selectedClient}
           onOpenChange={(open) => { setDetailsOpen(open); if (!open) setSelectedClient(null); }}
-          onClientUpdated={() => { loadClients(0, true); setDashboardKey(prev => prev + 1); }}
+          onClientUpdated={() => {
+            // O diálogo grava via rpc_update_client, que escreve nome, email,
+            // telefone e NIF na entidade. Esses campos vêm da cache do
+            // useEntityIdentity, e o resolveEntities() que loadClients dispara
+            // salta qualquer id já em cache — sem esta invalidação a lista
+            // recarregava e continuava a mostrar os valores anteriores até um
+            // F5. Estado e comercial actualizavam bem, por virem da linha do
+            // cliente, o que fazia o defeito parecer intermitente.
+            invalidateEntities([selectedClient?.entity_id]);
+            loadClients(0, true);
+            setDashboardKey(prev => prev + 1);
+          }}
         />
 
         {/* New Client Dialog */}

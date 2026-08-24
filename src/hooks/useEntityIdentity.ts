@@ -155,7 +155,39 @@ export function useEntityIdentity() {
     return identityMapRef.current[entityId] || null;
   }, []);
 
-  return { identityMap, resolveEntities, getIdentity, loading };
+  /**
+   * Drop entities from the cache so the next resolveEntities() fetches them
+   * again.
+   *
+   * Call this after writing to anew_entities / anew_entity_emails /
+   * anew_entity_phones / the fiscal link for an entity. Reloading the list
+   * that owns the row is NOT enough: name, email, phone and VAT are served
+   * from this cache, and resolveEntities() skips any id already in it, so the
+   * screen kept showing the pre-edit values until a full page reload.
+   *
+   * The ref is updated synchronously as well as the state: a resolveEntities()
+   * called in the same tick reads the ref, not the state, and would otherwise
+   * still see the stale entries and skip the refetch.
+   */
+  const invalidateEntities = useCallback((entityIds: (string | null | undefined)[]) => {
+    const ids = entityIds.filter((id): id is string => !!id);
+    if (ids.length === 0) return;
+
+    const next = { ...identityMapRef.current };
+    let removed = false;
+    for (const id of ids) {
+      if (id in next) {
+        delete next[id];
+        removed = true;
+      }
+    }
+    if (!removed) return;
+
+    identityMapRef.current = next;
+    setIdentityMap(next);
+  }, []);
+
+  return { identityMap, resolveEntities, getIdentity, invalidateEntities, loading };
 }
 
 /**
