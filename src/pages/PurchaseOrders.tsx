@@ -245,6 +245,30 @@ const PurchaseOrders = () => {
             brands(name)
           `;
 
+      // PostgREST caps an unranged response at 1000 rows (Content-Range: 0-999/*,
+      // confirmed live via Network tab) — a plain .select() silently truncates for
+      // catalogs bigger than that (2000+ products for orgs like Mudelar), returning
+      // only whichever ~1000 happen to come first in undefined order. This paginates
+      // past that cap instead of ever relying on a single unranged request.
+      const fetchAllRows = async (
+        buildQuery: () => any
+      ): Promise<{ data: any[] | null; error: any }> => {
+        const PAGE = 1000;
+        const rows: any[] = [];
+        let from = 0;
+        while (true) {
+          const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+          if (error) return { data: null, error };
+          rows.push(...(data || []));
+          if (!data || data.length < PAGE) break;
+          from += PAGE;
+        }
+        return { data: rows, error: null };
+      };
+
+      const fetchAllProductRows = (applyFilters: (q: any) => any) =>
+        fetchAllRows(() => applyFilters(supabase.from("products").select(productColumns)));
+
       const [
         ordersRes,
         suppliersRes,
@@ -266,20 +290,18 @@ const PurchaseOrders = () => {
               .is("deleted_at", null)
               .order("created_at", { ascending: false })),
         supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
-        supabase.from("product_organizations").select("product_id").eq("organization_id", companyId),
-        // Direct match: products owned by this org. Filtered server-side (no client-side
-        // id list needed) — this is the bulk of the catalog (2000+ products for orgs like
-        // Mudelar). Fetching these via .in("id", [...]) instead (as before) built a query
-        // string with thousands of UUIDs and failed outright with net::ERR_FAILED once
-        // the products.supplier_id exclusion (which used to shrink this list to ~6% of
-        // the catalog) was removed.
-        supabase
-          .from("products")
-          .select(productColumns)
-          .eq("organization_id", companyId)
-          .eq("is_active", true)
-          .eq("is_purchasable", true)
-          .is("deleted_at", null),
+        fetchAllRows(() =>
+          supabase.from("product_organizations").select("product_id").eq("organization_id", companyId)
+        ),
+        // Direct match: products owned by this org — the bulk of the catalog, paginated
+        // past the 1000-row cap above.
+        fetchAllProductRows((q) =>
+          q
+            .eq("organization_id", companyId)
+            .eq("is_active", true)
+            .eq("is_purchasable", true)
+            .is("deleted_at", null)
+        ),
         supabase
           .from("services")
           .select(`
@@ -317,13 +339,13 @@ const PurchaseOrders = () => {
 
       let sharedProductsData: any[] = [];
       if (junctionOnlyIds.length > 0) {
-        const sharedRes = await supabase
-          .from("products")
-          .select(productColumns)
-          .eq("is_active", true)
-          .eq("is_purchasable", true)
-          .is("deleted_at", null)
-          .in("id", junctionOnlyIds);
+        const sharedRes = await fetchAllProductRows((q) =>
+          q
+            .eq("is_active", true)
+            .eq("is_purchasable", true)
+            .is("deleted_at", null)
+            .in("id", junctionOnlyIds)
+        );
         if (sharedRes.error) throw sharedRes.error;
         sharedProductsData = sharedRes.data || [];
       }
