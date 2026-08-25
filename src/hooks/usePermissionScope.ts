@@ -9,29 +9,69 @@ export type ScopeLevel = "NONE" | "OWNED" | "TEAM" | "ORG";
 
 const SCOPE_HIERARCHY: Record<ScopeLevel, number> = { NONE: 0, OWNED: 1, TEAM: 2, ORG: 3 };
 
-/** Resolve all team member IDs where user is leader (via organization_teams) */
-async function resolveSubordinates(anewUserId: AnewUserId, activeOrgId?: string): Promise<AnewUserId[]> {
-  if (!activeOrgId) return [];
+/** Shape returned by the get_permission_scope_context RPC. */
+interface ScopeContextMembership {
+  id: string;
+  role_id: string;
+  organization_id: string;
+  role_code: string | null;
+}
 
-  const { data: ledTeams } = await supabase
-    .from("organization_teams")
-    .select("id")
-    .eq("organization_id", activeOrgId)
-    .eq("leader_id", anewUserId);
+interface ScopeContextRow {
+  membership_id: string;
+  organization_id: string;
+  permission_code: string;
+  scope_level: string;
+}
 
-  if (!ledTeams || ledTeams.length === 0) return [];
+interface ScopeContext {
+  anew_user_id: string | null;
+  is_global_system_admin: boolean;
+  org_chain: string[];
+  memberships: ScopeContextMembership[];
+  role_permissions: string[];
+  scope_rows: ScopeContextRow[];
+  binary_permission_codes: string[];
+  team_member_ids: string[];
+}
 
-  const teamIds = ledTeams.map(t => t.id);
-  const { data: teamMembers } = await supabase
-    .from("organization_team_members")
-    .select("user_id")
-    .in("team_id", teamIds);
+/**
+ * In-flight RPC calls, keyed by auth user + active organization. The hook has
+ * 29 consumers and they mount together, so the same context used to be
+ * resolved once per component instance. Sharing the pending promise collapses
+ * that burst into one request.
+ *
+ * Entries are dropped as soon as the call settles — this dedupes concurrency,
+ * it does not memoise results, so `refresh()` still re-reads the database.
+ */
+const inFlightScopeContexts = new Map<string, Promise<ScopeContext | null>>();
 
-  if (!teamMembers) return [];
+async function fetchScopeContext(authUid: string, organizationId: string): Promise<ScopeContext | null> {
+  const key = `${authUid}:${organizationId}`;
+  const pending = inFlightScopeContexts.get(key);
+  if (pending) return pending;
 
-  return teamMembers
-    .map(m => asAnewUserId(m.user_id))
-    .filter(id => id !== anewUserId);
+  const request = (async (): Promise<ScopeContext | null> => {
+    const { data, error } = await supabase.rpc("get_permission_scope_context", {
+      _organization_id: organizationId,
+    });
+
+    if (error) {
+      // Fail closed: a null context leaves every scope at NONE rather than
+      // silently granting anything.
+      console.error("[usePermissionScope] scope context RPC failed:", error);
+      return null;
+    }
+
+    return (data ?? null) as ScopeContext | null;
+  })();
+
+  inFlightScopeContexts.set(key, request);
+  try {
+    return await request;
+  } finally {
+    inFlightScopeContexts.delete(key);
+  }
 }
 
 export function usePermissionScope() {
@@ -54,83 +94,35 @@ export function usePermissionScope() {
       if (!user) { setLoading(false); return; }
       setAuthUserId(asAuthUserId(user.id));
 
-      const { data: anewUser } = await supabase.from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
-      if (!anewUser) { setLoading(false); return; }
-      const typedAnewUserId = asAnewUserId(anewUser.id);
+      // One RPC replaces the 11-query chain this hook used to run per
+      // instance. It is a data collector only — every decision below stays
+      // here, in reviewed and tested TypeScript.
+      const ctx = await fetchScopeContext(user.id, activeCompany.id);
+      if (!ctx?.anew_user_id) { setLoading(false); return; }
+
+      const typedAnewUserId = asAnewUserId(ctx.anew_user_id);
       setAnewUserId(typedAnewUserId);
 
       // System admins are global roles: they must keep full access even
       // when the active organization is not one of their direct memberships.
       // Super admins only have access to their own organizations.
-      const { data: globalMemberships } = await supabase.from("anew_memberships")
-        .select("role_id")
-        .eq("user_id", typedAnewUserId)
-        .eq("status", "active");
-
-      const globalRoleIds = [...new Set((globalMemberships || []).map(m => m.role_id).filter(Boolean))];
-      if (globalRoleIds.length > 0) {
-        const { data: globalRoles } = await supabase.from("anew_roles").select("code").in("id", globalRoleIds);
-        const globalAdminRole = (globalRoles || []).find(r => ["system_admin"].includes(r.code));
-        if (globalAdminRole) {
-          setAnewRoleCode(globalAdminRole.code);
-          setIsFullAccess(true);
-          setRolePermissions(new Set(["*"]));
-          setScopeOverrides(new Map());
-          setBinaryPermissions(new Set());
-          setTeamMemberIds([]);
-          setLoading(false);
-          return;
-        }
+      if (ctx.is_global_system_admin) {
+        setAnewRoleCode("system_admin");
+        setIsFullAccess(true);
+        setRolePermissions(new Set(["*"]));
+        setScopeOverrides(new Map());
+        setBinaryPermissions(new Set());
+        setTeamMemberIds([]);
+        setLoading(false);
+        return;
       }
 
-      // PERF-003 (Item 3): build ancestor chain via targeted queries (no full-scan of anew_hierarchy)
-      const orgChain: string[] = [activeCompany.id];
-      let currentOrgId = activeCompany.id;
-      for (let i = 0; i < 10; i++) {
-        const { data: parentLink } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id")
-          .eq("child_org_id", currentOrgId)
-          .maybeSingle();
-        if (!parentLink?.parent_org_id) break;
-        orgChain.push(parentLink.parent_org_id);
-        currentOrgId = parentLink.parent_org_id;
-      }
-
-      // Find ALL active memberships across ancestor chain
-      const { data: memberships } = await supabase.from("anew_memberships")
-        .select("id, role_id, organization_id")
-        .eq("user_id", typedAnewUserId)
-        .in("organization_id", orgChain)
-        .eq("status", "active");
-
-      if (!memberships || memberships.length === 0) {
+      // Active memberships across the organization ancestor chain, resolved
+      // server-side by the RPC's recursive CTE.
+      const memberships = ctx.memberships ?? [];
+      if (memberships.length === 0) {
         setRolePermissions(new Set()); setScopeOverrides(new Map()); setIsFullAccess(false); setTeamMemberIds([]); setLoading(false); return;
       }
-
-      const roleIds = [...new Set(memberships.map(m => m.role_id))];
-
-      // Scope overrides come ONLY from memberships in the ACTIVE organization.
-      // Reading them across the ancestor chain let ORG scope granted in a parent
-      // organization leak into every child — the cross-organization escalation
-      // fixed in the database by 20261112120000_scope_resolution_per_org_only.sql
-      // (and, for proposals, by 20261006010000). Role permissions still resolve
-      // across the chain, mirroring the database.
-      const ownMembershipIds = memberships
-        .filter(m => m.organization_id === activeCompany.id)
-        .map(m => m.id);
-
-      // PERF-003: parallelize independent queries (roles, role_perms, scope overrides)
-      const [rolesRes, rolePermsRes, scopeRes] = await Promise.all([
-        supabase.from("anew_roles").select("id, code").in("id", roleIds),
-        supabase.from("anew_role_permissions").select("permission_code").in("role_id", roleIds),
-        ownMembershipIds.length > 0
-          ? supabase.from("anew_membership_permission_scopes").select("permission_code, scope_level").in("membership_id", ownMembershipIds)
-          : Promise.resolve({ data: [] as { permission_code: string; scope_level: string }[] }),
-      ]);
-
-      const roles = rolesRes.data;
-      const roleCodeMap = new Map((roles || []).map(r => [r.id, r.code]));
 
       const ROLE_PRIORITY: Record<string, number> = {
         org_viewer: 0, org_editor: 1, org_admin: 2, super_admin: 3, system_admin: 4,
@@ -138,43 +130,50 @@ export function usePermissionScope() {
       let bestCode = "";
       let bestPriority = -Infinity;
       for (const m of memberships) {
-        const code = roleCodeMap.get(m.role_id) || '';
+        const code = m.role_code || '';
         const priority = ROLE_PRIORITY[code] ?? 0;
         if (priority > bestPriority) { bestPriority = priority; bestCode = code; }
       }
       setAnewRoleCode(bestCode || null);
 
-      const hasFullAccess = (roles || []).some(r => ["super_admin", "system_admin"].includes(r.code));
+      const hasFullAccess = memberships.some(m => ["super_admin", "system_admin"].includes(m.role_code || ''));
       if (hasFullAccess) { setIsFullAccess(true); setTeamMemberIds([]); setLoading(false); return; }
       setIsFullAccess(false);
 
-      const permSet = new Set<string>(rolePermsRes.data?.map(rp => rp.permission_code) || []);
+      const permSet = new Set<string>(ctx.role_permissions ?? []);
       setRolePermissions(permSet);
 
-      // Scope overrides — pick highest scope per permission
+      // Scope overrides come ONLY from memberships in the ACTIVE organization.
+      // Reading them across the ancestor chain let ORG scope granted in a parent
+      // organization leak into every child — the cross-organization escalation
+      // fixed in the database by 20261112120000_scope_resolution_per_org_only.sql
+      // (and, for proposals, by 20261006010000). Role permissions still resolve
+      // across the chain, mirroring the database.
+      //
+      // The RPC returns the chain's rows with their organization_id attached and
+      // this filter is what enforces the rule, so the invariant stays here where
+      // usePermissionScope.orgScope.test.ts can prove it.
       const overrideMap = new Map<string, ScopeLevel>();
-      scopeRes.data?.forEach(s => {
-        const existing = overrideMap.get(s.permission_code);
-        const newLevel = s.scope_level as ScopeLevel;
-        if (!existing || SCOPE_HIERARCHY[newLevel] > SCOPE_HIERARCHY[existing]) {
-          overrideMap.set(s.permission_code, newLevel);
-        }
-      });
+      (ctx.scope_rows ?? [])
+        .filter(s => s.organization_id === activeCompany.id)
+        .forEach(s => {
+          const existing = overrideMap.get(s.permission_code);
+          const newLevel = s.scope_level as ScopeLevel;
+          if (!existing || SCOPE_HIERARCHY[newLevel] > SCOPE_HIERARCHY[existing]) {
+            overrideMap.set(s.permission_code, newLevel);
+          }
+        });
       setScopeOverrides(overrideMap);
 
-      // PERF-003: parallelize binary perms lookup with subordinates resolution
-      const permCodes = Array.from(permSet);
+      setBinaryPermissions(new Set(ctx.binary_permission_codes ?? []));
+
+      // Team members only matter once a TEAM scope is in play, as before.
       const hasTeamScope = Array.from(overrideMap.values()).some(v => v === "TEAM");
-
-      const [binaryDefsRes, subs] = await Promise.all([
-        permCodes.length > 0
-          ? supabase.from("anew_permissions").select("code, supports_scope").in("code", permCodes).eq("supports_scope", false)
-          : Promise.resolve({ data: [] as { code: string; supports_scope: boolean }[] }),
-        hasTeamScope ? resolveSubordinates(typedAnewUserId, activeCompany?.id) : Promise.resolve([] as AnewUserId[]),
-      ]);
-
-      setBinaryPermissions(new Set((binaryDefsRes.data || []).map(p => p.code)));
-      setTeamMemberIds(subs);
+      setTeamMemberIds(
+        hasTeamScope
+          ? (ctx.team_member_ids ?? []).map(id => asAnewUserId(id)).filter(id => id !== typedAnewUserId)
+          : []
+      );
     } catch (error) { console.error("Error loading permission scopes:", error); } finally { setLoading(false); }
   }, [activeCompany]);
 

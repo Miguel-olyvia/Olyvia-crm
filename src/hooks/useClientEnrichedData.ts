@@ -140,6 +140,38 @@ export function calculateClientHealth(
   };
 }
 
+/** Linha devolvida por get_client_enriched_data (ver migration homonima). */
+interface EnrichedClientRow {
+  entity_id: string;
+  active_contract_count: number | string | null;
+  contract_total_value: number | string | null;
+  contract_total_value_sem_iva: number | string | null;
+  expiring_contracts: { id: string; end_date: string; total_value: number | string | null }[] | null;
+  last_interaction_at: string | null;
+  interaction_count_30d: number | string | null;
+  last_sentiment: string | null;
+  tags: { id: string; tag: string; color: string | null }[] | null;
+}
+
+/**
+ * `numeric` chega do PostgREST como string quando excede o que um double
+ * representa com seguranca, por isso tudo passa por Number() em vez de se
+ * confiar no tipo declarado.
+ */
+const toNumber = (value: unknown): number => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+/** Fuso do browser. A RPC faz aritmetica de datas em hora local, como o date-fns fazia. */
+const resolveBrowserTimeZone = (): string => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+};
+
 export function useClientEnrichedData(entityIds: string[], identityMap: Record<string, { email?: string | null; phone?: string | null; vat?: string | null; type?: string }>, statusMap?: Record<string, string>, organizationId?: string | null) {
   const [contracts, setContracts] = useState<Map<string, ClientContractInfo>>(new Map());
   const [interactions, setInteractions] = useState<Map<string, ClientInteractionInfo>>(new Map());
@@ -165,113 +197,79 @@ export function useClientEnrichedData(entityIds: string[], identityMap: Record<s
     setLoading(true);
     setError(null);
     try {
+      // Um unico POST em vez de 3 x ceil(n/100) GETs sequenciais (contratos,
+      // interacoes e tags, cada um em lotes de 100 ids). Alem das idas ao
+      // servidor, a leitura de entity_interactions trazia TODAS as linhas de
+      // interacao das entidades para o cliente reduzir a tres numeros; a RPC
+      // devolve ja uma linha por entidade.
+      // Ver supabase/migrations/20261113110000_client_enriched_data_rpc.sql.
+      //
+      // `now` e `since` sao calculados UMA vez por vaga e enviados como
+      // argumentos (em vez de now() do servidor) para que o servidor e o
+      // cliente nunca discordem sobre "agora" ao decidir o que esta a expirar
+      // ou o que conta para os ultimos 30 dias.
       const now = new Date();
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
-      // Load contracts
-      const contractMap = new Map<string, ClientContractInfo>();
-      for (let i = 0; i < entityIds.length; i += 100) {
-        const batch = entityIds.slice(i, i + 100);
-        // (supabase as any): total_value_sem_iva is a real client_contracts column (already
-        // relied on elsewhere, e.g. ClientsValueView.tsx/AnewClientsDashboard.tsx) but the
-        // generated Supabase types haven't been regenerated to include it yet, which makes
-        // supabase-js's select-string type checker treat this whole query as a
-        // SelectQueryError. Casting here (matching the (supabase as any) idiom already used
-        // throughout this codebase for the same class of stale-types gap) avoids that false
-        // positive without running `supabase gen types` (requires separate approval).
-        const { data: contractData, error: contractError } = await (supabase as any).from('client_contracts')
-          .select('id, entity_id, status, total_value, total_value_sem_iva, end_date')
-          .eq('organization_id', organizationId)
-          .in('entity_id', batch)
-          .in('status', ['signed', 'active']);
-        if (contractError) {
-          console.error('Error loading client contracts:', contractError);
-          setError('Falha ao carregar contratos dos clientes.');
-        }
-        if (contractData) {
-          for (const c of contractData) {
-            const info = contractMap.get(c.entity_id!) || { activeCount: 0, totalValue: 0, totalValueSemIva: 0, expiringContracts: [] };
-            const isActive = c.status === 'active' || c.status === 'signed';
-            if (isActive) {
-              info.activeCount++;
-              info.totalValue += c.total_value || 0;
-              info.totalValueSemIva = (info.totalValueSemIva || 0) + ((c as any).total_value_sem_iva || 0);
-              if (c.end_date) {
-                const endDate = new Date(c.end_date);
-                if (differenceInDays(endDate, now) >= 0 && differenceInDays(endDate, now) <= 30) {
-                  info.expiringContracts.push({ id: c.id, end_date: c.end_date, total_value: c.total_value || 0 });
-                }
-              }
-            }
-            contractMap.set(c.entity_id!, info);
-          }
-        }
+      const { data, error: rpcError } = await (supabase.rpc as any)('get_client_enriched_data', {
+        _organization_id: organizationId,
+        _entity_ids: [...new Set(entityIds)],
+        _since: thirtyDaysAgo.toISOString(),
+        _now: now.toISOString(),
+        _tz: resolveBrowserTimeZone(),
+      });
+
+      if (rpcError) {
+        console.error('Error loading client enriched data:', rpcError);
+        setError('Falha ao carregar dados dos clientes.');
+        return;
       }
-      setContracts(contractMap);
 
-      // Load interactions
+      const contractMap = new Map<string, ClientContractInfo>();
       const interactionMap = new Map<string, ClientInteractionInfo>();
-      for (let i = 0; i < entityIds.length; i += 100) {
-        const batch = entityIds.slice(i, i + 100);
-        const { data: intData, error: interactionError } = await supabase.from('entity_interactions')
-          .select('entity_id, interaction_at, sentiment')
-          .eq('organization_id', organizationId)
-          .in('entity_id', batch)
-          .order('interaction_at', { ascending: false });
-        if (interactionError) {
-          console.error('Error loading client interactions:', interactionError);
-          setError('Falha ao carregar interações dos clientes.');
-        }
-        if (intData) {
-          const countMap = new Map<string, number>();
-          for (const row of intData) {
-            const eid = (row as any).entity_id;
-            if (!interactionMap.has(eid)) {
-              interactionMap.set(eid, {
-                lastInteractionAt: (row as any).interaction_at,
-                interactionCount30d: 0,
-                lastSentiment: (row as any).sentiment as any,
-              });
-            }
-            const intDate = new Date((row as any).interaction_at);
-            if (intDate >= thirtyDaysAgo) {
-              countMap.set(eid, (countMap.get(eid) || 0) + 1);
-            }
-          }
-          countMap.forEach((count, eid) => {
-            const info = interactionMap.get(eid);
-            if (info) info.interactionCount30d = count;
+      const tagMap = new Map<string, ClientTag[]>();
+
+      for (const raw of (data || []) as EnrichedClientRow[]) {
+        const eid = raw.entity_id;
+        if (!eid) continue;
+
+        const activeCount = toNumber(raw.active_contract_count);
+        if (activeCount > 0) {
+          contractMap.set(eid, {
+            activeCount,
+            totalValue: toNumber(raw.contract_total_value),
+            totalValueSemIva: toNumber(raw.contract_total_value_sem_iva),
+            expiringContracts: (raw.expiring_contracts || []).map((c) => ({
+              id: c.id,
+              end_date: c.end_date,
+              total_value: toNumber(c.total_value),
+            })),
           });
         }
-      }
-      setInteractions(interactionMap);
 
-      // Load tags
-      const tagMap = new Map<string, ClientTag[]>();
-      for (let i = 0; i < entityIds.length; i += 100) {
-        const batch = entityIds.slice(i, i + 100);
-        const { data: tagData, error: tagError } = await supabase.from('contact_tags')
-          .select('id, entity_id, tag, color')
-          .eq('organization_id', organizationId)
-          .in('entity_id', batch);
-        if (tagError) {
-          console.error('Error loading client tags:', tagError);
-          setError('Falha ao carregar tags dos clientes.');
+        // Uma entidade sem qualquer interacao nao entra no mapa — e o que o
+        // codigo anterior fazia, e calculateClientHealth distingue
+        // `undefined` (nunca contactado) de um registo com contagem zero.
+        if (raw.last_interaction_at) {
+          interactionMap.set(eid, {
+            lastInteractionAt: raw.last_interaction_at,
+            interactionCount30d: toNumber(raw.interaction_count_30d),
+            lastSentiment: (raw.last_sentiment as ClientInteractionInfo['lastSentiment']) ?? null,
+          });
         }
-        if (tagData) {
-          for (const t of tagData) {
-            const existing = tagMap.get((t as any).entity_id) || [];
-            existing.push({ id: t.id, tag: t.tag, color: t.color });
-            tagMap.set((t as any).entity_id, existing);
-          }
+
+        if (raw.tags && raw.tags.length > 0) {
+          tagMap.set(eid, raw.tags.map((t) => ({ id: t.id, tag: t.tag, color: t.color })));
         }
       }
+
+      setContracts(contractMap);
+      setInteractions(interactionMap);
       setTags(tagMap);
     } catch (err) {
       console.error('Error loading enriched data:', err);
+      setError('Falha ao carregar dados dos clientes.');
     } finally {
       setLoading(false);
     }

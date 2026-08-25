@@ -21,7 +21,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { useToast } from "@/hooks/use-toast";
-import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -236,6 +236,13 @@ interface Campaign {
 
 // Canonical column list for a leads list/kanban fetch — shared so both call sites
 // always request (and therefore can filter/display) the exact same shape.
+//
+// `search_text` NAO consta aqui de proposito. E uma coluna denormalizada de
+// pesquisa (nome + email + telefone concatenados), usada apenas no `.ilike()`
+// do lado do servidor — nada no cliente a le. Vinha na resposta e custava,
+// medido nesta organizacao, 6081 bytes por pagina de 25 leads, ~24% do peso
+// das colunas de texto da pagina. O mesmo raciocinio ja estava escrito em
+// refreshSingleLead; faltava aplica-lo a lista.
 const LEADS_LIST_COLUMNS = `
   id, entity_id, campaign_id,
   status, workflow_stage_id, assigned_to, created_by,
@@ -245,7 +252,7 @@ const LEADS_LIST_COLUMNS = `
   field_values, notes, source, source_id,
   last_contact_at, last_contact_result, contact_attempts,
   callback_scheduled_at, callback_notes,
-  tags, search_text,
+  tags,
   qualification_type, qualified_at,
   campaigns(id, name)
 `;
@@ -396,7 +403,7 @@ export default function AnewLeads() {
     teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
   
   const [leads, setLeads] = useState<Lead[]>([]);
   const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
@@ -1480,7 +1487,14 @@ export default function AnewLeads() {
       });
       toast({
         title: "Exportação concluída",
-        description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+        description: result.includesSensitive
+          ? `${result.rowCount} leads exportados em XLSX com campos sensíveis autorizados.`
+          : hasPermission("leads.export_sensitive")
+            // Chose not to include them: nothing was withheld from this user.
+            ? `${result.rowCount} leads exportados em XLSX sem campos sensíveis.`
+            // Withheld by permission — say so, or the user distributes an
+            // incomplete file believing it is complete.
+            : `${result.rowCount} leads exportados em XLSX. ${t('leads.toast.exportNoSensitive')}`,
       });
     } catch (error: unknown) {
       const description = await getFriendlyErrorMessage(error);
@@ -1493,6 +1507,15 @@ export default function AnewLeads() {
   const handleExport = () => {
     if (!activeCompanyId) {
       toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
+      return;
+    }
+    // Until permissions resolve, hasPermission answers false for everything.
+    // Falling through here would silently produce a file stripped of email,
+    // phone and NIF — no dialog, and nothing telling the user their export was
+    // reduced. That is exactly what happened while the permission bootstrap
+    // took a couple of seconds. Wait instead of downgrading.
+    if (permissionsLoading) {
+      toast({ title: t('leads.toast.permissionsLoading'), description: t('leads.toast.permissionsLoadingDesc') });
       return;
     }
     if (hasPermission("leads.export_sensitive")) {
@@ -2395,11 +2418,20 @@ export default function AnewLeads() {
   // Effective hasMore: stop loading when we've reached the RPC total
   const effectiveHasMore = hasMore && leads.length < paginationTotal;
 
-  // Setup infinite scroll
-  const { loadMoreRef } = useInfiniteScroll({
-    onLoadMore: loadMoreLeads,
-    hasMore: effectiveHasMore,
-    isLoading: loading || loadingMore
+  // Scroll infinito por IntersectionObserver, o mesmo que /proposals usa.
+  //
+  // O hook anterior (useInfiniteScroll) decidia pela GEOMETRIA do primeiro
+  // antepassado com overflow: auto|scroll. Aqui a sentinela esta de facto
+  // dentro do contentor que rola, por isso nao havia o disparo em cadeia que
+  // se viu nas Propostas — mas isso depende de a arvore de DOM se manter tal
+  // como esta hoje, e o proximo wrapper com `overflow` entre a tabela e a
+  // sentinela reintroduzia o defeito em silencio. O IntersectionObserver
+  // pergunta ao browser se o elemento esta realmente visivel e ja tem em conta
+  // o recorte de TODOS os antepassados, seja qual for o que rola.
+  const { sentinelRef: loadMoreRef } = useSentinelInView({
+    onVisible: loadMoreLeads,
+    enabled: effectiveHasMore,
+    isLoading: loading || loadingMore,
   });
 
   // Debounce timers for search inputs (300ms) — cancels pending query on each keystroke

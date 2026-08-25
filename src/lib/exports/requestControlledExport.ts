@@ -7,7 +7,13 @@ import {
   type StandardExportPayload,
 } from "./xlsxExport";
 
-export type ControlledExportModule = "clients" | "contacts" | "quotes" | "leads";
+export type ControlledExportModule =
+  | "clients"
+  | "contacts"
+  | "quotes"
+  | "leads"
+  | "proposals"
+  | "client_contracts";
 
 interface ControlledExportResponse {
   filename: string;
@@ -73,8 +79,13 @@ export async function requestControlledExport(
   });
 
   if (error || !isControlledExportResponse(data)) {
-    const message = await getFriendlyErrorMessage(error, getLocalizedFallback("friendlyError.exportFailed"));
-    throw new Error(message);
+    const exportFailed = getLocalizedFallback("friendlyError.exportFailed");
+    const message = await getFriendlyErrorMessage(error, exportFailed);
+    // A bare non-2xx maps to the generic "server error", which tells the user
+    // less than knowing the export itself failed. Anything more specific the
+    // function reported — a row limit, an authorization refusal — is kept.
+    const generic = getLocalizedFallback("friendlyError.serverError");
+    throw new Error(message === generic ? exportFailed : message);
   }
 
   download(

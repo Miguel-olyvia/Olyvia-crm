@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { requestControlledExport } from "../requestControlledExport";
+import { getLocalizedFallback } from "@/utils/friendlyError";
 
 describe("requestControlledExport", () => {
   it("envia apenas módulo, organização, opção sensível e filtros", async () => {
@@ -62,6 +63,10 @@ describe("requestControlledExport", () => {
         module: "contacts",
         organizationId: "5d5fd457-e4b0-4d6a-b8e6-267d721b171a",
       }),
-    ).rejects.toThrow("Não foi possível exportar os dados");
+      // Asserted through the same catalogue the code reads, not a hardcoded
+      // translation: what matters is that the failure is reported as an EXPORT
+      // failure and not as the generic server error, in whichever language the
+      // caller is running.
+    ).rejects.toThrow(getLocalizedFallback("friendlyError.exportFailed"));
   });
 });

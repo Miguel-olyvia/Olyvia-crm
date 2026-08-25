@@ -1,10 +1,12 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { buildNoContactFilterKey } from "@/lib/clientsNoContactFilterKey";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
-import { searchEntityIds } from "@/lib/clientSearch";
+import { resolveClientSearch, applyClientSearchTextFilter } from "@/lib/clientSearch";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
@@ -20,7 +22,7 @@ import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDistanceToNow, differenceInDays, format, isValid } from "date-fns";
+import { formatDistanceToNow, differenceInDays, format, isValid, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ClientDetailsDialog } from "@/components/clients/ClientDetailsDialog";
@@ -177,7 +179,7 @@ const AnewClients = () => {
     [clientsViewScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds],
   );
   const { activeCompany, isLoading: companyLoading } = useCompany();
-  const { resolveEntities, getIdentity } = useEntityIdentity();
+  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   // Full comercial roster for this org (scoped to the viewer's permission scope) —
   // independent of which clients happen to be loaded, so the filter/bulk-assign
   // dropdowns always list every assignable comercial, not just the ones with a
@@ -219,7 +221,6 @@ const AnewClients = () => {
 
   const PAGE_SIZE = 10;
   const initialLoadDoneRef = useRef(false);
-  const truncatedWarnedRef = useRef<string | null>(null);
   const clientsAbortControllerRef = useRef<AbortController | null>(null);
   const clientsRequestIdRef = useRef(0);
   // Separate abort controller for "load more" (pagination) calls so they never share/abort
@@ -464,6 +465,19 @@ const AnewClients = () => {
     }));
   }, [analyticsClients, statusFilter, analyticsContractMap, alertData, getIdentity]);
 
+  // `loadClients` precisa do conjunto "sem contacto ha 30 dias" -- mas SO
+  // quando esse e o filtro ativo. Ler `alertData` por referencia (e nao pelas
+  // dependencias) e depender apenas desta chave quebra o ciclo
+  // loadClients -> setClients -> alertData -> loadClients que recarregava a
+  // pagina 1 em cadeia ate a carga de fundo de analytics terminar.
+  // Ver src/lib/clientsNoContactFilterKey.ts.
+  const alertDataRef = useRef(alertData);
+  alertDataRef.current = alertData;
+  const noContactFilterKey = useMemo(
+    () => buildNoContactFilterKey(statusFilter, alertData.noContactClients),
+    [statusFilter, alertData],
+  );
+
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
     let filtered = [...clients];
@@ -621,75 +635,125 @@ const AnewClients = () => {
     }
     try {
       const viewScope = getPermissionScope("clients.view");
-
-      let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
-      if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-      else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-      // When searching, ignore status filter so inactive/churned/lost clients still appear
-      if (!effectiveSearch) {
-        if (statusFilter === "active") {
-          query = query.not("status", "in", '("inactive","churned","lost")');
-        } else if (statusFilter === "inactive") {
-          query = query.in("status", ["inactive", "churned", "lost"]);
-        } else if (statusFilter !== "all" && statusFilter !== "no_contact_30d" && statusFilter !== "no_contact_60d" && statusFilter !== "expiring_contracts" && statusFilter !== "missing_nif") {
-          query = query.eq("status", statusFilter);
-        }
-        if (statusFilter === "no_contact_30d") {
-          query = query.not("status", "in", '("inactive","churned","lost")');
-          const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
-          if (atRiskIds.length > 0) {
-            query = query.in("entity_id", atRiskIds);
-          } else {
-            // No at-risk clients — force an empty result instead of falling back to
-            // "all non-inactive clients" (matches the pattern used in Deals.tsx).
-            query = query.eq("entity_id", "00000000-0000-0000-0000-000000000000");
-          }
-        }
-      }
-
-      if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
-      if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-      if (salesRepFilter !== "all") query = query.eq("assigned_to", salesRepFilter);
       if (viewScope === "NONE") {
         if (isInitial) setClients([]); setHasMore(false); setLoading(false); return;
-      } else {
-        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-        if (scopeFilter) query = query.or(scopeFilter);
       }
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
 
-      // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
-      if (effectiveSearch) {
-        const { ids: matchedIds, truncated } = await searchEntityIds(effectiveSearch);
+      // Builds a fresh `anew_clients` query with every filter EXCEPT the
+      // entity_id-in/order/range terminal steps, so it can be invoked once
+      // per entity_id chunk (see the search branch below) without any
+      // filter leaking/duplicating between chunk queries — supabase-js
+      // query builders mutate `this`, so each chunk needs its own instance.
+      const buildClientsQuery = () => {
+        let q = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, custom_fields, origin_source, origin_source_id, origin_campaign_id", { count: 'exact' }).is("deleted_at", null);
+        if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
+        else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
+        // When searching, ignore status filter so inactive/churned/lost clients still appear
+        if (!effectiveSearch) {
+          if (statusFilter === "active") {
+            q = q.not("status", "in", '("inactive","churned","lost")');
+          } else if (statusFilter === "inactive") {
+            q = q.in("status", ["inactive", "churned", "lost"]);
+          } else if (statusFilter !== "all" && statusFilter !== "no_contact_30d" && statusFilter !== "no_contact_60d" && statusFilter !== "expiring_contracts" && statusFilter !== "missing_nif") {
+            q = q.eq("status", statusFilter);
+          }
+          if (statusFilter === "no_contact_30d") {
+            q = q.not("status", "in", '("inactive","churned","lost")');
+            const atRiskIds = alertDataRef.current.noContactClients.map(c => c.entityId).filter(Boolean);
+            if (atRiskIds.length > 0) {
+              q = q.in("entity_id", atRiskIds);
+            } else {
+              // No at-risk clients — force an empty result instead of falling back to
+              // "all non-inactive clients" (matches the pattern used in Deals.tsx).
+              q = q.eq("entity_id", "00000000-0000-0000-0000-000000000000");
+            }
+          }
+        }
+
+        if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
+        if (dateTo) q = q.lte("created_at", dateTo.toISOString());
+        if (salesRepFilter !== "all") q = q.eq("assigned_to", salesRepFilter);
+        if (scopeFilter) q = q.or(scopeFilter);
+        return q;
+      };
+
+      let data: ClientRecord[] | null;
+      let count: number | null;
+
+      if (!effectiveSearch) {
+        // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
+        // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
+        // e travar o scroll infinito num loop de "A carregar mais...".
+        let query = buildClientsQuery().order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
+        if (abortController) query = query.abortSignal(abortController.signal);
+        const result = await query;
+        if (result.error) throw result.error;
         if (isInitial && requestId !== clientsRequestIdRef.current) return;
-        if (truncated && truncatedWarnedRef.current !== effectiveSearch) {
-          truncatedWarnedRef.current = effectiveSearch;
-          toast({
-            title: "Demasiados resultados",
-            description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-          });
-        }
-        if (matchedIds.length === 0) {
-          if (isInitial) setClients([]);
-          setHasMore(false);
-          return;
-        }
-        query = query.in("entity_id", matchedIds);
-      }
+        data = result.data;
+        count = result.count;
+      } else {
+        // Server-side search across name/email/phone (via anew_clients.search_text,
+        // same denormalized-column + ILIKE architecture as anew_leads.search_text —
+        // see supabase/migrations/20261113100000_anew_clients_search_text.sql) plus
+        // NIF (via the search-entities Edge Function, unchanged; NIF is deliberately
+        // never stored in search_text — see that migration's header comment).
+        const { words, nifEntityIds } = await resolveClientSearch(effectiveSearch);
+        if (isInitial && requestId !== clientsRequestIdRef.current) return;
 
-      // Tiebreaker por "id" garante ordenação determinística: sem ele, clientes com o
-      // mesmo updated_at (comum em lotes/seed) podiam reaparecer em páginas seguintes
-      // e travar o scroll infinito num loop de "A carregar mais...".
-      query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + PAGE_SIZE - 1);
-      if (abortController) query = query.abortSignal(abortController.signal);
-      const { data, error, count } = await query;
-      if (error) throw error;
-      if (isInitial && requestId !== clientsRequestIdRef.current) return;
+        if (nifEntityIds.length === 0) {
+          // Common case: no NIF match, so this is a single DB-paginated query —
+          // no id resolution, no JS-side intersection, no chunking.
+          if (words.length === 0) {
+            if (isInitial) setClients([]);
+            setHasMore(false);
+            return;
+          }
+          let query = applyClientSearchTextFilter(buildClientsQuery(), words)
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(offset, offset + PAGE_SIZE - 1);
+          if (abortController) query = query.abortSignal(abortController.signal);
+          const result = await query;
+          if (result.error) throw result.error;
+          if (isInitial && requestId !== clientsRequestIdRef.current) return;
+          data = result.data;
+          count = result.count;
+        } else {
+          // Rare case: the term also matches a NIF. NIF_SEARCH_LIMIT (100) already
+          // caps nifEntityIds well under the URL-length ceiling that used to force
+          // chunkIds for the old per-word architecture, so a single `.in()` is safe.
+          // The word-match set has no such cap, so both are fetched in full and
+          // merged/sorted/paginated in JS — same technique the old architecture
+          // used, just two queries instead of one RPC call per word plus N id chunks.
+          const wordQuery = words.length > 0
+            ? applyClientSearchTextFilter(buildClientsQuery(), words)
+            : Promise.resolve({ data: [] as ClientRecord[], error: null });
+          const nifQuery = buildClientsQuery().in("entity_id", nifEntityIds);
+          const [wordResult, nifResult] = await Promise.all([wordQuery, nifQuery]);
+          if (isInitial && requestId !== clientsRequestIdRef.current) return;
+          if (wordResult.error) throw wordResult.error;
+          if (nifResult.error) throw nifResult.error;
+
+          const mergedById = new Map<string, ClientRecord>();
+          (wordResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+          (nifResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+          const sorted = Array.from(mergedById.values()).sort((a, b) => {
+            const byUpdatedAt = (b.updated_at || "").localeCompare(a.updated_at || "");
+            if (byUpdatedAt !== 0) return byUpdatedAt;
+            return (b.id || "").localeCompare(a.id || "");
+          });
+
+          count = sorted.length;
+          data = sorted.slice(offset, offset + PAGE_SIZE);
+        }
+      }
 
       let newClients = (data || []) as ClientRecord[];
       const eIds = newClients.map(c => c.entity_id).filter(Boolean);
       if (eIds.length > 0) await resolveEntities(eIds);
 
-      // Text search is applied server-side above via searchEntityIds (entity_id .in).
+      // Text search is applied server-side above via anew_clients.search_text / NIF entity_id .in.
 
 
       // Post-filter: missing NIF / no contact (60d)
@@ -732,7 +796,14 @@ const AnewClients = () => {
         setLoadingMore(false);
       }
     }
-  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, alertData, resolveEntities, getIdentity, toast, t]);
+  // `noContactFilterKey` NAO e usado no corpo (o corpo le alertDataRef) e o
+  // eslint avisa que e uma dependencia "desnecessaria". E deliberado: e a
+  // unica coisa que faz esta callback ser recriada quando o conjunto "sem
+  // contacto" muda E esse filtro esta ativo. Trocar por `alertData` reabre o
+  // ciclo de recarregamento descrito em src/lib/clientsNoContactFilterKey.ts;
+  // remover a chave deixa o filtro `no_contact_30d` preso a um conjunto
+  // obsoleto.
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, noContactFilterKey, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
@@ -780,7 +851,30 @@ const AnewClients = () => {
     void openFromQuery();
   }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
 
-  const loadMoreClients = () => { if (!loadingMore && hasMore) loadClients(clients.length); };
+  // Guarda SINCRONA. `loadingMore` so reflete o pedido em curso depois do
+  // proximo render, e o disparo da sentinela pode repetir-se antes disso.
+  // Sem esta guarda, o segundo disparo abortava o `AbortController` do
+  // primeiro (clientsLoadMoreAbortControllerRef) e a pagina seguinte nunca
+  // chegava a entrar na lista — o scroll infinito parecia "encravar".
+  const loadMoreInFlightRef = useRef(false);
+  const loadMoreClients = useCallback(() => {
+    if (loadMoreInFlightRef.current || loadingMore || !hasMore) return;
+    loadMoreInFlightRef.current = true;
+    void Promise.resolve(loadClients(clients.length)).finally(() => {
+      loadMoreInFlightRef.current = false;
+    });
+  }, [loadingMore, hasMore, loadClients, clients.length]);
+
+  // Scroll infinito por IntersectionObserver, o mesmo que /proposals usa.
+  // Substitui o onScroll que corria a cada evento de scroll sobre a tabela
+  // (ate ~60 vezes por segundo, a ler scrollHeight/scrollTop/clientHeight e
+  // portanto a forcar layout em cada leitura) e o ref-callback que fazia a
+  // mesma medicao a montagem. A sentinela fica DENTRO do contentor que rola.
+  const { sentinelRef: clientsSentinelRef } = useSentinelInView({
+    onVisible: loadMoreClients,
+    enabled: hasMore,
+    isLoading: loading || loadingMore,
+  });
 
   // Background: load ALL clients recursively for analytics views
   const loadAllClients = useCallback(async () => {
@@ -788,41 +882,90 @@ const AnewClients = () => {
       const viewScope = getPermissionScope("clients.view");
       if (viewScope === "NONE") { setAllClients([]); setAllClientsLoaded(true); return; }
 
-      // Server-side search: pre-resolve matching entity_ids (covers full universe, not just first batch)
-      let searchEntityIdsList: string[] | null = null;
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      const SELECT_COLS = "id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id";
+
+      // Every filter EXCEPT the search-text/entity_id/order/range terminal steps,
+      // so it can be reused across the batched offset loop and the NIF branch
+      // below without any filter leaking/duplicating between them.
+      const buildBaseQuery = () => {
+        let q = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
+        if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
+        else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
+        if (scopeFilter) q = q.or(scopeFilter);
+        if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
+        if (dateTo) q = q.lte("created_at", dateTo.toISOString());
+        return q;
+      };
+
+      const words: string[] = [];
+      let nifEntityIds: string[] = [];
       if (effectiveSearch) {
-        const { ids } = await searchEntityIds(effectiveSearch);
-        if (ids.length === 0) {
+        const resolved = await resolveClientSearch(effectiveSearch);
+        words.push(...resolved.words);
+        nifEntityIds = resolved.nifEntityIds;
+        if (words.length === 0 && nifEntityIds.length === 0) {
           setAllClients([]);
           setAllClientsLoaded(true);
           return;
         }
-        searchEntityIdsList = ids;
       }
 
-      const BATCH = 500;
-      const all: ClientRecord[] = [];
-      let offset = 0;
-      let hasMore = true;
-      while (hasMore) {
-        let query = (supabase as any).from("anew_clients").select("id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id").is("deleted_at", null);
-        if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-        else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-        const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-        if (scopeFilter) query = query.or(scopeFilter);
-        if (searchEntityIdsList) query = query.in("entity_id", searchEntityIdsList);
-        if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
-        if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-        query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
-        const { data, error } = await query;
-        if (error) throw error;
-        const batch = (data || []) as ClientRecord[];
-        all.push(...batch);
-        // Resolve identities for new entity IDs
-        const eIds = batch.map(c => c.entity_id).filter(Boolean);
+      let all: ClientRecord[];
+      if (effectiveSearch) {
+        // Server-side search: name/email/phone via anew_clients.search_text
+        // (batched via offset/range — the match set can be in the hundreds,
+        // e.g. "mar" -> ~963 -- so it's fetched the same BATCH-loop way the
+        // no-search branch below already does), plus NIF via a single
+        // `.in()` (nifEntityIds is capped at 100 by NIF_SEARCH_LIMIT, well
+        // under the URL-length ceiling that used to force chunkIds here).
+        const mergedById = new Map<string, ClientRecord>();
+
+        if (words.length > 0) {
+          const BATCH = 500;
+          let offset = 0;
+          let hasMoreBatch = true;
+          while (hasMoreBatch) {
+            let query = applyClientSearchTextFilter(buildBaseQuery(), words)
+              .order("updated_at", { ascending: false }).order("id", { ascending: false })
+              .range(offset, offset + BATCH - 1);
+            const { data, error } = await query;
+            if (error) throw error;
+            const batch = (data || []) as ClientRecord[];
+            batch.forEach((row) => mergedById.set(row.id, row));
+            hasMoreBatch = batch.length === BATCH;
+            offset += BATCH;
+          }
+        }
+
+        if (nifEntityIds.length > 0) {
+          const { data, error } = await buildBaseQuery().in("entity_id", nifEntityIds);
+          if (error) throw error;
+          (data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+        }
+
+        all = Array.from(mergedById.values());
+        const eIds = all.map(c => c.entity_id).filter(Boolean);
         if (eIds.length > 0) await resolveEntities(eIds);
-        hasMore = batch.length === BATCH;
-        offset += BATCH;
+      } else {
+        const BATCH = 500;
+        const collected: ClientRecord[] = [];
+        let offset = 0;
+        let hasMoreBatch = true;
+        while (hasMoreBatch) {
+          let query = buildBaseQuery()
+            .order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
+          const { data, error } = await query;
+          if (error) throw error;
+          const batch = (data || []) as ClientRecord[];
+          collected.push(...batch);
+          // Resolve identities for new entity IDs
+          const eIds = batch.map(c => c.entity_id).filter(Boolean);
+          if (eIds.length > 0) await resolveEntities(eIds);
+          hasMoreBatch = batch.length === BATCH;
+          offset += BATCH;
+        }
+        all = collected;
       }
       setAllClients(all);
       setAllClientsLoaded(true);
@@ -1560,7 +1703,14 @@ const AnewClients = () => {
       });
       toast({
         title: "Exportação XLSX concluída",
-        description: `${result.rowCount} clientes exportados${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+        description: result.includesSensitive
+          ? `${result.rowCount} clientes exportados com campos sensíveis autorizados.`
+          : hasPermission("clients.export_sensitive")
+            // Chose not to include them: nothing was withheld from this user.
+            ? `${result.rowCount} clientes exportados sem campos sensíveis.`
+            // Withheld by permission — say so, or the user distributes an
+            // incomplete file believing it is complete.
+            : `${result.rowCount} clientes exportados. ${t('clients.toast.exportNoSensitive')}`,
       });
     } catch (error: any) {
       toast({ title: t('clients.toast.exportError'), description: error.message, variant: "destructive" });
@@ -1573,6 +1723,15 @@ const AnewClients = () => {
     const organizationId = companyFilter !== "all" ? companyFilter : activeCompany?.id;
     if (!organizationId) {
       toast({ title: t('clients.toast.selectOrganization'), variant: "destructive" });
+      return;
+    }
+    // Until permissions resolve, hasPermission answers false for everything.
+    // Falling through here would silently produce a file stripped of email,
+    // phone and NIF — no dialog, and nothing telling the user their export was
+    // reduced. That is exactly what happened while the permission bootstrap
+    // took a couple of seconds. Wait instead of downgrading.
+    if (permissionsLoading) {
+      toast({ title: t('clients.toast.permissionsLoading'), description: t('clients.toast.permissionsLoadingDesc') });
       return;
     }
     if (hasPermission("clients.export_sensitive")) {
@@ -1651,14 +1810,6 @@ const AnewClients = () => {
     if (sortColumn === col) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortColumn(col); setSortDir("desc"); }
   };
-
-  // Stable ref callback for the scroll container: auto-loads more when content fits on large screens.
-  // Using useCallback avoids React StrictMode calling the inline function twice (null + element).
-  const scrollContainerRef = useCallback((el: HTMLDivElement | null) => {
-    if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
-      loadMoreClients();
-    }
-  }, [hasMore, loadingMore, loadMoreClients]);
 
   if (loading) {
     return (
@@ -1985,6 +2136,39 @@ const AnewClients = () => {
                   </SelectContent>
                 </Select>
               )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-1.5 font-normal">
+                    <Calendar className="h-4 w-4" />
+                    {dateFrom && dateTo
+                      ? `${format(dateFrom, 'dd/MM/yy')} - ${format(dateTo, 'dd/MM/yy')}`
+                      : dateFrom
+                      ? t('clients.filters.dateSince', { date: format(dateFrom, 'dd/MM/yy') })
+                      : dateTo
+                      ? t('clients.filters.dateUntil', { date: format(dateTo, 'dd/MM/yy') })
+                      : t('clients.filters.date')}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="range"
+                    selected={{ from: dateFrom, to: dateTo }}
+                    onSelect={(range) => {
+                      setDateFrom(range?.from ? startOfDay(range.from) : undefined);
+                      setDateTo(range?.to ? endOfDay(range.to) : undefined);
+                    }}
+                    numberOfMonths={2}
+                    locale={pt}
+                  />
+                  {(dateFrom || dateTo) && (
+                    <div className="p-2 border-t flex justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => { setDateFrom(undefined); setDateTo(undefined); }}>
+                        {t('clients.filters.clearDates')}
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
               <ClientsTableColumns onColumnsChange={setVisibleClientColumns} />
             </div>
             {/* Special filter pills */}
@@ -2047,16 +2231,7 @@ const AnewClients = () => {
         ) : (
           <>
             <Card className="flex flex-col" style={{ maxHeight: 'calc(100vh - 380px)', minHeight: '400px' }}>
-              <div
-                ref={scrollContainerRef}
-                className="flex-1 min-h-0 overflow-auto leads-table-scroll"
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && !loadingMore && hasMore) {
-                    loadMoreClients();
-                  }
-                }}
-              >
+              <div className="flex-1 min-h-0 overflow-auto leads-table-scroll">
                 <Table density="compact" className="min-w-[1200px]" containerClassName="overflow-visible">
                   <TableHeader>
                     <TableRow>
@@ -2438,6 +2613,10 @@ const AnewClients = () => {
                   )}
                   </TableBody>
                 </Table>
+                {/* Sentinela do scroll infinito — TEM de ficar dentro deste
+                    contentor com overflow-auto: e o recorte dele que decide
+                    se esta visivel. */}
+                <div ref={clientsSentinelRef} aria-hidden="true" className="h-px" />
               </div>
             </Card>
           </>
@@ -2449,7 +2628,18 @@ const AnewClients = () => {
         <ClientDetailsDialog
           client={selectedClient} open={detailsOpen && !!selectedClient}
           onOpenChange={(open) => { setDetailsOpen(open); if (!open) setSelectedClient(null); }}
-          onClientUpdated={() => { loadClients(0, true); setDashboardKey(prev => prev + 1); }}
+          onClientUpdated={() => {
+            // O diálogo grava via rpc_update_client, que escreve nome, email,
+            // telefone e NIF na entidade. Esses campos vêm da cache do
+            // useEntityIdentity, e o resolveEntities() que loadClients dispara
+            // salta qualquer id já em cache — sem esta invalidação a lista
+            // recarregava e continuava a mostrar os valores anteriores até um
+            // F5. Estado e comercial actualizavam bem, por virem da linha do
+            // cliente, o que fazia o defeito parecer intermitente.
+            invalidateEntities([selectedClient?.entity_id]);
+            loadClients(0, true);
+            setDashboardKey(prev => prev + 1);
+          }}
         />
 
         {/* New Client Dialog */}

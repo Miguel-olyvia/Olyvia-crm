@@ -251,6 +251,66 @@ function applyOwnerScope(query: any, auth: AuthorizationContext): any {
   return query.or(`created_by.in.(${ids.join(",")}),assigned_to.in.(${ids.join(",")})`);
 }
 
+/**
+ * PostgREST serialises `.in()` into the query string, and the gateway rejects
+ * URLs past roughly 12 kB. Measured against this project: 300 ids (~11 kB)
+ * succeed, 400 (~15 kB) fail outright at the connection level.
+ *
+ * Exporting an organization with 5418 leads built a ~200 kB URL, so every
+ * lookup here failed and the whole export returned 500. Smaller organizations
+ * stayed under the limit, which is why leads broke while clients and contacts
+ * kept working — the defect was invisible until a tenant grew.
+ *
+ * 200 ids per request is ~7.5 kB, leaving room for the rest of the URL and the
+ * headers.
+ */
+const IN_CHUNK_SIZE = 200;
+
+/**
+ * PostgREST caps every response at `db-max-rows`, 1000 on this project, and
+ * does so silently — `.limit(10001)` still returns 1000 rows with no error and
+ * no indication that anything was dropped. An organization with 5418 leads was
+ * therefore exporting 1000 of them, which is worse than failing outright.
+ *
+ * Pages through the result instead, rebuilding the query each time because
+ * `.range()` needs a fresh builder. The caller's query must carry a
+ * deterministic ORDER BY or pages can overlap.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllRows(build: () => any): Promise<any[]> {
+  const rows: any[] = [];
+  for (let from = 0; from <= MAX_EXPORT_ROWS; from += PAGE_SIZE) {
+    const { data, error } = await build().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    // A short page means the end of the result set.
+    if (data.length < PAGE_SIZE) break;
+    // One row past the cap is enough for the caller's limit check to trip.
+    if (rows.length > MAX_EXPORT_ROWS) break;
+  }
+  return rows;
+}
+
+async function selectInChunks(
+  ids: string[],
+  build: (chunk: string[]) => any,
+): Promise<any[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK_SIZE) {
+    chunks.push(ids.slice(i, i + IN_CHUNK_SIZE));
+  }
+  const results = await Promise.all(chunks.map((chunk) => build(chunk)));
+  const rows: any[] = [];
+  for (const result of results) {
+    if (result.error) throw result.error;
+    if (result.data) rows.push(...result.data);
+  }
+  return rows;
+}
+
 async function resolveIdentityMaps(
   admin: any,
   entityIds: string[],
@@ -264,40 +324,46 @@ async function resolveIdentityMaps(
   const vat = new Map<string, string>();
   if (uniqueIds.length === 0) return { identity, email, phone, vat };
 
-  const { data: entities, error: entityError } = await admin
-    .from("anew_entities")
-    .select("id, display_name, type, first_name, last_name")
-    .in("id", uniqueIds);
-  if (entityError) throw entityError;
-  for (const entity of entities || []) identity.set(entity.id, entity);
+  const entities = await selectInChunks(uniqueIds, (chunk) =>
+    admin
+      .from("anew_entities")
+      .select("id, display_name, type, first_name, last_name")
+      .in("id", chunk),
+  );
+  for (const entity of entities) identity.set(entity.id, entity);
 
   if (!includeSensitive) return { identity, email, phone, vat };
 
-  const [emailsResult, phonesResult, fiscalLinksResult] = await Promise.all([
-    admin
-      .from("anew_entity_emails")
-      .select("entity_id, email, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
-    admin
-      .from("anew_entity_phones")
-      .select("entity_id, phone_number, country_code, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
-    admin
-      .from("anew_entity_fiscal_entities")
-      .select("entity_id, fiscal_entity_id, is_primary")
-      .in("entity_id", uniqueIds)
-      .order("is_primary", { ascending: false }),
+  // Chunks are split by entity id, so every row for a given entity lands in the
+  // same request and the is_primary ordering below still holds per entity.
+  const [emailRows, phoneRows, fiscalLinkRows] = await Promise.all([
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_emails")
+        .select("entity_id, email, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_phones")
+        .select("entity_id, phone_number, country_code, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
+    selectInChunks(uniqueIds, (chunk) =>
+      admin
+        .from("anew_entity_fiscal_entities")
+        .select("entity_id, fiscal_entity_id, is_primary")
+        .in("entity_id", chunk)
+        .order("is_primary", { ascending: false }),
+    ),
   ]);
-  if (emailsResult.error) throw emailsResult.error;
-  if (phonesResult.error) throw phonesResult.error;
-  if (fiscalLinksResult.error) throw fiscalLinksResult.error;
 
-  for (const item of emailsResult.data || []) {
+  for (const item of emailRows) {
     if (!email.has(item.entity_id)) email.set(item.entity_id, item.email);
   }
-  for (const item of phonesResult.data || []) {
+  for (const item of phoneRows) {
     if (!phone.has(item.entity_id)) {
       phone.set(
         item.entity_id,
@@ -306,18 +372,16 @@ async function resolveIdentityMaps(
     }
   }
 
-  const fiscalLinks = fiscalLinksResult.data || [];
+  const fiscalLinks = fiscalLinkRows;
   const fiscalIds = Array.from(
     new Set(fiscalLinks.map((link: any) => link.fiscal_entity_id).filter(Boolean)),
-  );
+  ) as string[];
   if (fiscalIds.length > 0 && decKey) {
-    const { data: fiscalEntities, error: fiscalError } = await admin
-      .from("fiscal_entities")
-      .select("id, nif_encrypted")
-      .in("id", fiscalIds);
-    if (fiscalError) throw fiscalError;
+    const fiscalEntities = await selectInChunks(fiscalIds, (chunk) =>
+      admin.from("fiscal_entities").select("id, nif_encrypted").in("id", chunk),
+    );
     const nifById = new Map<string, string>();
-    for (const item of fiscalEntities || []) {
+    for (const item of fiscalEntities) {
       if (!item.nif_encrypted) continue;
       try {
         nifById.set(item.id, await decryptNif(item.nif_encrypted, decKey));
@@ -345,27 +409,48 @@ async function exportClients(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_clients")
-    .select("entity_id, status, client_type, created_at, created_by, assigned_to")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
+  const buildClientsQuery = () => {
+    let query = admin
+      .from("anew_clients")
+      .select("entity_id, status, client_type, created_at, created_by, assigned_to")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildClientsQuery);
 
-  const records = data || [];
-  const maps = await resolveIdentityMaps(
-    admin,
-    records.map((record: any) => record.entity_id),
-    includeSensitive,
-    decKey,
+  // `assigned_to` is a business user id; the file gets the person's name, never
+  // the id — same treatment exportLeads already gives it. Bounded by the number
+  // of distinct assignees, so no chunking needed here.
+  const assignedIds = Array.from(
+    new Set(records.map((record: any) => record.assigned_to).filter(Boolean)),
+  ) as string[];
+
+  const [maps, usersResult] = await Promise.all([
+    resolveIdentityMaps(
+      admin,
+      records.map((record: any) => record.entity_id),
+      includeSensitive,
+      decKey,
+    ),
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (usersResult.error) throw usersResult.error;
+
+  const userNames = new Map(
+    (usersResult.data || []).map((u: any) => [u.id, u.name]),
   );
+
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
     status: record.status || "",
     clientType: record.client_type || "",
+    assignedTo: userNames.get(record.assigned_to) || "",
     createdAt: record.created_at,
     email: maps.email.get(record.entity_id) || "",
     phone: maps.phone.get(record.entity_id) || "",
@@ -380,18 +465,19 @@ async function exportContacts(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_contacts")
-    .select("entity_id, position, status, created_at, created_by, assigned_to")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null)
-    .is("converted_to_client_id", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  const buildContactsQuery = () => {
+    let query = admin
+      .from("anew_contacts")
+      .select("entity_id, position, status, created_at, created_by, assigned_to")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .is("converted_to_client_id", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildContactsQuery);
   const maps = await resolveIdentityMaps(
     admin,
     records.map((record: any) => record.entity_id),
@@ -417,17 +503,21 @@ async function exportLeads(
   includeSensitive: boolean,
   decKey: NifKey | null,
 ) {
-  let query = admin
-    .from("anew_leads")
-    .select("entity_id, status, source_id, assigned_to, created_by, created_at")
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  query = applyCommonFilters(query, request.filters);
-  query = applyOwnerScope(query, auth);
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  // Rebuilt per page: `.range()` has to be applied to a fresh builder, and the
+  // id ordering makes the paging deterministic (without an ORDER BY, PostgREST
+  // may repeat or skip rows across pages).
+  const buildLeadsQuery = () => {
+    let query = admin
+      .from("anew_leads")
+      .select("entity_id, status, source_id, assigned_to, created_by, created_at")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildLeadsQuery);
   const sourceIds = Array.from(
     new Set(records.map((r: any) => r.source_id).filter(Boolean)),
   );
@@ -446,7 +536,7 @@ async function exportLeads(
       ? admin.from("lead_sources").select("id, name").in("id", sourceIds)
       : Promise.resolve({ data: [], error: null }),
     assignedIds.length > 0
-      ? admin.from("anew_users").select("id, full_name").in("id", assignedIds)
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
   if (sourcesResult.error) throw sourcesResult.error;
@@ -456,7 +546,7 @@ async function exportLeads(
     (sourcesResult.data || []).map((s: any) => [s.id, s.name]),
   );
   const userNames = new Map(
-    (usersResult.data || []).map((u: any) => [u.id, u.full_name]),
+    (usersResult.data || []).map((u: any) => [u.id, u.name]),
   );
 
   return records.map((r: any) => ({
@@ -479,33 +569,34 @@ async function exportQuotes(
   decKey: NifKey | null,
   caller: { anewUserId: string },
 ) {
-  let query = admin
-    .from("quotes")
-    .select(
-      "quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
-    )
-    .in("organization_id", auth.exportOrgIds)
-    .is("deleted_at", null);
-  if (request.filters.status) query = query.eq("estado", request.filters.status);
-  if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
-  if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
-  if (request.filters.assignedTo === "none") {
-    query = query.is("assigned_to", null);
-  } else if (request.filters.assignedTo) {
-    query = query.eq("assigned_to", request.filters.assignedTo);
-  }
-  // "onlyMine" always narrows to the caller's own records — this can never
-  // widen access beyond whatever applyOwnerScope would already allow, since a
-  // caller's own anewUserId is always within their own permitted scope.
-  if (request.filters.onlyMine) {
-    query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
-  } else {
-    query = applyOwnerScope(query, auth);
-  }
-  const { data, error } = await query.limit(MAX_EXPORT_ROWS + 1);
-  if (error) throw error;
-
-  const records = data || [];
+  const buildQuotesQuery = () => {
+    let query = admin
+      .from("quotes")
+      .select(
+        "quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    if (request.filters.status) query = query.eq("estado", request.filters.status);
+    if (request.filters.dateFrom) query = query.gte("created_at", `${request.filters.dateFrom}T00:00:00`);
+    if (request.filters.dateTo) query = query.lte("created_at", `${request.filters.dateTo}T23:59:59.999`);
+    if (request.filters.assignedTo === "none") {
+      query = query.is("assigned_to", null);
+    } else if (request.filters.assignedTo) {
+      query = query.eq("assigned_to", request.filters.assignedTo);
+    }
+    // "onlyMine" always narrows to the caller's own records — this can never
+    // widen access beyond whatever applyOwnerScope would already allow, since a
+    // caller's own anewUserId is always within their own permitted scope.
+    if (request.filters.onlyMine) {
+      query = query.or(`created_by.eq.${caller.anewUserId},assigned_to.eq.${caller.anewUserId}`);
+    } else {
+      query = applyOwnerScope(query, auth);
+    }
+    return query;
+  };
+  const records = await fetchAllRows(buildQuotesQuery);
   const [maps, organizationsResult] = await Promise.all([
     resolveIdentityMaps(
       admin,
@@ -554,6 +645,293 @@ async function exportQuotes(
       baseModel: record.modelo_base || "",
       siteAddress: includeSensitive ? record.obra_endereco || "" : "",
     }));
+}
+
+// Portuguese labels for the portal status stored on client_portal_users /
+// derived for contracts — mirrors PortalStatusBadge (src/components/portal/PortalStatusBadge.tsx)
+// so the exported text matches what the UI badge shows.
+const PORTAL_STATUS_LABELS: Record<string, string> = {
+  sent: "Enviado",
+  viewed: "Acedido",
+  signed: "Assinado",
+};
+
+function formatPortalStatus(status: string | null | undefined): string {
+  if (!status) return "";
+  return PORTAL_STATUS_LABELS[status] || status;
+}
+
+async function exportProposals(
+  admin: any,
+  request: ExportRequest,
+  auth: AuthorizationContext,
+) {
+  // No column on this module is ever sensitive (see exportConfig.ts), so
+  // there is nothing here that depends on includeSensitive/decKey — every
+  // field below is already shown in the Proposals.tsx table to anyone with
+  // proposals.view.
+  const buildProposalsQuery = () => {
+    let query = admin
+      .from("proposals")
+      .select(
+        "id, title, value, status, valid_until, created_at, created_by, assigned_to, entity_id, deal_id, client_contract_id",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildProposalsQuery);
+  const proposalIds = records.map((r: any) => r.id);
+
+  const dealIds = Array.from(new Set(records.map((r: any) => r.deal_id).filter(Boolean))) as string[];
+  const assignedIds = Array.from(
+    new Set(records.map((r: any) => r.assigned_to).filter(Boolean)),
+  ) as string[];
+
+  const [dealsResult, usersResult, quoteRows, linkRows, portalUserRows] = await Promise.all([
+    dealIds.length > 0
+      ? admin.from("deals").select("id, title, entity_id").in("id", dealIds)
+      : Promise.resolve({ data: [], error: null }),
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+    // Whether a proposal has a linked quote — quotes.proposal_id points back
+    // at the proposal, same relationship Proposals.tsx reads via
+    // `quotes!proposal_id`.
+    selectInChunks(proposalIds, (chunk) =>
+      admin.from("quotes").select("proposal_id").in("proposal_id", chunk).in(
+        "organization_id",
+        auth.exportOrgIds,
+      ),
+    ),
+    // pipeline_links carries the authoritative quote_id/contract_id for the
+    // "Pipeline" column (same source Proposals.tsx uses via `pipelineLinks`).
+    selectInChunks(proposalIds, (chunk) =>
+      admin
+        .from("pipeline_links")
+        .select("proposal_id, quote_id, contract_id")
+        .in("proposal_id", chunk)
+        .in("organization_id", auth.exportOrgIds),
+    ),
+    // client_portal_users.portal_status is the same source Proposals.tsx
+    // reads for the "Portal" column.
+    selectInChunks(proposalIds, (chunk) =>
+      admin
+        .from("client_portal_users")
+        .select("proposal_id, portal_status")
+        .in("proposal_id", chunk)
+        .in("organization_id", auth.exportOrgIds),
+    ),
+  ]);
+  if (dealsResult.error) throw dealsResult.error;
+  if (usersResult.error) throw usersResult.error;
+
+  const deals = new Map<string, any>((dealsResult.data || []).map((d: any) => [d.id, d]));
+  const userNames = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
+
+  const quoteExistsSet = new Set((quoteRows || []).map((q: any) => q.proposal_id));
+  const linkByProposal = new Map((linkRows || []).map((l: any) => [l.proposal_id, l]));
+  const portalStatusByProposal = new Map(
+    (portalUserRows || []).map((p: any) => [p.proposal_id, p.portal_status]),
+  );
+
+  // Client identity: prefer the proposal's own entity_id, fall back to the
+  // linked deal's entity_id — same fallback Proposals.tsx uses when
+  // resolving `_clientName` for proposals created without one.
+  const entityIds = Array.from(
+    new Set(
+      records
+        .map((r: any) => r.entity_id || deals.get(r.deal_id)?.entity_id)
+        .filter(Boolean),
+    ),
+  ) as string[];
+  const identityMaps = await resolveIdentityMaps(admin, entityIds, false, null);
+
+  return records.map((record: any) => {
+    const effectiveEntityId = record.entity_id || deals.get(record.deal_id)?.entity_id;
+    const link = linkByProposal.get(record.id);
+    const dealExists = !!record.deal_id;
+    const quoteExists = quoteExistsSet.has(record.id) || !!link?.quote_id;
+    const contractCreated = !!link?.contract_id || !!record.client_contract_id;
+    const pipeline = [
+      dealExists ? "Pedido ✓" : "Sem pedido",
+      quoteExists ? "Orçamento ✓" : "Sem orçamento",
+      contractCreated ? "Contrato ✓" : "Contrato não criado",
+    ].join(" · ");
+    const portalRaw = record.status === "accepted" ? "signed" : portalStatusByProposal.get(record.id);
+
+    return {
+      title: record.title || "",
+      client: identityMaps.identity.get(effectiveEntityId)?.display_name || "",
+      assignedTo: userNames.get(record.assigned_to) || "",
+      deal: deals.get(record.deal_id)?.title || "",
+      value: Number(record.value) || 0,
+      status: record.status || "",
+      validUntil: record.valid_until,
+      pipeline,
+      portal: formatPortalStatus(portalRaw),
+      createdAt: record.created_at,
+    };
+  });
+}
+
+async function exportContracts(admin: any, request: ExportRequest, auth: AuthorizationContext) {
+  // No column on this module is ever sensitive (see exportConfig.ts) — the
+  // email column is exported to everyone with client_contracts.export, no
+  // dialog, because it's already visible in the ClientContracts.tsx table to
+  // anyone with client_contracts.view.
+  const buildContractsQuery = () => {
+    let query = admin
+      .from("client_contracts")
+      .select(
+        "id, contract_number, status, start_date, end_date, total_value, quote_id, entity_id, assigned_to, created_by, updated_at, proposals!client_contracts_proposal_id_fkey(id, title, quotes(id, total))",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildContractsQuery);
+  const contractIds = records.map((r: any) => r.id);
+
+  const assignedIds = Array.from(
+    new Set(records.flatMap((r: any) => [r.assigned_to, r.created_by]).filter(Boolean)),
+  ) as string[];
+  const entityIds = Array.from(new Set(records.map((r: any) => r.entity_id).filter(Boolean))) as string[];
+
+  const [usersResult, sentDocsRows, identityMaps] = await Promise.all([
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+    // "sent": this contract was published to the portal — same source
+    // ClientContracts.tsx uses for its portal status column.
+    selectInChunks(contractIds, (chunk) =>
+      admin
+        .from("client_portal_documents")
+        .select("document_id")
+        .in("organization_id", auth.exportOrgIds)
+        .eq("document_type", "contract")
+        .eq("is_visible", true)
+        .in("document_id", chunk),
+    ),
+    // Email has no sensitive gate for this module (product decision) — always
+    // resolved, regardless of the caller's includeSensitive flag/permission.
+    resolveIdentityMaps(admin, entityIds, true, null),
+  ]);
+  if (usersResult.error) throw usersResult.error;
+
+  const userNames = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
+  const sentIds = (sentDocsRows || []).map((d: any) => d.document_id).filter(Boolean);
+  const sentSet = new Set(sentIds);
+
+  // "viewed": an actual "viewed" access-log entry for this document — only
+  // meaningful for contracts already sent. client_portal_access_log has no
+  // organization_id column, so scoping comes from sentIds already being
+  // restricted to this caller's organizations (same pattern ClientContracts.tsx
+  // uses).
+  let viewedSet = new Set<string>();
+  if (sentIds.length > 0) {
+    const viewLogRows = await selectInChunks(sentIds, (chunk) =>
+      admin
+        .from("client_portal_access_log")
+        .select("document_id")
+        .eq("document_type", "contract")
+        .eq("action", "viewed")
+        .in("document_id", chunk),
+    );
+    viewedSet = new Set(viewLogRows.map((d: any) => d.document_id));
+  }
+
+  const now = Date.now();
+
+  return records.map((record: any) => {
+    const userName = userNames.get(record.assigned_to) || userNames.get(record.created_by) || "";
+    const isSigned = record.status === "signed" || record.status === "active";
+    const isExpired = record.status === "expired";
+    const isDraft = record.status === "draft";
+
+    // Same fallback chain as getEffectiveContractValue (src/utils/contractValue.ts):
+    // prefer the linked quote's total (includes the global discount) over the
+    // stored total_value.
+    let value = Number(record.total_value) || 0;
+    if (record.quote_id) {
+      const linkedQuote = (record.proposals?.quotes || []).find((q: any) => q.id === record.quote_id);
+      if (linkedQuote?.total != null) value = Number(linkedQuote.total);
+    }
+
+    let period = "—";
+    if (record.start_date) {
+      const start = new Date(record.start_date).toLocaleDateString("pt-PT");
+      const end = record.end_date ? new Date(record.end_date).toLocaleDateString("pt-PT") : "Indeterminado";
+      period = `${start} - ${end}`;
+    }
+
+    let progress = "";
+    if (record.start_date && record.end_date) {
+      const start = new Date(record.start_date).getTime();
+      const end = new Date(record.end_date).getTime();
+      const total = end - start;
+      if (total > 0) {
+        const pct = Math.min(100, Math.max(0, Math.round(((now - start) / total) * 100)));
+        const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+        progress = `${pct}% · ${daysLeft > 0 ? `${daysLeft} dias` : "Expirado"}`;
+      }
+    }
+
+    let renewal = "—";
+    if (record.end_date) {
+      const end = new Date(record.end_date).getTime();
+      const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+      renewal = `${daysLeft}d · ${daysLeft <= 0 ? "Expirado" : "Até expirar"}`;
+    }
+
+    const sentOrViewed = sentSet.has(record.id) || viewedSet.has(record.id);
+    // Mirrors getSignatureBadge (src/pages/ClientContracts.tsx) exactly,
+    // including its "✍️" prefix on every branch.
+    let signature = "✍️ Não enviado";
+    if (isSigned) {
+      const date = record.updated_at
+        ? new Date(record.updated_at).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" })
+        : "";
+      signature = `✍️ Assinado ${date}`.trim();
+    } else if (record.status === "pending_signature") {
+      signature = "✍️ A aguardar assinatura";
+    } else if (sentOrViewed) {
+      signature = "✍️ Enviado";
+    }
+
+    let pipeline = "";
+    if (isSigned) pipeline = "Pipeline completo ✅";
+    else if (isExpired) pipeline = "Não renovado ❌";
+    else if (isDraft) pipeline = "Falta assinar";
+    else if (record.status === "pending_signature") pipeline = "Aguarda assinatura";
+
+    let portal = "";
+    if (isSigned) portal = formatPortalStatus("signed");
+    else if (viewedSet.has(record.id)) portal = formatPortalStatus("viewed");
+    else if (sentSet.has(record.id)) portal = formatPortalStatus("sent");
+
+    return {
+      number: record.contract_number || "",
+      client: identityMaps.identity.get(record.entity_id)?.display_name || "",
+      proposal: record.proposals?.title || "",
+      value,
+      period,
+      progress,
+      renewal,
+      status: record.status || "",
+      signature,
+      email: identityMaps.email.get(record.entity_id) || "",
+      pipeline,
+      portal,
+      assignedTo: userName,
+    };
+  });
 }
 
 async function updateAudit(admin: any, auditId: string | null, values: Record<string, unknown>) {
@@ -684,7 +1062,11 @@ Deno.serve(async (req: Request) => {
           ? await exportContacts(admin, request, auth, includeSensitive, decKey)
           : request.module === "leads"
             ? await exportLeads(admin, request, auth, includeSensitive, decKey)
-            : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
+            : request.module === "proposals"
+              ? await exportProposals(admin, request, auth)
+              : request.module === "client_contracts"
+                ? await exportContracts(admin, request, auth)
+                : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
