@@ -5006,6 +5006,9 @@ export const translations = {
     'proposals.template.termsPlaceholder': 'Enter terms and conditions...',
 
     // Client Contracts
+    'clientContracts.filters.comercial': 'Sales rep',
+    'clientContracts.filters.allComercials': 'All sales reps',
+    'clientContracts.filters.noComercial': 'No sales rep assigned',
     'clientContracts.title': 'Client Contracts',
     'clientContracts.description': 'Manage contracts and digital signatures',
     'clientContracts.newContract': 'New Contract',
@@ -12344,6 +12347,9 @@ export const translations = {
     // Client Contracts
     'clientContracts.title': 'Contratos de Clientes',
     'clientContracts.description': 'Gerir contratos e assinaturas digitais',
+    'clientContracts.filters.comercial': 'Comercial',
+    'clientContracts.filters.allComercials': 'Todos os comerciais',
+    'clientContracts.filters.noComercial': 'Sem comercial atribuído',
     'clientContracts.newContract': 'Novo Contrato',
     'clientContracts.noContractsFound': 'Nenhum contrato encontrado.',
     'clientContracts.createFirstContract': 'Crie o primeiro contrato para começar.',

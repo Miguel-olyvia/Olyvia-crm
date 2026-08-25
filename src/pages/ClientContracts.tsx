@@ -8,6 +8,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
+import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -96,6 +97,22 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
 };
 
+/**
+ * Comercial efectivo de um contrato, para o filtro "Comercial".
+ *
+ * Tem de devolver EXACTAMENTE o mesmo dono que a coluna COMERCIAL mostra: essa
+ * coluna resolve `assigned_to_name` como `assigned_to` com recurso a
+ * `created_by` quando nao ha atribuicao (ver a query de contratos). Se o filtro
+ * olhasse so para `assigned_to`, uma linha que mostra "Joao" (herdado de
+ * created_by) desaparecia ao filtrar por Joao e aparecia em "Sem comercial" —
+ * a lista contradiria a propria coluna.
+ *
+ * "Sem comercial atribuido" e portanto o caso em que nem ha `assigned_to` nem
+ * `created_by`, que e tambem quando a coluna mostra "—".
+ */
+const getContractComercialId = (contract: ClientContract): string | null =>
+  (contract.assigned_to as string | null | undefined) || (contract.created_by ?? null) || null;
+
 const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
@@ -126,6 +143,7 @@ const ClientContracts = () => {
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [onlyMine, setOnlyMine] = useState(false);
+  const [comercialFilter, setComercialFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSignConfirmOpen, setIsSignConfirmOpen] = useState(false);
   const [signingContractId, setSigningContractId] = useState<string | null>(null);
@@ -362,6 +380,16 @@ const ClientContracts = () => {
 
   const viewScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.view");
   const teamMemberIdsKey = teamMemberIds.join(",");
+
+  // Roster do filtro "Comercial". Usa o MESMO ambito da listagem (viewScope),
+  // para o dropdown nunca revelar comerciais cujos contratos o utilizador
+  // nem sequer consegue ver na lista.
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: viewScope,
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
 
   const { data: contracts = [], isLoading, isFetched } = useQuery({
     queryKey: ["client-contracts", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey],
@@ -734,6 +762,16 @@ const ClientContracts = () => {
     if (onlyMine && currentUserId) {
       result = result.filter(c => c.created_by === currentUserId);
     }
+    // Filtro "Comercial". ESTE e o unico sitio onde ele e aplicado: os cartoes
+    // de KPI leem de `filteredContracts`, por isso acompanham-no automaticamente.
+    // Nao duplicar este predicado numa query ao servidor nem noutro `.filter()`
+    // — dois predicados sobre a mesma coisa foi o que fez os KPI divergirem da
+    // lista nos Orcamentos.
+    if (comercialFilter === "none") {
+      result = result.filter(c => getContractComercialId(c) === null);
+    } else if (comercialFilter !== "all") {
+      result = result.filter(c => getContractComercialId(c) === comercialFilter);
+    }
     if (statusFilter !== "all") {
       if (statusFilter === "expiring") {
         result = result.filter(c => {
@@ -767,7 +805,7 @@ const ClientContracts = () => {
       });
     }
     return result;
-  }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo]);
+  }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo, comercialFilter]);
 
   // KPIs — computed over filteredContracts so cards reflect active filters
   const kpis = useMemo(() => {
@@ -1713,6 +1751,18 @@ const ClientContracts = () => {
                   <SelectItem value="expired">Expirado</SelectItem>
                   <SelectItem value="cancelled">Anulado</SelectItem>
                   <SelectItem value="expiring">A expirar</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={comercialFilter} onValueChange={setComercialFilter}>
+                <SelectTrigger className="w-[160px] h-9">
+                  <SelectValue placeholder={t('clientContracts.filters.comercial')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('clientContracts.filters.allComercials')}</SelectItem>
+                  <SelectItem value="none">{t('clientContracts.filters.noComercial')}</SelectItem>
+                  {comercialUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Button
