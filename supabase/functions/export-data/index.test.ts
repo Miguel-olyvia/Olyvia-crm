@@ -34,9 +34,11 @@ import {
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   applyCommonFilters,
+  fetchAllRows,
   fetchScopedRows,
   IN_CHUNK_SIZE,
   MAX_SELECTION_IDS,
+  PAGE_SIZE,
   parseRequest,
   selectInChunks,
   type AuthorizationContext,
@@ -287,6 +289,125 @@ Deno.test("fetchScopedRows: with no ids, falls back to the normal paginated fetc
   const result = await fetchScopedRows(buildQuery, undefined);
 
   assertEquals(result.length, 3);
+});
+
+// ── fetchAllRows: parallel pagination ───────────────────────────────────
+
+Deno.test("fetchAllRows: pages through more than PAGE_SIZE rows, in id order, with no duplicates", async () => {
+  const total = PAGE_SIZE * 2 + 500;
+  const rows: FakeRow[] = Array.from({ length: total }, (_, i) => ({
+    id: String(i).padStart(8, "0"),
+    organization_id: ORG_A,
+    deleted_at: null,
+  }));
+  const admin = makeFakeAdmin(rows);
+  const build = () =>
+    admin
+      .from("proposals")
+      .select("id, organization_id")
+      .in("organization_id", [ORG_A])
+      .is("deleted_at", null)
+      .order("id");
+
+  const result = await fetchAllRows(build);
+
+  assertEquals(result.length, total);
+  assertEquals(new Set(result.map((r) => r.id)).size, total, "expected no duplicate rows");
+  assertEquals(
+    result.map((r) => r.id),
+    rows.map((r) => r.id),
+    "expected rows in ascending id order, matching the query's ORDER BY",
+  );
+});
+
+Deno.test("fetchAllRows: a single short page (the common case) needs exactly one request", async () => {
+  const rows = buildFixtureRows(3, 0);
+  const admin = makeFakeAdmin(rows);
+  let requestCount = 0;
+  const build = () => {
+    requestCount += 1;
+    return admin
+      .from("proposals")
+      .select("id, organization_id")
+      .in("organization_id", [ORG_A])
+      .is("deleted_at", null)
+      .order("id");
+  };
+
+  const result = await fetchAllRows(build);
+
+  assertEquals(result.length, 3);
+  // No count round trip and no second batch: the first page already came
+  // back short, which is the common case (clients, contracts, proposals).
+  assertEquals(requestCount, 1, "expected no extra requests once the first page is short");
+});
+
+Deno.test("fetchAllRows: fetches in doubling parallel batches (1, 2, 4...) and stops at the first short last-page", async () => {
+  // 6 full pages + 1 short one, mirroring roughly what leads looks like:
+  // several thousand rows spanning more than PAGE_SIZE * 4.
+  const total = PAGE_SIZE * 6 + 500;
+  const requestedFroms: number[] = [];
+  const build = () => ({
+    range: (from: number) => {
+      requestedFroms.push(from);
+      const length = Math.max(0, Math.min(PAGE_SIZE, total - from));
+      const data = Array.from({ length }, (_, i) => ({ id: String(from + i).padStart(8, "0") }));
+      return Promise.resolve({ data, error: null });
+    },
+  });
+
+  const result = await fetchAllRows(build);
+
+  assertEquals(result.length, total);
+  // Batch 1: [0]. Batch 2: [1000, 2000]. Batch 3: [3000, 4000, 5000, 6000] —
+  // the last of which (6000) comes back short (500 rows), stopping there.
+  // No wasted requests beyond that: exactly the 7 pages the data needs.
+  assertEquals(requestedFroms, [0, 1000, 2000, 3000, 4000, 5000, 6000]);
+});
+
+Deno.test("fetchAllRows: dedupes a row duplicated across the page boundary (e.g. a concurrent insert shifting rows)", async () => {
+  const pageOneRows = Array.from({ length: PAGE_SIZE }, (_, i) => ({ id: `p1-${i}` }));
+  // Page two "accidentally" repeats the last row of page one — the shape a
+  // concurrent insert produces between batches (see fetchAllRows' doc
+  // comment in requestScoping.ts).
+  const pageTwoRows = [pageOneRows[PAGE_SIZE - 1], { id: "p2-new" }];
+  const build = () => ({
+    range: (from: number) => {
+      if (from === 0) return Promise.resolve({ data: pageOneRows, error: null });
+      if (from === PAGE_SIZE) return Promise.resolve({ data: pageTwoRows, error: null });
+      // Batch 2 also requests from=2*PAGE_SIZE (doubling batch size); coming
+      // back empty is what stops the loop, even though the *other* page in
+      // this same batch (pageTwoRows, above) was already short.
+      return Promise.resolve({ data: [], error: null });
+    },
+  });
+
+  const result = await fetchAllRows(build);
+
+  assertEquals(result.length, PAGE_SIZE + 1, "the repeated row must be counted once, not twice");
+  assertEquals(new Set(result.map((r) => r.id)).size, result.length);
+  assertEquals(result[result.length - 1].id, "p2-new");
+});
+
+Deno.test("fetchAllRows: preserves row order across pages even when a later page resolves first", async () => {
+  const total = PAGE_SIZE * 3;
+  const build = () => ({
+    range: async (from: number) => {
+      // Deliberately resolve later pages faster than earlier ones, to prove
+      // ordering comes from array position, not resolution timing.
+      const delayMs = from === 0 ? 30 : from === PAGE_SIZE ? 15 : 0;
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const length = Math.max(0, Math.min(PAGE_SIZE, total - from));
+      const data = Array.from({ length }, (_, i) => ({ id: String(from + i).padStart(6, "0") }));
+      return { data, error: null };
+    },
+  });
+
+  const result = await fetchAllRows(build);
+  const ids = result.map((r) => r.id);
+
+  assertEquals(ids.length, total);
+  assertEquals(ids, [...ids].sort(), "expected strictly ascending id order");
 });
 
 Deno.test("applyCommonFilters: ids narrow an already org-scoped query, they never widen it", async () => {

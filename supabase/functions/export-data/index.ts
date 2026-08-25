@@ -49,6 +49,7 @@ const exportRequestSchema = z.object({
   }).optional().default({}),
 });
 
+/** `admin` here is the caller-scoped client (see `db` in Deno.serve) — anew_hierarchy rows are readable under RLS whenever either endpoint is in the caller's visible org set, which always holds for edges relevant to the requested org's ancestors/descendants. */
 async function getGraph(admin: any) {
   const { data, error } = await admin
     .from("anew_hierarchy")
@@ -92,7 +93,16 @@ function resolveAncestors(orgId: string, graph: any[]): string[] {
   return result;
 }
 
-async function authorizeExport(
+/**
+ * `admin` here is the caller-scoped client (`db` in Deno.serve), not the
+ * service-role one — every read below (visible orgs, hierarchy, memberships,
+ * roles, role_permissions, membership_permission_scopes, teams) runs under
+ * the caller's own RLS. That is what makes `visibleSet`/`exportOrgIds` an
+ * RLS-backed set rather than a second, hand-rolled authorization model: RLS
+ * decides what the caller can see, this function additionally decides what
+ * they may export (`.export`/`.export_sensitive` permission gates below).
+ */
+export async function authorizeExport(
   admin: any,
   caller: { authUid: string; anewUserId: string },
   request: ExportRequest,
@@ -183,6 +193,7 @@ async function authorizeExport(
   };
 }
 
+/** `admin` here is the caller-scoped client passed in by every exportX function below — identity/contact-detail reads run under the caller's RLS. */
 async function resolveIdentityMaps(
   admin: any,
   entityIds: string[],
@@ -274,7 +285,7 @@ async function resolveIdentityMaps(
   return { identity, email, phone, vat };
 }
 
-async function exportClients(
+export async function exportClients(
   admin: any,
   request: ExportRequest,
   auth: AuthorizationContext,
@@ -284,7 +295,7 @@ async function exportClients(
   const buildClientsQuery = () => {
     let query = admin
       .from("anew_clients")
-      .select("entity_id, status, client_type, created_at, created_by, assigned_to")
+      .select("id, entity_id, status, client_type, created_at, created_by, assigned_to")
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .order("id", { ascending: true });
@@ -330,7 +341,7 @@ async function exportClients(
   }));
 }
 
-async function exportContacts(
+export async function exportContacts(
   admin: any,
   request: ExportRequest,
   auth: AuthorizationContext,
@@ -340,7 +351,7 @@ async function exportContacts(
   const buildContactsQuery = () => {
     let query = admin
       .from("anew_contacts")
-      .select("entity_id, position, status, created_at, created_by, assigned_to")
+      .select("id, entity_id, position, status, created_at, created_by, assigned_to")
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .is("converted_to_client_id", null)
@@ -368,7 +379,7 @@ async function exportContacts(
   }));
 }
 
-async function exportLeads(
+export async function exportLeads(
   admin: any,
   request: ExportRequest,
   auth: AuthorizationContext,
@@ -381,7 +392,7 @@ async function exportLeads(
   const buildLeadsQuery = () => {
     let query = admin
       .from("anew_leads")
-      .select("entity_id, status, source_id, assigned_to, created_by, created_at")
+      .select("id, entity_id, status, source_id, assigned_to, created_by, created_at")
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .order("id", { ascending: true });
@@ -433,7 +444,7 @@ async function exportLeads(
   }));
 }
 
-async function exportQuotes(
+export async function exportQuotes(
   admin: any,
   request: ExportRequest,
   auth: AuthorizationContext,
@@ -445,7 +456,7 @@ async function exportQuotes(
     let query = admin
       .from("quotes")
       .select(
-        "quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
+        "id, quote_number, organization_id, entity_id, estado, created_at, total, moeda, modelo_base, obra_endereco, created_by, assigned_to",
       )
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
@@ -533,7 +544,7 @@ function formatPortalStatus(status: string | null | undefined): string {
   return PORTAL_STATUS_LABELS[status] || status;
 }
 
-async function exportProposals(
+export async function exportProposals(
   admin: any,
   request: ExportRequest,
   auth: AuthorizationContext,
@@ -653,7 +664,7 @@ async function exportProposals(
   });
 }
 
-async function exportContracts(admin: any, request: ExportRequest, auth: AuthorizationContext) {
+export async function exportContracts(admin: any, request: ExportRequest, auth: AuthorizationContext) {
   // No column on this module is ever sensitive (see exportConfig.ts) — the
   // email column is exported to everyone with client_contracts.export, no
   // dialog, because it's already visible in the ClientContracts.tsx table to
@@ -829,6 +840,10 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405);
 
+  // Service-role client — kept ONLY for data_export_audit writes below. The
+  // audit trail must be written (and its status/error_code updated) by
+  // something the caller cannot adulterate or suppress via their own RLS, so
+  // it deliberately does NOT run under the caller's JWT.
   const admin = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -839,6 +854,22 @@ Deno.serve(async (req: Request) => {
   try {
     const caller = await resolveCallerIdentity(req, admin);
     if (caller.isServiceRole) return jsonResponse({ error: "User session required" }, 403);
+
+    // Caller-scoped client — carries the caller's own JWT, so every read of
+    // exported data (org/hierarchy graph, role/permission context used to
+    // compute scope, and the six export queries themselves plus their
+    // lookups) runs under the caller's real RLS, exactly as the app itself
+    // would see it. RLS is the source of truth for visibility; the
+    // .export/.export_sensitive permission checks below decide what a
+    // visible row is additionally allowed to leave the system as an export.
+    const db = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
+      },
+    );
 
     const rawBody = await req.json();
     const zodParsed = exportRequestSchema.safeParse(rawBody);
@@ -853,7 +884,7 @@ Deno.serve(async (req: Request) => {
 
     let auth: AuthorizationContext;
     try {
-      auth = await authorizeExport(admin, caller, request, definition);
+      auth = await authorizeExport(db, caller, request, definition);
     } catch (error) {
       const code = error instanceof Error ? error.message : "EXPORT_FORBIDDEN";
       await admin.from("data_export_audit").insert({
@@ -935,16 +966,16 @@ Deno.serve(async (req: Request) => {
 
     const rows =
       request.module === "clients"
-        ? await exportClients(admin, request, auth, includeSensitive, decKey)
+        ? await exportClients(db, request, auth, includeSensitive, decKey)
         : request.module === "contacts"
-          ? await exportContacts(admin, request, auth, includeSensitive, decKey)
+          ? await exportContacts(db, request, auth, includeSensitive, decKey)
           : request.module === "leads"
-            ? await exportLeads(admin, request, auth, includeSensitive, decKey)
+            ? await exportLeads(db, request, auth, includeSensitive, decKey)
             : request.module === "proposals"
-              ? await exportProposals(admin, request, auth)
+              ? await exportProposals(db, request, auth)
               : request.module === "client_contracts"
-                ? await exportContracts(admin, request, auth)
-                : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
+                ? await exportContracts(db, request, auth)
+                : await exportQuotes(db, request, auth, includeSensitive, decKey, caller);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
