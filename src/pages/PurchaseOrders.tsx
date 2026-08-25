@@ -57,7 +57,6 @@ type ProductCatalogItem = {
   sku: string | null;
   category_name: string | null;
   brand_name: string | null;
-  supplier_id: string | null;
   purchase_price: number | null;
   vat_rate: number | null;
 };
@@ -240,7 +239,6 @@ const PurchaseOrders = () => {
             sku,
             name,
             description,
-            supplier_id,
             product_categories!category_id(name),
             brands(name)
           `;
@@ -309,7 +307,6 @@ const PurchaseOrders = () => {
             sku,
             name,
             short_desc,
-            supplier_id,
             service_categories:service_category_id(name)
           `)
           .eq("is_active", true)
@@ -383,7 +380,6 @@ const PurchaseOrders = () => {
           name: product.name,
           description: product.description,
           sku: product.sku,
-          supplier_id: product.supplier_id,
           category_name: product.product_categories?.name || null,
           brand_name: product.brands?.name || null,
           purchase_price: priceInfo?.price || null,
@@ -425,7 +421,6 @@ const PurchaseOrders = () => {
           name: service.name,
           description: service.short_desc,
           sku: service.sku,
-          supplier_id: service.supplier_id,
           category_name: service.service_categories?.name || null,
           brand_name: null,
           purchase_price: priceInfo?.price || null,
