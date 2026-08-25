@@ -2049,7 +2049,10 @@ const Proposals = () => {
 
         if (statusFilter !== "all") {
           const stage = getProposalStage(proposal);
-          if (stage?.id !== statusFilter && proposal.status !== statusFilter) return false;
+          // statusFilter pode ser um id de fase (dropdown "Estado", usa stage.id)
+          // ou um nome de fase (cartões agrupados, usa stage.name — cobre tanto
+          // a fase do org como a fase global homónima com uma única comparação).
+          if (stage?.id !== statusFilter && stage?.name !== statusFilter && proposal.status !== statusFilter) return false;
         }
 
         if (noResponseFilter) {
@@ -2175,6 +2178,31 @@ const Proposals = () => {
 
     return { total, totalValue, totalValueExVat, stageCounts, stageValues, stageValuesExVat, wonValue, wonValueExVat, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noResponse5dValueExVat, noValidity, expired };
   }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
+
+  // Uma fase do org e a fase global homónima (mesmo `name`, ex.: "accepted")
+  // representam o MESMO conceito de fase — devem aparecer como UM único
+  // cartão com as contagens somadas, não dois cartões duplicados. Ver
+  // loadWorkflowStages: allWorkflowStages inclui sempre as duas fontes.
+  const stageCardGroups = useMemo(() => {
+    const byName = new Map<string, WorkflowStage & { ids: string[] }>();
+    for (const stage of allWorkflowStages) {
+      const existing = byName.get(stage.name);
+      if (!existing) {
+        byName.set(stage.name, { ...stage, ids: [stage.id] });
+      } else {
+        existing.ids.push(stage.id);
+        // A fase específica do org (organization_id preenchido) vence na
+        // apresentação (label/cor) sobre a fase global de template.
+        if ((stage as any).organization_id && !(existing as any).organization_id) {
+          existing.label = stage.label;
+          existing.color = stage.color;
+          (existing as any).organization_id = (stage as any).organization_id;
+        }
+        existing.is_active = existing.is_active || stage.is_active;
+      }
+    }
+    return Array.from(byName.values());
+  }, [allWorkflowStages]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -3196,19 +3224,25 @@ const Proposals = () => {
               </CardContent>
             </Card>
             
-            {/* allWorkflowStages (not just active) so a deactivated stage that
-               still holds proposals (e.g. an old "Aceite") keeps its own card
-               instead of silently vanishing from these totals. */}
-            {allWorkflowStages.filter(stage => stage.is_active || (stats.stageCounts[stage.id] || 0) > 0).map((stage) => (
-              <Card key={stage.id} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.id && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.id === statusFilter ? "all" : stage.id)}>
-                <CardContent className="p-3">
-                  <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
-                  <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>
-                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValuesExVat[stage.id] || 0)}</div>
-                  <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)} com IVA</div>
-                </CardContent>
-              </Card>
-            ))}
+            {/* stageCardGroups: uma fase do org e a fase global homónima juntam-se
+               num único cartão com as contagens somadas — ver useMemo acima.
+               is_active OU alguma das ids do grupo ainda tiver propostas, para
+               uma fase desativada que ainda tem propostas não desaparecer. */}
+            {stageCardGroups.filter(stage => stage.is_active || stage.ids.some(id => (stats.stageCounts[id] || 0) > 0)).map((stage) => {
+              const count = stage.ids.reduce((s, id) => s + (stats.stageCounts[id] || 0), 0);
+              const valueExVat = stage.ids.reduce((s, id) => s + (stats.stageValuesExVat[id] || 0), 0);
+              const valueWithVat = stage.ids.reduce((s, id) => s + (stats.stageValues[id] || 0), 0);
+              return (
+                <Card key={stage.name} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.name && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.name === statusFilter ? "all" : stage.name)}>
+                  <CardContent className="p-3">
+                    <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
+                    <div className="text-xl font-bold" style={{ color: stage.color }}>{count}</div>
+                    <div className="text-xs text-muted-foreground">{formatCurrency(valueExVat)}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatCurrency(valueWithVat)} com IVA</div>
+                  </CardContent>
+                </Card>
+              );
+            })}
             
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
