@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
-import { searchEntityIds } from "@/lib/clientSearch";
+import { applyClientSearchTextFilter, resolveClientSearch } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
 import { useSentinelInView } from "@/hooks/useSentinelInView";
@@ -269,8 +269,26 @@ const Proposals = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
   const [searchEntityIdSet, setSearchEntityIdSet] = useState<Set<string> | null>(null);
-  const truncatedWarnedRef = useRef<string | null>(null);
-  // Resolve entity IDs matching the search term (covers name/email/phone/NIF)
+  // Resolve entity IDs matching the search term (covers name/email/phone/NIF).
+  //
+  // Passou a usar `anew_entities.search_text` (uma coluna denormalizada mantida
+  // por trigger, com indice GIN trigram — ver
+  // supabase/migrations/20261113150000_anew_entities_search_text.sql), o mesmo
+  // caminho que a pagina de Clientes usa.
+  //
+  // Substitui searchEntityIds(), que chamava a RPC search_entity_ids_by_word
+  // uma vez POR PALAVRA. Medido ao vivo como `authenticated` contra o remoto:
+  // "silva" e "mar" rebentavam o statement_timeout de 8s (HTTP 500, 57014) e
+  // "pinto" demorava 5,9s — ou seja, pesquisar propostas por um apelido comum
+  // nao era lento, era simplesmente vazio, porque o erro era engolido e o
+  // conjunto de entidades ficava vazio. O mesmo termo por search_text: 2,0s /
+  // 2,3s / 2,1s, sem erro. (O piso de ~2s e o RLS de anew_entities, nao a
+  // pesquisa: um `display_name ILIKE` simples mede os mesmos ~2,1s.)
+  //
+  // AND entre palavras e independente da ordem — "maria silva" encontra
+  // "Maria da Silva". O NIF continua de fora do search_text, resolvido a parte
+  // pela Edge Function search-entities (cifrado, nunca em texto claro) e unido
+  // por cima, tal como antes.
   useEffect(() => {
     const term = debouncedSearch.trim();
     if (term.length < 3) {
@@ -279,19 +297,26 @@ const Proposals = () => {
     }
     let cancelled = false;
     (async () => {
-      const { ids, truncated } = await searchEntityIds(term);
+      const { words, nifEntityIds } = await resolveClientSearch(term);
       if (cancelled) return;
-      if (truncated && truncatedWarnedRef.current !== term) {
-        truncatedWarnedRef.current = term;
-        toast({
-          title: "Demasiados resultados",
-          description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-        });
+
+      const ids = new Set<string>(nifEntityIds);
+      if (words.length > 0) {
+        const { data, error } = await applyClientSearchTextFilter(
+          supabase.from("anew_entities").select("id"),
+          words,
+        );
+        if (cancelled) return;
+        if (error) {
+          console.error("[Proposals] anew_entities.search_text lookup error:", error);
+        } else {
+          (data || []).forEach((row: { id: string }) => ids.add(row.id));
+        }
       }
-      setSearchEntityIdSet(new Set(ids));
+      setSearchEntityIdSet(ids);
     })();
     return () => { cancelled = true; };
-  }, [debouncedSearch, toast]);
+  }, [debouncedSearch]);
   const [statusFilter, setStatusFilter] = useState<string>(stageFromUrl || "all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -3658,7 +3683,16 @@ const Proposals = () => {
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <div className="relative flex-1 min-w-[200px] max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Procurar por título, cliente, pedido, valor..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+                {/*
+                  O placeholder prometia "valor" e nao existe — nunca existiu —
+                  nenhum filtro por valor: proposals_list_filtered nao tem
+                  parametro nenhum para isso e o valor nem sequer entra no
+                  predicado de pesquisa. Corrigido o texto em vez de inventar o
+                  filtro: acrescentar um exigiria mais um parametro aquela RPC,
+                  que serve a lista, a contagem e as metricas ao mesmo tempo e
+                  ja toca ~1,8 GB de buffers para devolver 25 linhas.
+                */}
+                <Input placeholder="Procurar por título, cliente ou pedido..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
               </div>
               
               <Button variant={onlyMine ? "default" : "outline"} size="sm" className="gap-1.5" onClick={() => setOnlyMine(!onlyMine)}>

@@ -1006,6 +1006,10 @@ const convertLead: Handler = async (ctx, args): Promise<ToolResult> => {
     // Finalize lead
     const leadPatch: Record<string, any> = {
       status: "converted",
+      // converted_to_client_id must be written together with converted_at:
+      // omitting it left the lead half-converted (converted_at set, no link
+      // to the client it became).
+      converted_to_client_id: clientId || null,
       converted_at: new Date().toISOString(),
       converted_by: actor,
     };

@@ -447,7 +447,10 @@ serve(async (req) => {
                 }
                 const { error: convertLeadError } = await supabase
                   .from("anew_leads")
-                  .update({ status: "converted", converted_at: new Date().toISOString(), converted_by: internalUserId })
+                  // converted_to_client_id must be written together with converted_at:
+                  // omitting it left the lead half-converted (converted_at set,
+                  // no link to the client it became).
+                  .update({ status: "converted", converted_to_client_id: clientId || null, converted_at: new Date().toISOString(), converted_by: internalUserId })
                   .eq("id", entity_id);
                 if (convertLeadError) throw convertLeadError;
                 results.stageActions++;

@@ -79,10 +79,10 @@ import { resolveLineUnitCosts, resolveLineDetails, type LineResolution } from "@
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 
-// Escape user input for PostgREST ilike filters ("," ")" "%" break the parser).
-const escapePostgrestIlike = (v: string) =>
-  v.replace(/[\\%_,()]/g, (c) => (c === '%' || c === '_' ? `\\${c}` : ''));
+// Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
+const MIN_QUOTE_SEARCH_LENGTH = 2;
 
 interface Quote {
   id: string;
@@ -245,6 +245,15 @@ export default function Quotes() {
   
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
+  // A pesquisa e agora um filtro da query (e do RPC dos KPIs), portanto cada
+  // tecla premida disparava uma consulta a lista, uma contagem e o
+  // get_quotes_kpi_stats. Debounce igual ao da pagina de Propostas: o valor
+  // que vai para o servidor so muda 400ms depois de o utilizador parar.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -312,7 +321,11 @@ export default function Quotes() {
       // datas e comercial na própria query, portanto os cartões têm de usar o
       // mesmo conjunto — senão deixam de bater certo com o que está no ecrã,
       // que é exactamente a queixa que trouxe isto aqui.
-      const trimmedSearch = searchTerm.trim();
+      // Mesmo limiar de comprimento que a lista usa (MIN_QUOTE_SEARCH_LENGTH em
+      // fetchQuotes): com 1 caracter a lista nao filtra, logo os cartoes
+      // tambem nao podem filtrar, senao divergem outra vez.
+      const rawSearch = debouncedSearchTerm.trim();
+      const trimmedSearch = rawSearch.length >= MIN_QUOTE_SEARCH_LENGTH ? rawSearch : "";
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
         p_filters: {
@@ -394,7 +407,7 @@ export default function Quotes() {
         setStatsLoading(false);
       }
     }
-  }, [activeCompany?.id, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, statusFilter, debouncedSearchTerm, dateFrom, dateTo, comercialFilter]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
@@ -473,7 +486,20 @@ export default function Quotes() {
     const { data: { user } } = await supabase.auth.getUser();
     const viewScope = getPermissionScope("quotes.view");
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
-    const searchQuoteNumber = searchTerm.trim().length >= 2 ? escapePostgrestIlike(searchTerm.trim()) : null;
+    // Pesquisa: uma palavra de cada vez contra `quotes.search_text` (numero do
+    // orcamento + titulo + nome/email/telefone do cliente ligado), AND entre
+    // palavras e independente da ordem — ver
+    // supabase/migrations/20261113170000_quotes_search_text.sql.
+    //
+    // Substitui `quote_number ILIKE %termo%`, que era a UNICA pesquisa feita no
+    // servidor: tudo o resto (nome do cliente) vinha de um efeito separado que
+    // ia buscar entidades com `.limit(200)` sem ORDER BY e injectava os
+    // resultados na lista ja carregada, por fora dos filtros de estado/data/
+    // comercial e por fora da paginacao. Agora a pesquisa e um filtro da propria
+    // query, portanto a contagem, a paginacao e os KPIs veem o mesmo conjunto.
+    const searchWords = debouncedSearchTerm.trim().length >= MIN_QUOTE_SEARCH_LENGTH
+      ? splitSearchWords(debouncedSearchTerm)
+      : [];
 
     // Server-side filters. The list is paginated 20 at a time, so a filter that
     // only runs in the browser can never see past the current page: picking a
@@ -490,7 +516,7 @@ export default function Quotes() {
     const dateToIso = dateTo ? endOfDay(dateTo).toISOString() : null;
     const applyServerFilters = (q: any) => {
       if (statusFilter !== "all") q = q.eq("estado", statusFilter);
-      if (searchQuoteNumber) q = q.ilike("quote_number", `%${searchQuoteNumber}%`);
+      if (searchWords.length > 0) q = applySearchTextFilter(q, searchWords);
       if (dateFromIso) q = q.gte("created_at", dateFromIso);
       if (dateToIso) q = q.lte("created_at", dateToIso);
       if (comercialFilter === "none") q = q.is("assigned_to", null);
@@ -736,7 +762,7 @@ export default function Quotes() {
         setLoadingMore(false);
       }
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, debouncedSearchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Resolve entity names
   useEffect(() => {
@@ -766,95 +792,17 @@ export default function Quotes() {
     resolveEntityNames();
   }, [quotes]);
 
-  // Server-side search: the paginated list only loads PAGE_SIZE quotes, so
-  // when the user types a search term we fetch matching quotes (by number,
-  // entity name/email/phone, or related deal entity) and merge them into the
-  // in-memory list so the existing client-side filter can find them.
-  // RLS still scopes results to what the user is allowed to see.
-  useEffect(() => {
-    if (!activeCompany?.id) return;
-    const term = searchTerm.trim();
-    if (term.length < 2) return;
-    const handle = setTimeout(async () => {
-      try {
-        const like = `%${escapePostgrestIlike(term)}%`;
-        const [byName, byEmail, byPhone] = await Promise.all([
-          supabase.from("anew_entities").select("id").ilike("display_name", like).limit(200),
-          supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(200),
-          supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(200),
-        ]);
-        const entityIds = Array.from(new Set([
-          ...((byName.data || []).map((e: any) => e.id)),
-          ...((byEmail.data || []).map((e: any) => e.entity_id)),
-          ...((byPhone.data || []).map((e: any) => e.entity_id)),
-        ])).filter(Boolean) as string[];
-
-        // dealIds via entityIds, batched ≤30
-        let dealIds: string[] = [];
-        if (entityIds.length) {
-          const dealsData = await fetchInBatches(entityIds, async (chunk) => {
-            const { data, error } = await (supabase as any)
-              .from("deals").select("id")
-              .eq("organization_id", activeCompany.id)
-              .in("entity_id", chunk).limit(500);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          dealIds = Array.from(new Set(dealsData.map((d: any) => d.id)));
-        }
-
-        const baseQuery = () => {
-          let q = (supabase as any)
-            .from("quotes")
-            .select(`*, deals!deal_id (id, title, entity_id), proposals!proposal_id (id, title, stage_id)`)
-            .is("deleted_at", null)
-            .limit(100);
-          q = q.eq("organization_id", activeCompany.id);
-          return q;
-        };
-
-        const merged = new Map<string, Quote>();
-
-        // 1) by quote_number
-        {
-          const { data, error } = await baseQuery().ilike("quote_number", like);
-          if (error) throw error;
-          (data as any[] | null)?.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        // 2) by entity_id, chunked ≤30 (single field → .in)
-        if (entityIds.length) {
-          const entityResults = await fetchInBatches(entityIds, async (chunk) => {
-            const { data, error } = await baseQuery().in("entity_id", chunk);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          entityResults.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        // 3) by deal_id, chunked ≤30 (single field → .in)
-        if (dealIds.length) {
-          const dealResults = await fetchInBatches(dealIds, async (chunk) => {
-            const { data, error } = await baseQuery().in("deal_id", chunk);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          dealResults.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        if (merged.size > 0) {
-          setQuotes(prev => {
-            const map = new Map(prev.map(p => [p.id, p]));
-            merged.forEach((d, id) => { if (!map.has(id)) map.set(id, d); });
-            return Array.from(map.values());
-          });
-        }
-      } catch (err) {
-        console.error("Quote server-side search error:", err);
-      }
-    }, 350);
-    return () => clearTimeout(handle);
-  }, [searchTerm, activeCompany?.id]);
+  // NOTA: aqui existia um segundo efeito de "pesquisa no servidor" que ia
+  // buscar entidades por display_name/email/telefone com `.limit(200)` sem
+  // ORDER BY (truncava em silencio: qualquer palavra com mais de 200
+  // correspondencias perdia clientes de forma arbitraria), resolvia os deals
+  // dessas entidades e injectava ate 100 orcamentos por consulta na lista ja
+  // carregada — por fora dos filtros de estado/data/comercial da query e por
+  // fora da paginacao e da contagem.
+  //
+  // Foi removido: a pesquisa passou a ser um filtro da propria query de
+  // orcamentos, por `search_text` (ver applyServerFilters em fetchQuotes),
+  // exactamente o mesmo predicado que get_quotes_kpi_stats aplica.
 
   // Resolve commercial (assigned_to) user names — covers both the paginated
   // `quotes` and the full `allQuotesForDashboard` so the Dashboard view always
@@ -962,7 +910,7 @@ export default function Quotes() {
   // refetches (and resets to page 0) whenever one of them changes.
   useEffect(() => {
     if (activeCompany?.id) fetchQuotes();
-  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, fetchQuotes, statusFilter, debouncedSearchTerm, dateFrom, dateTo, comercialFilter]);
 
   // Limpa qualquer rascunho de novo orçamento ao entrar na página de listagem
   // (evita reabrir o Quote Builder automaticamente).
@@ -1066,13 +1014,13 @@ export default function Quotes() {
   // Filtered quotes
   const filteredQuotes = useMemo(() => {
     const result = quotes.filter((quote) => {
-      if (searchTerm) {
-        const search = searchTerm.toLowerCase();
-        const quoteNumber = quote.quote_number?.toLowerCase() || "";
-        const clientName = getClientNameString(quote).toLowerCase();
-        const location = getClientAddress(quote).toLowerCase();
-        if (!quoteNumber.includes(search) && !clientName.includes(search) && !location.includes(search)) return false;
-      }
+      // A pesquisa NAO e reaplicada aqui de proposito. Era um segundo predicado
+      // — frase unica contra quote_number/nome do cliente/morada — que corria
+      // por cima do conjunto ja filtrado no servidor e discordava dele: para
+      // \"maria silva\" o servidor (e os cartoes de KPI) davam as linhas cujo
+      // cliente e \"Maria da Silva\", e este filtro voltava a escondê-las porque
+      // o nome nao contem a frase seguida. Era essa a divergencia entre os
+      // cartoes e a lista. A pesquisa e agora feita uma unica vez, na query.
       if (statusFilter !== "all" && quote.estado !== statusFilter) return false;
       if (dateFrom || dateTo) {
         const quoteDate = parseISO(quote.created_at);
@@ -1120,7 +1068,7 @@ export default function Quotes() {
 
     
     return result;
-  }, [quotes, searchTerm, statusFilter, dateFrom, dateTo, sortColumn, sortDirection, linesAgg, marginFilter, onlyMine, scopeAnewUserId, myQuoteIds, comercialFilter]);
+  }, [quotes, statusFilter, dateFrom, dateTo, sortColumn, sortDirection, linesAgg, marginFilter, onlyMine, scopeAnewUserId, myQuoteIds, comercialFilter]);
 
   const clearFilters = () => {
     setSearchTerm(""); setStatusFilter("all"); setDateFrom(undefined); setDateTo(undefined); setMarginFilter("all"); setOnlyMine(false); setComercialFilter("all");
