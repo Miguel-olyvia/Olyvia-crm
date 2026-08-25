@@ -187,6 +187,12 @@ const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
+  // Same rows as workflowStages, but WITHOUT the is_active filter — a stage
+  // deleted in the workflow editor is a soft-delete (is_active=false), and
+  // proposals/stats still reference it by stage_id. Anything that counts or
+  // labels proposals by stage must use this list, or a deactivated "Aceite"
+  // stage silently disappears from totals even though its proposals didn't.
+  const [allWorkflowStages, setAllWorkflowStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingProposal, setSavingProposal] = useState(false);
   const [open, setOpen] = useState(false);
@@ -630,24 +636,24 @@ const Proposals = () => {
   }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
   const loadWorkflowStages = useCallback(async () => {
-    const { data: orgStages } = await (supabase
+    const { data: orgStagesAll } = await (supabase
       .from("proposal_workflow_stages") as any)
       .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
       .eq("organization_id", activeCompany?.id || '')
-      .eq("is_active", true)
       .order("stage_order");
 
-    if (orgStages && orgStages.length > 0) {
-      setWorkflowStages(orgStages);
+    if (orgStagesAll && orgStagesAll.length > 0) {
+      setAllWorkflowStages(orgStagesAll);
+      setWorkflowStages(orgStagesAll.filter((s: WorkflowStage) => s.is_active));
     } else {
-      const { data: globalStages } = await (supabase
+      const { data: globalStagesAll } = await (supabase
         .from("proposal_workflow_stages") as any)
         .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
         .is("organization_id", null)
-        .eq("is_active", true)
         .order("stage_order");
-      
-      setWorkflowStages(globalStages || []);
+
+      setAllWorkflowStages(globalStagesAll || []);
+      setWorkflowStages((globalStagesAll || []).filter((s: WorkflowStage) => s.is_active));
     }
   }, [activeCompany?.id]);
 
@@ -1806,7 +1812,9 @@ const Proposals = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
+      // Resolve by the is_won flag, not by name — an org can rename/recreate
+      // this stage and accepting a proposal must keep working regardless.
+      const acceptedStage = workflowStages.find(s => s.is_won);
       if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
       const oldStageId = targetProposal.stage_id;
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
@@ -1855,9 +1863,10 @@ const Proposals = () => {
   ): Promise<{ workflowFailed: boolean }> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
+    // Resolve by the is_lost flag, not by name — same reasoning as accept.
     const rejectedStage = stageIdOverride
       ? workflowStages.find(s => s.id === stageIdOverride)
-      : workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
+      : workflowStages.find(s => s.is_lost);
     if (!rejectedStage) throw new Error("Estágio 'Rejeitada' não encontrado");
     const oldStageId = proposal.stage_id;
     const businessUserIdReject = await resolveCurrentBusinessUserId();
@@ -1984,8 +1993,10 @@ const Proposals = () => {
 
   const getProposalStage = useCallback((proposal: Proposal): WorkflowStage | null => {
     if (proposal.proposal_workflow_stages) return proposal.proposal_workflow_stages;
-    return workflowStages.find(s => s.name === proposal.status) || null;
-  }, [workflowStages]);
+    // allWorkflowStages (not the active-only list) — a legacy proposal whose
+    // status still names a since-deactivated stage must still resolve here.
+    return allWorkflowStages.find(s => s.name === proposal.status) || null;
+  }, [allWorkflowStages]);
 
   const getStageBadge = (proposal: Proposal) => {
     const stage = getProposalStage(proposal);
@@ -3175,7 +3186,10 @@ const Proposals = () => {
               </CardContent>
             </Card>
             
-            {workflowStages.map((stage) => (
+            {/* allWorkflowStages (not just active) so a deactivated stage that
+               still holds proposals (e.g. an old "Aceite") keeps its own card
+               instead of silently vanishing from these totals. */}
+            {allWorkflowStages.filter(stage => stage.is_active || (stats.stageCounts[stage.id] || 0) > 0).map((stage) => (
               <Card key={stage.id} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.id && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.id === statusFilter ? "all" : stage.id)}>
                 <CardContent className="p-3">
                   <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
@@ -3243,7 +3257,10 @@ const Proposals = () => {
         {viewMode === "dashboard" ? (
           <ProposalsDashboardView
             proposals={filteredProposals}
-            workflowStages={workflowStages}
+            // allWorkflowStages: its won/lost/pipeline aggregates key off this
+            // list — passing the active-only list silently dropped any
+            // proposal sitting in a deactivated stage from every total.
+            workflowStages={allWorkflowStages}
             getProposalStage={getProposalStage}
             comercialNamesMap={comercialNamesMap}
             isLoading={loading}
@@ -3297,7 +3314,9 @@ const Proposals = () => {
                 <SelectTrigger className="w-[140px]"><SelectValue placeholder="Estado" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {workflowStages.map((stage) => (
+                  {/* allWorkflowStages so a proposal stuck in a deactivated
+                     stage can still be filtered into view, not just counted. */}
+                  {allWorkflowStages.map((stage) => (
                     <SelectItem key={stage.id} value={stage.id}>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />

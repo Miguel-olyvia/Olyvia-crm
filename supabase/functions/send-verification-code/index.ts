@@ -222,7 +222,7 @@ const handler = async (req: Request): Promise<Response> => {
           .select("organization_id")
           .eq("id", proposal_id)
           .maybeSingle();
-        const acceptedStageId = await resolveProposalStageId(supabaseClient, proposalRow?.organization_id, ["accepted", "aceite"]);
+        const acceptedStageId = await resolveProposalStageId(supabaseClient, proposalRow?.organization_id, "is_won");
 
         await supabaseClient
           .from("proposals")
