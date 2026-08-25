@@ -8,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Building, Pencil, Trash2, Mail, Phone, Globe, Download, Upload, Search, Filter, X, Building2 } from "lucide-react";
+import { Plus, Building, Pencil, Trash2, Mail, Phone, Globe, Download, Upload, Search, Filter, X, Building2, Truck } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { BulkActionsBar } from "@/components/BulkActionsBar";
@@ -28,6 +28,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
@@ -87,6 +88,8 @@ const Suppliers = () => {
   const [bulkNewStatus, setBulkNewStatus] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
+  const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
+  const [catalogSupplier, setCatalogSupplier] = useState<Supplier | null>(null);
   
   // New bulk action states
   const [bulkCompanyDialogOpen, setBulkCompanyDialogOpen] = useState(false);
@@ -1072,6 +1075,19 @@ const Suppliers = () => {
                                 <Button
                                   variant="ghost"
                                   size="sm"
+                                  onClick={() => {
+                                    setCatalogSupplier(supplier);
+                                    setCatalogDialogOpen(true);
+                                  }}
+                                  title="Catálogo"
+                                >
+                                  <Truck className="h-4 w-4" />
+                                </Button>
+                              </PermissionGate>
+                              <PermissionGate permission="suppliers.edit">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
                                   onClick={() => handleEdit(supplier)}
                                 >
                                   <Pencil className="h-4 w-4" />
@@ -1269,6 +1285,18 @@ const Suppliers = () => {
             </form>
           </DialogContent>
         </Dialog>
+
+        {catalogSupplier && (
+          <SupplierCatalogDialog
+            open={catalogDialogOpen}
+            onOpenChange={(open) => {
+              setCatalogDialogOpen(open);
+              if (!open) setCatalogSupplier(null);
+            }}
+            supplierId={catalogSupplier.id}
+            supplierName={catalogSupplier.name}
+          />
+        )}
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

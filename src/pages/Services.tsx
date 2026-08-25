@@ -3,12 +3,13 @@ import { z } from "zod";
 import { useNavigate } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload, RotateCcw } from "lucide-react";
+import { Plus, Search, Wrench, Pencil, Trash2, DollarSign, History, Copy, Download, Upload, RotateCcw, Truck } from "lucide-react";
 import { exportServicesToCSV, parseServicesCSV, downloadServicesTemplate, type ImportReport } from "@/utils/servicesExportImport";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
 import ServicePricesDialog from "@/components/ServicePricesDialog";
 import ServicePriceHistoryDialog from "@/components/ServicePriceHistoryDialog";
+import ServiceSuppliersDialog from "@/components/ServiceSuppliersDialog";
 import ServiceFormPrices, { ServicePriceFormData } from "@/components/ServiceFormPrices";
 import {
   Table,
@@ -123,6 +124,7 @@ export default function Services() {
   const [editingValue, setEditingValue] = useState<string>("");
   const [pricesDialogOpen, setPricesDialogOpen] = useState(false);
   const [priceHistoryDialogOpen, setPriceHistoryDialogOpen] = useState(false);
+  const [suppliersDialogOpen, setSuppliersDialogOpen] = useState(false);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
@@ -1320,6 +1322,21 @@ export default function Services() {
                             <Button
                               variant="ghost"
                               size="icon"
+                              onClick={() => {
+                                setSelectedService(service);
+                                setSuppliersDialogOpen(true);
+                              }}
+                              title="Fornecedores"
+                            >
+                              <Truck className="w-4 h-4" />
+                            </Button>
+                          </PermissionGate>
+                        )}
+                        {!showDeleted && (
+                          <PermissionGate permission="services.edit">
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               onClick={() => openEditDialog(service)}
                             >
                               <Pencil className="w-4 h-4" />
@@ -1380,6 +1397,18 @@ export default function Services() {
             }}
             serviceId={selectedService.id}
             serviceName={selectedService.name}
+          />
+          <ServiceSuppliersDialog
+            open={suppliersDialogOpen}
+            onOpenChange={(open) => {
+              setSuppliersDialogOpen(open);
+              if (!open) {
+                setSelectedService(null);
+              }
+            }}
+            serviceId={selectedService.id}
+            serviceName={selectedService.name}
+            organizationId={selectedService.organization_id || activeCompany?.id || ''}
           />
         </>
       )}
