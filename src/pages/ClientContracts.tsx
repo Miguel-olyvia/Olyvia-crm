@@ -2089,9 +2089,13 @@ const ClientContracts = () => {
                                       🚫 Anular contrato
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
-                                    🗑 Eliminar
-                                  </DropdownMenuItem>
+                                  {canDelete && canDeleteContract(contract) ? (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
+                                      🗑 Eliminar
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (sem permissão)</DropdownMenuItem>
+                                  )}
                                 </>
                               )}
                               {(contract.status === "signed" || contract.status === "active") && (
@@ -2178,6 +2182,26 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (expirado mantém histórico)</DropdownMenuItem>
+                                </>
+                              )}
+                              {contract.status === "cancelled" && (
+                                <>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  {canDelete && canDeleteContract(contract) ? (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
+                                      🗑 Eliminar
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (sem permissão)</DropdownMenuItem>
+                                  )}
                                 </>
                               )}
                             </DropdownMenuContent>
