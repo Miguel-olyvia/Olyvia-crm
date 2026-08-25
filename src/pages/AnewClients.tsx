@@ -1,5 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
+import { buildNoContactFilterKey } from "@/lib/clientsNoContactFilterKey";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
@@ -463,6 +465,19 @@ const AnewClients = () => {
     }));
   }, [analyticsClients, statusFilter, analyticsContractMap, alertData, getIdentity]);
 
+  // `loadClients` precisa do conjunto "sem contacto ha 30 dias" -- mas SO
+  // quando esse e o filtro ativo. Ler `alertData` por referencia (e nao pelas
+  // dependencias) e depender apenas desta chave quebra o ciclo
+  // loadClients -> setClients -> alertData -> loadClients que recarregava a
+  // pagina 1 em cadeia ate a carga de fundo de analytics terminar.
+  // Ver src/lib/clientsNoContactFilterKey.ts.
+  const alertDataRef = useRef(alertData);
+  alertDataRef.current = alertData;
+  const noContactFilterKey = useMemo(
+    () => buildNoContactFilterKey(statusFilter, alertData.noContactClients),
+    [statusFilter, alertData],
+  );
+
   // Sorted/filtered clients for different views
   const displayClients = useMemo(() => {
     let filtered = [...clients];
@@ -645,7 +660,7 @@ const AnewClients = () => {
           }
           if (statusFilter === "no_contact_30d") {
             q = q.not("status", "in", '("inactive","churned","lost")');
-            const atRiskIds = alertData.noContactClients.map(c => c.entityId).filter(Boolean);
+            const atRiskIds = alertDataRef.current.noContactClients.map(c => c.entityId).filter(Boolean);
             if (atRiskIds.length > 0) {
               q = q.in("entity_id", atRiskIds);
             } else {
@@ -781,7 +796,14 @@ const AnewClients = () => {
         setLoadingMore(false);
       }
     }
-  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, alertData, resolveEntities, getIdentity, toast, t]);
+  // `noContactFilterKey` NAO e usado no corpo (o corpo le alertDataRef) e o
+  // eslint avisa que e uma dependencia "desnecessaria". E deliberado: e a
+  // unica coisa que faz esta callback ser recriada quando o conjunto "sem
+  // contacto" muda E esse filtro esta ativo. Trocar por `alertData` reabre o
+  // ciclo de recarregamento descrito em src/lib/clientsNoContactFilterKey.ts;
+  // remover a chave deixa o filtro `no_contact_30d` preso a um conjunto
+  // obsoleto.
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, noContactFilterKey, resolveEntities, getIdentity, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
@@ -829,7 +851,30 @@ const AnewClients = () => {
     void openFromQuery();
   }, [searchParams, clients, selectedClient, setSearchParams, resolveEntities, activeCompany?.id]);
 
-  const loadMoreClients = () => { if (!loadingMore && hasMore) loadClients(clients.length); };
+  // Guarda SINCRONA. `loadingMore` so reflete o pedido em curso depois do
+  // proximo render, e o disparo da sentinela pode repetir-se antes disso.
+  // Sem esta guarda, o segundo disparo abortava o `AbortController` do
+  // primeiro (clientsLoadMoreAbortControllerRef) e a pagina seguinte nunca
+  // chegava a entrar na lista — o scroll infinito parecia "encravar".
+  const loadMoreInFlightRef = useRef(false);
+  const loadMoreClients = useCallback(() => {
+    if (loadMoreInFlightRef.current || loadingMore || !hasMore) return;
+    loadMoreInFlightRef.current = true;
+    void Promise.resolve(loadClients(clients.length)).finally(() => {
+      loadMoreInFlightRef.current = false;
+    });
+  }, [loadingMore, hasMore, loadClients, clients.length]);
+
+  // Scroll infinito por IntersectionObserver, o mesmo que /proposals usa.
+  // Substitui o onScroll que corria a cada evento de scroll sobre a tabela
+  // (ate ~60 vezes por segundo, a ler scrollHeight/scrollTop/clientHeight e
+  // portanto a forcar layout em cada leitura) e o ref-callback que fazia a
+  // mesma medicao a montagem. A sentinela fica DENTRO do contentor que rola.
+  const { sentinelRef: clientsSentinelRef } = useSentinelInView({
+    onVisible: loadMoreClients,
+    enabled: hasMore,
+    isLoading: loading || loadingMore,
+  });
 
   // Background: load ALL clients recursively for analytics views
   const loadAllClients = useCallback(async () => {
@@ -1766,14 +1811,6 @@ const AnewClients = () => {
     else { setSortColumn(col); setSortDir("desc"); }
   };
 
-  // Stable ref callback for the scroll container: auto-loads more when content fits on large screens.
-  // Using useCallback avoids React StrictMode calling the inline function twice (null + element).
-  const scrollContainerRef = useCallback((el: HTMLDivElement | null) => {
-    if (el && hasMore && !loadingMore && el.scrollHeight <= el.clientHeight + 10) {
-      loadMoreClients();
-    }
-  }, [hasMore, loadingMore, loadMoreClients]);
-
   if (loading) {
     return (
       <>
@@ -2194,16 +2231,7 @@ const AnewClients = () => {
         ) : (
           <>
             <Card className="flex flex-col" style={{ maxHeight: 'calc(100vh - 380px)', minHeight: '400px' }}>
-              <div
-                ref={scrollContainerRef}
-                className="flex-1 min-h-0 overflow-auto leads-table-scroll"
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  if (el.scrollHeight - el.scrollTop - el.clientHeight < 200 && !loadingMore && hasMore) {
-                    loadMoreClients();
-                  }
-                }}
-              >
+              <div className="flex-1 min-h-0 overflow-auto leads-table-scroll">
                 <Table density="compact" className="min-w-[1200px]" containerClassName="overflow-visible">
                   <TableHeader>
                     <TableRow>
@@ -2585,6 +2613,10 @@ const AnewClients = () => {
                   )}
                   </TableBody>
                 </Table>
+                {/* Sentinela do scroll infinito — TEM de ficar dentro deste
+                    contentor com overflow-auto: e o recorte dele que decide
+                    se esta visivel. */}
+                <div ref={clientsSentinelRef} aria-hidden="true" className="h-px" />
               </div>
             </Card>
           </>
