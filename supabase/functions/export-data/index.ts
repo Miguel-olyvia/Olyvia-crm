@@ -421,16 +421,36 @@ async function exportClients(
     return query;
   };
   const records = await fetchAllRows(buildClientsQuery);
-  const maps = await resolveIdentityMaps(
-    admin,
-    records.map((record: any) => record.entity_id),
-    includeSensitive,
-    decKey,
+
+  // `assigned_to` is a business user id; the file gets the person's name, never
+  // the id — same treatment exportLeads already gives it. Bounded by the number
+  // of distinct assignees, so no chunking needed here.
+  const assignedIds = Array.from(
+    new Set(records.map((record: any) => record.assigned_to).filter(Boolean)),
+  ) as string[];
+
+  const [maps, usersResult] = await Promise.all([
+    resolveIdentityMaps(
+      admin,
+      records.map((record: any) => record.entity_id),
+      includeSensitive,
+      decKey,
+    ),
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (usersResult.error) throw usersResult.error;
+
+  const userNames = new Map(
+    (usersResult.data || []).map((u: any) => [u.id, u.name]),
   );
+
   return records.map((record: any) => ({
     name: maps.identity.get(record.entity_id)?.display_name || "",
     status: record.status || "",
     clientType: record.client_type || "",
+    assignedTo: userNames.get(record.assigned_to) || "",
     createdAt: record.created_at,
     email: maps.email.get(record.entity_id) || "",
     phone: maps.phone.get(record.entity_id) || "",

@@ -31,6 +31,7 @@ const DEFINITIONS: Record<ExportModule, ExportDefinition> = {
       { key: "name", header: "Nome", width: 30 },
       { key: "status", header: "Estado", width: 16 },
       { key: "clientType", header: "Tipo", width: 16 },
+      { key: "assignedTo", header: "Comercial", width: 24 },
       { key: "createdAt", header: "Criado em", type: "date", width: 14 },
       { key: "email", header: "Email", width: 30, sensitive: true },
       { key: "phone", header: "Telefone", width: 18, sensitive: true },
