@@ -3,6 +3,7 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { orderByLeastBusy } from "../_shared/leastBusy.ts";
+import { findLocalEntityForOrg } from "../_shared/entityScopedLookup.ts";
 import {
   loadFormEmailConfig,
   loadTemplate,
@@ -344,16 +345,27 @@ Deno.serve(async (req: Request) => {
       extractField(mergedFieldValues, 'city', 'localidade', 'cidade'),
     ].filter(Boolean).join(', ');
 
-    if (leadEmail) {
-      const { data: existingEmail } = await supabase
-        .from('anew_entity_emails')
-        .select('entity_id')
-        .eq('email', leadEmail)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingEmail?.entity_id) {
-        entityId = existingEmail.entity_id;
+    // Org-scoped dedup (same shared helper as create-lead/insert-lead) — the
+    // previous version matched by email against anew_entity_emails with NO
+    // organization filter, taking whichever entity happened to come back
+    // first across ALL orgs. Two real bugs from that: (1) it could silently
+    // reuse another organization's entity (the exact cross-org leak
+    // findLocalEntityForOrg is designed to prevent), and (2) when the true
+    // match belonged to a since-deactivated contact in a large org, an
+    // unrelated row from a different org — or no row at all if the query
+    // happened to miss it — could win, leaving this org with a second,
+    // duplicate entity that could never own the email at all (unique per
+    // org), silently breaking anything that needs it (e.g. resending portal
+    // credentials fails with "contacto não tem email").
+    if (leadEmail || leadPhone) {
+      const scopedHit = await findLocalEntityForOrg({
+        supabase,
+        organizationId,
+        email: leadEmail,
+        phone: leadPhone,
+      });
+      if (scopedHit?.entityId) {
+        entityId = scopedHit.entityId;
       }
     }
 
