@@ -149,7 +149,6 @@ export default function ServiceCatalogItems() {
           *,
           service_categories:service_categories!service_category_id(name),
           anew_organizations!organization_id(name),
-          suppliers(name),
           service_prices(price, price_type, currency)
         `)
         .in("service_type", ["sale", "both"]);
@@ -173,7 +172,23 @@ export default function ServiceCatalogItems() {
 
       if (error) throw error;
 
-      setServices(data || []);
+      // Fornecedor: já não vem de services.supplier_id (cache só-de-leitura,
+      // Fase 1/2 do inventário) — resolve-se o preferencial em item_suppliers.
+      const serviceIds = (data || []).map((s: any) => s.id);
+      const preferredSupplierMap = new Map<string, string>();
+      if (serviceIds.length > 0) {
+        const { data: preferredSuppliers } = await (supabase.from("item_suppliers") as any)
+          .select("service_id, suppliers(name)")
+          .in("service_id", serviceIds)
+          .eq("item_type", "service")
+          .eq("is_preferred", true)
+          .is("deleted_at", null);
+        (preferredSuppliers || []).forEach((row: any) => {
+          if (row.suppliers?.name) preferredSupplierMap.set(row.service_id, row.suppliers.name);
+        });
+      }
+
+      setServices((data || []).map((s: any) => ({ ...s, suppliers: preferredSupplierMap.has(s.id) ? { name: preferredSupplierMap.get(s.id) } : null })));
     } catch (error: any) {
       toast({
         title: t('serviceCatalog.toast.errorLoadingData'),
