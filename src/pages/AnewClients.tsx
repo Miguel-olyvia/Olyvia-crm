@@ -20,7 +20,7 @@ import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog"
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatDistanceToNow, differenceInDays, format, isValid } from "date-fns";
+import { formatDistanceToNow, differenceInDays, format, isValid, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ClientDetailsDialog } from "@/components/clients/ClientDetailsDialog";
@@ -2099,6 +2099,39 @@ const AnewClients = () => {
                   </SelectContent>
                 </Select>
               )}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-9 gap-1.5 font-normal">
+                    <Calendar className="h-4 w-4" />
+                    {dateFrom && dateTo
+                      ? `${format(dateFrom, 'dd/MM/yy')} - ${format(dateTo, 'dd/MM/yy')}`
+                      : dateFrom
+                      ? t('clients.filters.dateSince', { date: format(dateFrom, 'dd/MM/yy') })
+                      : dateTo
+                      ? t('clients.filters.dateUntil', { date: format(dateTo, 'dd/MM/yy') })
+                      : t('clients.filters.date')}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="range"
+                    selected={{ from: dateFrom, to: dateTo }}
+                    onSelect={(range) => {
+                      setDateFrom(range?.from ? startOfDay(range.from) : undefined);
+                      setDateTo(range?.to ? endOfDay(range.to) : undefined);
+                    }}
+                    numberOfMonths={2}
+                    locale={pt}
+                  />
+                  {(dateFrom || dateTo) && (
+                    <div className="p-2 border-t flex justify-end">
+                      <Button variant="ghost" size="sm" onClick={() => { setDateFrom(undefined); setDateTo(undefined); }}>
+                        {t('clients.filters.clearDates')}
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
               <ClientsTableColumns onColumnsChange={setVisibleClientColumns} />
             </div>
             {/* Special filter pills */}
