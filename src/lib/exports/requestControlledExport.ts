@@ -48,6 +48,13 @@ export interface RequestControlledExportOptions {
     assignedTo?: string;
     /** Restrict to quotes created by or assigned to the calling user (mirrors the "só os meus" toggle). */
     onlyMine?: boolean;
+    /**
+     * Explicit row id allow-list for "exportar apenas a seleção" — an
+     * ADDITIONAL filter on top of the module's normal org/owner scope, never
+     * a substitute for it (enforced server-side, see
+     * supabase/functions/export-data/requestScoping.ts).
+     */
+    ids?: string[];
   };
   download?: (payload: StandardExportPayload, filename: string) => void;
 }

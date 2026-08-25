@@ -47,6 +47,39 @@ describe("requestControlledExport", () => {
     expect(result.rowCount).toBe(1);
   });
 
+  it("envia filters.ids tal como recebido, sem os alterar (seleção controlada pelo servidor)", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      data: {
+        filename: "propostas_2026-08-24.xlsx",
+        sheetName: "Propostas",
+        columns: [{ key: "title", header: "Título", width: 30 }],
+        rows: [{ title: "Proposta A" }],
+        rowCount: 1,
+        includesSensitive: false,
+      },
+      error: null,
+    });
+
+    const selectedIds = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
+
+    await requestControlledExport({
+      client: { functions: { invoke } } as any,
+      module: "proposals",
+      organizationId: "5d5fd457-e4b0-4d6a-b8e6-267d721b171a",
+      filters: { ids: selectedIds },
+      download: vi.fn(),
+    });
+
+    expect(invoke).toHaveBeenCalledWith("export-data", {
+      body: {
+        module: "proposals",
+        organizationId: "5d5fd457-e4b0-4d6a-b8e6-267d721b171a",
+        includeSensitive: false,
+        filters: { ids: selectedIds },
+      },
+    });
+  });
+
   it("falha quando a Edge Function devolve erro", async () => {
     const client = {
       functions: {

@@ -2422,6 +2422,31 @@ const Proposals = () => {
     }
   };
 
+  // "Exportar apenas a seleção" — same request as handleExportProposals, but
+  // scoped to the checked rows via filters.ids. This is always an ADDITIONAL
+  // filter on top of the organization/owner scope the server already
+  // enforces (see supabase/functions/export-data/requestScoping.ts) — never
+  // a way to widen access.
+  const handleExportSelectedProposals = async () => {
+    if (!activeCompany?.id || selectedIds.length === 0) return;
+    setExportingProposals(true);
+    try {
+      const result = await requestControlledExport({
+        module: "proposals",
+        organizationId: activeCompany.id,
+        filters: { ids: selectedIds },
+      });
+      toast({
+        title: "Exportação XLSX concluída",
+        description: `${result.rowCount} propostas exportadas.`,
+      });
+    } catch (error: any) {
+      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } finally {
+      setExportingProposals(false);
+    }
+  };
+
   // Filter and sort
   // A filtragem e a ordenacao passaram para o servidor (proposals_list_filtered
   // + get_proposals_list_page). Filtrar no cliente deixou de ser possivel: so
@@ -3731,6 +3756,11 @@ const Proposals = () => {
                   <Button variant="outline" size="sm" disabled={bulkPdfExporting} onClick={handleBulkExportPdf}>
                     <FileText className="w-3.5 h-3.5 mr-1" /> {bulkPdfExporting ? "A gerar…" : "Exportar PDF"}
                   </Button>
+                  <PermissionGate permission="proposals.export">
+                    <Button variant="outline" size="sm" disabled={exportingProposals} onClick={handleExportSelectedProposals}>
+                      <Download className="w-3.5 h-3.5 mr-1" /> Exportar seleção ({selectedIds.length})
+                    </Button>
+                  </PermissionGate>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
                     <X className="w-4 h-4" />
                   </Button>

@@ -1439,6 +1439,28 @@ const ClientContracts = () => {
     }
   };
 
+  // "Exportar apenas a seleção" — same request as handleExportContracts, but
+  // scoped to the checked rows via filters.ids. This is always an ADDITIONAL
+  // filter on top of the organization/owner scope the server already
+  // enforces (see supabase/functions/export-data/requestScoping.ts) — never
+  // a way to widen access.
+  const handleExportSelectedContracts = async () => {
+    if (!activeCompany?.id || selectedIds.size === 0) return;
+    setExportingContracts(true);
+    try {
+      const result = await requestControlledExport({
+        module: "client_contracts",
+        organizationId: activeCompany.id,
+        filters: { ids: Array.from(selectedIds) },
+      });
+      toast.success(`${result.rowCount} contratos exportados.`);
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setExportingContracts(false);
+    }
+  };
+
   // Redirect when user lacks view permission. Must be in an effect — calling
   // navigate() during render is a side effect and causes undefined behaviour.
   useEffect(() => {
@@ -1764,6 +1786,11 @@ const ClientContracts = () => {
                   const first = contracts.find(c => selectedIds.has(c.id));
                   if (first) handleOpenSendChannel(first);
                 }}><Send className="h-3 w-3 mr-1" /> Enviar</Button>
+                <PermissionGate permission="client_contracts.export">
+                  <Button size="sm" variant="outline" disabled={exportingContracts} onClick={handleExportSelectedContracts}>
+                    <Download className="h-3 w-3 mr-1" /> Exportar seleção ({selectedIds.size})
+                  </Button>
+                </PermissionGate>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Limpar</Button>
               </div>
             )}

@@ -8,10 +8,22 @@ import {
   getExportDefinition,
   isSupportedExportModule,
   type ExportDefinition,
-  type ExportModule,
 } from "./exportConfig.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { decryptNif, deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
+import {
+  applyCommonFilters,
+  applyOwnerScope,
+  fetchAllRows,
+  fetchScopedRows,
+  MAX_EXPORT_ROWS,
+  MAX_SELECTION_IDS,
+  parseRequest,
+  selectInChunks,
+  type AuthorizationContext,
+  type ExportRequest,
+  type ScopeLevel,
+} from "./requestScoping.ts";
 
 initSentry();
 
@@ -29,76 +41,13 @@ const exportRequestSchema = z.object({
     search: z.string().max(200).optional(),
     assignedTo: z.string().max(80).optional(),
     onlyMine: z.boolean().optional(),
+    // Strict UUID shape isn't enforced here — requestScoping.ts's
+    // parseRequest re-validates every entry against UUID_PATTERN and rejects
+    // the whole request if any entry doesn't match, rather than silently
+    // dropping bad ids.
+    ids: z.array(z.string()).max(10_000).optional(),
   }).optional().default({}),
 });
-
-const MAX_EXPORT_ROWS = 10_000;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-type ScopeLevel = "NONE" | "OWNED" | "TEAM" | "ORG";
-
-interface ExportRequest {
-  module: ExportModule;
-  organizationId: string;
-  includeSensitive: boolean;
-  filters: {
-    status?: string;
-    dateFrom?: string;
-    dateTo?: string;
-    search?: string;
-    assignedTo?: string;
-    onlyMine?: boolean;
-  };
-}
-
-interface AuthorizationContext {
-  scope: ScopeLevel;
-  exportOrgIds: string[];
-  scopedUserIds: string[];
-  canIncludeSensitive: boolean;
-}
-
-function parseRequest(input: unknown): ExportRequest {
-  if (!input || typeof input !== "object") throw new Error("INVALID_REQUEST");
-  const body = input as Record<string, unknown>;
-  const module = typeof body.module === "string" ? body.module : "";
-  const organizationId = typeof body.organizationId === "string" ? body.organizationId : "";
-
-  if (!isSupportedExportModule(module) || !UUID_PATTERN.test(organizationId)) {
-    throw new Error("INVALID_REQUEST");
-  }
-
-  const filtersInput =
-    body.filters && typeof body.filters === "object"
-      ? (body.filters as Record<string, unknown>)
-      : {};
-  const filters: ExportRequest["filters"] = {};
-
-  if (typeof filtersInput.status === "string" && filtersInput.status.length <= 40) {
-    filters.status = filtersInput.status;
-  }
-  for (const key of ["dateFrom", "dateTo"] as const) {
-    const value = filtersInput[key];
-    if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      filters[key] = value;
-    }
-  }
-  if (typeof filtersInput.search === "string" && filtersInput.search.trim().length > 0) {
-    filters.search = filtersInput.search.trim().slice(0, 200);
-  }
-  if (typeof filtersInput.assignedTo === "string" && filtersInput.assignedTo.length <= 80) {
-    filters.assignedTo = filtersInput.assignedTo;
-  }
-  if (filtersInput.onlyMine === true) {
-    filters.onlyMine = true;
-  }
-
-  return {
-    module,
-    organizationId,
-    includeSensitive: body.includeSensitive === true,
-    filters,
-  };
-}
 
 async function getGraph(admin: any) {
   const { data, error } = await admin
@@ -232,83 +181,6 @@ async function authorizeExport(
     scopedUserIds: Array.from(scopedUserIds),
     canIncludeSensitive: permissionSet.has(definition.sensitivePermission),
   };
-}
-
-function applyCommonFilters(query: any, filters: ExportRequest["filters"]): any {
-  let filtered = query;
-  if (filters.status) filtered = filtered.eq("status", filters.status);
-  if (filters.dateFrom) filtered = filtered.gte("created_at", `${filters.dateFrom}T00:00:00`);
-  if (filters.dateTo) filtered = filtered.lte("created_at", `${filters.dateTo}T23:59:59.999`);
-  return filtered;
-}
-
-function applyOwnerScope(query: any, auth: AuthorizationContext): any {
-  if (auth.scope === "ORG") return query;
-  const ids = auth.scopedUserIds;
-  if (ids.length === 1) {
-    return query.or(`created_by.eq.${ids[0]},assigned_to.eq.${ids[0]}`);
-  }
-  return query.or(`created_by.in.(${ids.join(",")}),assigned_to.in.(${ids.join(",")})`);
-}
-
-/**
- * PostgREST serialises `.in()` into the query string, and the gateway rejects
- * URLs past roughly 12 kB. Measured against this project: 300 ids (~11 kB)
- * succeed, 400 (~15 kB) fail outright at the connection level.
- *
- * Exporting an organization with 5418 leads built a ~200 kB URL, so every
- * lookup here failed and the whole export returned 500. Smaller organizations
- * stayed under the limit, which is why leads broke while clients and contacts
- * kept working — the defect was invisible until a tenant grew.
- *
- * 200 ids per request is ~7.5 kB, leaving room for the rest of the URL and the
- * headers.
- */
-const IN_CHUNK_SIZE = 200;
-
-/**
- * PostgREST caps every response at `db-max-rows`, 1000 on this project, and
- * does so silently — `.limit(10001)` still returns 1000 rows with no error and
- * no indication that anything was dropped. An organization with 5418 leads was
- * therefore exporting 1000 of them, which is worse than failing outright.
- *
- * Pages through the result instead, rebuilding the query each time because
- * `.range()` needs a fresh builder. The caller's query must carry a
- * deterministic ORDER BY or pages can overlap.
- */
-const PAGE_SIZE = 1000;
-
-async function fetchAllRows(build: () => any): Promise<any[]> {
-  const rows: any[] = [];
-  for (let from = 0; from <= MAX_EXPORT_ROWS; from += PAGE_SIZE) {
-    const { data, error } = await build().range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    // A short page means the end of the result set.
-    if (data.length < PAGE_SIZE) break;
-    // One row past the cap is enough for the caller's limit check to trip.
-    if (rows.length > MAX_EXPORT_ROWS) break;
-  }
-  return rows;
-}
-
-async function selectInChunks(
-  ids: string[],
-  build: (chunk: string[]) => any,
-): Promise<any[]> {
-  if (ids.length === 0) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += IN_CHUNK_SIZE) {
-    chunks.push(ids.slice(i, i + IN_CHUNK_SIZE));
-  }
-  const results = await Promise.all(chunks.map((chunk) => build(chunk)));
-  const rows: any[] = [];
-  for (const result of results) {
-    if (result.error) throw result.error;
-    if (result.data) rows.push(...result.data);
-  }
-  return rows;
 }
 
 async function resolveIdentityMaps(
@@ -670,7 +542,7 @@ async function exportProposals(
   // there is nothing here that depends on includeSensitive/decKey — every
   // field below is already shown in the Proposals.tsx table to anyone with
   // proposals.view.
-  const buildProposalsQuery = () => {
+  const buildProposalsQuery = (idsChunk?: string[]) => {
     let query = admin
       .from("proposals")
       .select(
@@ -679,11 +551,14 @@ async function exportProposals(
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .order("id", { ascending: true });
-    query = applyCommonFilters(query, request.filters);
+    query = applyCommonFilters(
+      query,
+      idsChunk ? { ...request.filters, ids: idsChunk } : request.filters,
+    );
     query = applyOwnerScope(query, auth);
     return query;
   };
-  const records = await fetchAllRows(buildProposalsQuery);
+  const records = await fetchScopedRows(buildProposalsQuery, request.filters.ids);
   const proposalIds = records.map((r: any) => r.id);
 
   const dealIds = Array.from(new Set(records.map((r: any) => r.deal_id).filter(Boolean))) as string[];
@@ -783,7 +658,7 @@ async function exportContracts(admin: any, request: ExportRequest, auth: Authori
   // email column is exported to everyone with client_contracts.export, no
   // dialog, because it's already visible in the ClientContracts.tsx table to
   // anyone with client_contracts.view.
-  const buildContractsQuery = () => {
+  const buildContractsQuery = (idsChunk?: string[]) => {
     let query = admin
       .from("client_contracts")
       .select(
@@ -792,11 +667,14 @@ async function exportContracts(admin: any, request: ExportRequest, auth: Authori
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .order("id", { ascending: true });
-    query = applyCommonFilters(query, request.filters);
+    query = applyCommonFilters(
+      query,
+      idsChunk ? { ...request.filters, ids: idsChunk } : request.filters,
+    );
     query = applyOwnerScope(query, auth);
     return query;
   };
-  const records = await fetchAllRows(buildContractsQuery);
+  const records = await fetchScopedRows(buildContractsQuery, request.filters.ids);
   const contractIds = records.map((r: any) => r.id);
 
   const assignedIds = Array.from(
@@ -1103,6 +981,12 @@ Deno.serve(async (req: Request) => {
     const message = error instanceof Error ? error.message : "";
     if (message === "INVALID_REQUEST" || message === "Unsupported export module") {
       return jsonResponse({ error: "Invalid export request" }, 400);
+    }
+    if (message === "SELECTION_TOO_LARGE") {
+      return jsonResponse(
+        { error: `A seleção excede o máximo de ${MAX_SELECTION_IDS} itens por exportação.` },
+        400,
+      );
     }
     if (message.includes("Authorization") || message.includes("token")) {
       return jsonResponse({ error: "Authentication required" }, 401);

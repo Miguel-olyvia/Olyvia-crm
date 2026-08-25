@@ -1,0 +1,361 @@
+/**
+ * export-data — "exportar apenas a seleção" org-scoping regression tests.
+ *
+ * ── What this guards against ────────────────────────────────────────────
+ * `ids` (the explicit selection sent by Proposals.tsx / ClientContracts.tsx
+ * when the user exports only the checked rows) must always be an ADDITIONAL
+ * filter on top of the organization/owner scope already built into the
+ * query — never a substitute for it. If a caller (a compromised client, a
+ * bug, or a deliberately crafted request) sends ids that belong to another
+ * organization, those ids must come back EMPTY from the export, not be
+ * exported.
+ *
+ * These tests exercise the exact functions `exportProposals` /
+ * `exportContracts` (in index.ts) use for this (`applyCommonFilters`,
+ * `fetchScopedRows`, `selectInChunks`, `parseRequest`) against an in-memory
+ * fake Postgrest-like query builder that enforces real filter semantics on a
+ * fabricated multi-tenant dataset. They do not start `Deno.serve` and do not
+ * touch a real database.
+ *
+ * These functions live in `./requestScoping.ts`, not `index.ts`, and were
+ * moved there (no behavior change) specifically so this test file can import
+ * them directly: `index.ts` imports `npm:@supabase/supabase-js` and Sentry
+ * (via `_shared/sentry.ts`), which `deno test` cannot resolve in this repo
+ * without a `node_modules` install (see the other `.ignore`d
+ * cross-org-isolation tests in this repo, e.g. auto-schedule/index.test.ts,
+ * for the same constraint). `requestScoping.ts` has no such dependency, so
+ * these tests run for real instead of being permanently skipped.
+ */
+
+import {
+  assert,
+  assertEquals,
+  assertThrows,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  applyCommonFilters,
+  fetchScopedRows,
+  IN_CHUNK_SIZE,
+  MAX_SELECTION_IDS,
+  parseRequest,
+  selectInChunks,
+  type AuthorizationContext,
+  type ExportRequest,
+} from "./requestScoping.ts";
+
+// ── fake Postgrest-like query builder ───────────────────────────────────
+//
+// Applies filters against an in-memory row array using the same semantics
+// PostgREST gives `.in()` / `.is()` / `.eq()` / `.order()` / `.range()`.
+// Deliberately does NOT implement `.or()` — every test below uses
+// scope "ORG" so `applyOwnerScope` is a no-op and never calls it.
+
+interface FakeRow {
+  id: string;
+  organization_id: string;
+  deleted_at: string | null;
+  [key: string]: unknown;
+}
+
+class FakeQueryBuilder {
+  private predicates: Array<(row: FakeRow) => boolean> = [];
+  private orderKey: string | null = null;
+  private rangeBounds: [number, number] | null = null;
+
+  constructor(private rows: FakeRow[]) {}
+
+  select(_columns?: string): this {
+    return this;
+  }
+
+  in(column: string, values: unknown[]): this {
+    const set = new Set(values);
+    this.predicates.push((row) => set.has(row[column]));
+    return this;
+  }
+
+  is(column: string, value: unknown): this {
+    this.predicates.push((row) =>
+      value === null ? row[column] === null || row[column] === undefined : row[column] === value,
+    );
+    return this;
+  }
+
+  eq(column: string, value: unknown): this {
+    this.predicates.push((row) => row[column] === value);
+    return this;
+  }
+
+  gte(column: string, value: unknown): this {
+    this.predicates.push((row) => String(row[column]) >= String(value));
+    return this;
+  }
+
+  lte(column: string, value: unknown): this {
+    this.predicates.push((row) => String(row[column]) <= String(value));
+    return this;
+  }
+
+  order(column: string): this {
+    this.orderKey = column;
+    return this;
+  }
+
+  range(from: number, to: number): this {
+    this.rangeBounds = [from, to];
+    return this;
+  }
+
+  private resolve(): { data: FakeRow[]; error: null } {
+    let result = this.rows.filter((row) => this.predicates.every((predicate) => predicate(row)));
+    if (this.orderKey) {
+      const key = this.orderKey;
+      result = [...result].sort((a, b) => String(a[key]).localeCompare(String(b[key])));
+    }
+    if (this.rangeBounds) {
+      const [from, to] = this.rangeBounds;
+      result = result.slice(from, to + 1);
+    }
+    return { data: result, error: null };
+  }
+
+  // Makes the builder awaitable, like the real supabase-js query builder.
+  then<TResult1, TResult2 = never>(
+    onFulfilled?: (value: { data: FakeRow[]; error: null }) => TResult1 | PromiseLike<TResult1>,
+    onRejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
+  ): Promise<TResult1 | TResult2> {
+    return Promise.resolve(this.resolve()).then(onFulfilled, onRejected);
+  }
+}
+
+function makeFakeAdmin(rows: FakeRow[]) {
+  return {
+    from(_table: string) {
+      return new FakeQueryBuilder(rows);
+    },
+  };
+}
+
+// ── fixture: two organizations sharing one fake "proposals" table ──────
+
+const ORG_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const ORG_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+function makeProposalId(org: "a" | "b", n: number): string {
+  const prefix = org === "a" ? "aaaaaaaa" : "bbbbbbbb";
+  const suffix = String(n).padStart(12, "0");
+  return `${prefix}-1111-4111-8111-${suffix}`;
+}
+
+function buildFixtureRows(orgACount: number, orgBCount: number): FakeRow[] {
+  const rows: FakeRow[] = [];
+  for (let i = 0; i < orgACount; i += 1) {
+    rows.push({ id: makeProposalId("a", i), organization_id: ORG_A, deleted_at: null });
+  }
+  for (let i = 0; i < orgBCount; i += 1) {
+    rows.push({ id: makeProposalId("b", i), organization_id: ORG_B, deleted_at: null });
+  }
+  return rows;
+}
+
+function orgScopedAuth(exportOrgIds: string[]): AuthorizationContext {
+  return {
+    scope: "ORG",
+    exportOrgIds,
+    scopedUserIds: [],
+    canIncludeSensitive: false,
+  };
+}
+
+/**
+ * Mirrors exportProposals'/exportContracts' `buildProposalsQuery`/
+ * `buildContractsQuery` closures exactly: organization_id + deleted_at are
+ * applied unconditionally, `applyCommonFilters` (which is where `ids` gets
+ * chained in) runs next, and the whole thing is what `fetchScopedRows` calls
+ * once per id chunk.
+ */
+function buildScopedQuery(
+  admin: ReturnType<typeof makeFakeAdmin>,
+  auth: AuthorizationContext,
+  filters: ExportRequest["filters"],
+) {
+  return (idsChunk?: string[]) => {
+    let query = admin
+      .from("proposals")
+      .select("id, organization_id")
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id");
+    query = applyCommonFilters(query, idsChunk ? { ...filters, ids: idsChunk } : filters);
+    // auth.scope is always "ORG" in these fixtures, so applyOwnerScope would
+    // be a no-op — omitted here to keep the fake builder from needing `.or()`.
+    return query;
+  };
+}
+
+// ── the regression itself ───────────────────────────────────────────────
+
+Deno.test("fetchScopedRows: ids from another organization never leak into the export", async () => {
+  const rows = buildFixtureRows(5, 5);
+  const admin = makeFakeAdmin(rows);
+  const auth = orgScopedAuth([ORG_A]);
+
+  // A caller scoped to ORG_A sends a selection that mixes its own ids with
+  // ids that actually belong to ORG_B (e.g. a tampered request body).
+  const requestedIds = [
+    makeProposalId("a", 0),
+    makeProposalId("a", 1),
+    makeProposalId("b", 0),
+    makeProposalId("b", 1),
+    makeProposalId("b", 2),
+  ];
+
+  const buildQuery = buildScopedQuery(admin, auth, {});
+  const result = await fetchScopedRows(buildQuery, requestedIds);
+
+  const returnedIds = result.map((row) => row.id).sort();
+  assertEquals(returnedIds, [makeProposalId("a", 0), makeProposalId("a", 1)]);
+  // Every returned row must genuinely belong to the caller's scoped org —
+  // not merely "happen to have the right id format".
+  assert(result.every((row) => row.organization_id === ORG_A));
+});
+
+Deno.test("fetchScopedRows: an all-foreign-org selection resolves to zero rows, not an error", async () => {
+  const rows = buildFixtureRows(3, 3);
+  const admin = makeFakeAdmin(rows);
+  const auth = orgScopedAuth([ORG_A]);
+
+  const requestedIds = [makeProposalId("b", 0), makeProposalId("b", 1), makeProposalId("b", 2)];
+  const buildQuery = buildScopedQuery(admin, auth, {});
+  const result = await fetchScopedRows(buildQuery, requestedIds);
+
+  assertEquals(result, []);
+});
+
+Deno.test("fetchScopedRows: selections over 300 ids are chunked under IN_CHUNK_SIZE and return every in-scope row exactly once", async () => {
+  const orgACount = 350;
+  const rows = buildFixtureRows(orgACount, 10);
+  const admin = makeFakeAdmin(rows);
+  const auth = orgScopedAuth([ORG_A]);
+
+  const chunkSizesSeen: number[] = [];
+  const instrumentedBuild = (idsChunk?: string[]) => {
+    if (idsChunk) chunkSizesSeen.push(idsChunk.length);
+    return buildScopedQuery(admin, auth, {})(idsChunk);
+  };
+
+  // Selection includes every ORG_A id plus a handful of ORG_B ids mixed in,
+  // simulating a large "select all" that also carries tampered/foreign ids.
+  const requestedIds = [
+    ...Array.from({ length: orgACount }, (_, i) => makeProposalId("a", i)),
+    makeProposalId("b", 0),
+    makeProposalId("b", 1),
+  ];
+
+  const result = await fetchScopedRows(instrumentedBuild, requestedIds);
+
+  // Measured, not assumed: every chunk actually sent stays at or under the
+  // documented IN_CHUNK_SIZE, and more than one chunk was needed for 352 ids.
+  assert(chunkSizesSeen.length > 1, "expected selection to be split into multiple chunks");
+  assert(chunkSizesSeen.every((size) => size <= IN_CHUNK_SIZE), "a chunk exceeded IN_CHUNK_SIZE");
+
+  const returnedIds = result.map((row) => row.id);
+  assertEquals(returnedIds.length, orgACount, "expected exactly the org-scoped rows, no more, no fewer");
+  assertEquals(new Set(returnedIds).size, orgACount, "expected no duplicate rows across chunks");
+  assert(result.every((row) => row.organization_id === ORG_A));
+});
+
+Deno.test("fetchScopedRows: duplicate ids in the selection do not produce duplicate rows", async () => {
+  const rows = buildFixtureRows(2, 0);
+  const admin = makeFakeAdmin(rows);
+  const auth = orgScopedAuth([ORG_A]);
+
+  const oneId = makeProposalId("a", 0);
+  const requestedIds = [oneId, oneId, oneId, makeProposalId("a", 1)];
+  const buildQuery = buildScopedQuery(admin, auth, {});
+  const result = await fetchScopedRows(buildQuery, requestedIds);
+
+  assertEquals(result.map((row) => row.id).sort(), [makeProposalId("a", 0), makeProposalId("a", 1)]);
+});
+
+Deno.test("fetchScopedRows: with no ids, falls back to the normal paginated fetch (unchanged behavior)", async () => {
+  const rows = buildFixtureRows(3, 0);
+  const admin = makeFakeAdmin(rows);
+  const auth = orgScopedAuth([ORG_A]);
+
+  const buildQuery = buildScopedQuery(admin, auth, {});
+  const result = await fetchScopedRows(buildQuery, undefined);
+
+  assertEquals(result.length, 3);
+});
+
+Deno.test("applyCommonFilters: ids narrow an already org-scoped query, they never widen it", async () => {
+  const rows = buildFixtureRows(2, 2);
+  const admin = makeFakeAdmin(rows);
+  const orgAOnlyQuery = admin
+    .from("proposals")
+    .select("id, organization_id")
+    .in("organization_id", [ORG_A])
+    .is("deleted_at", null);
+
+  // Even asking for every id in the dataset (both orgs), the org filter
+  // applied before `applyCommonFilters` still wins.
+  const allIds = rows.map((row) => row.id);
+  const filtered = applyCommonFilters(orgAOnlyQuery, { ids: allIds });
+  const { data } = await filtered;
+
+  assertEquals(data.map((row: FakeRow) => row.organization_id), [ORG_A, ORG_A]);
+});
+
+// ── parseRequest: input validation for the `ids` filter ────────────────
+
+Deno.test("parseRequest: accepts a valid, deduplicated list of uuid ids", () => {
+  const id1 = makeProposalId("a", 0);
+  const id2 = makeProposalId("a", 1);
+  const parsed = parseRequest({
+    module: "proposals",
+    organizationId: ORG_A,
+    filters: { ids: [id1, id2, id1] },
+  });
+
+  assertEquals(parsed.filters.ids?.length, 2);
+  assert(parsed.filters.ids?.includes(id1));
+  assert(parsed.filters.ids?.includes(id2));
+});
+
+Deno.test("parseRequest: rejects a selection containing a non-uuid entry", () => {
+  assertThrows(
+    () =>
+      parseRequest({
+        module: "proposals",
+        organizationId: ORG_A,
+        filters: { ids: [makeProposalId("a", 0), "not-a-uuid"] },
+      }),
+    Error,
+    "INVALID_REQUEST",
+  );
+});
+
+Deno.test("parseRequest: rejects a selection larger than MAX_SELECTION_IDS", () => {
+  const tooMany = Array.from({ length: MAX_SELECTION_IDS + 1 }, (_, i) => makeProposalId("a", i));
+  assertThrows(
+    () =>
+      parseRequest({
+        module: "proposals",
+        organizationId: ORG_A,
+        filters: { ids: tooMany },
+      }),
+    Error,
+    "SELECTION_TOO_LARGE",
+  );
+});
+
+Deno.test("parseRequest: an omitted ids filter leaves filters.ids undefined (unchanged behavior)", () => {
+  const parsed = parseRequest({
+    module: "proposals",
+    organizationId: ORG_A,
+    filters: {},
+  });
+
+  assertEquals(parsed.filters.ids, undefined);
+});
