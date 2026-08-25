@@ -171,3 +171,46 @@ export async function searchEntityIds(search: string): Promise<SearchEntityIdsRe
 
   return { ids: Array.from(intersection) };
 }
+
+/**
+ * Resolution step for the `anew_clients.search_text` fast path (mirrors
+ * `anew_leads.search_text`, see
+ * supabase/migrations/20261113100000_anew_clients_search_text.sql): splits
+ * `term` into the same sanitized words `searchEntityIds` uses, and resolves
+ * NIF matches via the same `search-entities` Edge Function call (never a
+ * plaintext `fiscal_entities.nif ILIKE`).
+ *
+ * NIF is resolved once for the whole term (not per-word, unlike the
+ * legacy per-word architecture above) because a NIF isn't meaningfully
+ * split into sub-words — callers OR the resulting `entity_id`s in
+ * alongside the AND-across-words `search_text` match.
+ */
+export interface ClientSearchResolution {
+  words: string[];
+  nifEntityIds: string[];
+}
+
+export async function resolveClientSearch(term: string): Promise<ClientSearchResolution> {
+  const words = term
+    .toLowerCase()
+    .split(/\s+/)
+    .map(sanitizeWord)
+    .filter((w) => w.length > 0);
+
+  const nifEntityIds = await searchEntityIdsByNif(term);
+
+  return { words, nifEntityIds };
+}
+
+/**
+ * Chains one `.ilike("search_text", ...)` per word onto `query` (AND
+ * between words, tolerates order — e.g. "ulisses silva" still matches
+ * "Ulisses da Silva Galvão" because each word is checked independently
+ * instead of the whole phrase as one substring).
+ */
+export function applyClientSearchTextFilter<Q extends { ilike: (column: string, pattern: string) => Q }>(
+  query: Q,
+  words: readonly string[],
+): Q {
+  return words.reduce((q, word) => q.ilike("search_text", `%${escapeIlike(word)}%`), query);
+}

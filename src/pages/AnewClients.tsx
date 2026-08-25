@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
-import { searchEntityIds, chunkIds } from "@/lib/clientSearch";
+import { resolveClientSearch, applyClientSearchTextFilter } from "@/lib/clientSearch";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import Layout from "@/components/Layout";
@@ -678,52 +678,67 @@ const AnewClients = () => {
         data = result.data;
         count = result.count;
       } else {
-        // Server-side search across name/email/phone/NIF (covers ALL visible clients, not just current page)
-        const { ids: matchedIds } = await searchEntityIds(effectiveSearch);
+        // Server-side search across name/email/phone (via anew_clients.search_text,
+        // same denormalized-column + ILIKE architecture as anew_leads.search_text —
+        // see supabase/migrations/20261113100000_anew_clients_search_text.sql) plus
+        // NIF (via the search-entities Edge Function, unchanged; NIF is deliberately
+        // never stored in search_text — see that migration's header comment).
+        const { words, nifEntityIds } = await resolveClientSearch(effectiveSearch);
         if (isInitial && requestId !== clientsRequestIdRef.current) return;
-        if (matchedIds.length === 0) {
-          if (isInitial) setClients([]);
-          setHasMore(false);
-          return;
+
+        if (nifEntityIds.length === 0) {
+          // Common case: no NIF match, so this is a single DB-paginated query —
+          // no id resolution, no JS-side intersection, no chunking.
+          if (words.length === 0) {
+            if (isInitial) setClients([]);
+            setHasMore(false);
+            return;
+          }
+          let query = applyClientSearchTextFilter(buildClientsQuery(), words)
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(offset, offset + PAGE_SIZE - 1);
+          if (abortController) query = query.abortSignal(abortController.signal);
+          const result = await query;
+          if (result.error) throw result.error;
+          if (isInitial && requestId !== clientsRequestIdRef.current) return;
+          data = result.data;
+          count = result.count;
+        } else {
+          // Rare case: the term also matches a NIF. NIF_SEARCH_LIMIT (100) already
+          // caps nifEntityIds well under the URL-length ceiling that used to force
+          // chunkIds for the old per-word architecture, so a single `.in()` is safe.
+          // The word-match set has no such cap, so both are fetched in full and
+          // merged/sorted/paginated in JS — same technique the old architecture
+          // used, just two queries instead of one RPC call per word plus N id chunks.
+          const wordQuery = words.length > 0
+            ? applyClientSearchTextFilter(buildClientsQuery(), words)
+            : Promise.resolve({ data: [] as ClientRecord[], error: null });
+          const nifQuery = buildClientsQuery().in("entity_id", nifEntityIds);
+          const [wordResult, nifResult] = await Promise.all([wordQuery, nifQuery]);
+          if (isInitial && requestId !== clientsRequestIdRef.current) return;
+          if (wordResult.error) throw wordResult.error;
+          if (nifResult.error) throw nifResult.error;
+
+          const mergedById = new Map<string, ClientRecord>();
+          (wordResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+          (nifResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+          const sorted = Array.from(mergedById.values()).sort((a, b) => {
+            const byUpdatedAt = (b.updated_at || "").localeCompare(a.updated_at || "");
+            if (byUpdatedAt !== 0) return byUpdatedAt;
+            return (b.id || "").localeCompare(a.id || "");
+          });
+
+          count = sorted.length;
+          data = sorted.slice(offset, offset + PAGE_SIZE);
         }
-
-        // A single `.in("entity_id", matchedIds)` would put every matched id in the
-        // request's URL query string; with hundreds of matches (e.g. "mar" -> 802)
-        // that blows the gateway's URL-length ceiling (measured: ~300 ids/~11kB
-        // pass, ~400/~15kB fail at the connection level, before any Postgres
-        // involvement). Chunking keeps each request well under that ceiling; since
-        // PostgREST can't paginate a result that's assembled from independent
-        // chunk requests, the merge/sort/page step below happens in JS instead.
-        const idChunks = chunkIds(matchedIds);
-        const chunkResults = await Promise.all(
-          idChunks.map((chunk) => {
-            let chunkQuery = buildClientsQuery().in("entity_id", chunk);
-            if (abortController) chunkQuery = chunkQuery.abortSignal(abortController.signal);
-            return chunkQuery;
-          }),
-        );
-        if (isInitial && requestId !== clientsRequestIdRef.current) return;
-        for (const chunkResult of chunkResults) if (chunkResult.error) throw chunkResult.error;
-
-        const mergedById = new Map<string, ClientRecord>();
-        chunkResults.forEach((chunkResult) => {
-          (chunkResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
-        });
-        const sorted = Array.from(mergedById.values()).sort((a, b) => {
-          const byUpdatedAt = (b.updated_at || "").localeCompare(a.updated_at || "");
-          if (byUpdatedAt !== 0) return byUpdatedAt;
-          return (b.id || "").localeCompare(a.id || "");
-        });
-
-        count = sorted.length;
-        data = sorted.slice(offset, offset + PAGE_SIZE);
       }
 
       let newClients = (data || []) as ClientRecord[];
       const eIds = newClients.map(c => c.entity_id).filter(Boolean);
       if (eIds.length > 0) await resolveEntities(eIds);
 
-      // Text search is applied server-side above via searchEntityIds (entity_id .in).
+      // Text search is applied server-side above via anew_clients.search_text / NIF entity_id .in.
 
 
       // Post-filter: missing NIF / no contact (60d)
@@ -822,47 +837,68 @@ const AnewClients = () => {
       const viewScope = getPermissionScope("clients.view");
       if (viewScope === "NONE") { setAllClients([]); setAllClientsLoaded(true); return; }
 
-      // Server-side search: pre-resolve matching entity_ids (covers full universe, not just first batch)
-      let searchEntityIdsList: string[] | null = null;
+      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+      const SELECT_COLS = "id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id";
+
+      // Every filter EXCEPT the search-text/entity_id/order/range terminal steps,
+      // so it can be reused across the batched offset loop and the NIF branch
+      // below without any filter leaking/duplicating between them.
+      const buildBaseQuery = () => {
+        let q = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
+        if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
+        else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
+        if (scopeFilter) q = q.or(scopeFilter);
+        if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
+        if (dateTo) q = q.lte("created_at", dateTo.toISOString());
+        return q;
+      };
+
+      const words: string[] = [];
+      let nifEntityIds: string[] = [];
       if (effectiveSearch) {
-        const { ids } = await searchEntityIds(effectiveSearch);
-        if (ids.length === 0) {
+        const resolved = await resolveClientSearch(effectiveSearch);
+        words.push(...resolved.words);
+        nifEntityIds = resolved.nifEntityIds;
+        if (words.length === 0 && nifEntityIds.length === 0) {
           setAllClients([]);
           setAllClientsLoaded(true);
           return;
         }
-        searchEntityIdsList = ids;
       }
 
-      const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
-      const SELECT_COLS = "id, entity_id, organization_id, root_organization_id, status, client_type, source_type, assigned_to, notes, created_at, created_by, updated_at, last_interaction_at, origin_source, origin_source_id, origin_campaign_id";
-
       let all: ClientRecord[];
-      if (searchEntityIdsList) {
-        // searchEntityIdsList is already the FULL, unbounded match set (see
-        // searchEntityIds). Chunk it instead of paginating via offset/range —
-        // a single `.in("entity_id", ids)` with hundreds of ids would blow the
-        // gateway's URL-length ceiling (same measurement as loadClients:
-        // ~300 ids/~11kB pass, ~400/~15kB fail), and each chunk already
-        // covers a disjoint slice of the ids, so no offset loop is needed.
-        const idChunks = chunkIds(searchEntityIdsList);
-        const chunkResults = await Promise.all(
-          idChunks.map((chunk) => {
-            let q = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
-            if (companyFilter !== "all") q = q.eq("organization_id", companyFilter);
-            else if (activeCompany?.id) q = q.eq("organization_id", activeCompany.id);
-            if (scopeFilter) q = q.or(scopeFilter);
-            if (dateFrom) q = q.gte("created_at", dateFrom.toISOString());
-            if (dateTo) q = q.lte("created_at", dateTo.toISOString());
-            return q.in("entity_id", chunk);
-          }),
-        );
-        for (const chunkResult of chunkResults) if (chunkResult.error) throw chunkResult.error;
-
+      if (effectiveSearch) {
+        // Server-side search: name/email/phone via anew_clients.search_text
+        // (batched via offset/range — the match set can be in the hundreds,
+        // e.g. "mar" -> ~963 -- so it's fetched the same BATCH-loop way the
+        // no-search branch below already does), plus NIF via a single
+        // `.in()` (nifEntityIds is capped at 100 by NIF_SEARCH_LIMIT, well
+        // under the URL-length ceiling that used to force chunkIds here).
         const mergedById = new Map<string, ClientRecord>();
-        chunkResults.forEach((chunkResult) => {
-          (chunkResult.data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
-        });
+
+        if (words.length > 0) {
+          const BATCH = 500;
+          let offset = 0;
+          let hasMoreBatch = true;
+          while (hasMoreBatch) {
+            let query = applyClientSearchTextFilter(buildBaseQuery(), words)
+              .order("updated_at", { ascending: false }).order("id", { ascending: false })
+              .range(offset, offset + BATCH - 1);
+            const { data, error } = await query;
+            if (error) throw error;
+            const batch = (data || []) as ClientRecord[];
+            batch.forEach((row) => mergedById.set(row.id, row));
+            hasMoreBatch = batch.length === BATCH;
+            offset += BATCH;
+          }
+        }
+
+        if (nifEntityIds.length > 0) {
+          const { data, error } = await buildBaseQuery().in("entity_id", nifEntityIds);
+          if (error) throw error;
+          (data || []).forEach((row: ClientRecord) => mergedById.set(row.id, row));
+        }
+
         all = Array.from(mergedById.values());
         const eIds = all.map(c => c.entity_id).filter(Boolean);
         if (eIds.length > 0) await resolveEntities(eIds);
@@ -872,13 +908,8 @@ const AnewClients = () => {
         let offset = 0;
         let hasMoreBatch = true;
         while (hasMoreBatch) {
-          let query = (supabase as any).from("anew_clients").select(SELECT_COLS).is("deleted_at", null);
-          if (companyFilter !== "all") query = query.eq("organization_id", companyFilter);
-          else if (activeCompany?.id) query = query.eq("organization_id", activeCompany.id);
-          if (scopeFilter) query = query.or(scopeFilter);
-          if (dateFrom) query = query.gte("created_at", dateFrom.toISOString());
-          if (dateTo) query = query.lte("created_at", dateTo.toISOString());
-          query = query.order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
+          let query = buildBaseQuery()
+            .order("updated_at", { ascending: false }).order("id", { ascending: false }).range(offset, offset + BATCH - 1);
           const { data, error } = await query;
           if (error) throw error;
           const batch = (data || []) as ClientRecord[];

@@ -13,6 +13,10 @@ describe("controlled export definitions", () => {
       "name",
       "status",
       "clientType",
+      // O comercial atribuído é o nome de um utilizador interno, não dado
+      // pessoal do cliente — por isso fica de fora de clients.export_sensitive
+      // e aparece nesta lista.
+      "assignedTo",
       "createdAt",
     ]);
   });
