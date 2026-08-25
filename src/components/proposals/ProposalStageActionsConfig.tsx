@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Plus, Trash2, ClipboardList, Mail, Send,
-  ChevronDown, ChevronUp, Zap, CheckCircle2, XCircle,
+  ChevronDown, ChevronUp, Zap, CheckCircle2, XCircle, FileSignature,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +69,14 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
     label: "Enviar Email",
     icon: <Mail className="w-4 h-4 text-purple-600" />,
     description: "Envia um email automático",
+  },
+  // Legacy/informational entry: the actual "aceite → cria contrato"
+  // automation is hardcoded in execute-workflow (triggered by the stage's
+  // is_won flag) and does not read this table — this row only labels it.
+  create_contract: {
+    label: "Criar Contrato",
+    icon: <FileSignature className="w-4 h-4 text-emerald-600" />,
+    description: "Regista a criação automática de contrato (executada pelo motor de workflow ao aceitar a proposta)",
   },
 };
 
@@ -168,8 +176,12 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     setIsFormOpen(false);
   };
 
-  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || stageId;
+  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || "Fase removida";
   const getStageColor = (stageId: string) => stages.find((s) => s.id === stageId)?.color || "#6b7280";
+  // Only offer active stages as a target for a NEW action — stages is the
+  // full (active + inactive) list, needed above just to resolve labels for
+  // actions already tied to a deactivated stage.
+  const activeStages = stages.filter((s) => s.is_active);
 
   const actionsByStage = actions.reduce<Record<string, StageAction[]>>((acc, a) => {
     acc[a.stage_id] = acc[a.stage_id] || [];
@@ -284,7 +296,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
                       <SelectValue placeholder="Selecionar fase..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {stages.map((s) => (
+                      {activeStages.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
                           <div className="flex items-center gap-2">
                             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />

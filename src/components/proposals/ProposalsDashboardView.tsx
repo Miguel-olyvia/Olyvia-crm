@@ -71,9 +71,19 @@ export function ProposalsDashboardView({
   hasAnyProposals,
 }: ProposalsDashboardViewProps) {
   const funnelData = useMemo(() => {
-    const ordered = [...workflowStages]
-      .filter(s => !s.is_lost)
-      .sort((a, b) => a.stage_order - b.stage_order);
+    // Uma fase do org e a fase global homonima (mesmo `name`, ex.: "accepted")
+    // sao o MESMO degrau do funil — agrupam-se numa so linha com as
+    // contagens/valores somados, em vez de duas linhas duplicadas (ver
+    // loadWorkflowStages em Proposals.tsx: workflowStages/allWorkflowStages
+    // passaram a incluir sempre as duas fontes).
+    const byName = new Map<string, WorkflowStage & { ids: string[] }>();
+    for (const s of workflowStages) {
+      if (s.is_lost) continue;
+      const existing = byName.get(s.name);
+      if (existing) existing.ids.push(s.id);
+      else byName.set(s.name, { ...s, ids: [s.id] });
+    }
+    const ordered = Array.from(byName.values()).sort((a, b) => a.stage_order - b.stage_order);
 
     const directCount: Record<string, number> = {};
     const directValue: Record<string, number> = {};
@@ -85,6 +95,8 @@ export function ProposalsDashboardView({
       directValue[sId] = (directValue[sId] || 0) + valueOf(p);
       directValueWithVat[sId] = (directValueWithVat[sId] || 0) + valueWithVatOf(p);
     });
+    const sumIds = (map: Record<string, number>, ids: string[]) =>
+      ids.reduce((s, id) => s + (map[id] || 0), 0);
 
     return ordered.map((stage, idx) => {
       // Funil acumulado: cada stage soma a contagem/valor deste stage
@@ -93,15 +105,15 @@ export function ProposalsDashboardView({
       let value = 0;
       let valueWithVat = 0;
       for (let i = idx; i < ordered.length; i++) {
-        count += directCount[ordered[i].id] || 0;
-        value += directValue[ordered[i].id] || 0;
-        valueWithVat += directValueWithVat[ordered[i].id] || 0;
+        count += sumIds(directCount, ordered[i].ids);
+        value += sumIds(directValue, ordered[i].ids);
+        valueWithVat += sumIds(directValueWithVat, ordered[i].ids);
       }
       const nextStage = ordered[idx + 1];
       let nextCount = 0;
       if (nextStage) {
         for (let i = idx + 1; i < ordered.length; i++) {
-          nextCount += directCount[ordered[i].id] || 0;
+          nextCount += sumIds(directCount, ordered[i].ids);
         }
       }
       const conversionRate = count > 0 && nextStage ? Math.round((nextCount / count) * 100) : null;

@@ -123,6 +123,11 @@ function SortableStageRow({
 export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStagesUpdated }: Props) {
   const { toast } = useToast();
   const [stages, setStages] = useState<ProposalWorkflowStage[]>([]);
+  // Same stages, but including soft-deleted (is_active=false) ones. A stage
+  // action tied to a deactivated stage still exists in proposal_stage_actions
+  // — without this, the "Ações" tab can't resolve its label/color and falls
+  // back to showing the raw stage_id.
+  const [allStages, setAllStages] = useState<ProposalWorkflowStage[]>([]);
   const [templateStages, setTemplateStages] = useState<ProposalWorkflowStage[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -141,6 +146,15 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
   const loadStages = async () => {
     if (!companyId) return;
     setLoading(true);
+    // allStages must also include the global template stages (organization_id
+    // IS NULL): an action created before the org clicked "Personalizar" was
+    // saved with a template stage_id, which never appears in an org-scoped
+    // query — that's why it was still showing as a raw UUID.
+    const [{ data: allOrgData }, { data: allGlobalData }] = await Promise.all([
+      supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).order("stage_order"),
+      supabase.from("proposal_workflow_stages" as any).select("*").is("organization_id", null).order("stage_order"),
+    ]);
+    setAllStages([...((allOrgData || []) as any[]), ...((allGlobalData || []) as any[])]);
     const { data, error } = await supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).eq("is_active", true).order("stage_order");
     if (!error) { setStages((data || []) as any[]); setIsUsingTemplate(((data || []) as any[]).length === 0); }
     setLoading(false);
@@ -313,7 +327,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
             </TabsContent>
 
             <TabsContent value="flow" className="mt-4"><ProposalFlowchart stages={displayStages} companyId={companyId} /></TabsContent>
-            <TabsContent value="actions" className="mt-4"><ProposalStageActionsConfig stages={displayStages} companyId={companyId} /></TabsContent>
+            <TabsContent value="actions" className="mt-4"><ProposalStageActionsConfig stages={allStages.length > 0 ? allStages : displayStages} companyId={companyId} /></TabsContent>
             <TabsContent value="automations" className="mt-4">
               <WorkflowAutomationRules companyId={companyId || undefined} sourceEntity="proposal" workflowStages={workflowStagesForRules} />
             </TabsContent>
