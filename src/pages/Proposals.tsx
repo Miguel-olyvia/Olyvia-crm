@@ -197,6 +197,12 @@ const PROPOSALS_LIST_SELECT =
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
+  // Same rows as workflowStages, but WITHOUT the is_active filter — a stage
+  // deleted in the workflow editor is a soft-delete (is_active=false), and
+  // proposals/stats still reference it by stage_id. Anything that counts or
+  // labels proposals by stage must use this list, or a deactivated "Aceite"
+  // stage silently disappears from totals even though its proposals didn't.
+  const [allWorkflowStages, setAllWorkflowStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(true);
   // Paginacao com scroll infinito, no mesmo molde da listagem de Leads
   // (src/pages/AnewLeads.tsx). Antes desta vaga a listagem trazia as 519 linhas
@@ -666,28 +672,39 @@ const Proposals = () => {
   // Devolve os estados alem de os guardar no estado do React: a RPC de
   // paginacao precisa da lista de ids no mesmo tick, e ler `workflowStages`
   // logo depois do setState devolveria o valor da render anterior.
+  //
+  // allWorkflowStages inclui SEMPRE as fases globais de template alem das
+  // do org, mesmo quando o org ja tem fases proprias — propostas antigas
+  // podem ter stage_id a apontar para uma fase global legada que deixou de
+  // aparecer na lista do org, fazendo essas propostas desaparecerem de
+  // qualquer agregacao client-side por is_won/is_lost (ex.: ProposalsDashboardView),
+  // apesar de a flag estar certa quando lida diretamente do embed da
+  // proposta ou pela SQL de get_proposals_list_metrics (que ja resolve por
+  // nome de fase, nao por id). O valor devolvido e workflowStages (a lista
+  // "ativa", org-preferida) exatamente como antes deste merge.
   const loadWorkflowStages = useCallback(async (): Promise<WorkflowStage[]> => {
-    const { data: orgStages } = await (supabase
-      .from("proposal_workflow_stages") as any)
-      .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
-      .eq("organization_id", activeCompany?.id || '')
-      .eq("is_active", true)
-      .order("stage_order");
+    const selectCols = "id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost";
+    const [{ data: orgStagesAll }, { data: globalStagesAll }] = await Promise.all([
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
+        .eq("organization_id", activeCompany?.id || '')
+        .order("stage_order"),
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
+        .is("organization_id", null)
+        .order("stage_order"),
+    ]);
 
-    if (orgStages && orgStages.length > 0) {
-      setWorkflowStages(orgStages);
-      return orgStages as WorkflowStage[];
-    }
+    const org = orgStagesAll || [];
+    const global = globalStagesAll || [];
 
-    const { data: globalStages } = await (supabase
-      .from("proposal_workflow_stages") as any)
-      .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
-      .is("organization_id", null)
-      .eq("is_active", true)
-      .order("stage_order");
+    const orgIds = new Set(org.map((s: WorkflowStage) => s.id));
+    const merged = [...org, ...global.filter((s: WorkflowStage) => !orgIds.has(s.id))];
+    setAllWorkflowStages(merged);
 
-    setWorkflowStages(globalStages || []);
-    return (globalStages || []) as WorkflowStage[];
+    const active = org.length > 0 ? org.filter((s: WorkflowStage) => s.is_active) : global.filter((s: WorkflowStage) => s.is_active);
+    setWorkflowStages(active);
+    return active;
   }, [activeCompany?.id]);
 
   const loadProposalTemplates = useCallback(async () => {
@@ -2159,7 +2176,9 @@ const Proposals = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
+      // Resolve by the is_won flag, not by name — an org can rename/recreate
+      // this stage and accepting a proposal must keep working regardless.
+      const acceptedStage = workflowStages.find(s => s.is_won);
       if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
       const oldStageId = targetProposal.stage_id;
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
@@ -2208,9 +2227,10 @@ const Proposals = () => {
   ): Promise<{ workflowFailed: boolean }> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
+    // Resolve by the is_lost flag, not by name — same reasoning as accept.
     const rejectedStage = stageIdOverride
       ? workflowStages.find(s => s.id === stageIdOverride)
-      : workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
+      : workflowStages.find(s => s.is_lost);
     if (!rejectedStage) throw new Error("Estágio 'Rejeitada' não encontrado");
     const oldStageId = proposal.stage_id;
     const businessUserIdReject = await resolveCurrentBusinessUserId();
@@ -2344,8 +2364,10 @@ const Proposals = () => {
 
   const getProposalStage = useCallback((proposal: Proposal): WorkflowStage | null => {
     if (proposal.proposal_workflow_stages) return proposal.proposal_workflow_stages;
-    return workflowStages.find(s => s.name === proposal.status) || null;
-  }, [workflowStages]);
+    // allWorkflowStages (not the active-only list) — a legacy proposal whose
+    // status still names a since-deactivated stage must still resolve here.
+    return allWorkflowStages.find(s => s.name === proposal.status) || null;
+  }, [allWorkflowStages]);
 
   const getStageBadge = (proposal: Proposal) => {
     const stage = getProposalStage(proposal);
@@ -2410,6 +2432,14 @@ const Proposals = () => {
   // Cartoes de KPI: mesma forma de antes, mas alimentada pela RPC. Os campos
   // que eram arrays (noResponse5d, noValidity, expired) passam a contagens --
   // a UI so lhes lia o .length.
+  //
+  // stageCounts/stageValues/stageValuesExVat continuam indexados por
+  // stage_id em bruto (é o que get_proposals_list_metrics devolve — ver
+  // supabase/migrations/20261113070000_proposals_list_pagination_and_metrics_rpcs.sql,
+  // `per_stage` agrupa por f.stage_id). Uma fase do org e a fase global
+  // homónima têm ids diferentes para o mesmo conceito de fase — é por isso
+  // que a renderização dos cartões (stageCardGroups, abaixo) soma sobre
+  // todos os ids de cada grupo em vez de indexar direto por stage.id.
   const stats = useMemo(() => ({
     total: metrics.total,
     totalValue: metrics.totalValue,
@@ -2435,6 +2465,31 @@ const Proposals = () => {
     metricsLoading
       ? <div className={cn("flex items-center h-7", className)}><OlyviaLoader size={18} inline /></div>
       : <div className={className}>{node}</div>;
+
+  // Uma fase do org e a fase global homónima (mesmo `name`, ex.: "accepted")
+  // representam o MESMO conceito de fase — devem aparecer como UM único
+  // cartão com as contagens somadas, não dois cartões duplicados. Ver
+  // loadWorkflowStages: allWorkflowStages inclui sempre as duas fontes.
+  const stageCardGroups = useMemo(() => {
+    const byName = new Map<string, WorkflowStage & { ids: string[] }>();
+    for (const stage of allWorkflowStages) {
+      const existing = byName.get(stage.name);
+      if (!existing) {
+        byName.set(stage.name, { ...stage, ids: [stage.id] });
+      } else {
+        existing.ids.push(stage.id);
+        // A fase específica do org (organization_id preenchido) vence na
+        // apresentação (label/cor) sobre a fase global de template.
+        if ((stage as any).organization_id && !(existing as any).organization_id) {
+          existing.label = stage.label;
+          existing.color = stage.color;
+          (existing as any).organization_id = (stage as any).organization_id;
+        }
+        existing.is_active = existing.is_active || stage.is_active;
+      }
+    }
+    return Array.from(byName.values());
+  }, [allWorkflowStages]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -3450,18 +3505,30 @@ const Proposals = () => {
               </CardContent>
             </Card>
             
-            {workflowStages.map((stage) => (
-              <Card key={stage.id} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.id && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.id === statusFilter ? "all" : stage.id)}>
-                <CardContent className="p-3">
-                  <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
-                  {metricsLoading
-                    ? <div className="flex items-center h-7"><OlyviaLoader size={18} inline /></div>
-                    : <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>}
-                  {kpiValue(formatCurrency(stats.stageValuesExVat[stage.id] || 0), "text-xs text-muted-foreground")}
-                  {kpiValue(`${formatCurrency(stats.stageValues[stage.id] || 0)} com IVA`, "text-[11px] text-muted-foreground")}
-                </CardContent>
-              </Card>
-            ))}
+            {/* stageCardGroups: uma fase do org e a fase global homónima juntam-se
+               num único cartão com as contagens somadas — ver useMemo acima.
+               stats.stageCounts/stageValues continuam indexados por stage_id
+               em bruto (é o que a RPC devolve), por isso soma-se sobre todos
+               os ids do grupo em vez de indexar direto por stage.id.
+               is_active OU alguma das ids do grupo ainda tiver propostas, para
+               uma fase desativada que ainda tem propostas não desaparecer. */}
+            {stageCardGroups.filter(stage => stage.is_active || stage.ids.some(id => (stats.stageCounts[id] || 0) > 0)).map((stage) => {
+              const count = stage.ids.reduce((s, id) => s + (stats.stageCounts[id] || 0), 0);
+              const valueExVat = stage.ids.reduce((s, id) => s + (stats.stageValuesExVat[id] || 0), 0);
+              const valueWithVat = stage.ids.reduce((s, id) => s + (stats.stageValues[id] || 0), 0);
+              return (
+                <Card key={stage.name} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.name && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.name === statusFilter ? "all" : stage.name)}>
+                  <CardContent className="p-3">
+                    <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
+                    {metricsLoading
+                      ? <div className="flex items-center h-7"><OlyviaLoader size={18} inline /></div>
+                      : <div className="text-xl font-bold" style={{ color: stage.color }}>{count}</div>}
+                    {kpiValue(formatCurrency(valueExVat), "text-xs text-muted-foreground")}
+                    {kpiValue(`${formatCurrency(valueWithVat)} com IVA`, "text-[11px] text-muted-foreground")}
+                  </CardContent>
+                </Card>
+              );
+            })}
             
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
@@ -3520,7 +3587,10 @@ const Proposals = () => {
         {viewMode === "dashboard" ? (
           <ProposalsDashboardView
             proposals={filteredProposals}
-            workflowStages={workflowStages}
+            // allWorkflowStages: its won/lost/pipeline aggregates key off this
+            // list — passing the active-only list silently dropped any
+            // proposal sitting in a deactivated stage from every total.
+            workflowStages={allWorkflowStages}
             getProposalStage={getProposalStage}
             comercialNamesMap={comercialNamesMap}
             isLoading={loading}
@@ -3574,7 +3644,9 @@ const Proposals = () => {
                 <SelectTrigger className="w-[140px]"><SelectValue placeholder="Estado" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {workflowStages.map((stage) => (
+                  {/* allWorkflowStages so a proposal stuck in a deactivated
+                     stage can still be filtered into view, not just counted. */}
+                  {allWorkflowStages.map((stage) => (
                     <SelectItem key={stage.id} value={stage.id}>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />

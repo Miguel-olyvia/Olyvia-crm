@@ -587,7 +587,7 @@ serve(async (req) => {
 
         const now = new Date().toISOString();
         const { data: proposalOrgForAccept } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
-        const acceptedStageId = await resolveProposalStageId(supabase, proposalOrgForAccept?.organization_id ?? null, ["accepted", "aceite"]);
+        const acceptedStageId = await resolveProposalStageId(supabase, proposalOrgForAccept?.organization_id ?? null, "is_won");
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "accepted",
@@ -649,15 +649,24 @@ serve(async (req) => {
                 .from("pipeline_links").select("quote_id").eq("proposal_id", proposal_id).eq("status", "active").maybeSingle();
               if (pLink?.quote_id) linkedQuoteId = pLink.quote_id;
 
-              const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal_id).order("sort_order");
-              let contractValue = fullProposal.value || 0;
-              if (pi && pi.length > 0) {
-                contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
-              }
-              if ((!pi || pi.length === 0) && linkedQuoteId) {
+              // contractValue: proposals.value é a fonte de verdade sincronizada
+              // (trigger trg_sync_proposal_value_from_quote / calculate_proposal_value_from_quotes,
+              // ver migration 20261113060000_fix_proposal_value_trigger_estado.sql). Só recorremos
+              // a outras fontes se vier vazio/zero — nunca prevalecem sobre um valor já sincronizado
+              // (proposal_items é só um snapshot estático e pode divergir por arredondamento).
+              let contractValue = Number(fullProposal.value) || 0;
+
+              if (!contractValue && linkedQuoteId) {
                 const { data: ql } = await supabase.from("quote_lines").select("total_com_iva").eq("quote_id", linkedQuoteId);
                 if (ql && ql.length > 0) {
                   contractValue = ql.reduce((s: number, l: any) => s + (Number(l.total_com_iva) || 0), 0);
+                }
+              }
+
+              if (!contractValue) {
+                const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal_id).order("sort_order");
+                if (pi && pi.length > 0) {
+                  contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
                 }
               }
 
@@ -747,7 +756,7 @@ serve(async (req) => {
 
         const now = new Date().toISOString();
         const { data: proposalOrgForReject } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
-        const rejectedStageId = await resolveProposalStageId(supabase, proposalOrgForReject?.organization_id ?? null, ["rejected", "rejeitada"]);
+        const rejectedStageId = await resolveProposalStageId(supabase, proposalOrgForReject?.organization_id ?? null, "is_lost");
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "rejected",

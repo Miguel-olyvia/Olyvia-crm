@@ -612,10 +612,26 @@ serve(async (req) => {
     if (source_entity === "proposal" && new_stage_id && orgId) {
       const { data: proposal } = await supabase.from("proposals").select("*").eq("id", entity_id).single();
       const { data: psi } = await supabase.from("proposal_workflow_stages").select("name, is_won, is_lost").eq("id", new_stage_id).single();
-      const psn = psi?.name || "";
 
-      if (psn === "accepted" && proposal) {
+      // Detect "ganho"/"perdido" by the stage's own flag, never by its name —
+      // the org can rename or recreate this stage (e.g. "aceite" vs
+      // "accepted") and this must keep working without code changes.
+      if (psi?.is_won === true && proposal) {
         try {
+          // Duplicate-contract guard: a proposal can be re-sent into the won
+          // stage more than once (retry, double click, race condition) —
+          // never create a second client_contracts row for the same proposal.
+          const { data: existingContract } = await supabase
+            .from("client_contracts")
+            .select("id")
+            .eq("proposal_id", proposal.id)
+            .is("deleted_at", null)
+            .limit(1)
+            .maybeSingle();
+
+          if (existingContract?.id) {
+            results.logs.push({ type: "create_contract_from_proposal", status: "skipped", message: `Contract ${existingContract.id} already exists for this proposal` });
+          } else {
           // Create client_contract from proposal
           // Resolve entity_id: from proposal, then deal (some proposals are
           // created from a deal and only carry entity_id via deal_id, not on
@@ -655,15 +671,14 @@ serve(async (req) => {
             .maybeSingle();
           if (pLink?.quote_id) linkedQuoteId = pLink.quote_id;
 
-          // Get proposal items for contract value
-          const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal.id).order("sort_order");
-          let contractValue = proposal.value || 0;
-          if (pi && pi.length > 0) {
-            contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
-          }
+          // contractValue: proposals.value é a fonte de verdade sincronizada
+          // (trigger trg_sync_proposal_value_from_quote / calculate_proposal_value_from_quotes,
+          // ver migration 20261113060000_fix_proposal_value_trigger_estado.sql). Só recorremos
+          // a outras fontes se vier vazio/zero — nunca prevalecem sobre um valor já sincronizado
+          // (proposal_items é só um snapshot estático e pode divergir por arredondamento).
+          let contractValue = Number(proposal.value) || 0;
 
-          // If no proposal_items, use quote.total (already includes global discount + IVA)
-          if ((!pi || pi.length === 0) && linkedQuoteId) {
+          if (!contractValue && linkedQuoteId) {
             const { data: qt } = await supabase.from("quotes").select("total").eq("id", linkedQuoteId).maybeSingle();
             if (qt?.total != null) {
               contractValue = Number(qt.total);
@@ -672,6 +687,13 @@ serve(async (req) => {
               if (ql && ql.length > 0) {
                 contractValue = ql.reduce((s: number, l: any) => s + (Number(l.total_com_iva) || 0), 0);
               }
+            }
+          }
+
+          if (!contractValue) {
+            const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal.id).order("sort_order");
+            if (pi && pi.length > 0) {
+              contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
             }
           }
 
@@ -744,6 +766,7 @@ serve(async (req) => {
               status: "success",
             });
           }
+          } // end duplicate-contract guard (else branch)
         } catch (e: any) {
           results.logs.push({ type: "create_contract_from_proposal", status: "error", message: e.message });
           await logWorkflowExecution({
@@ -759,7 +782,7 @@ serve(async (req) => {
         }
       }
 
-      if (psn === "rejected" && proposal) {
+      if (psi?.is_lost === true && proposal) {
         try {
           if (proposal.deal_id) { const { data: ds } = await supabase.from("deal_stages").select("id").eq("name", "Desqualificado").maybeSingle(); if (ds) await supabase.from("deals").update({ stage_id: ds.id }).eq("id", proposal.deal_id); }
           const lid = await resolveLeadFromPipeline("proposal", proposal.id); if (lid) await syncLeadToStage(lid, "perdido");
