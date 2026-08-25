@@ -146,8 +146,15 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
   const loadStages = async () => {
     if (!companyId) return;
     setLoading(true);
-    const { data: allData } = await supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).order("stage_order");
-    setAllStages((allData || []) as any[]);
+    // allStages must also include the global template stages (organization_id
+    // IS NULL): an action created before the org clicked "Personalizar" was
+    // saved with a template stage_id, which never appears in an org-scoped
+    // query — that's why it was still showing as a raw UUID.
+    const [{ data: allOrgData }, { data: allGlobalData }] = await Promise.all([
+      supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).order("stage_order"),
+      supabase.from("proposal_workflow_stages" as any).select("*").is("organization_id", null).order("stage_order"),
+    ]);
+    setAllStages([...((allOrgData || []) as any[]), ...((allGlobalData || []) as any[])]);
     const { data, error } = await supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).eq("is_active", true).order("stage_order");
     if (!error) { setStages((data || []) as any[]); setIsUsingTemplate(((data || []) as any[]).length === 0); }
     setLoading(false);

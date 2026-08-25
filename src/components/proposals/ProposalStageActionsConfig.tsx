@@ -176,7 +176,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     setIsFormOpen(false);
   };
 
-  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || stageId;
+  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || "Fase removida";
   const getStageColor = (stageId: string) => stages.find((s) => s.id === stageId)?.color || "#6b7280";
   // Only offer active stages as a target for a NEW action — stages is the
   // full (active + inactive) list, needed above just to resolve labels for
