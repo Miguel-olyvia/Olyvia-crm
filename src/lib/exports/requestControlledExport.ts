@@ -7,7 +7,13 @@ import {
   type StandardExportPayload,
 } from "./xlsxExport";
 
-export type ControlledExportModule = "clients" | "contacts" | "quotes" | "leads";
+export type ControlledExportModule =
+  | "clients"
+  | "contacts"
+  | "quotes"
+  | "leads"
+  | "proposals"
+  | "client_contracts";
 
 interface ControlledExportResponse {
   filename: string;

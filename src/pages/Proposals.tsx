@@ -61,6 +61,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { proposalSchema } from "@/lib/validations";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -609,6 +610,7 @@ const Proposals = () => {
   const [contractStatuses, setContractStatuses] = useState<Record<string, string>>({});
   const [proposalsWithQuotes, setProposalsWithQuotes] = useState<Set<string>>(new Set());
   const [portalStatuses, setPortalStatuses] = useState<Record<string, string>>({});
+  const [exportingProposals, setExportingProposals] = useState(false);
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
@@ -2374,6 +2376,30 @@ const Proposals = () => {
     navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
   };
 
+  // No proposal column is personal data (see supabase/functions/export-data/exportConfig.ts),
+  // so this never shows a "com/sem dados sensíveis" dialog — unlike clients/contacts/quotes.
+  const handleExportProposals = async () => {
+    if (!activeCompany?.id) {
+      toast({ title: "Erro ao exportar", description: "Selecione uma organização.", variant: "destructive" });
+      return;
+    }
+    setExportingProposals(true);
+    try {
+      const result = await requestControlledExport({
+        module: "proposals",
+        organizationId: activeCompany.id,
+      });
+      toast({
+        title: "Exportação XLSX concluída",
+        description: `${result.rowCount} propostas exportadas.`,
+      });
+    } catch (error: any) {
+      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } finally {
+      setExportingProposals(false);
+    }
+  };
+
   // Filter and sort
   // A filtragem e a ordenacao passaram para o servidor (proposals_list_filtered
   // + get_proposals_list_page). Filtrar no cliente deixou de ser possivel: so
@@ -2850,6 +2876,11 @@ const Proposals = () => {
               <Button variant="outline" size="icon" onClick={loadData} title="Atualizar">
                 <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
               </Button>
+              <PermissionGate permission="proposals.export">
+                <Button variant="outline" size="sm" onClick={handleExportProposals} disabled={exportingProposals}>
+                  <Download className="w-4 h-4 mr-2" /> Exportar
+                </Button>
+              </PermissionGate>
               <PermissionGate permission="proposals.manage">
                 <Button variant="outline" size="sm" onClick={() => navigate("/proposal-templates")}>
                   <FileText className="w-4 h-4 mr-2" /> Templates

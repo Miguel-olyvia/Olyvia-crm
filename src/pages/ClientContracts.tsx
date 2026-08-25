@@ -48,6 +48,7 @@ import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
 import { exportClientContractsToXlsx } from "@/utils/contractsExportImport";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -137,6 +138,7 @@ const ClientContracts = () => {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
   const [contractPortalStatuses, setContractPortalStatuses] = useState<Record<string, string>>({});
+  const [exportingContracts, setExportingContracts] = useState(false);
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
   const [reassigningContract, setReassigningContract] = useState<ClientContract | null>(null);
   const [reassignOwnerId, setReassignOwnerId] = useState<string>("");
@@ -1415,6 +1417,29 @@ const ClientContracts = () => {
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
   };
 
+  // No contract column is gated as sensitive (product decision — EMAIL is
+  // already visible in this table to anyone with client_contracts.view, so
+  // exporting it reveals nothing new): unlike clients/contacts/quotes, this
+  // never shows a "com/sem dados sensíveis" dialog.
+  const handleExportContracts = async () => {
+    if (!activeCompany?.id) {
+      toast.error("Selecione uma organização.");
+      return;
+    }
+    setExportingContracts(true);
+    try {
+      const result = await requestControlledExport({
+        module: "client_contracts",
+        organizationId: activeCompany.id,
+      });
+      toast.success(`${result.rowCount} contratos exportados.`);
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setExportingContracts(false);
+    }
+  };
+
   // Redirect when user lacks view permission. Must be in an effect — calling
   // navigate() during render is a side effect and causes undefined behaviour.
   useEffect(() => {
@@ -1485,6 +1510,11 @@ const ClientContracts = () => {
               <Button variant="outline" size="sm" onClick={() => exportClientContractsToXlsx(filteredContracts)}>
                 <Download className="h-4 w-4 mr-2" /> Exportar
               </Button>
+              <PermissionGate permission="client_contracts.export">
+                <Button variant="outline" size="sm" onClick={handleExportContracts} disabled={exportingContracts}>
+                  <Download className="h-4 w-4 mr-2" /> Exportar XLSX (auditado)
+                </Button>
+              </PermissionGate>
               <PermissionGate permission="client_contracts.create">
                 <Button size="sm" onClick={() => setIsDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-2" /> Novo Contrato

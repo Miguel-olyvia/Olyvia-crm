@@ -647,6 +647,293 @@ async function exportQuotes(
     }));
 }
 
+// Portuguese labels for the portal status stored on client_portal_users /
+// derived for contracts — mirrors PortalStatusBadge (src/components/portal/PortalStatusBadge.tsx)
+// so the exported text matches what the UI badge shows.
+const PORTAL_STATUS_LABELS: Record<string, string> = {
+  sent: "Enviado",
+  viewed: "Acedido",
+  signed: "Assinado",
+};
+
+function formatPortalStatus(status: string | null | undefined): string {
+  if (!status) return "";
+  return PORTAL_STATUS_LABELS[status] || status;
+}
+
+async function exportProposals(
+  admin: any,
+  request: ExportRequest,
+  auth: AuthorizationContext,
+) {
+  // No column on this module is ever sensitive (see exportConfig.ts), so
+  // there is nothing here that depends on includeSensitive/decKey — every
+  // field below is already shown in the Proposals.tsx table to anyone with
+  // proposals.view.
+  const buildProposalsQuery = () => {
+    let query = admin
+      .from("proposals")
+      .select(
+        "id, title, value, status, valid_until, created_at, created_by, assigned_to, entity_id, deal_id, client_contract_id",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildProposalsQuery);
+  const proposalIds = records.map((r: any) => r.id);
+
+  const dealIds = Array.from(new Set(records.map((r: any) => r.deal_id).filter(Boolean))) as string[];
+  const assignedIds = Array.from(
+    new Set(records.map((r: any) => r.assigned_to).filter(Boolean)),
+  ) as string[];
+
+  const [dealsResult, usersResult, quoteRows, linkRows, portalUserRows] = await Promise.all([
+    dealIds.length > 0
+      ? admin.from("deals").select("id, title, entity_id").in("id", dealIds)
+      : Promise.resolve({ data: [], error: null }),
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+    // Whether a proposal has a linked quote — quotes.proposal_id points back
+    // at the proposal, same relationship Proposals.tsx reads via
+    // `quotes!proposal_id`.
+    selectInChunks(proposalIds, (chunk) =>
+      admin.from("quotes").select("proposal_id").in("proposal_id", chunk).in(
+        "organization_id",
+        auth.exportOrgIds,
+      ),
+    ),
+    // pipeline_links carries the authoritative quote_id/contract_id for the
+    // "Pipeline" column (same source Proposals.tsx uses via `pipelineLinks`).
+    selectInChunks(proposalIds, (chunk) =>
+      admin
+        .from("pipeline_links")
+        .select("proposal_id, quote_id, contract_id")
+        .in("proposal_id", chunk)
+        .in("organization_id", auth.exportOrgIds),
+    ),
+    // client_portal_users.portal_status is the same source Proposals.tsx
+    // reads for the "Portal" column.
+    selectInChunks(proposalIds, (chunk) =>
+      admin
+        .from("client_portal_users")
+        .select("proposal_id, portal_status")
+        .in("proposal_id", chunk)
+        .in("organization_id", auth.exportOrgIds),
+    ),
+  ]);
+  if (dealsResult.error) throw dealsResult.error;
+  if (usersResult.error) throw usersResult.error;
+
+  const deals = new Map<string, any>((dealsResult.data || []).map((d: any) => [d.id, d]));
+  const userNames = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
+
+  const quoteExistsSet = new Set((quoteRows || []).map((q: any) => q.proposal_id));
+  const linkByProposal = new Map((linkRows || []).map((l: any) => [l.proposal_id, l]));
+  const portalStatusByProposal = new Map(
+    (portalUserRows || []).map((p: any) => [p.proposal_id, p.portal_status]),
+  );
+
+  // Client identity: prefer the proposal's own entity_id, fall back to the
+  // linked deal's entity_id — same fallback Proposals.tsx uses when
+  // resolving `_clientName` for proposals created without one.
+  const entityIds = Array.from(
+    new Set(
+      records
+        .map((r: any) => r.entity_id || deals.get(r.deal_id)?.entity_id)
+        .filter(Boolean),
+    ),
+  ) as string[];
+  const identityMaps = await resolveIdentityMaps(admin, entityIds, false, null);
+
+  return records.map((record: any) => {
+    const effectiveEntityId = record.entity_id || deals.get(record.deal_id)?.entity_id;
+    const link = linkByProposal.get(record.id);
+    const dealExists = !!record.deal_id;
+    const quoteExists = quoteExistsSet.has(record.id) || !!link?.quote_id;
+    const contractCreated = !!link?.contract_id || !!record.client_contract_id;
+    const pipeline = [
+      dealExists ? "Pedido ✓" : "Sem pedido",
+      quoteExists ? "Orçamento ✓" : "Sem orçamento",
+      contractCreated ? "Contrato ✓" : "Contrato não criado",
+    ].join(" · ");
+    const portalRaw = record.status === "accepted" ? "signed" : portalStatusByProposal.get(record.id);
+
+    return {
+      title: record.title || "",
+      client: identityMaps.identity.get(effectiveEntityId)?.display_name || "",
+      assignedTo: userNames.get(record.assigned_to) || "",
+      deal: deals.get(record.deal_id)?.title || "",
+      value: Number(record.value) || 0,
+      status: record.status || "",
+      validUntil: record.valid_until,
+      pipeline,
+      portal: formatPortalStatus(portalRaw),
+      createdAt: record.created_at,
+    };
+  });
+}
+
+async function exportContracts(admin: any, request: ExportRequest, auth: AuthorizationContext) {
+  // No column on this module is ever sensitive (see exportConfig.ts) — the
+  // email column is exported to everyone with client_contracts.export, no
+  // dialog, because it's already visible in the ClientContracts.tsx table to
+  // anyone with client_contracts.view.
+  const buildContractsQuery = () => {
+    let query = admin
+      .from("client_contracts")
+      .select(
+        "id, contract_number, status, start_date, end_date, total_value, quote_id, entity_id, assigned_to, created_by, updated_at, proposals!client_contracts_proposal_id_fkey(id, title, quotes(id, total))",
+      )
+      .in("organization_id", auth.exportOrgIds)
+      .is("deleted_at", null)
+      .order("id", { ascending: true });
+    query = applyCommonFilters(query, request.filters);
+    query = applyOwnerScope(query, auth);
+    return query;
+  };
+  const records = await fetchAllRows(buildContractsQuery);
+  const contractIds = records.map((r: any) => r.id);
+
+  const assignedIds = Array.from(
+    new Set(records.flatMap((r: any) => [r.assigned_to, r.created_by]).filter(Boolean)),
+  ) as string[];
+  const entityIds = Array.from(new Set(records.map((r: any) => r.entity_id).filter(Boolean))) as string[];
+
+  const [usersResult, sentDocsRows, identityMaps] = await Promise.all([
+    assignedIds.length > 0
+      ? admin.from("anew_users").select("id, name").in("id", assignedIds)
+      : Promise.resolve({ data: [], error: null }),
+    // "sent": this contract was published to the portal — same source
+    // ClientContracts.tsx uses for its portal status column.
+    selectInChunks(contractIds, (chunk) =>
+      admin
+        .from("client_portal_documents")
+        .select("document_id")
+        .in("organization_id", auth.exportOrgIds)
+        .eq("document_type", "contract")
+        .eq("is_visible", true)
+        .in("document_id", chunk),
+    ),
+    // Email has no sensitive gate for this module (product decision) — always
+    // resolved, regardless of the caller's includeSensitive flag/permission.
+    resolveIdentityMaps(admin, entityIds, true, null),
+  ]);
+  if (usersResult.error) throw usersResult.error;
+
+  const userNames = new Map((usersResult.data || []).map((u: any) => [u.id, u.name]));
+  const sentIds = (sentDocsRows || []).map((d: any) => d.document_id).filter(Boolean);
+  const sentSet = new Set(sentIds);
+
+  // "viewed": an actual "viewed" access-log entry for this document — only
+  // meaningful for contracts already sent. client_portal_access_log has no
+  // organization_id column, so scoping comes from sentIds already being
+  // restricted to this caller's organizations (same pattern ClientContracts.tsx
+  // uses).
+  let viewedSet = new Set<string>();
+  if (sentIds.length > 0) {
+    const viewLogRows = await selectInChunks(sentIds, (chunk) =>
+      admin
+        .from("client_portal_access_log")
+        .select("document_id")
+        .eq("document_type", "contract")
+        .eq("action", "viewed")
+        .in("document_id", chunk),
+    );
+    viewedSet = new Set(viewLogRows.map((d: any) => d.document_id));
+  }
+
+  const now = Date.now();
+
+  return records.map((record: any) => {
+    const userName = userNames.get(record.assigned_to) || userNames.get(record.created_by) || "";
+    const isSigned = record.status === "signed" || record.status === "active";
+    const isExpired = record.status === "expired";
+    const isDraft = record.status === "draft";
+
+    // Same fallback chain as getEffectiveContractValue (src/utils/contractValue.ts):
+    // prefer the linked quote's total (includes the global discount) over the
+    // stored total_value.
+    let value = Number(record.total_value) || 0;
+    if (record.quote_id) {
+      const linkedQuote = (record.proposals?.quotes || []).find((q: any) => q.id === record.quote_id);
+      if (linkedQuote?.total != null) value = Number(linkedQuote.total);
+    }
+
+    let period = "—";
+    if (record.start_date) {
+      const start = new Date(record.start_date).toLocaleDateString("pt-PT");
+      const end = record.end_date ? new Date(record.end_date).toLocaleDateString("pt-PT") : "Indeterminado";
+      period = `${start} - ${end}`;
+    }
+
+    let progress = "";
+    if (record.start_date && record.end_date) {
+      const start = new Date(record.start_date).getTime();
+      const end = new Date(record.end_date).getTime();
+      const total = end - start;
+      if (total > 0) {
+        const pct = Math.min(100, Math.max(0, Math.round(((now - start) / total) * 100)));
+        const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+        progress = `${pct}% · ${daysLeft > 0 ? `${daysLeft} dias` : "Expirado"}`;
+      }
+    }
+
+    let renewal = "—";
+    if (record.end_date) {
+      const end = new Date(record.end_date).getTime();
+      const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+      renewal = `${daysLeft}d · ${daysLeft <= 0 ? "Expirado" : "Até expirar"}`;
+    }
+
+    const sentOrViewed = sentSet.has(record.id) || viewedSet.has(record.id);
+    // Mirrors getSignatureBadge (src/pages/ClientContracts.tsx) exactly,
+    // including its "✍️" prefix on every branch.
+    let signature = "✍️ Não enviado";
+    if (isSigned) {
+      const date = record.updated_at
+        ? new Date(record.updated_at).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" })
+        : "";
+      signature = `✍️ Assinado ${date}`.trim();
+    } else if (record.status === "pending_signature") {
+      signature = "✍️ A aguardar assinatura";
+    } else if (sentOrViewed) {
+      signature = "✍️ Enviado";
+    }
+
+    let pipeline = "";
+    if (isSigned) pipeline = "Pipeline completo ✅";
+    else if (isExpired) pipeline = "Não renovado ❌";
+    else if (isDraft) pipeline = "Falta assinar";
+    else if (record.status === "pending_signature") pipeline = "Aguarda assinatura";
+
+    let portal = "";
+    if (isSigned) portal = formatPortalStatus("signed");
+    else if (viewedSet.has(record.id)) portal = formatPortalStatus("viewed");
+    else if (sentSet.has(record.id)) portal = formatPortalStatus("sent");
+
+    return {
+      number: record.contract_number || "",
+      client: identityMaps.identity.get(record.entity_id)?.display_name || "",
+      proposal: record.proposals?.title || "",
+      value,
+      period,
+      progress,
+      renewal,
+      status: record.status || "",
+      signature,
+      email: identityMaps.email.get(record.entity_id) || "",
+      pipeline,
+      portal,
+      assignedTo: userName,
+    };
+  });
+}
+
 async function updateAudit(admin: any, auditId: string | null, values: Record<string, unknown>) {
   if (!auditId) return;
   const { error } = await admin.from("data_export_audit").update(values).eq("id", auditId);
@@ -775,7 +1062,11 @@ Deno.serve(async (req: Request) => {
           ? await exportContacts(admin, request, auth, includeSensitive, decKey)
           : request.module === "leads"
             ? await exportLeads(admin, request, auth, includeSensitive, decKey)
-            : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
+            : request.module === "proposals"
+              ? await exportProposals(admin, request, auth)
+              : request.module === "client_contracts"
+                ? await exportContracts(admin, request, auth)
+                : await exportQuotes(admin, request, auth, includeSensitive, decKey, caller);
 
     if (rows.length > MAX_EXPORT_ROWS) {
       await updateAudit(admin, auditId, {
