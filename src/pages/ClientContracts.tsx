@@ -47,7 +47,6 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
-import { exportClientContractsToXlsx } from "@/utils/contractsExportImport";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -1507,12 +1506,9 @@ const ClientContracts = () => {
               <Button variant="outline" size="sm" onClick={() => navigate("/contract-templates")}>
                 <Settings className="h-4 w-4 mr-2" /> Templates
               </Button>
-              <Button variant="outline" size="sm" onClick={() => exportClientContractsToXlsx(filteredContracts)}>
-                <Download className="h-4 w-4 mr-2" /> Exportar
-              </Button>
               <PermissionGate permission="client_contracts.export">
                 <Button variant="outline" size="sm" onClick={handleExportContracts} disabled={exportingContracts}>
-                  <Download className="h-4 w-4 mr-2" /> Exportar XLSX (auditado)
+                  <Download className="h-4 w-4 mr-2" /> Exportar
                 </Button>
               </PermissionGate>
               <PermissionGate permission="client_contracts.create">
@@ -1768,7 +1764,6 @@ const ClientContracts = () => {
                   const first = contracts.find(c => selectedIds.has(c.id));
                   if (first) handleOpenSendChannel(first);
                 }}><Send className="h-3 w-3 mr-1" /> Enviar</Button>
-                <Button size="sm" variant="outline" onClick={() => exportClientContractsToXlsx(filteredContracts.filter(c => selectedIds.has(c.id)))}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Limpar</Button>
               </div>
             )}
