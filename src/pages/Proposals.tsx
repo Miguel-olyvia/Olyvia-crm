@@ -636,25 +636,35 @@ const Proposals = () => {
   }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
   const loadWorkflowStages = useCallback(async () => {
-    const { data: orgStagesAll } = await (supabase
-      .from("proposal_workflow_stages") as any)
-      .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
-      .eq("organization_id", activeCompany?.id || '')
-      .order("stage_order");
-
-    if (orgStagesAll && orgStagesAll.length > 0) {
-      setAllWorkflowStages(orgStagesAll);
-      setWorkflowStages(orgStagesAll.filter((s: WorkflowStage) => s.is_active));
-    } else {
-      const { data: globalStagesAll } = await (supabase
-        .from("proposal_workflow_stages") as any)
-        .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
+    const selectCols = "id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost";
+    const [{ data: orgStagesAll }, { data: globalStagesAll }] = await Promise.all([
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
+        .eq("organization_id", activeCompany?.id || '')
+        .order("stage_order"),
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
         .is("organization_id", null)
-        .order("stage_order");
+        .order("stage_order"),
+    ]);
 
-      setAllWorkflowStages(globalStagesAll || []);
-      setWorkflowStages((globalStagesAll || []).filter((s: WorkflowStage) => s.is_active));
-    }
+    const org = orgStagesAll || [];
+    const global = globalStagesAll || [];
+
+    // allWorkflowStages precisa de incluir SEMPRE as fases globais de
+    // template, mesmo quando o org já tem fases próprias — propostas antigas
+    // podem ter stage_id a apontar para uma fase global legada que deixou de
+    // aparecer na lista do org, fazendo essas propostas desaparecerem de
+    // qualquer agregação por is_won/is_lost (dashboard, cartões por fase),
+    // apesar de a flag estar certa quando lida diretamente do embed da
+    // proposta. workflowStages (a lista "ativa", usada por aceitar/rejeitar
+    // e pelo Kanban) mantém exatamente o comportamento anterior — só isso
+    // muda o conjunto usado para totais/contagens.
+    const orgIds = new Set(org.map((s: WorkflowStage) => s.id));
+    const merged = [...org, ...global.filter((s: WorkflowStage) => !orgIds.has(s.id))];
+
+    setAllWorkflowStages(merged);
+    setWorkflowStages(org.length > 0 ? org.filter((s: WorkflowStage) => s.is_active) : global.filter((s: WorkflowStage) => s.is_active));
   }, [activeCompany?.id]);
 
   const loadProposalTemplates = useCallback(async () => {
