@@ -31,6 +31,7 @@ import {
   Briefcase,
   UserPlus,
   MessageCircle,
+  Phone,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -43,6 +44,16 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { ProposalPortalPreview } from "@/components/proposals/ProposalPortalPreview";
 import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
 import { getDisplayAttributes } from "@/utils/lineAttributes";
+import { usePermissions } from "@/hooks/usePermissions";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+
+const CALL_RESULT_LABELS: Record<string, string> = {
+  answered: "Chamada atendida",
+  no_answer: "Chamada não atendida",
+  busy: "Chamada — ocupado",
+  voicemail: "Chamada — voicemail",
+  wrong_number: "Chamada — número errado",
+};
 
 interface ProposalItem {
   id: string;
@@ -207,6 +218,11 @@ export function ProposalDetailsDialog({
   const [portalPreviewOpen, setPortalPreviewOpen] = useState(false);
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { hasPermission, isSystemAdmin } = usePermissions();
+  // A proposal carries its originating quote's lines, so the same restriction
+  // Quotes.tsx applies to cost/margin figures must apply here too — otherwise
+  // the Quotes-side gate is bypassed simply by opening the proposal instead.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
 
   useEffect(() => {
     if (open && proposal?.id) {
@@ -220,7 +236,7 @@ export function ProposalDetailsDialog({
 
     try {
       // Load all details in parallel
-      const [itemsRes, quotesRes, extendedRes, sendsRes] = await Promise.all([
+      const [itemsRes, quotesRes, extendedRes, sendsRes, proposalInteractionsRes] = await Promise.all([
         supabase
           .from("proposal_items")
           .select("*")
@@ -244,6 +260,11 @@ export function ProposalDetailsDialog({
           .eq("proposal_id", proposal.id)
           .order("sent_at", { ascending: false })
           .limit(5),
+        (supabase as any)
+          .from("entity_interactions")
+          .select("id, interaction_type, result, subject, notes, interaction_at")
+          .eq("proposal_id", proposal.id)
+          .order("interaction_at", { ascending: false }),
       ]);
 
       const loadedItems: ProposalItem[] = itemsRes.data || [];
@@ -388,6 +409,18 @@ export function ProposalDetailsDialog({
       if (extendedRes.data?.rejected_at) {
         journey.push({ label: "Proposta rejeitada", date: extendedRes.data.rejected_at, icon: "x", color: "text-red-600" });
       }
+
+      // Calls registered from this proposal (via entity_interactions.proposal_id)
+      const proposalCalls = (proposalInteractionsRes as any)?.data || [];
+      proposalCalls.forEach((call: any) => {
+        const resultLabel = CALL_RESULT_LABELS[call.result as string] || "Chamada registada";
+        journey.push({
+          label: call.subject ? `${resultLabel}: ${call.subject}` : resultLabel,
+          date: call.interaction_at,
+          icon: "call",
+          color: "text-teal-600",
+        });
+      });
 
       // Sort by date
       journey.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -656,7 +689,7 @@ export function ProposalDetailsDialog({
                                     <th className="text-right p-2 font-medium w-20">Preço Unit.</th>
                                     <th className="text-center p-2 font-medium w-12">IVA</th>
                                     <th className="text-center p-2 font-medium w-12">Desc.</th>
-                                    <th className="text-center p-2 font-medium w-16">Margem</th>
+                                    {canViewCosts && <th className="text-center p-2 font-medium w-16">Margem</th>}
                                     <th className="text-right p-2 font-medium w-24">Total</th>
                                   </tr>
                                 </thead>
@@ -698,15 +731,17 @@ export function ProposalDetailsDialog({
                                             <span className="text-muted-foreground">—</span>
                                           )}
                                         </td>
-                                        <td className="p-2 text-center">
-                                          {hasCostVal ? (
-                                            <span className={`font-medium ${margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
-                                              {margin.toFixed(1)}%
-                                            </span>
-                                          ) : (
-                                            <span className="text-muted-foreground">—</span>
-                                          )}
-                                        </td>
+                                        {canViewCosts && (
+                                          <td className="p-2 text-center">
+                                            {hasCostVal ? (
+                                              <span className={`font-medium ${margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {margin.toFixed(1)}%
+                                              </span>
+                                            ) : (
+                                              <span className="text-muted-foreground">—</span>
+                                            )}
+                                          </td>
+                                        )}
                                         <td className="p-2 text-right">
                                           <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
                                           <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/IVA</p>
@@ -834,8 +869,8 @@ export function ProposalDetailsDialog({
                             <div className="col-span-2 text-right">Preço Unit.</div>
                             <div className="col-span-1 text-center">IVA</div>
                             <div className="col-span-1 text-center">Desc.</div>
-                            <div className="col-span-1 text-center">Margem</div>
-                            <div className="col-span-2 text-right">Total</div>
+                            {canViewCosts && <div className="col-span-1 text-center">Margem</div>}
+                            <div className={canViewCosts ? "col-span-2 text-right" : "col-span-3 text-right"}>Total</div>
                           </div>
                           {[...quote.quote_lines]
                             .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
@@ -882,16 +917,18 @@ export function ProposalDetailsDialog({
                                         <span className="text-muted-foreground">—</span>
                                       )}
                                     </div>
-                                    <div className="col-span-1 text-center">
-                                      {hasCost ? (
-                                        <span className={`font-medium ${profitMargin >= 30 ? 'text-green-600 dark:text-green-400' : profitMargin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
-                                          {profitMargin.toFixed(1)}%
-                                        </span>
-                                      ) : (
-                                        <span className="text-muted-foreground">—</span>
-                                      )}
-                                    </div>
-                                    <div className="col-span-2 text-right">
+                                    {canViewCosts && (
+                                      <div className="col-span-1 text-center">
+                                        {hasCost ? (
+                                          <span className={`font-medium ${profitMargin >= 30 ? 'text-green-600 dark:text-green-400' : profitMargin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                                            {profitMargin.toFixed(1)}%
+                                          </span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className={canViewCosts ? "col-span-2 text-right" : "col-span-3 text-right"}>
                                       <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
                                       <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/ IVA</p>
                                     </div>
@@ -944,6 +981,7 @@ export function ProposalDetailsDialog({
                           : step.icon === "eye" ? Eye
                           : step.icon === "check" ? CheckCircle2
                           : step.icon === "x" ? XCircle
+                          : step.icon === "call" ? Phone
                           : Clock;
                         
                         return (

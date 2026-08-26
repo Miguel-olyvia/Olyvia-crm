@@ -4128,6 +4128,7 @@ const Proposals = () => {
         entityId={callTarget.entityId}
         entityName={callTarget.name}
         organizationId={activeCompany?.id || ""}
+        proposalId={callTarget.proposalId}
         onCallRegistered={() => {
           setCallDialogOpen(false);
           if (callTarget.proposalId) afterProposalMutation([callTarget.proposalId]); else loadData();

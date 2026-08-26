@@ -80,6 +80,7 @@ import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
 
 // Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
 const MIN_QUOTE_SEARCH_LENGTH = 2;
@@ -1062,12 +1063,10 @@ export default function Quotes() {
   }, [quotes, linesAgg]);
 
   // Check if any quote has actual cost data
-  // "quotes.view_costs" is not a real permission code in anew_permissions (phantom
-  // permission, unreachable by any real role). "quotes.manage" is the real DB write
-  // gate for the quotes domain and is already used elsewhere to protect sensitive
-  // quote data (see 20260627050000_quotes_security_fixes.sql), which matches the
-  // sensitivity of cost/margin figures here.
-  const canViewCosts = hasPermission("quotes.manage") || isSystemAdmin;
+  // See canViewQuoteCosts() for why "quotes.manage" (not "quotes.view_costs")
+  // is the gate, and why it must stay identical to the one ProposalDetailsDialog
+  // uses — a proposal carries its quote's lines, so this is the same data.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const hasCostData = useMemo(() => {
     return canViewCosts && Object.values(linesAgg).some(a => a.hasCostData);
   }, [linesAgg, canViewCosts]);
