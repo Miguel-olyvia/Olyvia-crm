@@ -46,12 +46,16 @@ export const ADDITIONAL_ALLOWED_ORIGINS = [
   "https://app.olyvia.pt",
 ];
 
-// Anchored: matches only this project's own Vercel preview URLs, e.g.
-// https://olyvia-crm-git-development-miguel-bmgest.vercel.app
+// Anchored: matches this project's own Vercel preview URLs, both the branch
+// alias Vercel generates (https://olyvia-crm-git-development-bmgest.vercel.app)
+// and the per-deployment hash URL (https://olyvia-441ime5jz-bmgest.vercel.app)
+// — the branch-only pattern this used to be missed the hash form entirely,
+// breaking login ("Failed to send a request to the Edge Function") on every
+// preview deployment tested via its "Visit"/CLI URL instead of a branch alias.
 // Anchoring with ^/$ prevents bypasses like
 // https://olyvia-crm-git-x-bmgest.vercel.app.evil.com
 export const VERCEL_PREVIEW_ORIGIN_PATTERN =
-  /^https:\/\/olyvia-crm-git-[a-z0-9-]+-bmgest\.vercel\.app$/;
+  /^https:\/\/olyvia[a-z0-9-]*-bmgest\.vercel\.app$/;
 
 // Anchored: matches only the localhost/127.0.0.1 loopback hosts with an
 // optional port (e.g. http://localhost:5173, http://127.0.0.1:4173), never an
