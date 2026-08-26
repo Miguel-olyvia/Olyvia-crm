@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -76,6 +76,27 @@ type ProductAttribute = {
   values: Array<{ id: string; value: string }>;
 };
 
+// PostgREST caps an unranged response at 1000 rows (Content-Range: 0-999/*,
+// confirmed live via Network tab) — a plain .select() silently truncates for
+// catalogs bigger than that (2000+ products for orgs like Mudelar), returning
+// only whichever ~1000 happen to come first in undefined order. This paginates
+// past that cap instead of ever relying on a single unranged request.
+const fetchAllRows = async (
+  buildQuery: () => any
+): Promise<{ data: any[] | null; error: any }> => {
+  const PAGE = 1000;
+  const rows: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  return { data: rows, error: null };
+};
+
 const PurchaseOrders = () => {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
@@ -88,6 +109,9 @@ const PurchaseOrders = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const loadRequestRef = useRef(0);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
@@ -224,15 +248,86 @@ const PurchaseOrders = () => {
     }
   }, [activeCompany?.id, showDeleted]);
 
+  // Catálogo (produtos/serviços/preços/atributos) só é preciso para escolher
+  // itens ao criar/editar uma encomenda — carregado sob demanda quando o
+  // diálogo abre, não no carregamento inicial da lista. Reseta quando a
+  // empresa ativa muda para forçar recarga do catálogo certo.
+  useEffect(() => {
+    setCatalogLoaded(false);
+  }, [activeCompany?.id]);
+
+  useEffect(() => {
+    if (open && !catalogLoaded && activeCompany?.id) {
+      loadCatalog();
+    }
+  }, [open, catalogLoaded, activeCompany?.id]);
+
   const loadData = async () => {
     if (!activeCompany?.id) {
       console.log("loadData: No activeCompany");
       return;
     }
 
+    const requestId = ++loadRequestRef.current;
+
     try {
       const companyId = activeCompany.id;
       console.log("loadData: Loading purchase orders for company:", companyId, activeCompany.name);
+
+      const [ordersRes, suppliersRes] = await Promise.all([
+        fetchAllRows(() =>
+          showDeleted
+            ? supabase
+                .from("purchase_orders")
+                .select("*, suppliers(name)")
+                .eq("organization_id", companyId)
+                .not("deleted_at", "is", null)
+                .order("created_at", { ascending: false })
+            : supabase
+                .from("purchase_orders")
+                .select("*, suppliers(name)")
+                .eq("organization_id", companyId)
+                .is("deleted_at", null)
+                .order("created_at", { ascending: false })
+        ),
+        supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
+      ]);
+
+      // Um loadData() mais recente (ex.: alternou "Ver eliminados" outra vez antes
+      // deste pedido terminar) já está em curso — descarta esta resposta desatualizada
+      // em vez de sobrepor dados mais recentes com dados antigos.
+      if (loadRequestRef.current !== requestId) return;
+
+      console.log("loadData: Orders response:", ordersRes.data, ordersRes.error);
+
+      if (ordersRes.error) throw ordersRes.error;
+      if (suppliersRes.error) throw suppliersRes.error;
+
+      setOrders((ordersRes.data as PurchaseOrder[]) || []);
+      setSuppliers(suppliersRes.data || []);
+    } catch (error: any) {
+      if (loadRequestRef.current !== requestId) return;
+      toast({
+        title: t('purchaseOrders.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      if (loadRequestRef.current === requestId) setLoading(false);
+    }
+  };
+
+  // Catálogo completo (produtos + serviços + preços de compra + atributos), usado
+  // apenas no formulário de criar/editar encomenda para escolher itens. Carregado
+  // uma vez sob demanda (ver useEffect de `open`/`catalogLoaded` acima) em vez de em
+  // todo o carregamento da lista de encomendas — isto evitava dezenas de pedidos de
+  // rede (e falhas "Failed to fetch" ocasionais) só para mostrar a tabela.
+  const loadCatalog = async () => {
+    if (!activeCompany?.id) return;
+
+    setCatalogLoading(true);
+    try {
+      const companyId = activeCompany.id;
 
       const productColumns = `
             id,
@@ -243,51 +338,10 @@ const PurchaseOrders = () => {
             brands(name)
           `;
 
-      // PostgREST caps an unranged response at 1000 rows (Content-Range: 0-999/*,
-      // confirmed live via Network tab) — a plain .select() silently truncates for
-      // catalogs bigger than that (2000+ products for orgs like Mudelar), returning
-      // only whichever ~1000 happen to come first in undefined order. This paginates
-      // past that cap instead of ever relying on a single unranged request.
-      const fetchAllRows = async (
-        buildQuery: () => any
-      ): Promise<{ data: any[] | null; error: any }> => {
-        const PAGE = 1000;
-        const rows: any[] = [];
-        let from = 0;
-        while (true) {
-          const { data, error } = await buildQuery().range(from, from + PAGE - 1);
-          if (error) return { data: null, error };
-          rows.push(...(data || []));
-          if (!data || data.length < PAGE) break;
-          from += PAGE;
-        }
-        return { data: rows, error: null };
-      };
-
       const fetchAllProductRows = (applyFilters: (q: any) => any) =>
         fetchAllRows(() => applyFilters(supabase.from("products").select(productColumns)));
 
-      const [
-        ordersRes,
-        suppliersRes,
-        companyProductsRes,
-        directProductsRes,
-        servicesRes,
-      ] = await Promise.all([
-        (showDeleted
-          ? supabase
-              .from("purchase_orders")
-              .select("*, suppliers(name)")
-              .eq("organization_id", companyId)
-              .not("deleted_at", "is", null)
-              .order("created_at", { ascending: false })
-          : supabase
-              .from("purchase_orders")
-              .select("*, suppliers(name)")
-              .eq("organization_id", companyId)
-              .is("deleted_at", null)
-              .order("created_at", { ascending: false })),
-        supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
+      const [companyProductsRes, directProductsRes, servicesRes] = await Promise.all([
         fetchAllRows(() =>
           supabase.from("product_organizations").select("product_id").eq("organization_id", companyId)
         ),
@@ -313,16 +367,9 @@ const PurchaseOrders = () => {
           .eq("organization_id", companyId),
       ]);
 
-      console.log("loadData: Orders response:", ordersRes.data, ordersRes.error);
-
-      if (ordersRes.error) throw ordersRes.error;
-      if (suppliersRes.error) throw suppliersRes.error;
       if (companyProductsRes.error) throw companyProductsRes.error;
       if (directProductsRes.error) throw directProductsRes.error;
       if (servicesRes.error) throw servicesRes.error;
-
-      setOrders((ordersRes.data as PurchaseOrder[]) || []);
-      setSuppliers(suppliersRes.data || []);
 
       // Shared products: linked via product_organizations to this org but owned
       // (products.organization_id) by a DIFFERENT org — not covered by the direct query
@@ -389,8 +436,9 @@ const PurchaseOrders = () => {
 
       setProducts(mappedProducts);
 
-      // Fetch product attributes
-      await fetchProductAttributes();
+      // Fetch product attributes — restrito aos produtos deste catálogo (em vez de
+      // todos os produtos ativos de todas as organizações, como acontecia antes).
+      await fetchProductAttributes(productIds);
 
       // Fetch service prices — same batching as product_prices above, for consistency
       // (services catalogs are usually much smaller, but no reason to risk it).
@@ -429,6 +477,7 @@ const PurchaseOrders = () => {
       });
 
       setServices(mappedServices);
+      setCatalogLoaded(true);
     } catch (error: any) {
       toast({
         title: t('purchaseOrders.toast.loadError'),
@@ -436,19 +485,28 @@ const PurchaseOrders = () => {
         variant: "destructive",
       });
     } finally {
-      setLoading(false);
+      setCatalogLoading(false);
     }
   };
 
-  const fetchProductAttributes = async () => {
+  const fetchProductAttributes = async (productIds: string[]) => {
     try {
-      // Get all products with their categories
-      const { data: productsData } = await supabase
-        .from("products")
-        .select("id, category_id")
-        .eq("is_active", true);
+      if (productIds.length === 0) return;
 
-      if (!productsData) return;
+      // Restrito aos produtos deste catálogo (batched a 200 ids, mesmo padrão dos
+      // preços acima) — antes ia buscar TODOS os produtos ativos de TODAS as
+      // organizações só para montar este mapa de atributos.
+      const BATCH = 200;
+      const productsData: Array<{ id: string; category_id: string | null }> = [];
+      for (let i = 0; i < productIds.length; i += BATCH) {
+        const batch = productIds.slice(i, i + BATCH);
+        const { data, error } = await supabase
+          .from("products")
+          .select("id, category_id")
+          .in("id", batch);
+        if (error) throw error;
+        productsData.push(...(data || []));
+      }
 
       // Get unique category IDs
       const categoryIds = [...new Set(productsData.map(p => p.category_id).filter(Boolean))];
@@ -458,7 +516,7 @@ const PurchaseOrders = () => {
       }
 
       // Get attributes for these categories
-      const { data: categoryAttrs } = await supabase
+      const { data: categoryAttrs, error: caError } = await supabase
         .from("category_attributes")
         .select(`
           category_id,
@@ -474,11 +532,13 @@ const PurchaseOrders = () => {
         `)
         .in("category_id", categoryIds);
 
+      if (caError) throw caError;
+
       const attributesMap = new Map<string, ProductAttribute[]>();
 
       productsData.forEach(product => {
         if (!product.category_id) return;
-        
+
         const productAttrs = categoryAttrs
           ?.filter(ca => ca.category_id === product.category_id)
           .map(ca => ({
@@ -487,7 +547,7 @@ const PurchaseOrders = () => {
             code: ca.product_attributes.code,
             value_type: ca.product_attributes.value_type,
             unit: ca.product_attributes.unit,
-            allowed_values: Array.isArray(ca.product_attributes.allowed_values) 
+            allowed_values: Array.isArray(ca.product_attributes.allowed_values)
               ? ca.product_attributes.allowed_values as string[]
               : null,
             values: []
