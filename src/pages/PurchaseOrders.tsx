@@ -7,7 +7,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck } from "lucide-react";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -112,6 +112,14 @@ const PurchaseOrders = () => {
   const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const loadRequestRef = useRef(0);
+  // Receção (Fase 4C): dedicado, fora do dropdown de estado genérico — pede o
+  // armazém de destino e liga-se a rpc_receive_purchase_order (gera a entrada
+  // em stock_movements na mesma transação que muda o estado para 'received').
+  const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
+  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string } | null>(null);
+  const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
+  const [receiving, setReceiving] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
@@ -637,6 +645,49 @@ const PurchaseOrders = () => {
         description: error.message,
         variant: "destructive",
       });
+    }
+  };
+
+  const openReceiveDialog = async (order: PurchaseOrder) => {
+    setReceivingOrder({ id: order.id, order_number: order.order_number });
+    setReceiveWarehouseId("");
+    setReceiveDialogOpen(true);
+
+    if (!activeCompany?.id) return;
+    const { data, error } = await supabase
+      .from("warehouses")
+      .select("id, name")
+      .eq("organization_id", activeCompany.id)
+      .is("deleted_at", null)
+      .order("name");
+    if (error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    setReceiveWarehouses(data || []);
+  };
+
+  const handleReceiveOrder = async () => {
+    if (!receivingOrder || !receiveWarehouseId) return;
+    setReceiving(true);
+    try {
+      const { error } = await supabase.rpc("rpc_receive_purchase_order", {
+        p_purchase_order_id: receivingOrder.id,
+        p_warehouse_id: receiveWarehouseId,
+      });
+      if (error) throw error;
+
+      toast({
+        title: "Encomenda recebida",
+        description: `${receivingOrder.order_number} marcada como recebida — stock atualizado.`,
+      });
+      setReceiveDialogOpen(false);
+      setReceivingOrder(null);
+      loadData();
+    } catch (error: any) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setReceiving(false);
     }
   };
 
@@ -1311,14 +1362,20 @@ const PurchaseOrders = () => {
                         <SelectContent>
                           <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
                           <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
-                          <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
+                          {/* "received" já não é uma opção genérica aqui — passa pelo botão
+                              dedicado "Marcar como recebida" na lista (Fase 4C), que pede o
+                              armazém de destino e gera a entrada em stock_movements. Manter
+                              este dropdown a permitir 'received' deixaria criar encomendas
+                              "recebidas" sem nunca dar entrada em stock nenhum. */}
+                          {editingId && formData.status === 'received' && (
+                            <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
+                          )}
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
                       {formData.status === 'received' && (
                         <p className="text-xs text-muted-foreground">
-                          {t('purchaseOrders.form.receivedStockNote') ||
-                            'Marcar como recebida não atualiza automaticamente o stock — atualize os armazéns manualmente em Stocks.'}
+                          Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
                         </p>
                       )}
                     </div>
@@ -1525,6 +1582,13 @@ const PurchaseOrders = () => {
                             <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
                               <FileDown className="w-4 h-4" />
                             </Button>
+                            {(order.status === 'pending' || order.status === 'ordered') && (
+                              <PermissionGate permission="purchase_orders.edit">
+                                <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
+                                  <PackageCheck className="w-4 h-4" />
+                                </Button>
+                              </PermissionGate>
+                            )}
                             <PermissionGate permission="purchase_orders.edit">
                               <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
                                 <Pencil className="w-4 h-4" />
@@ -1712,6 +1776,42 @@ const PurchaseOrders = () => {
           }}
         />
       )}
+
+      {/* Marcar como recebida (Fase 4C) — pede o armazém de destino e gera a
+          entrada de stock correspondente via rpc_receive_purchase_order. */}
+      <Dialog open={receiveDialogOpen} onOpenChange={setReceiveDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Marcar como recebida{receivingOrder ? ` — ${receivingOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Isto dá entrada em stock, no armazém escolhido, de todas as linhas de produto desta encomenda.
+            </p>
+            <div className="space-y-2">
+              <Label>Armazém de destino</Label>
+              <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolhe um armazém" />
+                </SelectTrigger>
+                <SelectContent>
+                  {receiveWarehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setReceiveDialogOpen(false)} disabled={receiving}>
+                Cancelar
+              </Button>
+              <Button onClick={handleReceiveOrder} disabled={receiving || !receiveWarehouseId}>
+                {receiving ? "A confirmar..." : "Confirmar receção"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
