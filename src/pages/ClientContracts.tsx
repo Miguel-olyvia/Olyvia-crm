@@ -46,7 +46,7 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
-import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
+import { downloadContractDocumentPdf, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -221,6 +221,9 @@ const ClientContracts = () => {
     setShowWhatsAppDialog(true);
   };
 
+  // Delega no gerador partilhado (contractDocument.downloadContractDocumentPdf).
+  // Antes havia aqui uma cópia integral do pipeline html2pdf: as duas divergiram
+  // e o portal do cliente passou a produzir um PDF diferente do da aplicação.
   const handleDownloadPdf = async (contract: any) => {
     if (!activeCompany?.id) {
       toast.error(t('clientContracts.toast.noActiveOrg'));
@@ -228,7 +231,6 @@ const ClientContracts = () => {
     }
 
     const loadingToast = toast.loading(t('clientContracts.toast.generatingPdf'));
-    let iframe: HTMLIFrameElement | null = null;
 
     try {
       const resolved = await resolveContractDocument(contract, activeCompany.id, activeCompany.name);
@@ -237,118 +239,14 @@ const ClientContracts = () => {
         return;
       }
 
-      const html2pdfModule = await import("html2pdf.js");
-      const html2pdf = (html2pdfModule.default || html2pdfModule) as any;
-      const html = buildContractPrintHtml(resolved, contract.contract_number || "Contrato");
-
-      const parser = new DOMParser();
-      const parsed = parser.parseFromString(html, "text/html");
-      parsed.querySelectorAll("script").forEach((script) => script.remove());
-
-      iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      // Dar dimensões reais ao iframe (CSS mm depende de DPI/viewport).
-      // Sem isto, html2canvas captura o `.page` com tamanhos inconsistentes
-      // e as margens/larguras do PDF saem distorcidas.
-      iframe.style.width = resolved.pageWidth;
-      iframe.style.height = resolved.pageHeight;
-      iframe.style.border = "0";
-      iframe.style.opacity = "0";
-      iframe.style.pointerEvents = "none";
-      document.body.appendChild(iframe);
-
-      const preparedHtml = `<!doctype html>${parsed.documentElement.outerHTML}`;
-
-      await new Promise<void>((resolve, reject) => {
-        iframe!.onload = () => resolve();
-        iframe!.onerror = () => reject(new Error("Falha ao preparar o documento para PDF"));
-        iframe!.srcdoc = preparedHtml;
-      });
-
-      const iframeDocument = iframe.contentDocument;
-      if (!iframeDocument) {
-        throw new Error("Não foi possível carregar o documento do contrato");
-      }
-
-      if (iframeDocument.fonts?.ready) {
-        await iframeDocument.fonts.ready;
-      }
-
-      const images = Array.from(iframeDocument.images || []);
-      await Promise.all(
-        images.map((image) => {
-          if (image.complete) return Promise.resolve();
-          return new Promise<void>((resolve) => {
-            image.onload = () => resolve();
-            image.onerror = () => resolve();
-          });
-        })
-      );
-
-      const pageElement = iframeDocument.querySelector(".page") as HTMLElement | null;
-      if (!pageElement) {
-        throw new Error("Não foi possível encontrar o conteúdo do contrato");
-      }
-
-      const safeFileName = `${contract.contract_number || contract.title || "contrato"}`
-        .trim()
-        .replace(/[^a-zA-Z0-9-_]+/g, "_")
-        .replace(/^_+|_+$/g, "") || "contrato";
-
-      const s = resolved.settings;
-      const marginTop = Number(s.margin_top ?? 20) || 20;
-      const marginRight = Number(s.margin_right ?? 20) || 20;
-      const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
-      const marginLeft = Number(s.margin_left ?? 20) || 20;
-      // Reserva extra para evitar que o rodapé (renderizado como conteúdo
-      // pelo html2pdf) encavalite o último parágrafo da página.
-      const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
-
-      const pdfWorker = html2pdf()
-        .set({
-          margin: [marginTop, marginRight, marginBottom, marginLeft],
-
-          filename: `${safeFileName}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-          },
-          jsPDF: {
-            unit: "mm",
-            format: resolved.settings.page_size === "LETTER" ? "letter" : "a4",
-            orientation: resolved.settings.page_orientation === "landscape" ? "landscape" : "portrait",
-          },
-          pagebreak: {
-            mode: ["css", "legacy"],
-            avoid: [
-              ".content p",
-              ".content li",
-              ".content h1", ".content h2", ".content h3",
-              ".content h4", ".content h5", ".content h6",
-              ".content tr",
-              ".content img",
-              ".content blockquote",
-              ".content div",
-              ".content font",
-              "[data-pdf-section='header']",
-            ],
-          },
-        })
-        .from(pageElement);
-
-      await pdfWorker.save();
+      const label = contract.contract_number || "Contrato";
+      await downloadContractDocumentPdf(resolved, label, label);
       toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
     } finally {
       toast.dismiss(loadingToast);
-      iframe?.remove();
     }
   };
 

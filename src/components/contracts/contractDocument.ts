@@ -1318,6 +1318,9 @@ export async function downloadContractDocumentPdf(
     const parser = new DOMParser();
     const parsed = parser.parseFromString(html, "text/html");
     parsed.querySelectorAll("script").forEach((script) => script.remove());
+    // O rodapé é desenhado por página com o jsPDF (drawContractPdfFooters);
+    // mantê-lo no corpo do documento voltaria a imprimi-lo só no fim.
+    parsed.querySelectorAll(".footer").forEach((node) => node.remove());
 
     iframe = window.document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -1361,6 +1364,15 @@ export async function downloadContractDocumentPdf(
     const pageElement = iframeDocument.querySelector(".page") as HTMLElement | null;
     if (!pageElement) throw new Error("Não foi possível encontrar o conteúdo do contrato");
 
+    // O html2canvas fecha o canvas alguns pixéis acima do fim real do conteúdo
+    // e corta a última linha do documento ao meio (visível já antes desta
+    // alteração, onde a vítima era o rodapé em vez do texto). Um espaçador
+    // final garante que a linha sacrificada é sempre espaço em branco.
+    const bottomSpacer = iframeDocument.createElement("div");
+    bottomSpacer.setAttribute("aria-hidden", "true");
+    bottomSpacer.style.height = `${CANVAS_BOTTOM_SPACER_PX}px`;
+    pageElement.appendChild(bottomSpacer);
+
     const safeFileName = `${fileNameBase}`
       .trim()
       .replace(/[^a-zA-Z0-9-_]+/g, "_")
@@ -1371,21 +1383,28 @@ export async function downloadContractDocumentPdf(
     const marginRight = Number(s.margin_right ?? 20) || 20;
     const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
     const marginLeft = Number(s.margin_left ?? 20) || 20;
-    // Reserva extra para evitar que o rodapé (renderizado como conteúdo
-    // pelo html2pdf) encavalite o último parágrafo da página.
-    const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
 
-    await html2pdf()
+    // O rodapé (texto + "Página X de Y") deixou de ser conteúdo do documento e
+    // passou a ser desenhado com jsPDF em TODAS as páginas — ver
+    // `drawContractPdfFooters`. Reservamos-lhe espaço alargando a margem
+    // inferior usada na paginação, para o conteúdo nunca lhe encavalitar.
+    const jsPdfOptions = {
+      unit: "mm" as const,
+      format: s.page_size === "LETTER" ? "letter" : "a4",
+      orientation: (s.page_orientation === "landscape" ? "landscape" : "portrait") as "landscape" | "portrait",
+    };
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF(jsPdfOptions);
+    const footerLayout = computeFooterLayout(s, pdf);
+    const marginBottom = Math.max(marginBottomBase, footerLayout.reservedMm);
+
+    const pdfWorker = html2pdf()
       .set({
         margin: [marginTop, marginRight, marginBottom, marginLeft],
         filename: `${safeFileName}.pdf`,
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-        jsPDF: {
-          unit: "mm",
-          format: s.page_size === "LETTER" ? "letter" : "a4",
-          orientation: s.page_orientation === "landscape" ? "landscape" : "portrait",
-        },
+        jsPDF: jsPdfOptions,
         pagebreak: {
           mode: ["css", "legacy"],
           avoid: [
@@ -1402,11 +1421,238 @@ export async function downloadContractDocumentPdf(
           ],
         },
       })
-      .from(pageElement)
-      .save();
+      .from(pageElement);
+
+    await paginateWorkerCanvasToPdf(pdfWorker, pdf, { marginTop, marginLeft });
+    drawContractPdfFooters(pdf, s, footerLayout);
+    pdf.save(`${safeFileName}.pdf`);
   } finally {
     iframe?.remove();
   }
+}
+
+/** Espaçador (px CSS) no fim do documento, para o html2canvas não cortar a última linha. */
+const CANVAS_BOTTOM_SPACER_PX = 24;
+
+/** Corpo de letra (pt) do rodapé desenhado pelo jsPDF. */
+const FOOTER_FONT_PT = 9;
+const PT_TO_MM = 25.4 / 72;
+/** Espaço em branco (mm) entre o rodapé e o limite físico da folha. */
+const FOOTER_BOTTOM_PADDING_MM = 4;
+/** Espaço em branco (mm) entre o texto do rodapé e a numeração. */
+const FOOTER_PAGE_NUM_GAP_MM = 2.5;
+/** Espaço em branco (mm) entre o divisor e a primeira linha do rodapé. */
+const FOOTER_DIVIDER_GAP_MM = 2;
+/** Folga (mm) entre o fim do conteúdo e o divisor do rodapé. */
+const FOOTER_CONTENT_CLEARANCE_MM = 4;
+
+interface ContractFooterLayout {
+  showFooterText: boolean;
+  showPageNumbers: boolean;
+  /** Texto do rodapé já partido nas linhas que cabem na largura útil. */
+  textLines: string[];
+  lineHeightMm: number;
+  /** Margem inferior mínima que a paginação tem de respeitar. */
+  reservedMm: number;
+}
+
+/**
+ * Calcula, a partir das definições do documento, quanto espaço o rodapé ocupa.
+ * Feito ANTES da paginação: o conteúdo tem de parar acima desta zona.
+ *
+ * `pdf` é usado só para medir a quebra de linha do texto do rodapé com a mesma
+ * fonte com que ele vai ser desenhado.
+ */
+function computeFooterLayout(settings: Record<string, any>, pdf: any): ContractFooterLayout {
+  const showFooter = settings.show_footer !== false;
+  const footerText = String(settings.footer_text || "");
+  const showFooterText = showFooter && footerText.length > 0;
+  const showPageNumbers = showFooter && settings.show_page_numbers !== false;
+  const lineHeightMm = FOOTER_FONT_PT * PT_TO_MM * 1.25;
+
+  const pageWidthMm = pdf.internal.pageSize.getWidth();
+  const marginLeft = Number(settings.margin_left ?? 20) || 20;
+  const marginRight = Number(settings.margin_right ?? 20) || 20;
+  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
+
+  pdf.setFontSize(FOOTER_FONT_PT);
+  const textLines: string[] = showFooterText ? pdf.splitTextToSize(footerText, contentWidthMm) : [];
+
+  const reservedMm =
+    FOOTER_BOTTOM_PADDING_MM +
+    (showPageNumbers ? lineHeightMm + FOOTER_PAGE_NUM_GAP_MM : 0) +
+    (showFooterText ? textLines.length * lineHeightMm + FOOTER_DIVIDER_GAP_MM : 0) +
+    FOOTER_CONTENT_CLEARANCE_MM;
+
+  return { showFooterText, showPageNumbers, textLines, lineHeightMm, reservedMm };
+}
+
+/**
+ * Escreve o rodapé (texto + "Página X de Y") em TODAS as páginas do PDF.
+ *
+ * Substitui o rodapé que era injetado como conteúdo do documento e que, por
+ * isso, (a) só aparecia no fim da última página e (b) dizia sempre
+ * "Página 1 de 1" — uma constante literal, independente do nº real de páginas.
+ * Mesmo padrão já usado no export de minutas (TemplateExportButtons).
+ */
+export function drawContractPdfFooters(
+  pdf: any,
+  settings: Record<string, any>,
+  layout: ContractFooterLayout = computeFooterLayout(settings, pdf),
+): void {
+  if (!layout.showFooterText && !layout.showPageNumbers) return;
+
+  const pageWidthMm = pdf.internal.pageSize.getWidth();
+  const pageHeightMm = pdf.internal.pageSize.getHeight();
+  const marginLeft = Number(settings.margin_left ?? 20) || 20;
+  const marginRight = Number(settings.margin_right ?? 20) || 20;
+  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
+
+  const total = pdf.getNumberOfPages();
+  const textLines = layout.textLines;
+  const textBlockHeightMm = textLines.length * layout.lineHeightMm;
+
+  const pageNumBaselineY = pageHeightMm - FOOTER_BOTTOM_PADDING_MM;
+  const textFirstBaselineY =
+    (layout.showPageNumbers ? pageNumBaselineY - FOOTER_PAGE_NUM_GAP_MM : pageNumBaselineY) -
+    textBlockHeightMm +
+    layout.lineHeightMm * 0.85;
+  const dividerY = textFirstBaselineY - layout.lineHeightMm * 0.85 - FOOTER_DIVIDER_GAP_MM;
+
+  for (let i = 1; i <= total; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(FOOTER_FONT_PT);
+    pdf.setTextColor(107, 114, 128);
+
+    if (layout.showFooterText) {
+      pdf.setDrawColor(229, 231, 235);
+      pdf.setLineWidth(0.2);
+      pdf.line(marginLeft, dividerY, pageWidthMm - marginRight, dividerY);
+      textLines.forEach((line, idx) => {
+        pdf.text(line, pageWidthMm / 2, textFirstBaselineY + idx * layout.lineHeightMm, { align: "center" });
+      });
+    }
+    if (layout.showPageNumbers) {
+      pdf.text(`Página ${i} de ${total}`, pageWidthMm / 2, pageNumBaselineY, { align: "center" });
+    }
+  }
+}
+
+/**
+ * Fatia o canvas do html2pdf em páginas, cortando sempre numa faixa sem tinta.
+ *
+ * Porquê não usar o `toPdf()` do html2pdf: a paginação dele acontece em dois
+ * sítios que não concordam entre si. O plugin `pagebreak` insere os "pads" com
+ * base no layout do DOM vivo, mas o `toPdf()` corta o canvas produzido pelo
+ * html2canvas — e o html2canvas re-faz o layout num clone, com diferenças de
+ * alguns pixéis. Onde um bloco acaba encostado ao limite da página, esse desvio
+ * chega para a última linha ficar partida ao meio: metade no fundo de uma
+ * página, metade no topo da seguinte (medido: 317 pixéis com tinta exatamente
+ * na linha de corte do CC-2026-0011).
+ *
+ * Aqui o corte é decidido sobre os pixéis que vão mesmo para o PDF: procura-se,
+ * a partir da altura nominal e para cima, a primeira linha de pixéis sem tinta.
+ * Isto é indiferente à causa do desvio e cobre também texto solto e blocos que
+ * o `pagebreak.avoid` não protege.
+ */
+async function paginateWorkerCanvasToPdf(
+  worker: any,
+  pdf: any,
+  offsets: { marginTop: number; marginLeft: number },
+): Promise<void> {
+  await worker.toContainer();
+  await worker.toCanvas();
+
+  const canvas: HTMLCanvasElement = worker.prop.canvas;
+  const pageSize = worker.prop.pageSize;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const pxPageHeight = Math.max(1, Math.floor(canvas.width * pageSize.inner.ratio));
+  const mmPerPx = pageSize.inner.width / canvas.width;
+
+  const pageCanvas = document.createElement("canvas");
+  pageCanvas.width = canvas.width;
+  const pageContext = pageCanvas.getContext("2d");
+
+  let top = 0;
+  let isFirstPage = true;
+  while (top < canvas.height) {
+    const nominalCut = Math.min(top + pxPageHeight, canvas.height);
+    const cut =
+      nominalCut >= canvas.height
+        ? canvas.height
+        : findInkFreeCut(context, canvas.width, top, nominalCut, pxPageHeight);
+    const sliceHeight = cut - top;
+    if (sliceHeight <= 0) break;
+
+    pageCanvas.height = sliceHeight;
+    if (pageContext) {
+      pageContext.fillStyle = "#ffffff";
+      pageContext.fillRect(0, 0, canvas.width, sliceHeight);
+      pageContext.drawImage(canvas, 0, top, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+    }
+
+    if (!isFirstPage) pdf.addPage();
+    pdf.addImage(
+      pageCanvas.toDataURL("image/jpeg", 0.98),
+      "JPEG",
+      offsets.marginLeft,
+      offsets.marginTop,
+      pageSize.inner.width,
+      sliceHeight * mmPerPx,
+    );
+
+    isFirstPage = false;
+    top = cut;
+  }
+}
+
+/** Fração máxima de uma página que se aceita perder para fugir de uma linha de texto. */
+const INK_SCAN_FRACTION = 0.14;
+/** Um pixel conta como "tinta" abaixo deste valor em qualquer canal. */
+const INK_THRESHOLD = 235;
+
+/**
+ * Devolve a maior altura <= `nominalCut` cuja linha de pixéis não tem tinta.
+ * Se não houver nenhuma dentro da janela de procura, devolve `nominalCut`
+ * (cortar no sítio nominal é melhor do que produzir uma página vazia).
+ */
+function findInkFreeCut(
+  context: CanvasRenderingContext2D | null,
+  width: number,
+  top: number,
+  nominalCut: number,
+  pxPageHeight: number,
+): number {
+  if (!context) return nominalCut;
+  const maxScan = Math.min(Math.round(pxPageHeight * INK_SCAN_FRACTION), nominalCut - top - 1);
+  if (maxScan <= 0) return nominalCut;
+
+  let band: ImageData;
+  try {
+    band = context.getImageData(0, nominalCut - maxScan, width, maxScan);
+  } catch {
+    // Canvas contaminado por imagem cross-origin: sem leitura de pixéis,
+    // mantém-se o corte nominal.
+    return nominalCut;
+  }
+
+  for (let row = maxScan - 1; row >= 0; row--) {
+    let hasInk = false;
+    for (let x = 0; x < width; x++) {
+      const offset = (row * width + x) * 4;
+      if (
+        band.data[offset] < INK_THRESHOLD ||
+        band.data[offset + 1] < INK_THRESHOLD ||
+        band.data[offset + 2] < INK_THRESHOLD
+      ) {
+        hasInk = true;
+        break;
+      }
+    }
+    if (!hasInk) return nominalCut - maxScan + row;
+  }
+  return nominalCut;
 }
 
 export function buildContractPrintHtml(document: ResolvedContractDocument, title: string) {
@@ -1564,7 +1810,7 @@ export function buildContractPrintHtml(document: ResolvedContractDocument, title
     <div class="page">
       ${renderContractHeaderHtml(document.settings as any, document.variableData as any)}
       <div class="content">${sanitizedBody}</div>
-      ${document.settings.show_footer !== false ? `<div class="footer">${footerText ? `<p>${escapeHtml(footerText)}</p>` : ""}${document.settings.show_page_numbers !== false ? `<p>${escapeHtml("Página 1 de 1")}</p>` : ""}</div>` : ""}
+      ${document.settings.show_footer !== false && footerText ? `<div class="footer"><p>${escapeHtml(footerText)}</p></div>` : ""}
     </div>
     <script>
       window.addEventListener('load', () => {
