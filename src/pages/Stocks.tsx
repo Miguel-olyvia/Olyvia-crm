@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
 import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
@@ -39,6 +39,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { escapeIlike } from "@/lib/clientSearch";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; category_id?: string | null; product_categories?: { name: string } | null };
@@ -46,6 +47,8 @@ type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
 };
 
 const UNCATEGORIZED_LABEL = "Sem categoria";
+const UNCATEGORIZED_VALUE = "__uncategorized__";
+const PAGE_SIZE = 30;
 
 function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
   if (stock.quantity <= stock.reorder_point) return "low";
@@ -66,14 +69,46 @@ const stockSchema = z.object({
   path: ["maximum_quantity"],
 });
 
+// PostgREST caps an unranged response at 1000 rows — a plain .select() silently
+// truncates for catalogs bigger than that. Paginates past that cap instead of
+// ever relying on a single unranged request. Same helper as PurchaseOrders.tsx.
+const fetchAllRows = async (
+  buildQuery: () => any
+): Promise<{ data: any[] | null; error: any }> => {
+  const PAGE = 1000;
+  const rows: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  return { data: rows, error: null };
+};
+
+const STOCK_SELECT = `
+  *,
+  products!inner(name, category_id, product_categories!category_id(name)),
+  warehouses(name)
+`;
+
 const Stocks = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [warehouses, setWarehouses] = useState<any[]>([]);
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingStock, setEditingStock] = useState<Stock | null>(null);
@@ -89,46 +124,190 @@ const Stocks = () => {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
 
-  // Categories actually present in the currently loaded stocks — derived from the
-  // data itself so the dropdown never lists a category with zero stock rows.
-  const availableCategories = useMemo(() => {
-    const names = new Set<string>();
-    for (const stock of stocks) {
-      names.add(stock.products?.product_categories?.name || UNCATEGORIZED_LABEL);
+  // Debounce search — server-side now, a network call per keystroke would be wasteful.
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Stable refs so loadStocks doesn't need to be recreated (and re-wired to the
+  // IntersectionObserver) on every filter keystroke — same pattern as Products.tsx.
+  const filtersRef = useRef({
+    showDeleted,
+    debouncedSearchTerm,
+    categoryFilter,
+    warehouseFilter,
+    statusFilter,
+    activeCompanyId: activeCompany?.id,
+  });
+  useEffect(() => {
+    filtersRef.current = {
+      showDeleted,
+      debouncedSearchTerm,
+      categoryFilter,
+      warehouseFilter,
+      statusFilter,
+      activeCompanyId: activeCompany?.id,
+    };
+  }, [showDeleted, debouncedSearchTerm, categoryFilter, warehouseFilter, statusFilter, activeCompany?.id]);
+
+  // status (low/normal/overstock) compares two columns of the SAME row
+  // (quantity vs reorder_point / maximum_quantity) — PostgREST filters only
+  // compare a column to a literal value, not to another column, so this can't
+  // be pushed into the query without a DB view/generated column. While a
+  // status filter is active, we fall back to looping through every stock that
+  // matches the OTHER filters (still safely paginated, never a single
+  // unranged request) and filter status client-side, instead of the normal
+  // 30-at-a-time infinite scroll.
+  //
+  // Takes `status` explicitly (read from filtersRef by callers) rather than
+  // closing over the `statusFilter` state directly: loadAllForStatusFilter is a
+  // useCallback with a narrow dep array ([t, toast]), so a plain closure over
+  // `statusFilter` would go stale after the first status change.
+  const applyStatusFilter = (rows: Stock[], status: typeof statusFilter) =>
+    status === "all" ? rows : rows.filter((s) => getStockStatusCode(s) === status);
+
+  const buildStocksQuery = (filters: typeof filtersRef.current) => {
+    let query = supabase
+      .from("stocks")
+      .select(STOCK_SELECT)
+      .eq("organization_id", filters.activeCompanyId);
+
+    query = filters.showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+    if (filters.warehouseFilter !== "all") {
+      query = query.eq("warehouse_id", filters.warehouseFilter);
     }
-    return Array.from(names).sort((a, b) => {
-      if (a === UNCATEGORIZED_LABEL) return 1;
-      if (b === UNCATEGORIZED_LABEL) return -1;
-      return a.localeCompare(b);
-    });
-  }, [stocks]);
+    if (filters.categoryFilter === UNCATEGORIZED_VALUE) {
+      query = (query as any).is("products.category_id", null);
+    } else if (filters.categoryFilter !== "all") {
+      query = (query as any).eq("products.category_id", filters.categoryFilter);
+    }
+    if (filters.debouncedSearchTerm.trim()) {
+      query = (query as any).ilike("products.name", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    }
+    return query;
+  };
 
-  // Client-side filter over the already-loaded stocks (no extra query — this page
-  // loads the whole org's stocks upfront, same as before this change).
-  const filteredStocks = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return stocks.filter((stock) => {
-      if (term && !(stock.products?.name || "").toLowerCase().includes(term)) return false;
-      if (categoryFilter !== "all") {
-        const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
-        if (categoryName !== categoryFilter) return false;
+  const loadStocks = useCallback(async (pageNum: number, reset: boolean) => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+
+    if (reset) {
+      setLoading(true);
+      setStocks([]);
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      const from = pageNum * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const query = buildStocksQuery(filters)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const newStocks = (data as Stock[]) || [];
+
+      if (reset) {
+        setStocks(newStocks);
+      } else {
+        setStocks((prev) => {
+          const existingIds = new Set(prev.map((s) => s.id));
+          return [...prev, ...newStocks.filter((s) => !existingIds.has(s.id))];
+        });
       }
-      if (warehouseFilter !== "all" && stock.warehouse_id !== warehouseFilter) return false;
-      if (statusFilter !== "all" && getStockStatusCode(stock) !== statusFilter) return false;
-      return true;
-    });
-  }, [stocks, searchTerm, categoryFilter, warehouseFilter, statusFilter]);
+      setHasMore(newStocks.length === PAGE_SIZE);
+      setPage(pageNum);
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [t, toast]);
 
-  // Group stocks by the product's category, sorted alphabetically (uncategorized
-  // last); products within a category sorted alphabetically too. Purely a render
-  // grouping — doesn't change what fetchStocks loads or how edit/delete work.
+  // Full loop (still batched at 1000/req, never a single unranged request) across
+  // every stock matching search/category/warehouse — only used while a status
+  // filter is active, since status can't be filtered server-side. See comment
+  // on applyStatusFilter above.
+  const loadAllForStatusFilter = useCallback(async () => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+
+    setLoading(true);
+    setStocks([]);
+    try {
+      const { data, error } = await fetchAllRows(() =>
+        buildStocksQuery(filters).order("created_at", { ascending: false }).order("id", { ascending: true })
+      );
+      if (error) throw error;
+      setStocks(applyStatusFilter((data as Stock[]) || [], filters.statusFilter));
+      setHasMore(false);
+      setPage(0);
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [t, toast]);
+
+  const refresh = useCallback(() => {
+    if (statusFilter !== "all") {
+      loadAllForStatusFilter();
+    } else {
+      setHasMore(true);
+      loadStocks(0, true);
+    }
+  }, [statusFilter, loadAllForStatusFilter, loadStocks]);
+
+  // Reload from scratch whenever a filter changes.
+  useEffect(() => {
+    if (!activeCompany?.id) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, warehouseFilter, statusFilter]);
+
+  // Infinite scroll observer — inert while a status filter is active (hasMore is
+  // false in that mode, since loadAllForStatusFilter already loaded everything).
+  useEffect(() => {
+    if (loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadStocks(page + 1, false);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    observerRef.current = observer;
+    return () => observerRef.current?.disconnect();
+  }, [loading, hasMore, loadingMore, page, loadStocks]);
+
+  // Group the currently loaded stocks by the product's category, sorted
+  // alphabetically (uncategorized last); products within a category sorted
+  // alphabetically too. Purely a render grouping — grows incrementally as more
+  // pages load, same as any infinite-scroll list.
   const groupedStocks = useMemo(() => {
     const groups = new Map<string, Stock[]>();
-    for (const stock of filteredStocks) {
+    for (const stock of stocks) {
       const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
       const list = groups.get(categoryName) || [];
       list.push(stock);
@@ -142,72 +321,28 @@ const Stocks = () => {
       if (b === UNCATEGORIZED_LABEL) return -1;
       return a.localeCompare(b);
     });
-  }, [filteredStocks]);
+  }, [stocks]);
 
-  useEffect(() => {
-    if (activeCompany?.id) {
-      fetchStocks();
-      fetchProducts();
-      fetchWarehouses();
-    }
-  }, [activeCompany?.id, showDeleted]);
-
-  const fetchStocks = async () => {
+  const fetchCategories = async () => {
     if (!activeCompany?.id) return;
-
     try {
-      let query = supabase
-        .from("stocks")
-        .select(`
-          *,
-          products(name, category_id, product_categories!category_id(name)),
-          warehouses(name)
-        `)
-        .eq("organization_id", activeCompany.id)
-        .order("created_at", { ascending: false });
-
-      // Soft-deleted stocks are hidden from the normal list by default.
-      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
-
-      const { data, error } = await query;
-
+      const { data, error } = await fetchAllRows(() =>
+        supabase
+          .from("product_categories")
+          .select("id, name")
+          .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
+          .order("id", { ascending: true })
+      );
       if (error) throw error;
-      setStocks(data as Stock[] || []);
+      setCategories((data || []) as { id: string; name: string }[]);
     } catch (error: any) {
-      toast({
-        title: t('stocks.toast.loadError'),
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchProducts = async () => {
-    if (!activeCompany?.id) return;
-    
-    try {
-      const { data, error } = await (supabase as any)
-        .from("products")
-        .select("id, name")
-        .eq("organization_id", activeCompany.id)
-        .order("name");
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error: any) {
-      toast({
-        title: t('stocks.toast.loadProductsError'),
-        description: error.message,
-        variant: "destructive",
-      });
+      console.error("Error loading categories:", error);
     }
   };
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
       const { data, error } = await supabase
         .from("warehouses")
@@ -226,6 +361,46 @@ const Stocks = () => {
       });
     }
   };
+
+  useEffect(() => {
+    if (activeCompany?.id) {
+      fetchCategories();
+      fetchWarehouses();
+      setProductsLoaded(false);
+      setProducts([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id]);
+
+  // Products (for the create/edit dialog's <Select> and the CSV import's
+  // name-matching) — only needed when a dialog that uses them is open, not on
+  // every visit to the page. Paginated to avoid truncating above 1000 products.
+  useEffect(() => {
+    if (!activeCompany?.id || productsLoaded || !(dialogOpen || importDialogOpen)) return;
+
+    (async () => {
+      try {
+        const { data, error } = await fetchAllRows(() =>
+          (supabase as any)
+            .from("products")
+            .select("id, name")
+            .eq("organization_id", activeCompany.id)
+            .order("name", { ascending: true })
+            .order("id", { ascending: true })
+        );
+        if (error) throw error;
+        setProducts(data || []);
+        setProductsLoaded(true);
+      } catch (error: any) {
+        toast({
+          title: t('stocks.toast.loadProductsError'),
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, dialogOpen, importDialogOpen, productsLoaded]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -289,7 +464,7 @@ const Stocks = () => {
 
       setDialogOpen(false);
       resetForm();
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       toast({
         title: t('stocks.toast.error'),
@@ -311,7 +486,7 @@ const Stocks = () => {
         description: t('stocks.toast.deleteSuccessDesc'),
       });
 
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       toast({
         title: t('stocks.toast.error'),
@@ -328,7 +503,7 @@ const Stocks = () => {
 
       toast({ title: t('stocks.toast.restoreSuccess') || "Stock restaurado" });
 
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       toast({
         title: t('stocks.toast.error'),
@@ -373,35 +548,62 @@ const Stocks = () => {
     return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
   };
 
-  const handleExport = () => {
-    downloadStandardXlsx({
-      sheetName: "Stocks",
-      columns: [
-        { key: "category", header: "Categoria", width: 22 },
-        { key: "product", header: t('stocks.table.product'), width: 30 },
-        { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
-        { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
-        { key: "minimum", header: t('stocks.form.minimumQuantity'), type: "number", width: 14 },
-        { key: "maximum", header: t('stocks.form.maximumQuantity'), type: "number", width: 14 },
-        { key: "reorderPoint", header: t('stocks.form.reorderPoint'), type: "number", width: 16 },
-        { key: "location", header: t('stocks.table.location'), width: 24 },
-      ],
-      rows: stocks.map((stock) => ({
-        category: stock.products?.product_categories?.name || UNCATEGORIZED_LABEL,
-        product: stock.products?.name,
-        warehouse: stock.warehouses?.name,
-        quantity: stock.quantity,
-        minimum: stock.minimum_quantity,
-        maximum: stock.maximum_quantity,
-        reorderPoint: stock.reorder_point,
-        location: stock.location,
-      })),
-    }, `stocks_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    
-    toast({
-      title: t('stocks.toast.exportSuccess'),
-      description: t('stocks.toast.exportSuccessDesc'),
-    });
+  // Exports every stock matching the current filters, not just what's been
+  // paginated into the browser so far — loops in batches of 1000 (fetchAllRows),
+  // same fix already applied to Products.tsx's export.
+  const handleExport = async () => {
+    try {
+      const filters = filtersRef.current;
+      const { data, error } = await fetchAllRows(() =>
+        buildStocksQuery(filters).order("created_at", { ascending: false }).order("id", { ascending: true })
+      );
+      if (error) throw error;
+      const rows = applyStatusFilter((data as Stock[]) || [], filters.statusFilter);
+
+      if (rows.length === 0) {
+        toast({
+          title: t('stocks.toast.error'),
+          description: "Não existem stocks para exportar com os filtros atuais",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      downloadStandardXlsx({
+        sheetName: "Stocks",
+        columns: [
+          { key: "category", header: "Categoria", width: 22 },
+          { key: "product", header: t('stocks.table.product'), width: 30 },
+          { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
+          { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
+          { key: "minimum", header: t('stocks.form.minimumQuantity'), type: "number", width: 14 },
+          { key: "maximum", header: t('stocks.form.maximumQuantity'), type: "number", width: 14 },
+          { key: "reorderPoint", header: t('stocks.form.reorderPoint'), type: "number", width: 16 },
+          { key: "location", header: t('stocks.table.location'), width: 24 },
+        ],
+        rows: rows.map((stock) => ({
+          category: stock.products?.product_categories?.name || UNCATEGORIZED_LABEL,
+          product: stock.products?.name,
+          warehouse: stock.warehouses?.name,
+          quantity: stock.quantity,
+          minimum: stock.minimum_quantity,
+          maximum: stock.maximum_quantity,
+          reorderPoint: stock.reorder_point,
+          location: stock.location,
+        })),
+      }, `stocks_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+      toast({
+        title: t('stocks.toast.exportSuccess'),
+        description: t('stocks.toast.exportSuccessDesc'),
+      });
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -415,19 +617,22 @@ const Stocks = () => {
       if (!businessUserId) throw new Error("Business user not resolved");
       const text = await file.text();
       const lines = text.split(/\r?\n/).filter(line => line.trim());
-      
+
       if (lines.length < 2) {
         throw new Error(t('stocks.toast.emptyFile'));
       }
 
       // Pre-check existing (product_id, warehouse_id) pairs already tracked for this
       // org, so a collision can be skipped/reported per-row instead of failing the
-      // whole batch atomically.
-      const { data: existingStockPairs, error: existingStockPairsError } = await supabase
-        .from("stocks")
-        .select("product_id, warehouse_id")
-        .eq("organization_id", activeCompany.id)
-        .is("deleted_at", null);
+      // whole batch atomically. Paginated — a plain unranged .select() would
+      // silently truncate above 1000 existing stock rows.
+      const { data: existingStockPairs, error: existingStockPairsError } = await fetchAllRows(() =>
+        supabase
+          .from("stocks")
+          .select("product_id, warehouse_id")
+          .eq("organization_id", activeCompany.id)
+          .is("deleted_at", null)
+      );
 
       if (existingStockPairsError) throw existingStockPairsError;
 
@@ -531,7 +736,7 @@ const Stocks = () => {
       });
 
       setImportDialogOpen(false);
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       toast({
         title: t('stocks.toast.importError'),
@@ -539,7 +744,7 @@ const Stocks = () => {
         variant: "destructive",
       });
     }
-    
+
     e.target.value = '';
   };
 
@@ -780,8 +985,9 @@ const Stocks = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as categorias</SelectItem>
-              {availableCategories.map((name) => (
-                <SelectItem key={name} value={name}>{name}</SelectItem>
+              <SelectItem value={UNCATEGORIZED_VALUE}>{UNCATEGORIZED_LABEL}</SelectItem>
+              {categories.map((category) => (
+                <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -822,7 +1028,7 @@ const Stocks = () => {
             </Button>
           )}
           <span className="text-sm text-muted-foreground ml-auto">
-            {filteredStocks.length} de {stocks.length}
+            {stocks.length} carregado{stocks.length === 1 ? "" : "s"}
           </span>
         </div>
 
@@ -852,12 +1058,6 @@ const Stocks = () => {
                 <TableRow>
                   <TableCell colSpan={9} className="text-center">
                     {t('stocks.noStocks')}
-                  </TableCell>
-                </TableRow>
-              ) : filteredStocks.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
-                    Nenhum stock corresponde aos filtros aplicados.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -934,6 +1134,16 @@ const Stocks = () => {
               )}
             </TableBody>
           </Table>
+          {/* Infinite scroll loader — inert (never shows "a carregar mais") while a
+              status filter is active, since hasMore is false in that mode. */}
+          <div ref={loadMoreRef} className="py-4 flex justify-center">
+            {loadingMore && (
+              <div className="text-sm text-muted-foreground">{t('stocks.loadingMore') || 'A carregar mais...'}</div>
+            )}
+            {!hasMore && !loading && stocks.length > 0 && (
+              <div className="text-sm text-muted-foreground">{t('stocks.allLoaded') || 'Todos carregados'}</div>
+            )}
+          </div>
         </div>
       </div>
     </>
