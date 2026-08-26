@@ -67,8 +67,77 @@ export class ClientsPage extends AppPage {
 export class LeadsPage extends AppPage {
   async goto() { await super.goto('/leads') }
 
-  newButton()   { return this.page.locator('button', { hasText: 'Novo Lead' }).first() }
+  // The test account may run the UI in EN or PT — matching only the PT label
+  // made the whole suite fail on an English session.
+  newButton() {
+    return this.page
+      .locator('button')
+      .filter({ hasText: /^\s*(Nova?\s+Lead|New\s+Lead)\s*$/i })
+      .first()
+  }
   searchInput() { return this.page.locator('input[type="search"], input[placeholder*="pesquis"]').first() }
+
+  createDialog() { return new CreateLeadDialog(this.page) }
+}
+
+/** Dialog opened by LeadsPage.newButton() — manual lead creation. */
+export class CreateLeadDialog {
+  constructor(readonly page: Page) {}
+
+  root() { return this.page.locator('[role="dialog"]').last() }
+
+  submitButton() {
+    return this.root()
+      .locator('button')
+      .filter({ hasText: /^\s*(Criar\s+Lead|Create\s+Lead)\s*$/i })
+      .last()
+  }
+
+  /** Field labels come from form_fields/lead_field_definitions, so they stay PT. */
+  input(label: string) {
+    return this.root().locator(`label:has-text("${label}")`).first().locator('xpath=following-sibling::input')
+  }
+
+  async fill(label: string, value: string) {
+    const field = this.input(label)
+    await field.waitFor({ timeout: 10000 })
+    await field.fill(value)
+  }
+
+  async selectCampaign(name: string) {
+    await this.root().locator('button[role="combobox"]').first().click()
+    await this.page.locator('[role="option"]').filter({ hasText: name }).first().click()
+  }
+
+  /** Checkbox-style multi-select rendered by DynamicFormField (display_style=checkbox). */
+  async checkFirstOption(labelMatch: RegExp) {
+    for (const label of await this.root().locator('label').all()) {
+      const text = (await label.innerText()).trim()
+      if (!labelMatch.test(text)) continue
+      const options = label.locator('xpath=following-sibling::div//label')
+      if (await options.count() > 0) {
+        await options.first().click()
+        return true
+      }
+    }
+    return false
+  }
+
+  /** Picks the first option of every still-unset dropdown inside the dialog. */
+  async fillRemainingDropdowns() {
+    for (const combo of await this.root().locator('button[role="combobox"]').all()) {
+      const text = (await combo.innerText()).trim()
+      if (!/Selecionar|Select|Escolha|Choose/i.test(text) && text !== '') continue
+      try {
+        await combo.click({ timeout: 3000 })
+        const option = this.page.locator('[role="option"]').first()
+        await option.waitFor({ timeout: 3000 })
+        await option.click()
+      } catch {
+        await this.page.keyboard.press('Escape')
+      }
+    }
+  }
 }
 
 export class ContactsPage extends AppPage {

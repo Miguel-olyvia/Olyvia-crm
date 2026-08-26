@@ -10,6 +10,7 @@ import {
 import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
@@ -2967,13 +2968,16 @@ export default function AnewLeads() {
     }
     // Merge base + extra campaign fields for validation
     const allFieldDefs = [...createLeadFieldDefs, ...extraCampaignFieldDefs];
-    // Validate required fields
-    const missingRequired = allFieldDefs
-      .filter(f => f.is_required && !newLeadValues[f.field_key])
-      .map(f => f.field_label);
+    // "Required" means valid, not merely non-empty: a lone "-" used to satisfy
+    // every required text field, producing leads with po_codigo_postal = "-".
+    const fieldErrors = validateLeadFieldValues(allFieldDefs as any, newLeadValues);
 
-    if (missingRequired.length > 0) {
-      toast({ title: t('leads.toast.missingRequiredFields'), description: missingRequired.join(", "), variant: "destructive" });
+    if (fieldErrors.length > 0) {
+      toast({
+        title: t('leads.toast.missingRequiredFields'),
+        description: fieldErrors.map(e => e.message).join(", "),
+        variant: "destructive",
+      });
       return;
     }
 
@@ -3042,7 +3046,6 @@ export default function AnewLeads() {
         let emailValue = '';
         let phoneValue = '';
         let vatValue = '';
-        let addressData: Record<string, any> | null = null;
 
         for (const fieldDef of allFieldDefs) {
           const val = newLeadValues[fieldDef.field_key];
@@ -3069,10 +3072,9 @@ export default function AnewLeads() {
           if (mapping === 'vat' || key.includes('vat') || key.includes('nif')) {
             vatValue = String(val);
           }
-          // Address detection
-          if (fType === 'address' || mapping === 'address' || key.includes('morada') || key.includes('address')) {
-            addressData = typeof val === 'object' ? val : { address_line1: String(val) };
-          }
+          // Address fields are intentionally NOT collected here: the address is
+          // persisted post-commit by syncEntityPrimaryAddressFromLead(), which
+          // reads them straight from field_values.
         }
 
         emailValue = emailValue.trim().toLowerCase();
@@ -4052,6 +4054,13 @@ export default function AnewLeads() {
           placeholder: f.placeholder,
           help_text: f.help_text,
           display_style: f.display_style,
+          // Validation constraints must survive the mapping — dropping them is
+          // what let a lone "-" pass as a valid required postal code here while
+          // the public form rejected it.
+          pattern: f.pattern,
+          pattern_message: f.pattern_message,
+          min_length: f.min_length,
+          max_length: f.max_length,
         }));
 
       setExtraCampaignFieldDefs(mappedFields);

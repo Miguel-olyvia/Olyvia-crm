@@ -55,3 +55,8 @@ migrations_disabled_local/
 /_hdr*.txt
 /_body*.json
 .mcp.json
+
+# Playwright artefactos e estado de sessao (contem tokens) — nunca commitar
+test-results/
+playwright-report/
+tests/.auth/

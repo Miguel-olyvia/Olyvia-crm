@@ -7,9 +7,11 @@ import { fileURLToPath } from 'url'
 const currentDir = path.dirname(fileURLToPath(import.meta.url))
 const authFile = path.join(currentDir, '../.auth/user.json')
 
+setup.setTimeout(120_000)
+
 setup('autenticar utilizador', async ({ page }) => {
-  await page.goto('/auth')
-  await page.waitForLoadState('networkidle')
+  await page.goto('/auth', { waitUntil: 'domcontentloaded' })
+  await page.locator('input[type="email"]').waitFor({ timeout: 60000 })
 
   await page.locator('input[type="email"]').fill(process.env.TEST_EMAIL || 'carvalhomiguel319@gmail.com')
   await page.locator('input[type="password"]').fill(process.env.TEST_PASSWORD || 'Migasdela007#')
