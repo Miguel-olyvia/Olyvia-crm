@@ -32,7 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
-import { Plus, Pencil, Trash2, Package, Download, Upload } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -40,6 +40,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { escapeIlike } from "@/lib/clientSearch";
+import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHistoryDialog";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; category_id?: string | null; product_categories?: { name: string } | null };
@@ -112,6 +114,10 @@ const Stocks = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingStock, setEditingStock] = useState<Stock | null>(null);
+  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  const [movementContext, setMovementContext] = useState<{ productId?: string; warehouseId?: string }>({});
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyContext, setHistoryContext] = useState<{ productId: string; warehouseId: string; productName?: string; warehouseName?: string } | null>(null);
   const [formData, setFormData] = useState({
     product_id: "",
     warehouse_id: "",
@@ -816,6 +822,17 @@ const Stocks = () => {
                 </DialogContent>
               </Dialog>
             </PermissionGate>
+            <PermissionGate permission="stocks.edit">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setMovementContext({});
+                  setMovementDialogOpen(true);
+                }}
+              >
+                <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
+              </Button>
+            </PermissionGate>
             <PermissionGate permission="stocks.create">
               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
                 <DialogTrigger asChild>
@@ -1109,6 +1126,35 @@ const Stocks = () => {
                                   <Button
                                     variant="ghost"
                                     size="sm"
+                                    title="Registar movimento"
+                                    onClick={() => {
+                                      setMovementContext({ productId: stock.product_id, warehouseId: stock.warehouse_id });
+                                      setMovementDialogOpen(true);
+                                    }}
+                                  >
+                                    <ArrowLeftRight className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Ver histórico de movimentos"
+                                  onClick={() => {
+                                    setHistoryContext({
+                                      productId: stock.product_id,
+                                      warehouseId: stock.warehouse_id,
+                                      productName: stock.products?.name,
+                                      warehouseName: stock.warehouses?.name,
+                                    });
+                                    setHistoryDialogOpen(true);
+                                  }}
+                                >
+                                  <History className="w-4 h-4" />
+                                </Button>
+                                <PermissionGate permission="stocks.edit">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
                                     onClick={() => openEditDialog(stock)}
                                   >
                                     <Pencil className="w-4 h-4" />
@@ -1146,6 +1192,27 @@ const Stocks = () => {
           </div>
         </div>
       </div>
+
+      <StockMovementDialog
+        open={movementDialogOpen}
+        onOpenChange={setMovementDialogOpen}
+        organizationId={activeCompany.id}
+        warehouses={warehouses}
+        defaultProductId={movementContext.productId}
+        defaultWarehouseId={movementContext.warehouseId}
+        onSuccess={refresh}
+      />
+
+      {historyContext && (
+        <StockMovementsHistoryDialog
+          open={historyDialogOpen}
+          onOpenChange={setHistoryDialogOpen}
+          productId={historyContext.productId}
+          warehouseId={historyContext.warehouseId}
+          productName={historyContext.productName}
+          warehouseName={historyContext.warehouseName}
+        />
+      )}
     </>
   );
 };
