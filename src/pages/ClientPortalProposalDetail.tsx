@@ -5,7 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDocument";
 import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
-import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
+import { generateProposalPdfBlob, downloadBlob, type ProposalPdfPrefetch } from "@/utils/generateProposalPdfBlob";
+import { parseEdgeFunctionPayload, describeEdgeFunctionError } from "@/utils/edgeFunctionResponse";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -426,7 +427,18 @@ const ClientPortalProposalDetail = () => {
                 body: { action: "get_proposal_pdf_data", params: { proposal_id: proposal.id } },
               });
               if (error) throw error;
-              if (!data?.quotes?.length) {
+
+              // The function returns JSON but sets no `Content-Type`, so
+              // `invoke` hands back the raw JSON *string* and every field read
+              // off it is `undefined`. Reading `data.quotes` directly made a
+              // successful HTTP 200 look like a proposal with no quotes, and
+              // the button reported exactly that to every client.
+              // See utils/edgeFunctionResponse.ts.
+              const payload = parseEdgeFunctionPayload<ProposalPdfPrefetch>(data);
+              if (!payload) {
+                throw new Error("A resposta do servidor veio num formato inesperado. Contacta o suporte.");
+              }
+              if (!payload.quotes?.length) {
                 toast({
                   title: "Sem conteúdo para gerar o PDF",
                   description: "Esta proposta não tem orçamentos associados.",
@@ -434,10 +446,14 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, data);
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload);
               downloadBlob(blob, fileName);
-            } catch (e: any) {
-              toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
+            } catch (e: unknown) {
+              toast({
+                title: "Erro ao gerar PDF",
+                description: await describeEdgeFunctionError(e),
+                variant: "destructive",
+              });
             }
           }}
         />
