@@ -246,6 +246,29 @@ function KPICard({
   );
 }
 
+/**
+ * queryKey prefixes of this dashboard's react-query caches.
+ *
+ * Exported because the page that owns every lead mutation (AnewLeads.tsx) has
+ * to invalidate them after a write: these queries use `staleTime: 60_000` with
+ * no polling and no refetchOnWindowFocus, so without an explicit invalidation
+ * the cards kept showing pre-change data for up to a minute (and react-query
+ * keeps the cache across this component unmounting when the tab is switched,
+ * so simply leaving and re-entering the Dashboard tab did not refresh them).
+ *
+ * Invalidation matches by prefix, so the filter/scope suffixes of each key do
+ * not need to be reproduced by the caller.
+ */
+export const LEADS_DASHBOARD_QUERY_KEYS = {
+  negotiation: "leads-dashboard-negotiation",
+  activity: "leads-dashboard-activity",
+  qualificationHistory: "leads-dashboard-qualification-history",
+  qualificationTrend: "leads-dashboard-qualification-trend",
+} as const;
+
+export const LEADS_DASHBOARD_QUERY_KEY_PREFIXES: readonly string[] =
+  Object.values(LEADS_DASHBOARD_QUERY_KEYS);
+
 export function LeadsDashboard(props: LeadsDashboardProps) {
   const {
     query,
@@ -411,7 +434,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     error: negotiationQueryError,
   } = useQuery({
     queryKey: [
-      "leads-dashboard-negotiation",
+      LEADS_DASHBOARD_QUERY_KEYS.negotiation,
       query?.orgId,
       negotiationScope,
       query?.anewUserId,
@@ -496,7 +519,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     error: activityQueryError,
   } = useQuery({
     queryKey: [
-      "leads-dashboard-activity",
+      LEADS_DASHBOARD_QUERY_KEYS.activity,
       query?.orgId,
       negotiationScope,
       query?.anewUserId,
@@ -571,7 +594,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     isLoading: qualificationHistoryLoading,
   } = useQuery({
     queryKey: [
-      "leads-dashboard-qualification-history",
+      LEADS_DASHBOARD_QUERY_KEYS.qualificationHistory,
       query?.orgId,
       dateRange.from.toISOString(),
       dateRange.to.toISOString(),
@@ -617,7 +640,7 @@ export function LeadsDashboard(props: LeadsDashboardProps) {
     isLoading: qualificationTrendLoading,
   } = useQuery({
     queryKey: [
-      "leads-dashboard-qualification-trend",
+      LEADS_DASHBOARD_QUERY_KEYS.qualificationTrend,
       query?.orgId,
       negotiationScope,
       query?.anewUserId,

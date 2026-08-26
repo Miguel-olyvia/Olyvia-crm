@@ -75,7 +75,7 @@ import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog"
 import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
 import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
+import { LeadsDashboard, LEADS_DASHBOARD_QUERY_KEY_PREFIXES } from "@/components/leads/LeadsDashboard";
 import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
 import { LeadsTableColumns, ColumnConfig, DEFAULT_SYSTEM_COLUMNS } from "@/components/leads/LeadsTableColumns";
 import { LeadsAIOrganization } from "@/components/leads/LeadsAIOrganization";
@@ -386,7 +386,7 @@ export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
-  const { resolveEntities, getIdentity } = useEntityIdentity();
+  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
@@ -984,7 +984,21 @@ export default function AnewLeads() {
   // Now accepts the same filters as the UI to keep counters synchronized
   const loadStatusCounts = useCallback(async () => {
     if (!activeCompanyId) return;
-    
+
+    // Single funnel-in point for "the lead data changed, re-read the
+    // aggregates": every mutation path on this page (create, edit, status
+    // change, assign, bulk actions, delete, kanban drop, convert to client)
+    // already calls loadStatusCounts afterwards, so invalidating the
+    // Dashboard tab's react-query caches here keeps its cards in sync without
+    // repeating the call at a dozen sites. Those queries use staleTime 60s
+    // with no polling/refocus refetch, and react-query keeps their data while
+    // the Dashboard tab is unmounted, so nothing else would refresh them.
+    // While the List tab is open these queries are inactive, so this only
+    // marks them stale — no refetch cascade.
+    LEADS_DASHBOARD_QUERY_KEY_PREFIXES.forEach((prefix) => {
+      queryClient.invalidateQueries({ queryKey: [prefix] });
+    });
+
     const viewScope = getPermissionScope("leads.view");
     if (viewScope === "NONE") { setStatusCounts({}); return; }
     
@@ -1031,7 +1045,7 @@ export default function AnewLeads() {
     } catch (error) {
       console.error("Error loading status counts:", error);
     }
-  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
@@ -2407,6 +2421,30 @@ export default function AnewLeads() {
     selectedLead,
     teamMemberIds,
   ]);
+
+  /**
+   * Single entry point for "a dialog just wrote to this lead".
+   *
+   * Both AnewLeadEditDialog and AnewLeadContactDialog can change the entity's
+   * identity (first/last name, email, phone, VAT) and both report the affected
+   * `entityId` in their callback payload. Refreshing the lead row alone is not
+   * enough: the name/email/phone shown in the table row, in the detail header,
+   * in the schedule-visit dialog and in RegisterCallDialog all come from
+   * useEntityIdentity's cache, and resolveEntities() deliberately skips ids it
+   * already holds — so the pre-edit values survived until a full page reload.
+   * Dropping the cached entry first makes refreshSingleLead's resolveEntities()
+   * re-fetch it.
+   *
+   * Callbacks that carry no payload (schedule visit, register call) fall back
+   * to the selected lead and skip the identity invalidation, keeping their
+   * previous behavior.
+   */
+  const handleLeadDialogUpdate = useCallback((payload?: { leadId?: string; entityId?: string | null }) => {
+    const leadId = payload?.leadId ?? selectedLead?.id;
+    if (!leadId) return;
+    invalidateEntities([payload?.entityId ?? null]);
+    void refreshSingleLead(leadId);
+  }, [invalidateEntities, refreshSingleLead, selectedLead]);
 
   // Load more leads for infinite scroll
   const loadMoreLeads = useCallback(() => {
@@ -6921,7 +6959,7 @@ export default function AnewLeads() {
           onOpenChange={handleContactDialogOpenChange}
           lead={selectedLead as any}
           companyId={activeCompanyId || null}
-          onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onLeadUpdated={handleLeadDialogUpdate}
         />
 
         <ScheduleLeadVisitDialog
@@ -6930,7 +6968,7 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           leadName={selectedLead ? (getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name || "Lead") : ""}
           companyId={activeCompanyId || null}
-          onScheduled={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onScheduled={handleLeadDialogUpdate}
         />
 
         {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline
@@ -6957,7 +6995,7 @@ export default function AnewLeads() {
                 .eq("id", lead.id);
               refreshSingleLead(lead.id);
             }}
-            onCallRegistered={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+            onCallRegistered={handleLeadDialogUpdate}
           />
         )}
 
@@ -6982,7 +7020,7 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           companyId={activeCompanyId || ""}
           companyUsers={assignableCompanyUsers}
-          onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onLeadUpdated={handleLeadDialogUpdate}
           userId={scopeAnewUserId || scopeAuthUserId || ""}
         />
 
