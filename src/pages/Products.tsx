@@ -1422,9 +1422,75 @@ export default function Products() {
     }
   };
 
+  // Busca TODOS os ids que respeitam os filtros atuais (organização, categoria,
+  // subcategoria, marca, pesquisa) — não só os já carregados na tela pelo
+  // infinite scroll. Sem isto, "Exportar" só exportava a página visível (por
+  // vezes uma dúzia de produtos), silenciosamente, sem qualquer aviso.
+  const fetchAllFilteredProductIds = async (): Promise<string[]> => {
+    const filters = filtersRef.current;
+    const effectiveOrgIds = descendantIdsRef.current.length > 0
+      ? descendantIdsRef.current
+      : (filters.activeCompanyId ? [filters.activeCompanyId] : []);
+
+    const PAGE = 1000;
+    const ids: string[] = [];
+    let from = 0;
+    while (true) {
+      let query = (supabase.from("products") as any)
+        .select(
+          effectiveOrgIds.length > 0
+            ? "id, product_organizations!inner(organization_id)"
+            : "id, organization_id, product_organizations(organization_id)"
+        )
+        .is("deleted_at", null);
+
+      if (effectiveOrgIds.length > 0) {
+        query = query.in("product_organizations.organization_id", effectiveOrgIds);
+      }
+      if (filters.categoryFilter !== "all") query = query.eq("category_id", filters.categoryFilter);
+      if (filters.subcategoryFilter !== "all") query = query.eq("subcategory_id", filters.subcategoryFilter);
+      if (filters.brandFilter !== "all") query = query.eq("brand_id", filters.brandFilter);
+      if (filters.debouncedSearchTerm.trim()) {
+        const searchLower = escapePostgrestOrTerm(filters.debouncedSearchTerm.toLowerCase().trim());
+        if (searchLower) {
+          query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,barcode.ilike.%${searchLower}%`);
+        }
+      }
+
+      query = query.order("id", { ascending: true }).range(from, from + PAGE - 1);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const page = data || [];
+
+      for (const p of page) {
+        // Mesmo filtro de organização (vista global) que filteredProducts aplicava
+        // client-side — replicado aqui para não exportar produtos de outra empresa.
+        if (effectiveOrgIds.length === 0 && companyFilter !== "all") {
+          const productOrgIds = (p.product_organizations || []).map((po: any) => po.organization_id);
+          if (!productOrgIds.includes(companyFilter) && p.organization_id !== companyFilter) continue;
+        }
+        ids.push(p.id);
+      }
+
+      if (page.length < PAGE) break;
+      from += PAGE;
+    }
+    return ids;
+  };
+
   const handleExport = async () => {
     try {
-      await exportProductsToCSV(filteredProducts, activeCompany?.id);
+      const ids = await fetchAllFilteredProductIds();
+      if (ids.length === 0) {
+        toast({
+          title: t('products.toast.exportError'),
+          description: "Não existem produtos para exportar com os filtros atuais",
+          variant: "destructive",
+        });
+        return;
+      }
+      await exportProductsToCSV(ids.map((id) => ({ id })), activeCompany?.id);
       toast({
         title: t('products.toast.exportSuccess'),
         description: t('products.toast.exportSuccessDesc'),
