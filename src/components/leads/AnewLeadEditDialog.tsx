@@ -476,7 +476,7 @@ export function AnewLeadEditDialog({
         const city = readGeneralField("city", updatedFieldValues);
         if (street && postalCode) {
           try {
-            await linkEntityAddress(lead.entity_id, street, postalCode, city, userId);
+            await linkEntityAddress(lead.entity_id, companyId, street, postalCode, city, userId);
           } catch (addressError) {
             console.error("Error linking lead's address:", addressError);
             const description = await getFriendlyErrorMessage(addressError);

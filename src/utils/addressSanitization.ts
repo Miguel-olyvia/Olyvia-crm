@@ -142,11 +142,12 @@ function strengthScore(s: SanitizedAddress | AddressRow): number {
 export async function syncEntityPrimaryAddressFromLead(args: {
   supabase: typeof supabase;
   entityId: string;
+  organizationId: string;
   fieldValues: Record<string, any> | null | undefined;
   actorId: string | null;
   allowOverwriteValid: boolean;
 }): Promise<SyncResult> {
-  const { supabase: db, entityId, fieldValues, actorId, allowOverwriteValid } = args;
+  const { supabase: db, entityId, organizationId, fieldValues, actorId, allowOverwriteValid } = args;
   try {
     const san = sanitizeAddressFields(fieldValues);
     if (!san.hasAnyUsefulData) return { decision: "skip_no_valid_source", reason: "no useful data in lead" };
@@ -159,34 +160,26 @@ export async function syncEntityPrimaryAddressFromLead(args: {
       .is("valid_to", null)
       .maybeSingle();
 
-    // CASE A — no current primary link
+    // CASE A — no current primary link. Delegates to the sync_entity_primary_address
+    // RPC (SECURITY DEFINER) so the address insert and the entity link happen in a
+    // single transaction — a plain insert+insert from here left 5 orphaned addresses
+    // in prod when the second insert failed after the first one succeeded.
     if (!link) {
       if (!san.hasCoreMinimum) return { decision: "skip_no_valid_source", reason: "missing street+postal_code for new insert" };
-      const newId = crypto.randomUUID();
-      const addressKey = buildAddressKey({
-        street: san.street, number: "", postal_code: san.postal_code, city: san.city, country: "PT",
-      });
-      const { error: aErr } = await db.from("anew_addresses").insert({
-        id: newId,
-        address_key: addressKey,
-        street: san.street!,
-        number: "",
-        postal_code: san.postal_code!,
-        city: san.city ?? "",
-        district: san.district ?? null,
-        country: "PT",
-        created_by: actorId,
+      if (!organizationId) return { decision: "error", reason: "organizationId is required to sync entity address" };
+      const { data: rpcData, error: rpcErr } = await db.rpc("sync_entity_primary_address", {
+        p_entity_id: entityId,
+        p_organization_id: organizationId,
+        p_street: san.street,
+        p_postal_code: san.postal_code,
+        p_city: san.city,
+        p_district: san.district,
+        p_created_by: actorId,
       } as any);
-      if (aErr) return { decision: "error", reason: aErr.message };
-      const { error: lErr } = await db.from("anew_entity_addresses").insert({
-        entity_id: entityId,
-        address_id: newId,
-        address_type: "work",
-        is_primary: true,
-        created_by: actorId,
-      } as any);
-      if (lErr) return { decision: "error", reason: lErr.message };
-      return { decision: "insert_new", addressId: newId };
+      if (rpcErr) return { decision: "error", reason: rpcErr.message };
+      const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+      if (!row?.address_id) return { decision: "skip_no_valid_source", reason: row?.decision ?? "rpc returned no address" };
+      return { decision: "insert_new", addressId: row.address_id };
     }
 
     // CASE B — existing link
@@ -249,36 +242,26 @@ export async function syncEntityPrimaryAddressFromLead(args: {
       return { decision: "update_in_place", addressId: curr.id };
     }
 
-    // Clone + repoint: new address → new primary link → close old link
-    const newAddrId = crypto.randomUUID();
-    const { error: aErr } = await db.from("anew_addresses").insert({
-      id: newAddrId,
-      address_key: newKey,
-      street: merged.street!,
-      number: merged.number ?? "",
-      postal_code: merged.postal_code!,
-      city: merged.city ?? "",
-      district: merged.district ?? null,
-      country: merged.country ?? "PT",
-      created_by: actorId,
+    // Clone + repoint (address shared with other entities/orgs, so it can't be
+    // mutated in place): delegates to the same sync_entity_primary_address RPC
+    // used by CASE A — it inserts-or-reuses the address by key and repoints the
+    // entity's primary link atomically, closing the old link in the same
+    // transaction. Avoids the address-insert-then-link-insert-then-old-link-close
+    // three-step sequence that could leave things half-done on a mid-way failure.
+    if (!organizationId) return { decision: "error", reason: "organizationId is required to sync entity address" };
+    const { data: rpcData, error: rpcErr } = await db.rpc("sync_entity_primary_address", {
+      p_entity_id: entityId,
+      p_organization_id: organizationId,
+      p_street: merged.street,
+      p_postal_code: merged.postal_code,
+      p_city: merged.city,
+      p_district: merged.district,
+      p_created_by: actorId,
     } as any);
-    if (aErr) return { decision: "error", reason: aErr.message };
-
-    const { error: nlErr } = await db.from("anew_entity_addresses").insert({
-      entity_id: entityId,
-      address_id: newAddrId,
-      address_type: "work",
-      is_primary: true,
-      created_by: actorId,
-    } as any);
-    if (nlErr) return { decision: "error", reason: nlErr.message };
-
-    const { error: oErr } = await db.from("anew_entity_addresses")
-      .update({ valid_to: new Date().toISOString(), is_primary: false } as any)
-      .eq("id", link.id);
-    if (oErr) return { decision: "error", reason: `repointed but failed to close old link: ${oErr.message}` };
-
-    return { decision: "clone_and_repoint", addressId: newAddrId };
+    if (rpcErr) return { decision: "error", reason: rpcErr.message };
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (!row?.address_id) return { decision: "skip_no_valid_source", reason: row?.decision ?? "rpc returned no address" };
+    return { decision: "clone_and_repoint", addressId: row.address_id };
   } catch (e: any) {
     return { decision: "error", reason: e?.message ?? String(e) };
   }

@@ -3562,6 +3562,7 @@ export default function AnewLeads() {
         const addr = await syncEntityPrimaryAddressFromLead({
           supabase,
           entityId: entityIdForPostCommit,
+          organizationId: activeCompanyId,
           fieldValues: newLeadValues,
           actorId: createdByResolved,
           allowOverwriteValid: false,
@@ -3834,7 +3835,7 @@ export default function AnewLeads() {
 
       try {
         const addr = await syncEntityPrimaryAddressFromLead({
-          supabase, entityId: entityIdForPostCommit, fieldValues, actorId: createdBy, allowOverwriteValid: false,
+          supabase, entityId: entityIdForPostCommit, organizationId: activeCompanyId, fieldValues, actorId: createdBy, allowOverwriteValid: false,
         });
         if (addr.decision === "error") {
           console.warn("[post-commit/create-anyway] address sync failed", addr.reason);

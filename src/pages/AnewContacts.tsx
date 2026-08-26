@@ -1491,6 +1491,7 @@ const AnewContacts = () => {
           const addr = await syncEntityPrimaryAddressFromLead({
             supabase,
             entityId: contactEntityId,
+            organizationId,
             fieldValues: {
               street: addressData.street,
               postal_code: addressData.postal_code,

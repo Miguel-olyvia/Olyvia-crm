@@ -78,6 +78,7 @@ export class LeadsPage extends AppPage {
   searchInput() { return this.page.locator('input[type="search"], input[placeholder*="pesquis"]').first() }
 
   createDialog() { return new CreateLeadDialog(this.page) }
+  editDialog() { return new EditLeadDialog(this.page) }
 }
 
 /** Dialog opened by LeadsPage.newButton() — manual lead creation. */
@@ -137,6 +138,30 @@ export class CreateLeadDialog {
         await this.page.keyboard.press('Escape')
       }
     }
+  }
+}
+
+/** Dialog opened via LeadsPage row click or the `?open=<leadId>` URL param — lead edit. */
+export class EditLeadDialog {
+  constructor(readonly page: Page) {}
+
+  root() { return this.page.locator('[role="dialog"]').last() }
+
+  saveButton() {
+    return this.root()
+      .locator('button')
+      .filter({ hasText: /^\s*(Guardar\s+Altera.{0,3}es|Save\s+Changes)\s*$/i })
+      .last()
+  }
+
+  input(label: string) {
+    return this.root().locator(`label:has-text("${label}")`).first().locator('xpath=following-sibling::input')
+  }
+
+  async fill(label: string, value: string) {
+    const field = this.input(label)
+    await field.waitFor({ timeout: 10000 })
+    await field.fill(value)
   }
 }
 
