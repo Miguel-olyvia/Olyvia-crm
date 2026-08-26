@@ -28,13 +28,36 @@ import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
-import { Plus, Pencil, Trash2, Warehouse, MapPin, Download, Upload, Shield } from "lucide-react";
+import { Plus, Pencil, Trash2, Warehouse, MapPin, Download, Upload, Shield, ArrowLeftRight, History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExportImport";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { warehouseSchema } from "@/lib/validations";
+import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+
+const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  entrada: "Entrada",
+  saida: "Saída",
+  transferencia_entrada: "Transferência (entrada)",
+  transferencia_saida: "Transferência (saída)",
+  ajuste_positivo: "Ajuste (+)",
+  ajuste_negativo: "Ajuste (-)",
+  devolucao_fornecedor: "Devolução a fornecedor",
+  quebra: "Quebra",
+};
+const INCREASING_TYPES = new Set(["entrada", "transferencia_entrada", "ajuste_positivo"]);
+
+interface WarehouseMovementRow {
+  id: string;
+  movement_type: string;
+  quantity: number;
+  balance_after: number;
+  document_number: string;
+  created_at: string;
+  products?: { name: string } | null;
+}
 
 type WarehouseData = Database["public"]["Tables"]["warehouses"]["Row"];
 
@@ -64,12 +87,36 @@ const Warehouses = () => {
     capacity: "",
     is_active: true,
   });
+  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  const [movementWarehouseId, setMovementWarehouseId] = useState<string | undefined>(undefined);
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyWarehouse, setHistoryWarehouse] = useState<{ id: string; name: string } | null>(null);
+  const [historyRows, setHistoryRows] = useState<WarehouseMovementRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     if (activeCompany?.id) {
       fetchWarehouses();
     }
   }, [activeCompany?.id, showDeleted]);
+
+  const loadWarehouseHistory = async (warehouseId: string) => {
+    setHistoryLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("stock_movements")
+        .select("id, movement_type, quantity, balance_after, document_number, created_at, products(name)")
+        .eq("warehouse_id", warehouseId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setHistoryRows((data || []) as WarehouseMovementRow[]);
+    } catch (error: any) {
+      toast({ title: "Erro ao carregar movimentos", description: error.message, variant: "destructive" });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
@@ -670,6 +717,31 @@ const Warehouses = () => {
                           </PermissionGate>
                         ) : (
                           <>
+                            <PermissionGate permission="inventory.edit">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                title="Registar movimento"
+                                onClick={() => {
+                                  setMovementWarehouseId(warehouse.id);
+                                  setMovementDialogOpen(true);
+                                }}
+                              >
+                                <ArrowLeftRight className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="Ver movimentos"
+                              onClick={() => {
+                                setHistoryWarehouse({ id: warehouse.id, name: warehouse.name });
+                                setHistoryDialogOpen(true);
+                                loadWarehouseHistory(warehouse.id);
+                              }}
+                            >
+                              <History className="w-4 h-4" />
+                            </Button>
                             <PermissionGate permission="warehouses.edit">
                               <Button
                                 variant="ghost"
@@ -699,6 +771,64 @@ const Warehouses = () => {
           </Table>
         </div>
       </div>
+
+      <StockMovementDialog
+        open={movementDialogOpen}
+        onOpenChange={setMovementDialogOpen}
+        organizationId={activeCompany.id}
+        warehouses={warehouses.map((w) => ({ id: w.id, name: w.name }))}
+        defaultWarehouseId={movementWarehouseId}
+        onSuccess={() => {
+          // Só recarrega o histórico se for do mesmo armazém já aberto no diálogo.
+          if (movementWarehouseId && historyWarehouse?.id === movementWarehouseId) {
+            loadWarehouseHistory(movementWarehouseId);
+          }
+        }}
+      />
+
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Movimentos recentes{historyWarehouse ? ` — ${historyWarehouse.name}` : ""}</DialogTitle>
+          </DialogHeader>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Data</TableHead>
+                <TableHead>Produto</TableHead>
+                <TableHead>Tipo</TableHead>
+                <TableHead className="text-right">Quantidade</TableHead>
+                <TableHead className="text-right">Saldo depois</TableHead>
+                <TableHead>Documento</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {historyLoading ? (
+                <TableRow><TableCell colSpan={6} className="text-center">A carregar...</TableCell></TableRow>
+              ) : historyRows.length === 0 ? (
+                <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">Sem movimentos registados ainda.</TableCell></TableRow>
+              ) : (
+                historyRows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>{new Date(row.created_at).toLocaleDateString('pt-PT')}</TableCell>
+                    <TableCell>{row.products?.name || "-"}</TableCell>
+                    <TableCell>
+                      <Badge variant={INCREASING_TYPES.has(row.movement_type) ? "default" : "outline"}>
+                        {MOVEMENT_TYPE_LABELS[row.movement_type] || row.movement_type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{row.quantity}
+                    </TableCell>
+                    <TableCell className="text-right">{row.balance_after}</TableCell>
+                    <TableCell className="font-mono text-xs">{row.document_number}</TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
