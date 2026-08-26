@@ -42,6 +42,7 @@ import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { ProposalPortalPreview } from "@/components/proposals/ProposalPortalPreview";
 import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
+import { getDisplayAttributes } from "@/utils/lineAttributes";
 
 interface ProposalItem {
   id: string;
@@ -436,7 +437,7 @@ export function ProposalDetailsDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader className="pb-4">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-xl">
@@ -453,7 +454,7 @@ export function ProposalDetailsDialog({
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6 overflow-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+        <ScrollArea className="flex-1 -mx-6 px-6 overflow-auto [&_[data-radix-scroll-area-viewport]>div]:!block" style={{ maxHeight: 'calc(90vh - 120px)' }}>
           <div className="space-y-6 pb-4">
             {/* Header Info */}
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -646,8 +647,8 @@ export function ProposalDetailsDialog({
 
                           {/* Quote Lines Table */}
                           {group.lines.length > 0 && (
-                            <div className="border rounded-md overflow-hidden">
-                              <table className="w-full text-xs">
+                            <div className="border rounded-md overflow-x-auto max-w-full">
+                              <table className="w-full min-w-[560px] text-xs">
                                 <thead>
                                   <tr className="bg-muted/50 text-muted-foreground uppercase tracking-wider">
                                     <th className="text-left p-2 font-medium">Descrição</th>
@@ -669,8 +670,7 @@ export function ProposalDetailsDialog({
                                       ? ((unitPriceVal - costVal) / unitPriceVal) * 100
                                       : 0;
                                     const hasCostVal = costVal > 0;
-                                    const attrs = line.selected_attributes as Record<string, any> | null;
-                                    const attrEntries = attrs ? Object.entries(attrs).filter(([_, v]) => v && v !== '') : [];
+                                    const attrEntries = getDisplayAttributes(line.selected_attributes);
 
                                     return (
                                       <tr key={line.id} className="border-t border-muted/30 align-top">
@@ -678,9 +678,9 @@ export function ProposalDetailsDialog({
                                           <span className="font-medium">{line.descricao_snapshot || "-"}</span>
                                           {attrEntries.length > 0 && (
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                              {attrEntries.map(([key, val]) => (
-                                                <span key={key} className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
-                                                  {key}: {typeof val === 'object' ? (val.label || val.value || JSON.stringify(val)) : String(val)}
+                                              {attrEntries.map((attr) => (
+                                                <span key={attr.key} className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                                                  {attr.label}: {attr.text}
                                                 </span>
                                               ))}
                                             </div>
@@ -855,8 +855,7 @@ export function ProposalDetailsDialog({
                               const hasCost = custoUnit > 0;
 
                               // Parse selected attributes
-                              const attrs = line.selected_attributes as Record<string, any> | null;
-                              const attrEntries = attrs ? Object.entries(attrs).filter(([_, v]) => v && v !== '') : [];
+                              const attrEntries = getDisplayAttributes(line.selected_attributes);
                               
                               return (
                                 <div key={line.id} className="space-y-0">
@@ -899,9 +898,9 @@ export function ProposalDetailsDialog({
                                   </div>
                                   {attrEntries.length > 0 && (
                                     <div className="px-3 py-1.5 bg-muted/15 rounded-b-lg border-t border-border/30 flex flex-wrap gap-x-3 gap-y-1">
-                                      {attrEntries.map(([key, val]) => (
-                                        <span key={key} className="text-[11px] text-muted-foreground">
-                                          <span className="font-medium">{key}:</span> {typeof val === 'object' ? (val.label || val.value || JSON.stringify(val)) : String(val)}
+                                      {attrEntries.map((attr) => (
+                                        <span key={attr.key} className="text-[11px] text-muted-foreground">
+                                          <span className="font-medium">{attr.label}:</span> {attr.text}
                                         </span>
                                       ))}
                                     </div>
