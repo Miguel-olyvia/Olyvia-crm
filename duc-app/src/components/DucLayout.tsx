@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog } from "./ui";
 import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart, FileText } from "./icons";
 
-const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 
 function initials(name: string | null, email: string | null): string {
   const src = (name || email || "?").trim();
