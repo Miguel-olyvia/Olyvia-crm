@@ -607,7 +607,7 @@ export default function DucList() {
           pending={pending}
           dismissedClients={dismissedClients}
           contractCount={contractCount}
-          ducCount={Math.max(0, contractCount - pending.length)}
+          ducCount={Math.max(0, contractCount - pending.length - dismissedClients.length)}
           onCreate={(c) => openCreate(c)}
           onDismiss={handleDismiss}
           onRestore={handleRestore}

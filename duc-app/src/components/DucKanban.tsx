@@ -149,6 +149,12 @@ export function DucKanban({
                         onDragEnd={() => {
                           setDraggingId(null);
                           setDragOverStage(null);
+                          // Repõe o guard após o ciclo de eventos: o click sintético
+                          // que possa seguir o arrasto ainda vê `true`; cliques reais
+                          // seguintes veem `false` (senão o próximo click era engolido).
+                          setTimeout(() => {
+                            didDrag.current = false;
+                          }, 0);
                         }}
                         className={isDragging ? "cursor-grabbing" : "cursor-grab active:cursor-grabbing"}
                       >

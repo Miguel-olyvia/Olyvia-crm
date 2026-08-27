@@ -502,7 +502,12 @@ AS $$
       AND c.revoked_at IS NULL
       AND (
         c.auth_user_id = (SELECT auth.uid())
-        OR lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+        OR (
+          lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+          -- Só por email se o email do JWT estiver VERIFICADO (evita takeover por
+          -- signup com o email do convidado sem confirmar posse).
+          AND COALESCE(((SELECT auth.jwt() ->> 'email_verified'))::boolean, false) = true
+        )
       )
   );
 $$;
@@ -520,7 +525,12 @@ AS $$
       AND c.role = 'editor'
       AND (
         c.auth_user_id = (SELECT auth.uid())
-        OR lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+        OR (
+          lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+          -- Só por email se o email do JWT estiver VERIFICADO (evita takeover por
+          -- signup com o email do convidado sem confirmar posse).
+          AND COALESCE(((SELECT auth.jwt() ->> 'email_verified'))::boolean, false) = true
+        )
       )
   );
 $$;
@@ -534,7 +544,16 @@ CREATE POLICY anew_client_duc_collab_manage
   FOR ALL
   TO authenticated
   USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))))
-  WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
+  WITH CHECK (
+    organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    -- O DUC tem de pertencer MESMO a esta organização (evita gerar acesso a um
+    -- DUC de outra org sob uma org visível).
+    AND EXISTS (
+      SELECT 1 FROM public.anew_client_ducs d
+      WHERE d.id = anew_client_duc_collaborators.duc_id
+        AND d.organization_id = anew_client_duc_collaborators.organization_id
+    )
+  );
 
 -- O próprio colaborador pode VER as suas linhas (para saber a que DUCs tem acesso).
 DROP POLICY IF EXISTS anew_client_duc_collab_self_select ON public.anew_client_duc_collaborators;
@@ -545,7 +564,8 @@ CREATE POLICY anew_client_duc_collab_self_select
   USING (
     revoked_at IS NULL
     AND (auth_user_id = (SELECT auth.uid())
-         OR lower(email) = lower((SELECT auth.jwt() ->> 'email')))
+         OR (lower(email) = lower((SELECT auth.jwt() ->> 'email'))
+             AND COALESCE(((SELECT auth.jwt() ->> 'email_verified'))::boolean, false) = true))
   );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_collaborators TO authenticated;
@@ -668,7 +688,16 @@ CREATE POLICY anew_client_duc_shares_manage
   ON public.anew_client_duc_public_shares
   FOR ALL TO authenticated
   USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))))
-  WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
+  WITH CHECK (
+    organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    -- O DUC tem de pertencer MESMO a esta organização (o link público é lido por
+    -- uma função SECURITY DEFINER que ignora a RLS — daí validar aqui).
+    AND EXISTS (
+      SELECT 1 FROM public.anew_client_ducs d
+      WHERE d.id = anew_client_duc_public_shares.duc_id
+        AND d.organization_id = anew_client_duc_public_shares.organization_id
+    )
+  );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_public_shares TO authenticated;
 
