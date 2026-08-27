@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +72,14 @@ interface ItemSuppliersTableProps {
 export default function ItemSuppliersTable({ itemType, itemId, organizationId, onChanged }: ItemSuppliersTableProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { hasPermission } = usePermissions();
+  // Custo de compra (purchase_price/currency) e código do fornecedor são
+  // sensíveis por tipo de artigo — sem a permissão, lê-se de
+  // item_suppliers_public (sem essas colunas) em vez de item_suppliers.
+  // Isto é só UX de ocultação: a leitura direta de item_suppliers por quem
+  // não tem a permissão continua dependente das políticas da BD.
+  const costPermission = itemType === "product" ? "products.view_cost" : "services.view_cost";
+  const canViewCost = hasPermission(costPermission);
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<ItemSupplierRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -89,20 +98,36 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
       loadSuppliers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemId, organizationId]);
+  }, [itemId, organizationId, canViewCost]);
 
   const loadRows = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("item_suppliers")
-      .select("id, supplier_id, supplier_sku, purchase_price, currency, lead_time_days, moq, is_preferred, is_active, suppliers(name)")
-      .eq(itemColumn, itemId)
-      .is("deleted_at", null)
-      .order("is_preferred", { ascending: false });
+    // Sem products.view_cost/services.view_cost: lê-se item_suppliers_public
+    // (sem purchase_price/currency/supplier_sku) em vez de item_suppliers.
+    const { data, error } = canViewCost
+      ? await (supabase as any)
+          .from("item_suppliers")
+          .select("id, supplier_id, supplier_sku, purchase_price, currency, lead_time_days, moq, is_preferred, is_active, suppliers(name)")
+          .eq(itemColumn, itemId)
+          .is("deleted_at", null)
+          .order("is_preferred", { ascending: false })
+      : await (supabase as any)
+          .from("item_suppliers_public")
+          .select("id, supplier_id, lead_time_days, moq, is_preferred, is_active, suppliers(name)")
+          .eq(itemColumn, itemId)
+          .order("is_preferred", { ascending: false });
     if (error) {
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } else {
-      setRows((data || []) as ItemSupplierRow[]);
+      const mapped = canViewCost
+        ? ((data || []) as ItemSupplierRow[])
+        : ((data || []) as any[]).map((row) => ({
+            ...row,
+            supplier_sku: null,
+            purchase_price: null,
+            currency: "",
+          })) as ItemSupplierRow[];
+      setRows(mapped);
     }
     setLoading(false);
   };
@@ -177,12 +202,20 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
 
   const handleSaveEdit = async (rowId: string) => {
     setSavingRowId(rowId);
+    // Sem canViewCost, o formulário nunca mostrou o valor real de
+    // supplier_sku/purchase_price/currency (foram lidos como null/"" de
+    // item_suppliers_public) — omitir estes campos do payload evita apagar
+    // o valor real na BD com o estado em branco do formulário.
     const { error } = await (supabase as any)
       .from("item_suppliers")
       .update({
-        supplier_sku: editForm.supplier_sku || null,
-        purchase_price: editForm.purchase_price ? Number(editForm.purchase_price) : null,
-        currency: editForm.currency,
+        ...(canViewCost
+          ? {
+              supplier_sku: editForm.supplier_sku || null,
+              purchase_price: editForm.purchase_price ? Number(editForm.purchase_price) : null,
+              currency: editForm.currency,
+            }
+          : {}),
         lead_time_days: editForm.lead_time_days ? Number(editForm.lead_time_days) : null,
         moq: editForm.moq ? Number(editForm.moq) : null,
         is_active: editForm.is_active,
@@ -285,8 +318,20 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                 {editingRowId === row.id ? (
                   <>
                     <TableCell className="font-medium">{row.suppliers?.name || "-"}</TableCell>
-                    <TableCell><Input value={editForm.supplier_sku} onChange={(e) => setEditForm({ ...editForm, supplier_sku: e.target.value })} className="h-8 w-32" /></TableCell>
-                    <TableCell><Input type="number" step="0.01" value={editForm.purchase_price} onChange={(e) => setEditForm({ ...editForm, purchase_price: e.target.value })} className="h-8 w-24" /></TableCell>
+                    <TableCell>
+                      {canViewCost ? (
+                        <Input value={editForm.supplier_sku} onChange={(e) => setEditForm({ ...editForm, supplier_sku: e.target.value })} className="h-8 w-32" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {canViewCost ? (
+                        <Input type="number" step="0.01" value={editForm.purchase_price} onChange={(e) => setEditForm({ ...editForm, purchase_price: e.target.value })} className="h-8 w-24" />
+                      ) : (
+                        <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                      )}
+                    </TableCell>
                     <TableCell><Input type="number" value={editForm.lead_time_days} onChange={(e) => setEditForm({ ...editForm, lead_time_days: e.target.value })} className="h-8 w-20" /></TableCell>
                     <TableCell><Input type="number" step="0.01" value={editForm.moq} onChange={(e) => setEditForm({ ...editForm, moq: e.target.value })} className="h-8 w-20" /></TableCell>
                     <TableCell>
@@ -306,8 +351,8 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                 ) : (
                   <>
                     <TableCell className="font-medium">{row.suppliers?.name || "-"}</TableCell>
-                    <TableCell>{row.supplier_sku || "-"}</TableCell>
-                    <TableCell>{row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-"}</TableCell>
+                    <TableCell>{canViewCost ? (row.supplier_sku || "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
+                    <TableCell>{canViewCost ? (row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
                     <TableCell>{row.lead_time_days ?? "-"}</TableCell>
                     <TableCell>{row.moq ?? "-"}</TableCell>
                     <TableCell>
@@ -340,8 +385,20 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                     </SelectContent>
                   </Select>
                 </TableCell>
-                <TableCell><Input value={addForm.supplier_sku} onChange={(e) => setAddForm({ ...addForm, supplier_sku: e.target.value })} className="h-8 w-32" placeholder="Código" /></TableCell>
-                <TableCell><Input type="number" step="0.01" value={addForm.purchase_price} onChange={(e) => setAddForm({ ...addForm, purchase_price: e.target.value })} className="h-8 w-24" placeholder="0.00" /></TableCell>
+                <TableCell>
+                  {canViewCost ? (
+                    <Input value={addForm.supplier_sku} onChange={(e) => setAddForm({ ...addForm, supplier_sku: e.target.value })} className="h-8 w-32" placeholder="Código" />
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {canViewCost ? (
+                    <Input type="number" step="0.01" value={addForm.purchase_price} onChange={(e) => setAddForm({ ...addForm, purchase_price: e.target.value })} className="h-8 w-24" placeholder="0.00" />
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                  )}
+                </TableCell>
                 <TableCell><Input type="number" value={addForm.lead_time_days} onChange={(e) => setAddForm({ ...addForm, lead_time_days: e.target.value })} className="h-8 w-20" /></TableCell>
                 <TableCell><Input type="number" step="0.01" value={addForm.moq} onChange={(e) => setAddForm({ ...addForm, moq: e.target.value })} className="h-8 w-20" /></TableCell>
                 <TableCell>

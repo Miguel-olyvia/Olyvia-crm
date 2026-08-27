@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -122,6 +123,7 @@ const PurchaseOrders = () => {
   const [receiving, setReceiving] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
+  const { hasPermission } = usePermissions();
 
   const [formData, setFormData] = useState({
     supplier_id: "",
@@ -1361,7 +1363,14 @@ const PurchaseOrders = () => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
-                          <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
+                          {/* Passar a "ordered" (aprovar a encomenda) requer purchase_orders.approve.
+                              Continua visível se já for o valor atual (ex.: a reabrir uma encomenda
+                              já aprovada por quem entretanto perdeu a permissão), só fica indisponível
+                              para escolher de novo a partir de outro estado sem a permissão. Isto é só
+                              UX — o backend rejeita na mesma quem contornar isto. */}
+                          {(hasPermission('purchase_orders.approve') || formData.status === 'ordered') && (
+                            <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
+                          )}
                           {/* "received" já não é uma opção genérica aqui — passa pelo botão
                               dedicado "Marcar como recebida" na lista (Fase 4C), que pede o
                               armazém de destino e gera a entrada em stock_movements. Manter
@@ -1373,6 +1382,11 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
+                      {!hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
+                        <p className="text-xs text-muted-foreground">
+                          Sem permissão para aprovar encomendas (mudar para "{t('purchaseOrders.status.ordered')}").
+                        </p>
+                      )}
                       {formData.status === 'received' && (
                         <p className="text-xs text-muted-foreground">
                           Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
@@ -1583,7 +1597,7 @@ const PurchaseOrders = () => {
                               <FileDown className="w-4 h-4" />
                             </Button>
                             {(order.status === 'pending' || order.status === 'ordered') && (
-                              <PermissionGate permission="purchase_orders.edit">
+                              <PermissionGate permission="purchase_orders.receive">
                                 <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
                                   <PackageCheck className="w-4 h-4" />
                                 </Button>

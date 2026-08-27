@@ -10,6 +10,7 @@ import {
 import { Loader2, Star, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { usePermissions } from "@/hooks/usePermissions";
 
 interface SupplierCatalogDialogProps {
   open: boolean;
@@ -38,6 +39,11 @@ interface CatalogRow {
 // mesmo formulário de adicionar nos dois sentidos.
 export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, supplierName }: SupplierCatalogDialogProps) {
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+  // Ecrã de Fornecedores: custo de compra e código do fornecedor exigem
+  // suppliers.view_pricing — sem ela, lê-se item_suppliers_public (sem
+  // purchase_price/currency/supplier_sku) em vez de item_suppliers.
+  const canViewPricing = hasPermission("suppliers.view_pricing");
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [deletingRow, setDeletingRow] = useState<CatalogRow | null>(null);
@@ -46,20 +52,34 @@ export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, 
     if (open && supplierId) {
       loadRows();
     }
-  }, [open, supplierId]);
+  }, [open, supplierId, canViewPricing]);
 
   const loadRows = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("item_suppliers")
-      .select("id, item_type, supplier_sku, purchase_price, currency, lead_time_days, is_preferred, is_active, products(name, sku), services(name, sku)")
-      .eq("supplier_id", supplierId)
-      .is("deleted_at", null)
-      .order("item_type");
+    const { data, error } = canViewPricing
+      ? await (supabase as any)
+          .from("item_suppliers")
+          .select("id, item_type, supplier_sku, purchase_price, currency, lead_time_days, is_preferred, is_active, products(name, sku), services(name, sku)")
+          .eq("supplier_id", supplierId)
+          .is("deleted_at", null)
+          .order("item_type")
+      : await (supabase as any)
+          .from("item_suppliers_public")
+          .select("id, item_type, lead_time_days, is_preferred, is_active, products(name, sku), services(name, sku)")
+          .eq("supplier_id", supplierId)
+          .order("item_type");
     if (error) {
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } else {
-      setRows((data || []) as CatalogRow[]);
+      const mapped = canViewPricing
+        ? ((data || []) as CatalogRow[])
+        : ((data || []) as any[]).map((row) => ({
+            ...row,
+            supplier_sku: null,
+            purchase_price: null,
+            currency: "",
+          })) as CatalogRow[];
+      setRows(mapped);
     }
     setLoading(false);
   };
@@ -122,8 +142,8 @@ export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, 
                   <TableCell>{row.item_type === "product" ? "Produto" : "Serviço"}</TableCell>
                   <TableCell className="font-medium">{itemLabel(row)}</TableCell>
                   <TableCell>{itemSku(row)}</TableCell>
-                  <TableCell>{row.supplier_sku || "-"}</TableCell>
-                  <TableCell>{row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-"}</TableCell>
+                  <TableCell>{canViewPricing ? (row.supplier_sku || "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
+                  <TableCell>{canViewPricing ? (row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
                   <TableCell>{row.lead_time_days ?? "-"}</TableCell>
                   <TableCell><Badge variant={row.is_active ? "default" : "secondary"}>{row.is_active ? "Sim" : "Não"}</Badge></TableCell>
                   <TableCell className="text-right">
