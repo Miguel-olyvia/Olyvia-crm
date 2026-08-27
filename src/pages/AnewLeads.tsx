@@ -20,6 +20,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
+import { splitSearchWords, applySearchTextFilter } from "@/lib/searchTextFilter";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { useToast } from "@/hooks/use-toast";
 import { useSentinelInView } from "@/hooks/useSentinelInView";
@@ -322,7 +323,16 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   }
   if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
   if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
-  if (effectiveSearch) q = q.ilike("search_text", `%${effectiveSearch}%`);
+  // Palavra a palavra, nao a frase seguida: um `.ilike("search_text", "%joao silva%")`
+  // exigia que as palavras fossem contiguas, por isso "joao silva" nunca
+  // encontrava "Joao Pedro Silva". `applySearchTextFilter` encadeia um
+  // `.ilike()` por palavra (o PostgREST junta-os com AND na mesma coluna), e
+  // cada um continua a usar o indice GIN trgm de `search_text`. Vive aqui,
+  // dentro das clausulas partilhadas, para que lista e kanban recebam
+  // exactamente o mesmo filtro. A regra e byte a byte a mesma que
+  // get_scoped_leads_base aplica no SQL, para os contadores de estado nao
+  // divergirem da lista.
+  if (effectiveSearch) q = applySearchTextFilter(q, splitSearchWords(effectiveSearch));
   if (sourceFilter === "none") {
     q = q.is("source", null);
   } else if (sourceFilter !== "all") {
