@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
-import { Badge, Button, Card, Select, Spinner, Textarea, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText } from "../components/icons";
+import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
+import { StageFlowView } from "../components/flow/StageFlowView";
 import {
   fetchClientOlyviaInfo,
   prefillBlocksFromInfo,
@@ -16,6 +17,7 @@ import {
   type ScopeLine,
 } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
+import { notifyStage } from "../lib/notify";
 import {
   CHANGE_LOG_COLUMNS,
   STATUS_LABELS,
@@ -23,9 +25,11 @@ import {
   fieldsForVariant,
   sectionsForVariant,
   stageAppliesToVariant,
+  missingRequiredFields,
   type DucField,
   type DucItemSection,
   type DucStage,
+  type PaymentPhase,
 } from "../lib/ducSchema";
 import type { DucRecord, DucSection, DucStatus, DucVariant, TrackingEntry } from "../lib/types";
 
@@ -48,7 +52,7 @@ const AUTOSAVE_MS = 2500;
 
 export default function DucDetail() {
   const { id } = useParams<{ id: string }>();
-  const { businessUserId } = useAuth();
+  const { businessUserId, userName } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -70,6 +74,13 @@ export default function DucDetail() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string>("rastreio");
+
+  // Etapa a aguardar confirmação de fecho (null = sem diálogo aberto).
+  const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
+  // Fecho bloqueado por campos obrigatórios em falta.
+  const [blockedClose, setBlockedClose] = useState<{ stageNo: number; missing: string[] } | null>(
+    null
+  );
 
   const savingRef = useRef(false);
   // Conta cada edição; usada para NÃO limpar `dirty` quando o utilizador altera
@@ -196,6 +207,32 @@ export default function DucDetail() {
     );
     markDirty();
   };
+  // Fecha/reabre uma etapa registando QUEM fechou e QUANDO (assinatura). Ao
+  // reabrir, limpa a assinatura e a data para não ficar registo enganador.
+  const closeStage = (stage: number, close: boolean) => {
+    setTrackingEntry(stage, {
+      state: close ? "done" : "pending",
+      date: close ? new Date().toISOString().slice(0, 10) : null,
+      signed_by: close ? userName ?? businessUserId ?? "—" : null,
+    });
+  };
+  // Fechar pede confirmação (ação com peso: assina a etapa); reabrir é direto.
+  // Antes de confirmar, valida os campos OBRIGATÓRIOS da etapa.
+  const requestToggleClose = (stage: number, close: boolean) => {
+    if (!close) {
+      closeStage(stage, false);
+      return;
+    }
+    const st = configStages.find((s) => s.no === stage);
+    if (st) {
+      const gaps = missingRequiredFields(st, variant, blocks[st.key]);
+      if (gaps.length > 0) {
+        setBlockedClose({ stageNo: stage, missing: gaps.map((f) => f.label) });
+        return;
+      }
+    }
+    setConfirmingClose(stage);
+  };
   const addItem = (section: DucSection) => {
     setItems((prev) => [
       ...prev,
@@ -231,6 +268,21 @@ export default function DucDetail() {
     markDirty();
   };
   const changeStage = (n: number) => {
+    // Notifica "entrada" na nova etapa (se configurado) apenas quando muda mesmo.
+    if (n !== currentStage && duc) {
+      const st = configStages.find((s) => s.no === n);
+      if (st) {
+        void notifyStage(st, {
+          organizationId: duc.organization_id,
+          ducNumber: duc.duc_number,
+          clientName: clientName ?? duc.title,
+          stageNo: st.no,
+          stageTitle: st.title.split(" — ")[0],
+          event: "enter",
+          ducUrl: window.location.href,
+        });
+      }
+    }
     setCurrentStage(n);
     markDirty();
   };
@@ -387,6 +439,7 @@ export default function DucDetail() {
 
   const navItems: Array<{ key: string; label: string; done?: boolean; no?: number }> = [
     { key: "rastreio", label: "Rastreio do testemunho" },
+    { key: "fluxo", label: "Fluxo" },
     ...visibleStages.map((s) => ({
       key: s.key,
       label: `${s.no}. ${s.title.split(" — ")[1] ?? s.title}`,
@@ -398,7 +451,7 @@ export default function DucDetail() {
   ];
 
   return (
-    <div className="pb-4">
+    <div className="pb-24 md:pb-4">
       {/* Cabeçalho + progresso + ações */}
       <Card className="mb-6 p-5 print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -421,13 +474,13 @@ export default function DucDetail() {
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-3 print:hidden">
-            <div className="flex flex-col items-end gap-1">
+          <div className="flex w-full flex-col gap-3 print:hidden sm:w-auto sm:items-end">
+            <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end sm:gap-1">
               <span className="text-xs font-medium text-slate-500">Estado</span>
               <StatusSelect value={status} onChange={changeStatus} />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mr-auto text-xs text-slate-400 sm:mr-0">
                 {error ? (
                   <span className="text-red-600">{error}</span>
                 ) : saving ? (
@@ -512,7 +565,21 @@ export default function DucDetail() {
           </div>
 
           <Section active={activeKey === "rastreio"} keyName="rastreio">
-            <TrackingBoard stages={visibleStages} tracking={tracking} onChange={setTrackingEntry} currentStage={currentStage} onStageChange={changeStage} />
+            <TrackingBoard stages={visibleStages} tracking={tracking} onChange={setTrackingEntry} onToggleClose={requestToggleClose} currentStage={currentStage} onStageChange={changeStage} />
+          </Section>
+
+          <Section active={activeKey === "fluxo"} keyName="fluxo">
+            <Card className="p-3 print:hidden">
+              <div className="mb-3 flex items-center justify-between px-2 pt-1">
+                <h2 className="text-base font-semibold text-slate-800">Fluxo do DUC</h2>
+                <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Fechada</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" /> Atual</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> Pendente</span>
+                </div>
+              </div>
+              <StageFlowView stages={visibleStages} tracking={tracking} currentStage={currentStage} />
+            </Card>
           </Section>
 
           {visibleStages.map((stage) => (
@@ -522,10 +589,18 @@ export default function DucDetail() {
                 variant={variant}
                 blocks={blocks}
                 items={items}
+                entry={tracking.find((t) => t.stage === stage.no) ?? null}
+                isCurrent={stage.no === currentStage}
+                enteredAt={
+                  (stage.no > 1
+                    ? tracking.find((t) => t.stage === stage.no - 1)?.date ?? null
+                    : null) ?? duc.created_at
+                }
                 onField={setField}
                 onAddItem={addItem}
                 onUpdateItem={updateItem}
                 onRemoveItem={removeItem}
+                onToggleClose={requestToggleClose}
               />
             </Section>
           ))}
@@ -549,6 +624,93 @@ export default function DucDetail() {
           </Section>
         </div>
       </div>
+
+      {/* Barra de ações fixa — só mobile (no desktop as ações estão no cabeçalho) */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5 shadow-[0_-4px_16px_rgba(15,23,42,0.06)] backdrop-blur md:hidden print:hidden">
+        <div className="mx-auto flex max-w-6xl items-center gap-3">
+          <span className="min-w-0 flex-1 truncate text-xs text-slate-400">
+            {error ? (
+              <span className="text-red-600">{error}</span>
+            ) : saving ? (
+              "A guardar…"
+            ) : dirty ? (
+              "Alterações por guardar…"
+            ) : savedAt ? (
+              `Guardado às ${savedAt}`
+            ) : (
+              "Tudo guardado"
+            )}
+          </span>
+          <Button variant="secondary" onClick={() => window.print()} aria-label="Exportar PDF">
+            <Printer />
+          </Button>
+          <Button onClick={() => void save()} disabled={saving || !dirty}>
+            <Save /> Guardar
+          </Button>
+        </div>
+      </div>
+
+      {confirmingClose !== null && (
+        <ConfirmDialog
+          title="Fechar etapa"
+          tone="brand"
+          confirmLabel="Fechar etapa"
+          icon={<Check width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que queres fechar a etapa{" "}
+              <span className="font-medium text-slate-800">
+                {confirmingClose}.{" "}
+                {visibleStages.find((s) => s.no === confirmingClose)?.title.split(" — ")[0]}
+              </span>
+              ? Fica assinada por{" "}
+              <span className="font-medium text-slate-800">{userName ?? "ti"}</span> com a data de
+              hoje. Podes reabrir depois.
+            </>
+          }
+          onCancel={() => setConfirmingClose(null)}
+          onConfirm={() => {
+            const st = visibleStages.find((s) => s.no === confirmingClose);
+            closeStage(confirmingClose, true);
+            if (st && duc) {
+              void notifyStage(st, {
+                organizationId: duc.organization_id,
+                ducNumber: duc.duc_number,
+                clientName: clientName ?? duc.title,
+                stageNo: st.no,
+                stageTitle: st.title.split(" — ")[0],
+                event: "close",
+                signedBy: userName ?? businessUserId,
+                ducUrl: window.location.href,
+              });
+            }
+            setConfirmingClose(null);
+          }}
+        />
+      )}
+
+      {blockedClose && (
+        <Modal
+          title="Faltam campos obrigatórios"
+          size="sm"
+          onClose={() => setBlockedClose(null)}
+          footer={<Button onClick={() => setBlockedClose(null)}>Entendi</Button>}
+        >
+          <div className="space-y-2">
+            <p className="text-sm text-slate-600">
+              Não é possível fechar a etapa {blockedClose.stageNo} — estes campos obrigatórios estão
+              por preencher:
+            </p>
+            <ul className="max-h-52 space-y-1 overflow-y-auto rounded-lg bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-inset ring-amber-100">
+              {blockedClose.missing.map((m, i) => (
+                <li key={i} className="flex gap-1.5">
+                  <span className="text-amber-500">•</span> {m}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -577,31 +739,66 @@ function StageCard({
   variant,
   blocks,
   items,
+  entry,
+  isCurrent,
+  enteredAt,
   onField,
   onAddItem,
   onUpdateItem,
   onRemoveItem,
+  onToggleClose,
 }: {
   stage: DucStage;
   variant: DucVariant;
   blocks: Record<string, Record<string, unknown>>;
   items: LocalItem[];
+  entry: TrackingEntry | null;
+  isCurrent: boolean;
+  enteredAt: string | null;
   onField: (stageKey: string, fieldKey: string, value: unknown) => void;
   onAddItem: (section: DucSection) => void;
   onUpdateItem: (key: string, patch: Partial<LocalItem>) => void;
   onRemoveItem: (key: string) => void;
+  onToggleClose: (stageNo: number, close: boolean) => void;
 }) {
   const fields = fieldsForVariant(stage.fields, variant);
   const sections = sectionsForVariant(stage, variant);
+  const done = entry?.state === "done";
+  // Alerta de etapa parada: só na etapa atual, por fechar, com limite configurado.
+  const alertDays = stage.notify?.alertAfterDays ?? 0;
+  const openDays =
+    isCurrent && !done && enteredAt
+      ? Math.max(0, Math.floor((Date.now() - new Date(enteredAt).getTime()) / 86_400_000))
+      : 0;
+  const isStale = alertDays > 0 && isCurrent && !done && openDays > alertDays;
   return (
-    <Card className="p-5 print:border-0 print:shadow-none">
-      <div className="mb-4 flex items-baseline justify-between">
+    <Card
+      className={cx(
+        "p-5 print:border-0 print:shadow-none",
+        done && "ring-1 ring-emerald-100"
+      )}
+    >
+      <div className="mb-4 flex items-baseline justify-between gap-3">
         <h2 className="text-base font-semibold text-slate-800">
           <span className="mr-2 text-brand">{stage.no}</span>
           {stage.title}
         </h2>
-        <span className="text-xs text-slate-400">{stage.responsible}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          {done && (
+            <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
+              <Check width={12} height={12} /> Fechada
+            </Badge>
+          )}
+          <span className="text-xs text-slate-400">{stage.responsible}</span>
+        </div>
       </div>
+      {isStale && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
+          <AlertTriangle width={14} height={14} className="shrink-0" />
+          Etapa parada há {openDays} dias (limite {alertDays}). Os destinatários configurados
+          devem ser alertados.
+        </div>
+      )}
       {stage.intro && <p className="mb-4 text-xs text-slate-500">{stage.intro}</p>}
 
       {fields.length > 0 && (
@@ -627,6 +824,38 @@ function StageCard({
           onRemove={onRemoveItem}
         />
       ))}
+
+      {/* Fecho da etapa — assinatura (quem/quando) + botão fechar/reabrir */}
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 print:hidden">
+        {done ? (
+          <p className="text-xs text-slate-500">
+            Fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+            {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+          </p>
+        ) : (
+          <p className="text-xs text-slate-400">Etapa por fechar.</p>
+        )}
+        <Button
+          variant={done ? "secondary" : "primary"}
+          onClick={() => onToggleClose(stage.no, !done)}
+        >
+          {done ? (
+            "Reabrir etapa"
+          ) : (
+            <>
+              <Check /> Fechar etapa
+            </>
+          )}
+        </Button>
+      </div>
+
+      {/* Registo de assinatura visível também na impressão */}
+      {done && (
+        <p className="mt-4 hidden text-xs text-slate-500 print:block">
+          Etapa fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+          {entry?.date ? ` em ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}.
+        </p>
+      )}
     </Card>
   );
 }
@@ -637,12 +866,14 @@ function TrackingBoard({
   stages,
   tracking,
   onChange,
+  onToggleClose,
   currentStage,
   onStageChange,
 }: {
   stages: DucStage[];
   tracking: TrackingEntry[];
   onChange: (stage: number, patch: Partial<TrackingEntry>) => void;
+  onToggleClose: (stageNo: number, close: boolean) => void;
   currentStage: number;
   onStageChange: (n: number) => void;
 }) {
@@ -652,7 +883,71 @@ function TrackingBoard({
       <p className="mb-3 text-xs text-slate-500">
         Onde está o DUC agora · marca cada etapa como fechada quando o departamento a valida.
       </p>
-      <div className="overflow-x-auto">
+      {/* Mobile: cartões (a tabela de 5 colunas não cabe no telemóvel) */}
+      <div className="space-y-2.5 md:hidden">
+        {stages.map((stage) => {
+          const entry =
+            tracking.find((t) => t.stage === stage.no) ?? { stage: stage.no, state: "pending" as const };
+          const done = entry.state === "done";
+          const isCurrent = stage.no === currentStage;
+          return (
+            <div
+              key={stage.no}
+              onClick={() => onStageChange(stage.no)}
+              className={cx(
+                "rounded-xl border p-3.5 transition-colors",
+                isCurrent ? "border-teal-200 bg-teal-50/40" : "border-slate-200"
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-800">
+                    {stage.no} · {stage.title.split(" — ")[0]}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-400">{stage.responsible}</p>
+                  {done && entry.signed_by && (
+                    <p className="mt-0.5 text-[11px] text-emerald-700">
+                      Fechada por {entry.signed_by}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleClose(stage.no, !done);
+                  }}
+                  className={cx(
+                    "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                    done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                  )}
+                >
+                  {done && <Check width={12} height={12} />}
+                  {done ? "Fechado" : "Pendente"}
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="date"
+                  value={entry.date ?? ""}
+                  onChange={(e) => onChange(stage.no, { date: e.target.value || null })}
+                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                />
+                <input
+                  type="text"
+                  value={entry.note ?? ""}
+                  onChange={(e) => onChange(stage.no, { note: e.target.value })}
+                  placeholder="visto / nota"
+                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop: tabela */}
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-slate-400">
             <tr>
@@ -683,10 +978,7 @@ function TrackingBoard({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onChange(stage.no, {
-                          state: done ? "pending" : "done",
-                          date: done ? null : new Date().toISOString().slice(0, 10),
-                        });
+                        onToggleClose(stage.no, !done);
                       }}
                       className={cx(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
@@ -696,6 +988,11 @@ function TrackingBoard({
                       {done && <Check width={12} height={12} />}
                       {done ? "Fechado" : "Pendente"}
                     </button>
+                    {done && entry.signed_by && (
+                      <span className="mt-0.5 block text-[11px] text-slate-400">
+                        {entry.signed_by}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 pr-3" onClick={(e) => e.stopPropagation()}>
                     <input
@@ -736,16 +1033,27 @@ function FieldRenderer({
   onChange: (v: unknown) => void;
 }) {
   if (field.type === "checkbox") {
+    const on = Boolean(value);
     return (
-      <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 sm:col-span-2">
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => onChange(e.target.checked)}
-          className="h-4 w-4 accent-teal-600"
-        />
+      <div
+        className={cx(
+          "flex items-center justify-between gap-3 rounded-md border px-3 py-2.5 transition-colors sm:col-span-2",
+          on ? "border-brand-100 bg-brand-50/40" : "border-slate-200"
+        )}
+      >
         <span className="text-sm text-slate-700">{field.label}</span>
-      </label>
+        <Toggle checked={on} onChange={onChange} />
+      </div>
+    );
+  }
+
+  if (field.type === "phases") {
+    return (
+      <div className="sm:col-span-2">
+        <span className="text-sm font-medium text-slate-700">{field.label}</span>
+        <PhasesField value={value} onChange={onChange} />
+        {field.hint && <span className="mt-1 block text-xs text-slate-400">{field.hint}</span>}
+      </div>
     );
   }
 
@@ -753,18 +1061,15 @@ function FieldRenderer({
     return (
       <label className="block space-y-1">
         <span className="text-sm font-medium text-slate-700">{field.label}</span>
-        <Select
+        <Combobox
           value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={onChange}
           className="w-full"
-        >
-          <option value="">—</option>
-          {(field.options ?? []).map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </Select>
+          options={[
+            { value: "", label: "—" },
+            ...(field.options ?? []).map((o) => ({ value: o, label: o })),
+          ]}
+        />
         {field.hint && <span className="block text-xs text-slate-400">{field.hint}</span>}
       </label>
     );
@@ -792,6 +1097,127 @@ function FieldRenderer({
       )}
       {field.hint && <span className="block text-xs text-slate-400">{field.hint}</span>}
     </label>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+const EMPTY_PHASE: PaymentPhase = { label: "", percent: "", amount: "", due: "", note: "" };
+
+function toPhases(value: unknown): PaymentPhase[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((p) => ({ ...EMPTY_PHASE, ...(p as Partial<PaymentPhase>) }));
+}
+
+/** Editor de fases de pagamento — lista repetível com "+", guardada como array
+ *  no bloco. Cada fase: rótulo, %, valor, vencimento e nota/condição. */
+function PhasesField({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const phases = toPhases(value);
+  const update = (idx: number, patch: Partial<PaymentPhase>) =>
+    onChange(phases.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  const add = () =>
+    onChange([...phases, { ...EMPTY_PHASE, label: `Fase ${phases.length + 1}` }]);
+  const remove = (idx: number) => onChange(phases.filter((_, i) => i !== idx));
+
+  const totalPct = phases.reduce((s, p) => s + (parseFloat(p.percent) || 0), 0);
+
+  return (
+    <div className="mt-1.5 space-y-2">
+      {phases.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">
+          Sem fases de pagamento. Adiciona a primeira.
+        </p>
+      ) : (
+        phases.map((p, idx) => (
+          <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50/40 p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-brand-100">
+                {idx + 1}
+              </span>
+              <input
+                type="text"
+                value={p.label}
+                onChange={(e) => update(idx, { label: e.target.value })}
+                placeholder="Ex.: Sinal, Entrega, Final…"
+                className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-brand"
+              />
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                title="Remover fase"
+                className="shrink-0 text-slate-300 transition-colors hover:text-red-500"
+              >
+                <Trash width={15} height={15} />
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="block">
+                <span className="mb-0.5 block text-[11px] text-slate-400">%</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={p.percent}
+                  onChange={(e) => update(idx, { percent: e.target.value })}
+                  placeholder="0"
+                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-brand"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-0.5 block text-[11px] text-slate-400">Valor (€)</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  value={p.amount}
+                  onChange={(e) => update(idx, { amount: e.target.value })}
+                  placeholder="0,00"
+                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-brand"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-0.5 block text-[11px] text-slate-400">Vencimento</span>
+                <input
+                  type="date"
+                  value={p.due}
+                  onChange={(e) => update(idx, { due: e.target.value })}
+                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-brand"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-0.5 block text-[11px] text-slate-400">Condição / nota</span>
+                <input
+                  type="text"
+                  value={p.note}
+                  onChange={(e) => update(idx, { note: e.target.value })}
+                  placeholder="ex.: à adjudicação"
+                  className="w-full rounded-md border border-slate-200 px-2 py-1 text-xs outline-none focus:border-brand"
+                />
+              </label>
+            </div>
+          </div>
+        ))
+      )}
+      <div className="flex items-center justify-between">
+        <Button variant="secondary" onClick={add} className="px-2.5 py-1.5 text-xs">
+          <Plus width={14} height={14} /> Adicionar fase
+        </Button>
+        {phases.length > 0 && (
+          <span
+            className={cx(
+              "text-xs tabular-nums",
+              Math.abs(totalPct - 100) < 0.01 ? "text-emerald-600" : "text-slate-400"
+            )}
+          >
+            Total: {totalPct % 1 === 0 ? totalPct : totalPct.toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 

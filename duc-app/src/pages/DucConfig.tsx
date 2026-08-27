@@ -24,7 +24,9 @@ import {
   type DucField,
   type DucItemSection,
   type DucStage,
+  type StageNotify,
 } from "../lib/ducSchema";
+import { fetchOrgMembers, type OrgMember } from "../lib/members";
 import type { DucSection, DucVariant } from "../lib/types";
 import {
   Badge,
@@ -100,6 +102,7 @@ export default function DucConfig() {
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [members, setMembers] = useState<OrgMember[]>([]);
 
   const activeOrg = useMemo(
     () => orgs.find((o) => o.id === orgId) ?? null,
@@ -140,6 +143,21 @@ export default function DucConfig() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Membros da organização (destinatários de notificações por etapa).
+  useEffect(() => {
+    if (!orgId) {
+      setMembers([]);
+      return;
+    }
+    let alive = true;
+    void fetchOrgMembers(orgId).then((m) => {
+      if (alive) setMembers(m);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [orgId]);
 
   // ---- mutações da árvore (todas marcam dirty) ---------------------------
 
@@ -322,6 +340,15 @@ export default function DucConfig() {
     [mutate]
   );
 
+  const patchNotify = useCallback(
+    (idx: number, notify: StageNotify) => {
+      mutate((draft) => {
+        draft[idx] = { ...draft[idx], notify };
+      });
+    },
+    [mutate]
+  );
+
   const handlers: StageInspectorHandlers = useMemo(
     () => ({
       onPatchStage: patchStage,
@@ -335,6 +362,7 @@ export default function DucConfig() {
       onAddColumn: addColumn,
       onRemoveColumn: removeColumn,
       onPatchColumn: patchColumn,
+      onPatchNotify: patchNotify,
     }),
     [
       patchStage,
@@ -348,6 +376,7 @@ export default function DucConfig() {
       addColumn,
       removeColumn,
       patchColumn,
+      patchNotify,
     ]
   );
 
@@ -606,6 +635,7 @@ export default function DucConfig() {
                   stage={selectedStage}
                   stageIdx={selectedIdx}
                   keyErrors={fieldKeyErrors[selectedIdx]}
+                  members={members}
                   handlers={handlers}
                   onClose={() => setSelectedIdx(null)}
                   onDelete={() => setConfirmDelete(selectedIdx)}

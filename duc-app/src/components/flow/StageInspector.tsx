@@ -1,12 +1,15 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   type DucField,
   type DucItemSection,
   type DucStage,
   type FieldType,
+  type StageNotify,
+  type StageRecipient,
 } from "../../lib/ducSchema";
 import type { DucSection } from "../../lib/types";
-import { Badge, Button, Select, Textarea, cx } from "../ui";
+import type { OrgMember } from "../../lib/members";
+import { Badge, Button, Combobox, Select, Textarea, Toggle, cx } from "../ui";
 import {
   Plus,
   Trash,
@@ -24,6 +27,7 @@ export const FIELD_TYPES: FieldType[] = [
   "checkbox",
   "number",
   "select",
+  "phases",
 ];
 
 export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -33,6 +37,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   checkbox: "Sim/Não",
   number: "Número",
   select: "Lista (opções)",
+  phases: "Fases de pagamento",
 };
 
 export const SECTION_KEYS: DucSection[] = [
@@ -86,12 +91,14 @@ export interface StageInspectorHandlers {
     colIdx: number,
     patch: Partial<DucItemSection["columns"][number]>
   ) => void;
+  onPatchNotify: (stageIdx: number, notify: StageNotify) => void;
 }
 
 export function StageInspector({
   stage,
   stageIdx,
   keyErrors,
+  members,
   onClose,
   onDelete,
   handlers,
@@ -99,6 +106,7 @@ export function StageInspector({
   stage: DucStage;
   stageIdx: number;
   keyErrors: Set<string> | undefined;
+  members: OrgMember[];
   onClose: () => void;
   onDelete: () => void;
   handlers: StageInspectorHandlers;
@@ -229,6 +237,13 @@ export function StageInspector({
             </div>
           )}
         </section>
+
+        {/* Notificações por email */}
+        <NotifySection
+          notify={stage.notify}
+          members={members}
+          onChange={(n) => handlers.onPatchNotify(stageIdx, n)}
+        />
       </div>
 
       {/* Rodapé: eliminar etapa */}
@@ -238,6 +253,154 @@ export function StageInspector({
         </Button>
       </div>
     </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+function NotifySection({
+  notify,
+  members,
+  onChange,
+}: {
+  notify: StageNotify | undefined;
+  members: OrgMember[];
+  onChange: (n: StageNotify) => void;
+}) {
+  const [emailInput, setEmailInput] = useState("");
+
+  const current: StageNotify = notify ?? { recipients: [], onEnter: false, onClose: true };
+  const recipients = current.recipients ?? [];
+
+  const patch = (p: Partial<StageNotify>) => onChange({ ...current, ...p });
+
+  const addRecipient = (r: StageRecipient) => {
+    if (recipients.some((x) => x.type === r.type && x.value === r.value)) return;
+    patch({ recipients: [...recipients, r] });
+  };
+  const removeRecipient = (idx: number) =>
+    patch({ recipients: recipients.filter((_, i) => i !== idx) });
+
+  const availableMembers = members.filter(
+    (m) => !recipients.some((r) => r.type === "member" && r.value === m.id)
+  );
+
+  const addEmail = () => {
+    const v = emailInput.trim();
+    if (!v || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return;
+    addRecipient({ type: "email", value: v });
+    setEmailInput("");
+  };
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-700">
+          Notificações <Badge className="ml-1">{recipients.length}</Badge>
+        </h3>
+      </div>
+      <p className="mb-3 text-xs text-slate-400">
+        Quem recebe email quando esta etapa entra ou fecha — membros da organização ou emails
+        externos.
+      </p>
+
+      {recipients.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {recipients.map((r, i) => (
+            <span
+              key={`${r.type}-${r.value}`}
+              className={cx(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+                r.type === "member"
+                  ? "bg-brand-50 text-brand-800 ring-brand-100"
+                  : "bg-amber-50 text-amber-700 ring-amber-100"
+              )}
+            >
+              {r.type === "member" ? r.label ?? "Membro" : r.value}
+              <button
+                type="button"
+                onClick={() => removeRecipient(i)}
+                className="opacity-60 transition-opacity hover:opacity-100"
+                aria-label="Remover destinatário"
+              >
+                <X width={11} height={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {availableMembers.length > 0 && (
+          <Combobox
+            value=""
+            onChange={(id) => {
+              const m = members.find((x) => x.id === id);
+              if (m) addRecipient({ type: "member", value: m.id, label: m.name });
+            }}
+            placeholder="Adicionar membro…"
+            searchPlaceholder="Pesquisar membro…"
+            options={availableMembers.map((m) => ({ value: m.id, label: m.name }))}
+          />
+        )}
+
+        <div className="flex items-center gap-2">
+          <input
+            type="email"
+            value={emailInput}
+            onChange={(e) => setEmailInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addEmail();
+              }
+            }}
+            placeholder="email externo…"
+            className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+          />
+          <Button variant="secondary" size="sm" onClick={addEmail}>
+            <Plus width={14} height={14} /> Email
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-slate-700">Ao entrar na etapa</span>
+          <Toggle checked={Boolean(current.onEnter)} onChange={(v) => patch({ onEnter: v })} />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-slate-700">Ao fechar a etapa</span>
+          <Toggle checked={Boolean(current.onClose)} onChange={(v) => patch({ onClose: v })} />
+        </div>
+      </div>
+
+      {/* Alerta de etapa parada (SLA) */}
+      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-sm text-slate-700">Alertar se ficar aberta mais de</span>
+          <span className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={0}
+              value={current.alertAfterDays ?? ""}
+              onChange={(e) =>
+                patch({
+                  alertAfterDays:
+                    e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)),
+                })
+              }
+              placeholder="0"
+              className="w-16 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+            />
+            <span className="text-sm text-slate-500">dias</span>
+          </span>
+        </label>
+        <p className="mt-1 text-[11px] text-slate-400">
+          Ex.: 7 → alerta os destinatários se a etapa não fechar numa semana. Vazio/0 = sem alerta.
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -345,6 +508,18 @@ function FieldEditor({
             <Trash width={14} height={14} />
           </IconBtn>
         </div>
+
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={Boolean(field.required)}
+            onChange={(e) => onPatch(stageIdx, fieldIdx, { required: e.target.checked })}
+            className="h-4 w-4 accent-teal-600"
+          />
+          <span className="text-xs text-slate-600">
+            Obrigatório <span className="text-slate-400">(bloqueia o fecho da etapa)</span>
+          </span>
+        </label>
       </div>
 
       {field.type === "select" && (

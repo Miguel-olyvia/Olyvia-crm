@@ -15,7 +15,45 @@ export const ATTACHMENT_CATEGORIES: Array<{ key: AttachmentCategory; label: stri
 // dinâmico. Cada bloco/campo declara a que variante(s) se aplica.
 // ============================================================================
 
-export type FieldType = "text" | "textarea" | "date" | "checkbox" | "number" | "select";
+export type FieldType =
+  | "text"
+  | "textarea"
+  | "date"
+  | "checkbox"
+  | "number"
+  | "select"
+  | "phases";
+
+/** Uma fase de pagamento (linha do campo `phases`). Guardada como array no bloco. */
+export interface PaymentPhase {
+  label: string;
+  percent: string;
+  amount: string;
+  due: string;
+  note: string;
+}
+
+/** Destinatário de notificação de uma etapa. */
+export interface StageRecipient {
+  /** "member" → anew_users.id da organização; "email" → endereço livre (externo). */
+  type: "member" | "email";
+  value: string;
+  label?: string;
+}
+
+/** Configuração de notificações por etapa (quem recebe e em que momento). */
+export interface StageNotify {
+  recipients: StageRecipient[];
+  /** Notificar quando a etapa passa a atual. */
+  onEnter?: boolean;
+  /** Notificar quando a etapa é fechada. */
+  onClose?: boolean;
+  /**
+   * Alertar os destinatários se a etapa ficar ATIVA sem fechar mais de N dias
+   * (ex.: 7 = "etapa parada há mais de uma semana"). 0/vazio = sem alerta.
+   */
+  alertAfterDays?: number;
+}
 
 export interface DucField {
   key: string;
@@ -27,6 +65,8 @@ export interface DucField {
   hint?: string;
   /** Opções quando type === "select". */
   options?: string[];
+  /** Obrigatório: bloqueia o fecho da etapa enquanto estiver vazio. */
+  required?: boolean;
 }
 
 export interface DucItemSection {
@@ -54,6 +94,8 @@ export interface DucStage {
   variants?: DucVariant[];
   fields: DucField[];
   itemSections?: DucItemSection[];
+  /** Notificações por email quando a etapa entra/fecha (config por organização). */
+  notify?: StageNotify;
 }
 
 export const VARIANT_LABELS: Record<DucVariant, string> = {
@@ -163,7 +205,7 @@ export const DUC_STAGES: DucStage[] = [
           "Cartão",
         ],
       },
-      { key: "condicoes_faseamento", label: "Condições / faseamento", type: "textarea" },
+      { key: "condicoes_faseamento", label: "Fases de pagamento", type: "phases" },
       { key: "nif_dados_faturacao", label: "NIF / dados de faturação", type: "textarea" },
       {
         key: "periodicidade_faturacao",
@@ -379,4 +421,22 @@ export function sectionsForVariant(stage: DucStage, variant: DucVariant): DucIte
 export function stageAppliesToVariant(stage: DucStage, variant: DucVariant): boolean {
   if (stage.variants && !stage.variants.includes(variant)) return false;
   return fieldsForVariant(stage.fields, variant).length > 0 || sectionsForVariant(stage, variant).length > 0;
+}
+
+/**
+ * Campos OBRIGATÓRIOS de uma etapa que estão por preencher, dado o bloco guardado.
+ * Serve para bloquear o fecho de etapas (no detalhe e no cascata do Kanban).
+ */
+export function missingRequiredFields(
+  stage: DucStage,
+  variant: DucVariant,
+  block: Record<string, unknown> | undefined
+): DucField[] {
+  return fieldsForVariant(stage.fields, variant).filter((f) => {
+    if (!f.required) return false;
+    const v = block?.[f.key];
+    if (f.type === "checkbox") return v !== true;
+    if (f.type === "phases") return !Array.isArray(v) || v.length === 0;
+    return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+  });
 }

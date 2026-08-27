@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { Building, ChevronLeft, FileSolid, LogOut, ExternalLink, Settings } from "./icons";
+import { Combobox } from "./ui";
+import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
 
@@ -19,36 +20,33 @@ export function DucLayout() {
   return (
     <div className="app-canvas min-h-screen">
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur print:hidden">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-4 px-4">
-          <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-white shadow-sm">
-              <FileSolid width={18} height={18} />
-            </span>
-            <span className="hidden leading-tight sm:block">
-              <span className="block text-sm font-semibold text-slate-800">DUC</span>
-              <span className="block text-[11px] text-slate-400">Documento Único de Cliente</span>
-            </span>
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+          {/* Esquerda: seletor de organização (pesquisável) */}
+          <div className="flex flex-1 items-center">
+            {orgs.length > 0 && (
+              <Combobox
+                className="w-full max-w-[210px]"
+                value={activeOrgId ?? ""}
+                onChange={setActiveOrgId}
+                placeholder="Organização…"
+                searchPlaceholder="Pesquisar organização…"
+                options={orgs.map((o) => ({ value: o.id, label: o.name }))}
+              />
+            )}
+          </div>
+
+          {/* Centro: marca — ícone desenhado à mão */}
+          <Link
+            to="/"
+            title="Documento Único de Cliente"
+            aria-label="Início"
+            className="shrink-0 text-brand transition-transform hover:-rotate-2 hover:scale-105"
+          >
+            <DucMark />
           </Link>
 
-          <div className="ml-auto flex items-center gap-3">
-            {orgs.length > 0 && (
-              <div className="hidden items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm sm:flex">
-                <Building width={15} height={15} className="text-slate-400" />
-                <select
-                  value={activeOrgId ?? ""}
-                  onChange={(e) => setActiveOrgId(e.target.value)}
-                  className="max-w-[180px] cursor-pointer border-0 bg-transparent text-sm text-slate-700 outline-none"
-                  title="Organização ativa"
-                >
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
+          {/* Direita: ações */}
+          <div className="flex flex-1 items-center justify-end gap-2.5">
             <div className="flex items-center gap-2.5">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
                 {initials(userName, userEmail)}
