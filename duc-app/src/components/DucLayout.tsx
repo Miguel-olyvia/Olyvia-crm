@@ -57,12 +57,12 @@ export function DucLayout() {
   return (
     <div className="app-canvas min-h-screen">
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur print:hidden">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-3 sm:gap-3 sm:px-4">
           {/* Esquerda: seletor de organização (pesquisável) */}
-          <div className="flex flex-1 items-center">
+          <div className="flex min-w-0 flex-1 items-center">
             {orgs.length > 0 && (
               <Combobox
-                className="w-full max-w-[220px]"
+                className="w-full max-w-[140px] sm:max-w-[220px]"
                 value={activeOrgId ?? ""}
                 onChange={setActiveOrgId}
                 placeholder="Organização…"
@@ -81,22 +81,24 @@ export function DucLayout() {
             className="flex shrink-0 items-center gap-2 text-brand transition-transform hover:scale-105"
           >
             <DucMark />
-            <span className="text-lg font-semibold tracking-tight text-slate-800">DUC</span>
+            <span className="hidden text-lg font-semibold tracking-tight text-slate-800 min-[400px]:inline">
+              DUC
+            </span>
           </Link>
 
           {/* Direita: menu do utilizador (dropdown) */}
-          <div ref={menuRef} className="relative flex flex-1 items-center justify-end">
+          <div ref={menuRef} className="relative flex min-w-0 flex-1 items-center justify-end">
             <button
               type="button"
               onClick={() => setMenuOpen((o) => !o)}
-              className="flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2 transition-colors hover:bg-slate-100"
+              className="flex max-w-full items-center gap-2.5 rounded-full py-1 pl-1 pr-1 transition-colors hover:bg-slate-100 sm:pr-2"
             >
               <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
                 {initials(userName, userEmail)}
               </span>
-              <span className="hidden text-left leading-tight md:block">
-                <span className="block text-sm font-medium text-slate-700">{userName}</span>
-                <span className="block text-[11px] text-slate-400">{userEmail}</span>
+              <span className="hidden min-w-0 max-w-[180px] text-left leading-tight md:block lg:max-w-[220px]">
+                <span className="block truncate text-sm font-medium text-slate-700">{userName}</span>
+                <span className="block truncate text-[11px] text-slate-400">{userEmail}</span>
               </span>
               <ChevronRight
                 width={15}
@@ -109,7 +111,7 @@ export function DucLayout() {
             </button>
 
             {menuOpen && (
-              <div className="absolute right-0 top-full z-40 mt-2 w-60 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-elevated animate-in-pop">
+              <div className="absolute right-0 top-full z-40 mt-2 w-[min(15rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-elevated animate-in-pop">
                 <div className="mb-1 flex items-center gap-2.5 rounded-lg bg-slate-50 px-2.5 py-2">
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
                     {initials(userName, userEmail)}
@@ -133,7 +135,7 @@ export function DucLayout() {
                       to={to}
                       onClick={() => setMenuOpen(false)}
                       className={cx(
-                        "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                        "flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm transition-colors sm:py-2",
                         active ? "bg-brand-50 text-brand-800" : "text-slate-600 hover:bg-slate-50"
                       )}
                     >
@@ -147,7 +149,7 @@ export function DucLayout() {
                   target="_blank"
                   rel="noreferrer"
                   onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-50"
+                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 sm:py-2"
                 >
                   <ExternalLink width={16} height={16} /> Olyvia
                 </a>
@@ -160,7 +162,7 @@ export function DucLayout() {
                     setMenuOpen(false);
                     setConfirmingLogout(true);
                   }}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
                 >
                   <LogOut width={16} height={16} /> Sair
                 </button>
@@ -190,19 +192,20 @@ export function DucLayout() {
 
       {/* Bottom nav — apenas mobile; escondida no detalhe do DUC para não colidir */}
       {showFooterNav && (
-        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[max(0.4rem,env(safe-area-inset-bottom))] md:hidden print:hidden">
-          <div className="mx-auto flex max-w-6xl justify-around">
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[max(0.35rem,env(safe-area-inset-bottom))] md:hidden print:hidden">
+          <div className="mx-auto flex max-w-6xl items-stretch justify-around">
             {navItems.map(({ to, label, Icon, active }) => (
               <Link
                 key={to}
                 to={to}
+                aria-current={active ? "page" : undefined}
                 className={
-                  "flex flex-col items-center gap-0.5 px-2 py-1.5 text-[10px] transition-colors " +
-                  (active ? "text-brand" : "text-slate-400 hover:text-slate-600")
+                  "flex min-h-[46px] flex-1 basis-0 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] transition-colors " +
+                  (active ? "font-semibold text-brand" : "text-slate-400 hover:text-slate-600")
                 }
               >
                 <Icon width={20} height={20} />
-                {label}
+                <span className="max-w-full truncate">{label}</span>
               </Link>
             ))}
           </div>

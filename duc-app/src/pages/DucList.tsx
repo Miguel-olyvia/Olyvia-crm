@@ -499,48 +499,54 @@ export default function DucList() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
             Documento Único de Cliente
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Vês os clientes da tua área com contrato assinado.
           </p>
         </div>
-        <Button onClick={() => openCreate(null)} disabled={!activeOrgId}>
+        <Button
+          onClick={() => openCreate(null)}
+          disabled={!activeOrgId}
+          className="w-full justify-center sm:w-auto"
+        >
           <Plus width={16} height={16} /> Novo DUC
         </Button>
       </div>
 
-      {/* Abas */}
-      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      {/* Abas — largura total e distribuídas em mobile; inline em desktop */}
+      <div className="flex w-full rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:inline-flex sm:w-auto">
         <button
           onClick={() => setView("ducs")}
           className={
-            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "ducs" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          <FileText width={15} height={15} /> DUCs {totalDucs > 0 && `(${totalDucs})`}
+          <FileText width={15} height={15} className="shrink-0" /> DUCs {totalDucs > 0 && `(${totalDucs})`}
         </button>
         <button
           onClick={() => setView("kanban")}
           className={
-            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "kanban" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          <Sheet width={15} height={15} /> Kanban
+          <Sheet width={15} height={15} className="shrink-0" /> Kanban
         </button>
         <button
           onClick={() => setView("pending")}
           className={
-            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "pending" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          <Building width={15} height={15} /> Por documentar
+          <Building width={15} height={15} className="shrink-0" />{" "}
+          <span className="sm:hidden">Pendentes</span>
+          <span className="hidden sm:inline">Por documentar</span>
         </button>
       </div>
 
@@ -570,7 +576,7 @@ export default function DucList() {
         />
       ) : view === "kanban" ? (
         <div className="space-y-3">
-          <div className="relative sm:max-w-xs">
+          <div className="relative w-full sm:max-w-xs">
             <Search
               width={16}
               height={16}
@@ -592,13 +598,22 @@ export default function DucList() {
               <Spinner label="A carregar etapas…" />
             </Card>
           ) : (
-            <DucKanban
-              ducs={filtered}
-              clientNames={clientNames}
-              stages={kanbanStages}
-              onDropCard={requestMove}
-              onOpen={(id) => navigate(`/duc/${id}`)}
-            />
+            <>
+              {/* Indício de que o quadro faz scroll lateral (só em ecrãs estreitos) */}
+              {kanbanStages.length > 1 && (
+                <p className="flex items-center gap-1 text-xs text-slate-400 sm:hidden">
+                  <ChevronRight width={13} height={13} className="animate-pulse" />
+                  Desliza para o lado para ver as {kanbanStages.length} etapas
+                </p>
+              )}
+              <DucKanban
+                ducs={filtered}
+                clientNames={clientNames}
+                stages={kanbanStages}
+                onDropCard={requestMove}
+                onOpen={(id) => navigate(`/duc/${id}`)}
+              />
+            </>
           )}
         </div>
       ) : (
@@ -860,7 +875,7 @@ function DucsView({
                         {d.duc_number ?? "—"}
                       </div>
                     </div>
-                    <div onClick={(e) => e.stopPropagation()}>
+                    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                       <StatusSelect
                         value={d.status}
                         onChange={(s) => onStatusChange(d.id, s)}
@@ -869,11 +884,11 @@ function DucsView({
                   </div>
 
                   <div className="mt-3 flex items-center gap-2">
-                    <Badge className="bg-brand-50 text-brand-800 ring-brand-100">
-                      {VARIANT_LABELS[d.variant]}
+                    <Badge className="min-w-0 max-w-[45%] bg-brand-50 text-brand-800 ring-brand-100">
+                      <span className="truncate">{VARIANT_LABELS[d.variant]}</span>
                     </Badge>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100 sm:w-20">
                         <div
                           className="h-full rounded-full bg-brand transition-all"
                           style={{ width: `${(done / total) * 100}%` }}
@@ -883,8 +898,8 @@ function DucsView({
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5">
-                    <div className="flex items-center gap-2">
+                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <OpenBadge duc={d} />
                       <span className="text-xs text-slate-400">
                         {new Date(d.updated_at).toLocaleDateString("pt-PT")}
@@ -893,13 +908,14 @@ function DucsView({
                     <button
                       type="button"
                       title="Eliminar"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
+                      aria-label="Eliminar DUC"
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 active:bg-red-50 active:text-red-500"
                       onClick={(e) => {
                         e.stopPropagation();
                         onDelete(d);
                       }}
                     >
-                      <Trash width={15} height={15} />
+                      <Trash width={16} height={16} />
                     </button>
                   </div>
                 </Card>
@@ -1217,13 +1233,13 @@ function PendingView({
         <>
           {/* Hero — resumo da área com o caso mais urgente em destaque */}
           <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 ring-amber-100 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3 sm:items-center">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200">
                   <Clock width={22} height={22} />
                 </span>
-                <div>
-                  <p className="text-lg font-semibold text-slate-900">
+                <div className="min-w-0">
+                  <p className="text-base font-semibold text-slate-900 sm:text-lg">
                     {pending.length} cliente{pending.length === 1 ? "" : "s"} à espera de DUC
                   </p>
                   {oldest ? (
@@ -1239,7 +1255,11 @@ function PendingView({
                 </div>
               </div>
               {oldest && (
-                <Button size="sm" onClick={() => onCreate(oldest.c)}>
+                <Button
+                  size="sm"
+                  onClick={() => onCreate(oldest.c)}
+                  className="w-full justify-center sm:w-auto"
+                >
                   <Plus width={14} height={14} /> Documentar o mais antigo
                 </Button>
               )}
@@ -1321,12 +1341,13 @@ function PendingView({
                           size="sm"
                           onClick={() => onDismiss(c)}
                           title="Este cliente não precisa de DUC"
+                          className="min-h-[40px] flex-1 justify-center whitespace-nowrap border border-slate-200 sm:min-h-0 sm:flex-none sm:border-0"
                         >
                           Não precisa
                         </Button>
                         <Button
                           size="sm"
-                          className="flex-1 justify-center sm:flex-none"
+                          className="min-h-[40px] flex-1 justify-center sm:min-h-0 sm:flex-none"
                           onClick={() => onCreate(c)}
                         >
                           <Plus width={14} height={14} /> Criar DUC{" "}
@@ -1356,7 +1377,12 @@ function PendingView({
                   {initials(c.name)}
                 </span>
                 <p className="min-w-0 flex-1 truncate text-sm text-slate-500">{c.name}</p>
-                <Button variant="ghost" size="sm" onClick={() => onRestore(c)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => onRestore(c)}
+                >
                   Repor
                 </Button>
               </li>

@@ -587,15 +587,15 @@ export default function DucDetail() {
 
       {/* Cabeçalho + progresso + ações */}
       <Card className="mb-6 overflow-hidden p-0 print:border-0 print:shadow-none">
-        <div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 bg-gradient-to-br from-brand-50/60 via-white to-white p-5 print:bg-none">
-          <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-gradient-to-br from-brand-50/60 via-white to-white p-4 print:bg-none sm:gap-5 sm:p-5">
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-md bg-slate-900/5 px-2 py-0.5 font-mono text-xs font-medium tracking-tight text-slate-500">
                 {duc.duc_number}
               </span>
               <Badge className="bg-brand-50 text-brand-800 ring-brand-100">{VARIANT_LABELS[variant]}</Badge>
             </div>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
+            <h1 className="mt-2 break-words text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
               {clientName ?? duc.title ?? "DUC"}
             </h1>
             <div className="mt-4 flex items-center gap-3">
@@ -619,8 +619,8 @@ export default function DucDetail() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 px-5 py-3 print:hidden">
-          <div className="flex flex-1 flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 print:hidden sm:px-5">
+          <div className="hidden flex-1 flex-wrap items-center gap-2 sm:flex">
             <span className="mr-auto text-xs text-slate-400 sm:mr-0">
                 {error ? (
                   <span className="text-red-600">{error}</span>
@@ -635,25 +635,36 @@ export default function DucDetail() {
                 )}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <PdfMenu
-              open={pdfMenuOpen}
-              onOpenChange={setPdfMenuOpen}
-              onPrint={runPrint}
-            />
-            <Button variant="secondary" onClick={() => void handleShare()} disabled={sharingHeader}>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {/* No telemóvel, PDF e Guardar vivem na barra fixa inferior — aqui só
+                Partilhar, que não existe nessa barra. */}
+            <div className="hidden sm:block">
+              <PdfMenu
+                open={pdfMenuOpen}
+                onOpenChange={setPdfMenuOpen}
+                onPrint={runPrint}
+              />
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => void handleShare()}
+              disabled={sharingHeader}
+              className="flex-1 sm:flex-none"
+            >
               <ExternalLink /> {sharingHeader ? "A gerar…" : "Partilhar"}
             </Button>
-            <Button onClick={() => void save()} disabled={saving || !dirty}>
-              <Save /> Guardar
-            </Button>
+            <div className="hidden sm:block">
+              <Button onClick={() => void save()} disabled={saving || !dirty}>
+                <Save /> Guardar
+              </Button>
+            </div>
           </div>
         </div>
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-[248px_1fr]">
         {/* Rail de navegação */}
-        <nav className="-mx-4 flex gap-1.5 overflow-x-auto scroll-px-4 px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:rounded-xl lg:border lg:border-slate-200/70 lg:bg-white/60 lg:p-2 lg:px-2 lg:pb-2 lg:shadow-sm lg:sticky lg:top-20 lg:self-start">
+        <nav className="-mx-4 flex snap-x snap-proximity gap-1.5 overflow-x-auto scroll-px-4 px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden lg:mx-0 lg:snap-none lg:flex-col lg:gap-0.5 lg:overflow-visible lg:rounded-xl lg:border lg:border-slate-200/70 lg:bg-white/60 lg:p-2 lg:px-2 lg:pb-2 lg:shadow-sm lg:sticky lg:top-20 lg:self-start">
           {navItems.map((n) => {
             const active = activeKey === n.key;
             return (
@@ -663,7 +674,7 @@ export default function DucDetail() {
                 aria-current={active ? "page" : undefined}
                 onClick={() => setActiveKey(n.key)}
                 className={cx(
-                  "group relative flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-all lg:w-full",
+                  "group relative flex shrink-0 snap-start items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-all lg:w-full lg:px-2.5 lg:py-2",
                   active
                     ? "bg-brand text-white shadow-sm shadow-brand/20 lg:bg-brand-50 lg:font-semibold lg:text-brand-800 lg:shadow-none"
                     : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
@@ -862,7 +873,7 @@ export default function DucDetail() {
             dropUp
             iconOnly
           />
-          <Button onClick={() => void save()} disabled={saving || !dirty}>
+          <Button onClick={() => void save()} disabled={saving || !dirty} className="px-4 py-2.5">
             <Save /> Guardar
           </Button>
         </div>
@@ -1158,7 +1169,7 @@ function StageCard({
   return (
     <Card
       className={cx(
-        "p-5 print:border-0 print:shadow-none sm:p-6",
+        "p-4 print:border-0 print:shadow-none sm:p-6",
         done && "ring-1 ring-emerald-100"
       )}
     >
@@ -1257,6 +1268,7 @@ function StageCard({
         <Button
           variant={done ? "secondary" : "primary"}
           onClick={() => onToggleClose(stage.no, !done)}
+          className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
         >
           {done ? (
             "Reabrir etapa"
