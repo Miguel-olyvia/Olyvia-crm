@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { getEffectiveContractValue } from "@/utils/contractValue";
+import { useDebounce } from "@/hooks/useDebounce";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -110,6 +111,48 @@ const statusColors: Record<string, string> = {
  * "Sem comercial atribuido" e portanto o caso em que nem ha `assigned_to` nem
  * `created_by`, que e tambem quando a coluna mostra "—".
  */
+/**
+ * Subarvore de organizacoes da pagina de Contratos: empresa ativa + todos os
+ * descendentes em `anew_hierarchy`.
+ *
+ * Esta e a travessia que a query da lista ja fazia inline — foi extraida sem
+ * lhe mudar uma linha (mesmos `relationship_type`, mesmo BFS, mesmo fallback)
+ * para que a query das metricas possa usar EXACTAMENTE o mesmo conjunto de
+ * organizacoes. Se a lista e os cartoes resolverem o ambito por caminhos
+ * diferentes, contam sobre universos diferentes sem ninguem dar por isso.
+ *
+ * Deliberadamente NAO usa `resolveOrgSubtree` de "@/lib/orgSubtree": esse
+ * helper resolve a subarvore pela RPC `get_org_subtree_ids` e nao pelos
+ * `relationship_type` filtrados aqui. Trocar um pelo outro pode mudar o que a
+ * lista mostra, e isso e outra alteracao — nao esta.
+ */
+async function resolveContractsOrgSubtree(activeCompanyId: string): Promise<string[]> {
+  const subtreeIds = [activeCompanyId];
+  try {
+    const { data: allHierarchy } = await supabase
+      .from("anew_hierarchy")
+      .select("parent_org_id, child_org_id")
+      .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
+    const childrenMap = new Map<string, string[]>();
+    (allHierarchy || []).forEach((h: any) => {
+      if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
+      childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
+    });
+    const queue = [activeCompanyId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const children = childrenMap.get(current) || [];
+      for (const child of children) {
+        if (!subtreeIds.includes(child)) {
+          subtreeIds.push(child);
+          queue.push(child);
+        }
+      }
+    }
+  } catch { /* fallback to just activeCompany */ }
+  return subtreeIds;
+}
+
 const getContractComercialId = (contract: ClientContract): string | null =>
   (contract.assigned_to as string | null | undefined) || (contract.created_by ?? null) || null;
 
@@ -295,30 +338,10 @@ const ClientContracts = () => {
       if (!activeCompany?.id) return [];
       if (viewScope === "NONE") return [];
 
-      // Build subtree: activeCompany + all descendants
-      const subtreeIds = [activeCompany.id];
-      try {
-        const { data: allHierarchy } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id, child_org_id")
-          .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
-        const childrenMap = new Map<string, string[]>();
-        (allHierarchy || []).forEach((h: any) => {
-          if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
-          childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
-        });
-        const queue = [activeCompany.id];
-        while (queue.length > 0) {
-          const current = queue.shift()!;
-          const children = childrenMap.get(current) || [];
-          for (const child of children) {
-            if (!subtreeIds.includes(child)) {
-              subtreeIds.push(child);
-              queue.push(child);
-            }
-          }
-        }
-      } catch { /* fallback to just activeCompany */ }
+      // Subarvore: empresa ativa + descendentes. Partilhada com a query de
+      // metricas (resolveOrgSubtree) para que os cartoes de KPI e a lista
+      // contem sempre sobre o MESMO conjunto de organizacoes.
+      const subtreeIds = await resolveContractsOrgSubtree(activeCompany.id);
 
       // Visibilidade por ÁREA/organização: quem tem acesso à org (subárvore da
       // empresa ativa) vê TODOS os contratos dela, independentemente de quem os
@@ -650,7 +673,8 @@ const ClientContracts = () => {
       } else if (statusFilter === "signed") {
         // "Assinado" KPI/filter option represents both "signed" and "active"
         // statuses (there is no separate "active" option in the Estado dropdown)
-        // — keep this in sync with the kpis.signed definition above.
+        // — keep this in sync with the signed_count definition in
+        // client_contracts_list_metrics (supabase/migrations/20261115010000).
         result = result.filter(c => c.status === "signed" || c.status === "active");
       } else {
         result = result.filter(c => c.status === statusFilter);
@@ -675,41 +699,71 @@ const ClientContracts = () => {
     return result;
   }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo, comercialFilter]);
 
-  // KPIs — computed over filteredContracts so cards reflect active filters
-  const kpis = useMemo(() => {
-    const now = new Date();
-    const total = filteredContracts.length;
-    const totalValue = filteredContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const drafts = filteredContracts.filter(c => c.status === "draft");
-    const sent = filteredContracts.filter(c => c.status === "pending_signature");
-    const signed = filteredContracts.filter(c => c.status === "signed" || c.status === "active");
-    const expired = filteredContracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
-    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
-    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const avgValue = total > 0 ? totalValue / total : 0;
-    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
-    const expiring90 = filteredContracts.filter(c => {
-      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
-      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      return d > 0 && d <= 90;
-    });
-    // Avg sign time
-    let avgSignDays = 0;
-    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
-    if (signedWithDates.length > 0) {
-      const totalDays = signedWithDates.reduce((s, c) => {
-        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
-      }, 0);
-      avgSignDays = Math.round(totalDays / signedWithDates.length);
-    }
-    return {
-      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
-      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-    };
-  }, [filteredContracts]);
+  // KPIs — calculados NO SERVIDOR (client_contracts_list_metrics).
+  //
+  // Antes eram somados no browser sobre `filteredContracts`. Isso so estava
+  // certo porque esta lista carrega todos os contratos da subarvore de uma vez
+  // (sem .range()/.limit()): no dia em que ganhar paginacao, os cartoes
+  // passariam a contar apenas a pagina visivel — foi exactamente este padrao
+  // que fez os graficos de Orcamentos mostrarem 48 ganhos com o cartao ao lado
+  // a dizer 113.
+  //
+  // Ambito: a RPC NAO decide autorizacao. Recebe a mesma subarvore de
+  // organizacoes que a query da lista (resolveOrgSubtree) e e SECURITY INVOKER,
+  // por isso a RLS de client_contracts continua a ser a fronteira real — um
+  // utilizador nunca soma nos cartoes contratos que a lista nao lhe mostra.
+  // `viewScope === "NONE"` desliga a query, tal como desliga a lista.
+  //
+  // Os predicados dos filtros estao duplicados entre `filteredContracts` (aqui)
+  // e a RPC (no SQL). Sao duas copias da MESMA regra: qualquer filtro novo tem
+  // de ser adicionado nos dois sitios, ou os cartoes deixam de bater com a lista.
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const { data: metrics, isLoading: metricsLoading } = useQuery({
+    queryKey: [
+      "client-contracts-metrics", activeCompany?.id, viewScope,
+      statusFilter, debouncedSearch.trim(), onlyMine, currentUserId,
+      dateFrom?.toISOString() ?? null, dateTo?.toISOString() ?? null, comercialFilter,
+    ],
+    queryFn: async () => {
+      if (!activeCompany?.id) return null;
+      const organizationIds = await resolveContractsOrgSubtree(activeCompany.id);
+      const { data, error } = await (supabase as any).rpc("client_contracts_list_metrics", {
+        _organization_ids: organizationIds,
+        _status_filter: statusFilter,
+        _search: debouncedSearch.trim() || null,
+        _date_from: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+        _date_to: dateTo ? endOfDay(dateTo).toISOString() : null,
+        _only_mine: onlyMine && currentUserId ? currentUserId : null,
+        _comercial: comercialFilter !== "all" && comercialFilter !== "none" ? comercialFilter : null,
+        _comercial_none: comercialFilter === "none",
+        // Calculado a cada execucao (e nao incluido na queryKey) para os cartoes
+        // "a expirar"/"expirado" usarem sempre a hora do fetch sem invalidar a
+        // cache a cada render.
+        _now: new Date().toISOString(),
+      });
+      if (error) throw error;
+      return (Array.isArray(data) ? data[0] : data) ?? null;
+    },
+    enabled: !!activeCompany?.id && viewScope !== "NONE",
+  });
+
+  const kpis = useMemo(() => ({
+    total: metrics?.total_count ?? 0,
+    totalValue: Number(metrics?.total_value ?? 0),
+    draftCount: metrics?.draft_count ?? 0,
+    draftValue: Number(metrics?.draft_value ?? 0),
+    sentCount: metrics?.sent_count ?? 0,
+    sentValue: Number(metrics?.sent_value ?? 0),
+    signedCount: metrics?.signed_count ?? 0,
+    signedValue: Number(metrics?.signed_value ?? 0),
+    expiredCount: metrics?.expired_count ?? 0,
+    expiredValue: Number(metrics?.expired_value ?? 0),
+    activeValue: Number(metrics?.active_value ?? 0),
+    avgValue: Number(metrics?.avg_value ?? 0),
+    signRate: metrics?.sign_rate ?? 0,
+    expiring90Count: metrics?.expiring90_count ?? 0,
+    avgSignDays: metrics?.avg_sign_days ?? 0,
+  }), [metrics]);
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {
@@ -1492,7 +1546,9 @@ const ClientContracts = () => {
 
         {/* KPIs */}
         <div className="flex-shrink-0 p-4 md:px-6">
-          <div className="flex flex-wrap gap-3">
+          {/* Os cartoes esbatem enquanto as metricas do servidor recarregam,
+              para nunca dar a impressao de um numero final enquanto ainda muda. */}
+          <div className={`flex flex-wrap gap-3 transition-opacity ${metricsLoading ? "opacity-60" : ""}`}>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "all" ? "ring-2 ring-primary" : ""}`} onClick={() => setStatusFilter("all")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">TOTAL CONTRATOS</p>
@@ -1503,28 +1559,28 @@ const ClientContracts = () => {
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "draft" ? "ring-2 ring-yellow-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "draft" ? "all" : "draft")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-yellow-600 tracking-wider">DRAFT</p>
-              <p className="text-2xl font-black text-yellow-600">{kpis.drafts.length}</p>
+              <p className="text-2xl font-black text-yellow-600">{kpis.draftCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.draftValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "sent" ? "ring-2 ring-blue-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "sent" ? "all" : "sent")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-blue-600 tracking-wider">ENVIADO</p>
-              <p className="text-2xl font-black text-blue-600">{kpis.sent.length}</p>
+              <p className="text-2xl font-black text-blue-600">{kpis.sentCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.sentValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "signed" ? "ring-2 ring-green-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "signed" ? "all" : "signed")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-green-600 tracking-wider">ASSINADO</p>
-              <p className="text-2xl font-black text-green-600">{kpis.signed.length}</p>
+              <p className="text-2xl font-black text-green-600">{kpis.signedCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.signedValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "expired" ? "ring-2 ring-red-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "expired" ? "all" : "expired")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-red-600 tracking-wider">EXPIRADO</p>
-              <p className="text-2xl font-black text-red-600">{kpis.expired.length}</p>
+              <p className="text-2xl font-black text-red-600">{kpis.expiredCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.expiredValue)}</p>
             </CardContent>
           </Card>
@@ -1545,14 +1601,14 @@ const ClientContracts = () => {
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">TAXA ASSINATURA</p>
               <p className="text-2xl font-black text-primary">{kpis.signRate}%</p>
-              <p className="text-[10px] text-muted-foreground">{kpis.signed.length}/{kpis.sent.length + kpis.signed.length} assinados</p>
+              <p className="text-[10px] text-muted-foreground">{kpis.signedCount}/{kpis.sentCount + kpis.signedCount} assinados</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "expiring" ? "ring-2 ring-orange-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "expiring" ? "all" : "expiring")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">A EXPIRAR (90D)</p>
-              <p className={`text-2xl font-black ${kpis.expiring90.length > 0 ? "text-orange-600" : ""}`}>{kpis.expiring90.length}</p>
-              <p className="text-[10px] text-muted-foreground">{kpis.expiring90.length === 0 ? "Sem urgentes" : "Renovações urgentes"}</p>
+              <p className={`text-2xl font-black ${kpis.expiring90Count > 0 ? "text-orange-600" : ""}`}>{kpis.expiring90Count}</p>
+              <p className="text-[10px] text-muted-foreground">{kpis.expiring90Count === 0 ? "Sem urgentes" : "Renovações urgentes"}</p>
             </CardContent>
           </Card>
           <Card className="min-w-[120px] flex-1">
