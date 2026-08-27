@@ -1,5 +1,14 @@
 {
+  "buildCommand": "npm run build && npm --prefix duc-app install && npm --prefix duc-app run build && rm -rf dist/duc-app && cp -r duc-app/dist dist/duc-app",
   "rewrites": [
+    {
+      "source": "/duc-app",
+      "destination": "/duc-app/index.html"
+    },
+    {
+      "source": "/duc-app/(.*)",
+      "destination": "/duc-app/index.html"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
