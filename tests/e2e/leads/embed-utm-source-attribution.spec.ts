@@ -755,9 +755,11 @@ test.describe('GA parity: session origin and paid vs organic', () => {
     expect(lead.tracking?.referrer).toContain('google.com')
     expect(lead.tracking?.gclid, 'no click id on an organic click').toBeUndefined()
     expect(lead.source, 'organic google is "Google", not "Google Ads"').toBe('Google')
-    // There is no lead_sources row named "Google" in this database, so the
-    // internal id stays unresolved rather than being invented.
-    expect(lead.source_id).toBeNull()
+    // A origem global "Google" passou a existir (20261114020000), distinta de
+    // "Google Ads", por isso o id resolve pelo nome normalizado. O que importa
+    // aqui e que NAO resolve para "Google Ads": organico nunca conta como pago.
+    expect(lead.source_id, 'organic google resolves to its own source').not.toBeNull()
+    expect(lead.source, 'must not be the paid source').not.toBe('Google Ads')
     expect(mediumOf(lead), 'organic traffic must not get a paid medium').toBeNull()
   })
 
@@ -837,8 +839,9 @@ test.describe('GA parity: expanded referrer table, end to end', () => {
     console.log('[TIKTOK] lead:', JSON.stringify(lead, null, 2))
     expect(lead.tracking?.referrer).toContain('tiktok.com')
     expect(lead.source).toBe('TikTok')
-    // No "TikTok" row exists -> id stays null rather than being guessed.
-    expect(lead.source_id).toBeNull()
+    // A origem global "TikTok" passou a existir (20261114020000), por isso o id
+    // resolve pelo nome normalizado em vez de ficar nulo.
+    expect(lead.source_id, 'tiktok resolves to its own source').not.toBeNull()
   })
 
   // -- MATRIX #7 (security): `notinstagram.com` is a domain anybody can
