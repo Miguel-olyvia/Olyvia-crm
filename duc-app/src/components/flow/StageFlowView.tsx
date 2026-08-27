@@ -9,6 +9,7 @@ import {
   type Edge,
   type NodeProps,
   type NodeTypes,
+  type NodeMouseHandler,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { cx } from "../ui";
@@ -34,19 +35,20 @@ function ProgressNodeImpl({ data }: NodeProps<ProgressNode>) {
   return (
     <div
       className={cx(
-        "w-[220px] rounded-2xl border bg-white px-4 py-3 shadow-card transition-shadow",
+        // Nó maior e clicável (realce leve em hover)
+        "w-[260px] cursor-pointer rounded-2xl border bg-white px-5 py-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lg",
         status === "done"
-          ? "border-emerald-200"
+          ? "border-emerald-200 hover:border-emerald-300"
           : status === "current"
-            ? "border-brand ring-2 ring-brand/25"
-            : "border-slate-200"
+            ? "border-brand ring-2 ring-brand/25 hover:ring-brand/40"
+            : "border-slate-200 hover:border-slate-300"
       )}
     >
       {!data.isFirst && <Handle type="target" position={Position.Top} className="!opacity-0" />}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-3">
         <span
           className={cx(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold",
             status === "done"
               ? "bg-emerald-500 text-white"
               : status === "current"
@@ -54,11 +56,11 @@ function ProgressNodeImpl({ data }: NodeProps<ProgressNode>) {
                 : "bg-slate-100 text-slate-500"
           )}
         >
-          {status === "done" ? <Check width={14} height={14} /> : data.no}
+          {status === "done" ? <Check width={18} height={18} /> : data.no}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-800">{data.title}</p>
-          <p className="truncate text-[11px] text-slate-400">
+          <p className="truncate text-base font-semibold text-slate-800">{data.title}</p>
+          <p className="truncate text-xs text-slate-400">
             {data.responsible || "—"}
             {status === "current" && " · em curso"}
           </p>
@@ -74,7 +76,7 @@ const nodeTypes: NodeTypes = { progress: ProgressNodeComponent };
 
 const NODE_X = 40;
 const NODE_Y0 = 20;
-const NODE_DY = 120;
+const NODE_DY = 150;
 
 /**
  * Vista de fluxo read-only das etapas de um DUC. Cada nó reflete o estado atual
@@ -84,12 +86,20 @@ export function StageFlowView({
   stages,
   tracking,
   currentStage,
+  onSelectStage,
 }: {
   stages: DucStage[];
   tracking: TrackingEntry[];
   currentStage: number;
+  /** Opcional: clicar num nó leva a essa etapa (nº da etapa). */
+  onSelectStage?: (stageNo: number) => void;
 }) {
   const isDone = (no: number) => tracking.find((t) => t.stage === no)?.state === "done";
+
+  // Clique num nó → seleciona a etapa correspondente (id === String(stage.no))
+  const handleNodeClick: NodeMouseHandler = (_event, node) => {
+    onSelectStage?.(Number(node.id));
+  };
 
   const nodes = useMemo<ProgressNode[]>(
     () =>
@@ -137,18 +147,19 @@ export function StageFlowView({
   );
 
   return (
-    <div className="h-[62vh] min-h-[420px] w-full overflow-hidden rounded-xl border border-slate-200/80 bg-slate-50/40">
+    <div className="h-[70vh] min-h-[520px] w-full overflow-hidden rounded-xl border border-slate-200/80 bg-slate-50/40">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+        fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
         minZoom={0.3}
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
         nodesConnectable={false}
         nodesDraggable={false}
+        onNodeClick={handleNodeClick}
         panOnScroll
         deleteKeyCode={null}
       >

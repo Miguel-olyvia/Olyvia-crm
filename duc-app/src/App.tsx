@@ -10,6 +10,8 @@ import DucDetail from "./pages/DucDetail";
 // Editor visual (React Flow) só carrega quando se abre /config — mantém o bundle
 // de arranque leve.
 const DucConfig = lazy(() => import("./pages/DucConfig"));
+const Notifications = lazy(() => import("./pages/Notifications"));
+const Help = lazy(() => import("./pages/Help"));
 
 export default function App() {
   return (
@@ -29,6 +31,22 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar editor…" />}>
               <DucConfig />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/notificacoes"
+          element={
+            <Suspense fallback={<Spinner label="A carregar…" />}>
+              <Notifications />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/ajuda"
+          element={
+            <Suspense fallback={<Spinner label="A carregar…" />}>
+              <Help />
             </Suspense>
           }
         />

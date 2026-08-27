@@ -20,6 +20,21 @@ export const Plus = (p: IconProps) => (
   </svg>
 );
 
+export const Bell = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </svg>
+);
+
+export const Help = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+    <path d="M12 17h.01" />
+  </svg>
+);
+
 /** Marca do DUC — documento com traço "à mão" (linhas irregulares), só outline. */
 export const DucMark = (p: IconProps) => (
   <svg

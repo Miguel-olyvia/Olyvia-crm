@@ -77,10 +77,8 @@ export default function DucDetail() {
 
   // Etapa a aguardar confirmação de fecho (null = sem diálogo aberto).
   const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
-  // Fecho bloqueado por campos obrigatórios em falta.
-  const [blockedClose, setBlockedClose] = useState<{ stageNo: number; missing: string[] } | null>(
-    null
-  );
+  // Fecho bloqueado (ordem das etapas OU campos obrigatórios em falta).
+  const [blockedClose, setBlockedClose] = useState<{ title: string; items: string[] } | null>(null);
 
   const savingRef = useRef(false);
   // Conta cada edição; usada para NÃO limpar `dirty` quando o utilizador altera
@@ -241,11 +239,29 @@ export default function DucDetail() {
       void closeStage(stage, false);
       return;
     }
+    // Regra: só se pode fechar se as etapas ANTERIORES (aplicáveis) já estiverem
+    // fechadas — não se salta etapas.
+    const openPrev = configStages.filter(
+      (s) =>
+        stageAppliesToVariant(s, variant) &&
+        s.no < stage &&
+        tracking.find((t) => t.stage === s.no)?.state !== "done"
+    );
+    if (openPrev.length > 0) {
+      setBlockedClose({
+        title: "Fecha primeiro as etapas anteriores",
+        items: openPrev.map((s) => `${s.no}. ${s.title.split(" — ")[0]}`),
+      });
+      return;
+    }
     const st = configStages.find((s) => s.no === stage);
     if (st) {
       const gaps = missingRequiredFields(st, variant, blocks[st.key]);
       if (gaps.length > 0) {
-        setBlockedClose({ stageNo: stage, missing: gaps.map((f) => f.label) });
+        setBlockedClose({
+          title: "Faltam campos obrigatórios",
+          items: gaps.map((f) => f.label),
+        });
         return;
       }
     }
@@ -604,7 +620,15 @@ export default function DucDetail() {
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> Pendente</span>
                 </div>
               </div>
-              <StageFlowView stages={visibleStages} tracking={tracking} currentStage={currentStage} />
+              <StageFlowView
+                stages={visibleStages}
+                tracking={tracking}
+                currentStage={currentStage}
+                onSelectStage={(no) => {
+                  const st = visibleStages.find((s) => s.no === no);
+                  if (st) setActiveKey(st.key);
+                }}
+              />
             </Card>
           </Section>
 
@@ -718,18 +742,15 @@ export default function DucDetail() {
 
       {blockedClose && (
         <Modal
-          title="Faltam campos obrigatórios"
+          title={blockedClose.title}
           size="sm"
           onClose={() => setBlockedClose(null)}
           footer={<Button onClick={() => setBlockedClose(null)}>Entendi</Button>}
         >
           <div className="space-y-2">
-            <p className="text-sm text-slate-600">
-              Não é possível fechar a etapa {blockedClose.stageNo} — estes campos obrigatórios estão
-              por preencher:
-            </p>
+            <p className="text-sm text-slate-600">Não é possível fechar esta etapa ainda:</p>
             <ul className="max-h-52 space-y-1 overflow-y-auto rounded-lg bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-inset ring-amber-100">
-              {blockedClose.missing.map((m, i) => (
+              {blockedClose.items.map((m, i) => (
                 <li key={i} className="flex gap-1.5">
                   <span className="text-amber-500">•</span> {m}
                 </li>
