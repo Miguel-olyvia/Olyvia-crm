@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock } from "../components/icons";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
@@ -95,6 +95,10 @@ export default function DucDetail() {
   const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
   // Fecho bloqueado (ordem das etapas OU campos obrigatórios em falta).
   const [blockedClose, setBlockedClose] = useState<{ title: string; items: string[] } | null>(null);
+  // Link público gerado a partir do cabeçalho.
+  const [shareModalUrl, setShareModalUrl] = useState<string | null>(null);
+  const [sharingHeader, setSharingHeader] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Âmbito da impressão: documento completo ou só a etapa em foco. O menu de PDF
   // (cabeçalho + barra mobile) escreve aqui antes de chamar window.print().
@@ -330,6 +334,26 @@ export default function DucDetail() {
     setVariant(v);
     markDirty();
   };
+  // Gera um link público (só leitura) a partir do cabeçalho e copia-o.
+  const handleShare = async () => {
+    if (!duc) return;
+    setSharingHeader(true);
+    setShareCopied(false);
+    const res = await createShare(duc.id, duc.organization_id, businessUserId);
+    setSharingHeader(false);
+    if ("error" in res) {
+      setError(
+        /exist|relation|schema cache|permission|denied|not find/i.test(res.error)
+          ? "Falta aplicar a tabela de partilhas no Supabase (duc-app/db/schema.sql §11)."
+          : res.error
+      );
+      return;
+    }
+    const url = `${window.location.origin}${import.meta.env.BASE_URL}share/${res.token}`;
+    void navigator.clipboard?.writeText(url).then(() => setShareCopied(true)).catch(() => {});
+    setShareModalUrl(url);
+  };
+
   const changeStatus = (s: DucStatus) => {
     if (id && duc && s !== status) {
       void logDucEvent({
@@ -607,6 +631,9 @@ export default function DucDetail() {
                 onOpenChange={setPdfMenuOpen}
                 onPrint={runPrint}
               />
+              <Button variant="secondary" onClick={() => void handleShare()} disabled={sharingHeader}>
+                <ExternalLink /> {sharingHeader ? "A gerar…" : "Partilhar"}
+              </Button>
               <Button onClick={() => void save()} disabled={saving || !dirty}>
                 <Save /> Guardar
               </Button>
@@ -878,6 +905,50 @@ export default function DucDetail() {
                 </li>
               ))}
             </ul>
+          </div>
+        </Modal>
+      )}
+
+      {shareModalUrl && (
+        <Modal
+          title="Link público (só leitura)"
+          size="md"
+          onClose={() => setShareModalUrl(null)}
+          footer={<Button onClick={() => setShareModalUrl(null)}>Fechar</Button>}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Qualquer pessoa com este link vê o documento completo, sem conta. Não é indexado no
+              Google. Podes revogá-lo na aba <span className="font-medium">Colaboradores</span>.
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+              <input
+                readOnly
+                value={shareModalUrl}
+                onFocus={(e) => e.target.select()}
+                className="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-600 outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(shareModalUrl)
+                    .then(() => setShareCopied(true))
+                    .catch(() => {});
+                }}
+                className="shrink-0 rounded-md px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand-50"
+              >
+                {shareCopied ? "Copiado!" : "Copiar"}
+              </button>
+            </div>
+            <a
+              href={shareModalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark"
+            >
+              Abrir numa nova aba <ExternalLink width={14} height={14} />
+            </a>
           </div>
         </Modal>
       )}
