@@ -53,8 +53,12 @@ const UNCATEGORIZED_VALUE = "__uncategorized__";
 const PAGE_SIZE = 30;
 
 function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
-  if (stock.quantity <= stock.reorder_point) return "low";
-  if (stock.quantity >= stock.maximum_quantity) return "overstock";
+  // reorder_point/maximum_quantity = 0 means "never configured", not "reencomendar
+  // já" — sem isto, qualquer stock nunca configurado (0/0) aparecia sempre como
+  // "Stock Baixo", mesmo sem limiar nenhum definido. Alinhado com a mesma regra
+  // já usada no motor de alertas (generate-notifications, stock_low).
+  if (stock.reorder_point > 0 && stock.quantity <= stock.reorder_point) return "low";
+  if (stock.maximum_quantity > 0 && stock.quantity >= stock.maximum_quantity) return "overstock";
   return "normal";
 }
 

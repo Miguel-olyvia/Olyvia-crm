@@ -111,7 +111,10 @@ export default function ProductSuppliersDialog({ open, onOpenChange, productId, 
 
   const stockStatus = (row: WarehouseStock) => {
     if (row.quantity <= 0) return { label: "Esgotado", variant: "destructive" as const };
-    if (row.quantity <= row.reorder_point) return { label: "Abaixo do ponto de encomenda", variant: "outline" as const };
+    // reorder_point = 0 significa "nunca configurado", não "abaixo do ponto de
+    // encomenda" — mesma regra do motor de alertas (generate-notifications) e
+    // de Stocks.tsx (getStockStatusCode).
+    if (row.reorder_point > 0 && row.quantity <= row.reorder_point) return { label: "Abaixo do ponto de encomenda", variant: "outline" as const };
     return { label: "OK", variant: "default" as const };
   };
 
