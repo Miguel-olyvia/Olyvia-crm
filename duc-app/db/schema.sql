@@ -591,3 +591,48 @@ CREATE POLICY anew_client_duc_attachments_collab_select
   ON public.anew_client_duc_attachments
   FOR SELECT TO authenticated
   USING (public.is_duc_collaborator(duc_id));
+
+-- ============================================================
+-- 10. Chat / conversa por DUC (com @menções)
+-- ============================================================
+-- Cada DUC tem um fio de conversa. Membros da organização (área) e colaboradores
+-- externos podem ler e escrever. `mentions` guarda os anew_users.id mencionados.
+
+CREATE TABLE IF NOT EXISTS public.anew_client_duc_messages (
+  id               uuid        NOT NULL DEFAULT gen_random_uuid(),
+  duc_id           uuid        NOT NULL REFERENCES public.anew_client_ducs (id) ON DELETE CASCADE,
+  organization_id  uuid        NOT NULL,
+  author_id        uuid,       -- anew_users.id (null se externo)
+  author_name      text,
+  body             text        NOT NULL,
+  mentions         jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT anew_client_duc_messages_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_duc_messages_duc
+  ON public.anew_client_duc_messages (duc_id, created_at);
+
+ALTER TABLE public.anew_client_duc_messages ENABLE ROW LEVEL SECURITY;
+
+-- Acesso: membros da org do DUC OU colaboradores externos convidados.
+DROP POLICY IF EXISTS anew_client_duc_messages_select ON public.anew_client_duc_messages;
+CREATE POLICY anew_client_duc_messages_select
+  ON public.anew_client_duc_messages
+  FOR SELECT TO authenticated
+  USING (
+    organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    OR public.is_duc_collaborator(duc_id)
+  );
+
+DROP POLICY IF EXISTS anew_client_duc_messages_insert ON public.anew_client_duc_messages;
+CREATE POLICY anew_client_duc_messages_insert
+  ON public.anew_client_duc_messages
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    OR public.is_duc_collaborator(duc_id)
+  );
+
+-- Sem UPDATE/DELETE pela app (conversa imutável).
+GRANT SELECT, INSERT ON public.anew_client_duc_messages TO authenticated;

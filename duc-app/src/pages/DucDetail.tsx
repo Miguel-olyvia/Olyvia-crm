@@ -7,6 +7,7 @@ import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, 
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
+import { DucChat } from "../components/DucChat";
 import {
   fetchClientOlyviaInfo,
   prefillBlocksFromInfo,
@@ -88,6 +89,12 @@ export default function DucDetail() {
   const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
   // Fecho bloqueado (ordem das etapas OU campos obrigatórios em falta).
   const [blockedClose, setBlockedClose] = useState<{ title: string; items: string[] } | null>(null);
+
+  // Âmbito da impressão: documento completo ou só a etapa em foco. O menu de PDF
+  // (cabeçalho + barra mobile) escreve aqui antes de chamar window.print().
+  const [printScope, setPrintScope] = useState<"all" | "current">("all");
+  // Controla a abertura do menu de PDF (desktop e mobile partilham o estado).
+  const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
 
   const savingRef = useRef(false);
   // Conta cada edição; usada para NÃO limpar `dirty` quando o utilizador altera
@@ -359,6 +366,15 @@ export default function DucDetail() {
       });
   };
 
+  // Dispara a impressão no âmbito escolhido. Fixa o `printScope` (React ainda
+  // não re-renderizou ao clicar) e espera um tick para o atributo `data-print-*`
+  // já estar no DOM antes de abrir o diálogo de impressão do browser.
+  const runPrint = (scope: "all" | "current") => {
+    setPrintScope(scope);
+    setPdfMenuOpen(false);
+    requestAnimationFrame(() => window.print());
+  };
+
   // ---- gravar -------------------------------------------------------------
 
   const save = useCallback(async () => {
@@ -500,6 +516,13 @@ export default function DucDetail() {
   const totalStages = visibleStages.length || tracking.length || 1;
   const doneStages = visibleStages.filter((s) => stageDone(s.no)).length;
 
+  // Secção (keyName) a manter na impressão "só a etapa atual": a etapa em foco no
+  // rail, ou a etapa em curso se estivermos noutra vista (rastreio, anexos…).
+  const currentSectionKey =
+    visibleStages.find((s) => s.key === activeKey)?.key ??
+    visibleStages.find((s) => s.no === currentStage)?.key ??
+    activeKey;
+
   if (loading) return <Spinner label="A carregar DUC…" />;
   if (notFound || !duc) {
     return (
@@ -512,6 +535,7 @@ export default function DucDetail() {
   const navItems: Array<{ key: string; label: string; done?: boolean; no?: number }> = [
     { key: "rastreio", label: "Rastreio do testemunho" },
     { key: "fluxo", label: "Fluxo" },
+    { key: "chat", label: "Conversa" },
     ...visibleStages.map((s) => ({
       key: s.key,
       label: `${s.no}. ${s.title.split(" — ")[1] ?? s.title}`,
@@ -525,7 +549,12 @@ export default function DucDetail() {
   ];
 
   return (
-    <div className="pb-24 md:pb-4">
+    <div className="pb-24 md:pb-4" data-print-scope={printScope}>
+      {/* CSS de impressão — gera um DOCUMENTO (não um screenshot da viewport):
+          cada etapa em página nova, campos legíveis, controlos escondidos. No
+          âmbito "current" só a secção marcada com data-print-current aparece. */}
+      <style>{PRINT_CSS}</style>
+
       {/* Cabeçalho + progresso + ações */}
       <Card className="mb-6 p-5 print:border-0 print:shadow-none">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -567,9 +596,11 @@ export default function DucDetail() {
                   "Tudo guardado"
                 )}
               </span>
-              <Button variant="secondary" onClick={() => window.print()}>
-                <Printer /> PDF
-              </Button>
+              <PdfMenu
+                open={pdfMenuOpen}
+                onOpenChange={setPdfMenuOpen}
+                onPrint={runPrint}
+              />
               <Button onClick={() => void save()} disabled={saving || !dirty}>
                 <Save /> Guardar
               </Button>
@@ -638,11 +669,19 @@ export default function DucDetail() {
             </p>
           </div>
 
-          <Section active={activeKey === "rastreio"} keyName="rastreio">
+          <Section
+            active={activeKey === "rastreio"}
+            keyName="rastreio"
+            printCurrent={currentSectionKey === "rastreio"}
+          >
             <TrackingBoard stages={visibleStages} tracking={tracking} onChange={setTrackingEntry} onToggleClose={requestToggleClose} currentStage={currentStage} onStageChange={changeStage} />
           </Section>
 
-          <Section active={activeKey === "fluxo"} keyName="fluxo">
+          <Section
+            active={activeKey === "fluxo"}
+            keyName="fluxo"
+            printCurrent={currentSectionKey === "fluxo"}
+          >
             <Card className="p-3 print:hidden">
               <div className="mb-3 flex items-center justify-between px-2 pt-1">
                 <h2 className="text-base font-semibold text-slate-800">Fluxo do DUC</h2>
@@ -664,8 +703,23 @@ export default function DucDetail() {
             </Card>
           </Section>
 
+          <Section active={activeKey === "chat"} keyName="chat">
+            <DucChat
+              ducId={duc.id}
+              orgId={duc.organization_id}
+              businessUserId={businessUserId}
+              userName={userName}
+              ducNumber={duc.duc_number}
+            />
+          </Section>
+
           {visibleStages.map((stage) => (
-            <Section key={stage.key} active={activeKey === stage.key} keyName={stage.key}>
+            <Section
+              key={stage.key}
+              active={activeKey === stage.key}
+              keyName={stage.key}
+              printCurrent={currentSectionKey === stage.key}
+            >
               <StageCard
                 stage={stage}
                 variant={variant}
@@ -687,7 +741,11 @@ export default function DucDetail() {
             </Section>
           ))}
 
-          <Section active={activeKey === "registo"} keyName="registo">
+          <Section
+            active={activeKey === "registo"}
+            keyName="registo"
+            printCurrent={currentSectionKey === "registo"}
+          >
             <Card className="p-5 print:border-0 print:shadow-none">
               <ItemsTable
                 section={CHANGE_LOG_COLUMNS}
@@ -699,11 +757,19 @@ export default function DucDetail() {
             </Card>
           </Section>
 
-          <Section active={activeKey === "historico"} keyName="historico">
+          <Section
+            active={activeKey === "historico"}
+            keyName="historico"
+            printCurrent={currentSectionKey === "historico"}
+          >
             <HistoryTimeline duc={duc} tracking={tracking} stages={visibleStages} />
           </Section>
 
-          <Section active={activeKey === "anexos"} keyName="anexos">
+          <Section
+            active={activeKey === "anexos"}
+            keyName="anexos"
+            printCurrent={currentSectionKey === "anexos"}
+          >
             {businessUserId ? (
               <AttachmentsPanel ducId={duc.id} orgId={duc.organization_id} businessUserId={businessUserId} />
             ) : null}
@@ -737,9 +803,13 @@ export default function DucDetail() {
               "Tudo guardado"
             )}
           </span>
-          <Button variant="secondary" onClick={() => window.print()} aria-label="Exportar PDF">
-            <Printer />
-          </Button>
+          <PdfMenu
+            open={pdfMenuOpen}
+            onOpenChange={setPdfMenuOpen}
+            onPrint={runPrint}
+            dropUp
+            iconOnly
+          />
           <Button onClick={() => void save()} disabled={saving || !dirty}>
             <Save /> Guardar
           </Button>
@@ -809,18 +879,142 @@ export default function DucDetail() {
   );
 }
 
-/** Secção: visível no ecrã só se ativa; sempre visível na impressão. */
+// ---------------------------------------------------------------------------
+
+/** Menu de PDF: botão que abre um dropdown com "Documento completo" e "Só a
+ *  etapa atual". Fecha ao clicar fora ou ao escolher. Escondido na impressão. */
+function PdfMenu({
+  open,
+  onOpenChange,
+  onPrint,
+  dropUp,
+  iconOnly,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onPrint: (scope: "all" | "current") => void;
+  /** Abre para cima (barra fixa mobile). */
+  dropUp?: boolean;
+  /** Só ícone, sem rótulo "PDF" (barra mobile). */
+  iconOnly?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fecha ao clicar fora do menu.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={ref} className="relative print:hidden">
+      <Button
+        variant="secondary"
+        onClick={() => onOpenChange(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Exportar PDF"
+      >
+        <Printer />
+        {!iconOnly && "PDF"}
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className={cx(
+            "absolute right-0 z-40 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-lg",
+            dropUp ? "bottom-full mb-2" : "top-full mt-2"
+          )}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onPrint("all")}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+          >
+            <FileText width={15} height={15} className="text-slate-400" />
+            Documento completo
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onPrint("current")}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+          >
+            <Printer width={15} height={15} className="text-slate-400" />
+            Só a etapa atual
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/** CSS aplicado só na impressão. Trata o detalhe como documento paginado. */
+const PRINT_CSS = `
+@media print {
+  /* Página A4 com margens confortáveis. */
+  @page { size: A4; margin: 16mm 14mm; }
+
+  /* Cada secção/etapa começa em página nova e não se corta a meio. */
+  [data-print-scope] [data-section] { break-before: page; break-inside: auto; }
+  [data-print-scope] [data-section]:first-of-type { break-before: auto; }
+  [data-print-scope] .print\\:mb-6 { margin-bottom: 0; }
+
+  /* Cartões e linhas de tabela: não partir a meio de uma página. */
+  [data-print-scope] [data-section] > * { break-inside: avoid; }
+  [data-print-scope] tr, [data-print-scope] .grid > * { break-inside: avoid; }
+
+  /* Âmbito "só a etapa atual": esconde tudo menos a secção marcada. */
+  [data-print-scope="current"] [data-section]:not([data-print-current]) { display: none !important; }
+  [data-print-scope="current"] [data-print-current] { break-before: auto; }
+
+  /* Campos: imprimir o VALOR de forma legível — sem sombras, fundo branco,
+     bordas leves, e sem cortar o texto. */
+  [data-print-scope] input,
+  [data-print-scope] textarea,
+  [data-print-scope] select {
+    border: 1px solid #cbd5e1 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+  }
+  /* Textarea cresce com o conteúdo em vez de cortar/scroll. */
+  [data-print-scope] textarea { height: auto !important; min-height: 3.5rem; white-space: pre-wrap; }
+  /* Tabelas de itens: sem scroll horizontal, colunas visíveis. */
+  [data-print-scope] .overflow-x-auto { overflow: visible !important; }
+}
+`;
+
+/** Secção: visível no ecrã só se ativa; na impressão sai sempre (âmbito "all")
+ *  ou só a que estiver marcada como atual (âmbito "current", via CSS). */
 function Section({
   active,
   keyName,
+  printCurrent,
   children,
 }: {
   active: boolean;
   keyName: string;
+  /** Marca esta secção como a "etapa atual" para a impressão de âmbito único. */
+  printCurrent?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section data-section={keyName} className={cx(!active && "hidden print:block", "print:mb-6")}>
+    <section
+      data-section={keyName}
+      data-print-current={printCurrent ? "" : undefined}
+      className={cx(!active && "hidden print:block", "print:mb-6")}
+    >
       {children}
     </section>
   );

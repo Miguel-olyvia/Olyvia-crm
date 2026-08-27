@@ -18,6 +18,7 @@ import {
 import { Plus, Search, Trash, FileText, Building, ChevronRight } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
+import { Celebration } from "../components/Celebration";
 import {
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -206,6 +207,7 @@ export default function DucList() {
   const [showCreate, setShowCreate] = useState(false);
   const [presetClient, setPresetClient] = useState<ClientOption | null>(null);
   const [deleting, setDeleting] = useState<DucRecord | null>(null);
+  const [celebrateId, setCelebrateId] = useState<string | null>(null);
 
   const [pending, setPending] = useState<ClientOption[]>([]);
   const [contractCount, setContractCount] = useState(0);
@@ -596,7 +598,22 @@ export default function DucList() {
             setShowCreate(false);
             setPresetClient(null);
           }}
-          onCreated={(id) => navigate(`/duc/${id}`)}
+          onCreated={(id) => {
+            // Fecha o modal e festeja antes de abrir o novo DUC.
+            setShowCreate(false);
+            setPresetClient(null);
+            setCelebrateId(id);
+          }}
+        />
+      )}
+
+      {celebrateId && (
+        <Celebration
+          onDone={() => {
+            const id = celebrateId;
+            setCelebrateId(null);
+            navigate(`/duc/${id}`);
+          }}
         />
       )}
 
