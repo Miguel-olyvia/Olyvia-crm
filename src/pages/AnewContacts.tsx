@@ -441,9 +441,12 @@ const AnewContacts = () => {
     const newContact = searchParams.get("newContact");
     if (newContact === "true") { setOpen(true); setSearchParams({}); return; }
  
-    const openId = searchParams.get("open");
+    const openIdParam = searchParams.get("open");
+    const openContactParam = searchParams.get("open_contact");
+    const openContactIsValidUuid = !!openContactParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(openContactParam);
+    const openId = openIdParam || (openContactIsValidUuid ? openContactParam : null);
     if (!openId || selectedContact) return;
- 
+
     const openFromQuery = async () => {
       const contactPool = allContacts.length > 0 ? allContacts : contacts;
       const found = findScopedContactByRef(contactPool, openId, currentScopeOptions);
@@ -1848,6 +1851,47 @@ const AnewContacts = () => {
         <ModuleAlertsBanner
           alerts={personalizedContactAlerts}
           onDismiss={dismissContactAlert}
+          onAction={async (alert) => {
+            // "Ligar agora" — mirrors the phone-resolution pattern used in AnewClients.tsx.
+            // Contact alerts are grouped per-user, so action_config.entity_ids holds one or
+            // more anew_contacts.id values; the button acts on the first one in the list.
+            const callTargetIds = (alert.action_config as any)?.entity_ids as string[] | undefined;
+            const callTargetRef = callTargetIds?.[0] || (alert.action_config as any)?.entity_id || (alert.action_config as any)?.contact_id;
+            if (!callTargetRef) return;
+
+            const contactPool = (allContacts.length > 0 ? allContacts : contacts);
+            let callTargetContact: ContactRecord | undefined = findScopedContactByRef(contactPool, callTargetRef, currentScopeOptions);
+
+            if (!callTargetContact && viewScope !== "NONE") {
+              const scopeFilter = buildContactScopeOrFilter(viewScope, scopedUserIds);
+              let callLookupQuery = supabase
+                .from("anew_contacts")
+                .select("id, entity_id, organization_id, root_organization_id, status, source_type, source_lead_id, assigned_to, notes, created_at, created_by, last_interaction_at")
+                .or(`id.eq.${callTargetRef},entity_id.eq.${callTargetRef}`)
+                .is("deleted_at", null)
+                .is("converted_to_client_id", null);
+              if (effectiveOrgIds.length > 0) callLookupQuery = callLookupQuery.in("organization_id", effectiveOrgIds);
+              if (scopeFilter) callLookupQuery = callLookupQuery.or(scopeFilter);
+              const { data: callLookupRows } = await callLookupQuery.limit(1);
+              if (callLookupRows?.[0]) {
+                await resolveEntities([callLookupRows[0].entity_id]);
+                callTargetContact = callLookupRows[0] as ContactRecord;
+              }
+            }
+
+            if (!callTargetContact) {
+              toast({ title: "Contacto não encontrado", variant: "destructive" });
+              return;
+            }
+
+            const callIdentity = getIdentity(callTargetContact.entity_id);
+            if (callIdentity?.phone) {
+              const callPhoneNumber = `${(callIdentity.phone_country_code || '+351').replace(/\s/g, '')}${callIdentity.phone.replace(/\s/g, '')}`;
+              window.location.href = `tel:${callPhoneNumber}`;
+            } else {
+              toast({ title: "Sem telefone", description: "Este contacto não tem telefone associado.", variant: "destructive" });
+            }
+          }}
           onAlertClick={async (alert) => {
             const alertRef = (alert.action_config as any)?.entity_id || alert.entity_id || (alert.action_config as any)?.contact_id;
             if (!alertRef) return;

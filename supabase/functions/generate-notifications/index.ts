@@ -1023,10 +1023,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "lead_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "lead_no_contact_urgent", entity_type: "lead", entity_id: userId,
+            type: "lead_no_contact_urgent", entity_type: "lead", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "lead", "leads")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "lead", "leads")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/leads",
+            priority: "high", action_type: "call_now", link: `/leads?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1034,10 +1034,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "lead_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "lead_no_contact", entity_type: "lead", entity_id: userId,
+            type: "lead_no_contact", entity_type: "lead", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "lead", "leads")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Considere contactar ${group.normal.length === 1 ? "este lead" : `estes ${group.normal.length} leads`}.`,
-            priority: "medium", link: "/leads",
+            priority: "medium", link: `/leads?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
@@ -1117,10 +1117,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact_urgent", entity_type: "contact", entity_id: userId,
+            type: "contact_no_contact_urgent", entity_type: "contact", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "contacto", "contactos")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/contacts",
+            priority: "high", action_type: "call_now", link: `/contacts?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1128,10 +1128,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact", entity_type: "contact", entity_id: userId,
+            type: "contact_no_contact", entity_type: "contact", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
             message: `Considere fazer follow-up com ${group.normal.length === 1 ? "este contacto" : `estes ${group.normal.length} contactos`}.`,
-            priority: "medium", link: "/contacts",
+            priority: "medium", link: `/contacts?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
@@ -1139,10 +1139,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_deal");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_deal", entity_type: "contact", entity_id: userId,
+            type: "contact_no_deal", entity_type: "contact", entity_id: group.noDeal[0],
             title: `${pl(group.noDeal.length, "contacto", "contactos")} sem pedido de proposta há +${cfg.days_threshold} dias`,
             message: `${group.noDeal.length === 1 ? "Este contacto foi convertido" : "Estes contactos foram convertidos"} mas não ${group.noDeal.length === 1 ? "tem" : "têm"} pedido de proposta criado.`,
-            priority: "medium", link: "/contacts",
+            priority: "medium", link: `/contacts?open=${group.noDeal[0]}`,
             action_config: { entity_ids: group.noDeal, count: group.noDeal.length },
           });
         }
@@ -1201,10 +1201,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "client_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_no_contact_urgent", entity_type: "client", entity_id: userId,
+            type: "client_no_contact_urgent", entity_type: "client", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "cliente", "clientes")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "cliente", "clientes")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/clients",
+            priority: "high", action_type: "call_now", link: `/clients?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1212,20 +1212,20 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "client_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_no_contact", entity_type: "client", entity_id: userId,
+            type: "client_no_contact", entity_type: "client", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "cliente", "clientes")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Considere contactar ${group.normal.length === 1 ? "este cliente" : `estes ${group.normal.length} clientes`}.`,
-            priority: "medium", link: "/clients",
+            priority: "medium", link: `/clients?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
         if (group.missingNif.length > 0) {
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_missing_nif", entity_type: "client", entity_id: userId,
+            type: "client_missing_nif", entity_type: "client", entity_id: group.missingNif[0],
             title: `${pl(group.missingNif.length, "cliente", "clientes")} sem NIF`,
             message: `Tem ${pl(group.missingNif.length, "cliente", "clientes")} sem informação fiscal.`,
-            priority: "low", link: "/clients",
+            priority: "low", link: `/clients?open=${group.missingNif[0]}`,
             action_config: { entity_ids: group.missingNif, count: group.missingNif.length },
           });
         }
