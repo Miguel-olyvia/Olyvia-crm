@@ -19,6 +19,7 @@ import {
   MAX_EXPORT_ROWS,
   MAX_SELECTION_IDS,
   parseRequest,
+  resolveLeadSourceLabel,
   selectInChunks,
   type AuthorizationContext,
   type ExportRequest,
@@ -392,7 +393,7 @@ export async function exportLeads(
   const buildLeadsQuery = () => {
     let query = admin
       .from("anew_leads")
-      .select("id, entity_id, status, source_id, assigned_to, created_by, created_at")
+      .select("id, entity_id, status, source, source_id, assigned_to, created_by, created_at")
       .in("organization_id", auth.exportOrgIds)
       .is("deleted_at", null)
       .order("id", { ascending: true });
@@ -435,7 +436,7 @@ export async function exportLeads(
   return records.map((r: any) => ({
     name: maps.identity.get(r.entity_id)?.display_name || "",
     status: r.status || "",
-    source: sourceNames.get(r.source_id) || "",
+    source: resolveLeadSourceLabel(sourceNames.get(r.source_id), r.source),
     assignedTo: userNames.get(r.assigned_to) || "",
     createdAt: r.created_at,
     email: maps.email.get(r.entity_id) || "",

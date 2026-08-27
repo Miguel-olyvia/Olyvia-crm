@@ -321,3 +321,22 @@ export async function fetchScopedRows(
   const uniqueIds = Array.from(new Set(ids));
   return selectInChunks(uniqueIds, (chunk) => buildQuery(chunk));
 }
+
+/**
+ * Resolves the "Origem" text exported for a lead.
+ *
+ * Precedence (decided explicitly, not inferred from the UI): the
+ * `lead_sources` name resolved via `source_id` wins when present — it is
+ * considered the more reliable value (e.g. it says "META" for a lead that
+ * was manually entered by an agent who picked a real source at creation
+ * time). Falls back to the lead's own raw `source` text when `source_id`
+ * is null or unresolved (covers rows where only the free-text source was
+ * ever recorded, e.g. old manual entries or csv_import). No translation is
+ * applied to either value — whatever is stored is what gets exported.
+ */
+export function resolveLeadSourceLabel(
+  sourceIdName: string | null | undefined,
+  rawSource: string | null | undefined,
+): string {
+  return sourceIdName || rawSource || "";
+}

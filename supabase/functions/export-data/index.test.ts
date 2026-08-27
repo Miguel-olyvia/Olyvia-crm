@@ -40,6 +40,7 @@ import {
   MAX_SELECTION_IDS,
   PAGE_SIZE,
   parseRequest,
+  resolveLeadSourceLabel,
   selectInChunks,
   type AuthorizationContext,
   type ExportRequest,
@@ -480,3 +481,31 @@ Deno.test("parseRequest: an omitted ids filter leaves filters.ids undefined (unc
 
   assertEquals(parsed.filters.ids, undefined);
 });
+
+// ── exportLeads: "Origem" column source-of-truth precedence ──────────────
+//
+// Regression coverage for the export-data `exportLeads` bug where ~2866 of
+// 6096 leads (org "nike") exported an empty "Origem" column: the query only
+// ever looked up `lead_sources.name` via `source_id`, and left the column
+// blank whenever `source_id` was null — even though the lead's own raw
+// `source` text column had the value all along. Decided precedence (not the
+// UI's, which never resolves source_id at all): lead_sources name via
+// source_id first (it is the more reliable value once a real source is
+// picked at creation) > raw lead.source text > empty. No translation is
+// applied to either value.
+Deno.test("resolveLeadSourceLabel: prefers the lead_sources name resolved via source_id when present (no regression)", () => {
+  assertEquals(resolveLeadSourceLabel("META", "manual"), "META");
+});
+
+Deno.test("resolveLeadSourceLabel: falls back to the raw source text, verbatim, when source_id is unresolved", () => {
+  assertEquals(resolveLeadSourceLabel(undefined, "public_form"), "public_form");
+});
+
+Deno.test("resolveLeadSourceLabel: falls back to the raw source text when it is already a display-ready value", () => {
+  assertEquals(resolveLeadSourceLabel(undefined, "Website"), "Website");
+});
+
+Deno.test("resolveLeadSourceLabel: returns empty, without inventing a value, when neither source_id nor source is set", () => {
+  assertEquals(resolveLeadSourceLabel(undefined, null), "");
+});
+
