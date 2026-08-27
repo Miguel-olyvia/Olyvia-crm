@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Card, Badge, EmptyState, Spinner, Input, cx } from "../components/ui";
-import { Search, Check, AlertTriangle, FileText } from "../components/icons";
+import { Search, Check, AlertTriangle, FileText, Settings } from "../components/icons";
 
 /* ------------------------------------------------------------------ Tipos -- */
 
@@ -120,6 +121,24 @@ export default function Notifications() {
           Emails de notificação enviados pelo DUC nesta organização.
         </p>
       </header>
+
+      {/* Explicador: aqui VÊS; para CRIAR/configurar, vai a Configurações */}
+      <div className="flex items-start gap-3 rounded-xl border border-brand-100 bg-brand-50/50 p-3.5 text-sm">
+        <Settings width={18} height={18} className="mt-0.5 shrink-0 text-brand-700" />
+        <div>
+          <p className="text-slate-700">
+            Aqui <strong>vês</strong> as notificações enviadas. Para <strong>criar/configurar</strong>{" "}
+            quem recebe email e quando (ao entrar ou fechar uma etapa, ou alerta de etapa parada),
+            vai a Configurações e clica numa etapa.
+          </p>
+          <Link
+            to="/config"
+            className="mt-1 inline-flex items-center gap-1 font-medium text-brand-700 transition-colors hover:text-brand"
+          >
+            Configurar notificações por etapa →
+          </Link>
+        </div>
+      </div>
 
       {/* Pesquisa */}
       <div className="relative">

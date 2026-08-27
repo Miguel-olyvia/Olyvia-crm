@@ -54,6 +54,8 @@ export interface ClientOption {
   entity_id: string | null;
   name: string;
   assigned_to: string | null;
+  /** Data de referência do contrato (assinatura/criação) — para "dias sem DUC". */
+  since?: string | null;
 }
 
 export type AttachmentCategory =

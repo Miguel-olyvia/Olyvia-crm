@@ -4,6 +4,7 @@ import {
   fieldsForVariant,
   sectionsForVariant,
   stageAppliesToVariant,
+  missingRequiredFields,
   DUC_STAGES,
   VARIANT_LABELS,
   STATUS_LABELS,
@@ -255,5 +256,126 @@ describe("constantes exportadas", () => {
     // description e included são colunas próprias
     const own = CHANGE_LOG_COLUMNS.columns.filter((c) => c.own).map((c) => c.field);
     expect(own).toEqual(["description", "included"]);
+  });
+});
+
+describe("missingRequiredFields", () => {
+  // Helper: constrói uma etapa mínima com os campos dados.
+  const stageWith = (fields: DucField[]): DucStage => ({
+    no: 1,
+    key: "test",
+    title: "Test",
+    responsible: "R",
+    fields,
+  });
+
+  const variant: DucVariant = "universal";
+
+  it("campo obrigatório de texto vazio ('' ou ausente) aparece; preenchido não aparece", () => {
+    const stage = stageWith([
+      { key: "nome", label: "Nome", type: "text", required: true },
+    ]);
+
+    // string vazia
+    expect(missingRequiredFields(stage, variant, { nome: "" }).map((f) => f.key)).toEqual([
+      "nome",
+    ]);
+    // ausente (chave não presente)
+    expect(missingRequiredFields(stage, variant, {}).map((f) => f.key)).toEqual(["nome"]);
+    // preenchido
+    expect(missingRequiredFields(stage, variant, { nome: "Ana" })).toEqual([]);
+  });
+
+  it("campo obrigatório só com espaços ('   ') conta como vazio", () => {
+    const stage = stageWith([
+      { key: "nome", label: "Nome", type: "text", required: true },
+    ]);
+    expect(missingRequiredFields(stage, variant, { nome: "   " }).map((f) => f.key)).toEqual([
+      "nome",
+    ]);
+    // com conteúdo rodeado de espaços já não está vazio
+    expect(missingRequiredFields(stage, variant, { nome: "  Ana  " })).toEqual([]);
+  });
+
+  it("checkbox obrigatório: false/ausente falta; true ok", () => {
+    const stage = stageWith([
+      { key: "aceito", label: "Aceito", type: "checkbox", required: true },
+    ]);
+    expect(missingRequiredFields(stage, variant, { aceito: false }).map((f) => f.key)).toEqual([
+      "aceito",
+    ]);
+    expect(missingRequiredFields(stage, variant, {}).map((f) => f.key)).toEqual(["aceito"]);
+    expect(missingRequiredFields(stage, variant, { aceito: true })).toEqual([]);
+  });
+
+  it("phases obrigatório: undefined/[] falta; [{...}] ok", () => {
+    const stage = stageWith([
+      { key: "fases", label: "Fases", type: "phases", required: true },
+    ]);
+    expect(missingRequiredFields(stage, variant, {}).map((f) => f.key)).toEqual(["fases"]);
+    expect(missingRequiredFields(stage, variant, { fases: [] }).map((f) => f.key)).toEqual([
+      "fases",
+    ]);
+    expect(
+      missingRequiredFields(stage, variant, {
+        fases: [{ label: "1", percent: "50", amount: "", due: "", note: "" }],
+      })
+    ).toEqual([]);
+  });
+
+  it("campo NÃO obrigatório vazio nunca aparece", () => {
+    const stage = stageWith([
+      { key: "opcional", label: "Opcional", type: "text" },
+      { key: "opcional_cb", label: "OpcionalCB", type: "checkbox" },
+    ]);
+    expect(missingRequiredFields(stage, variant, {})).toEqual([]);
+    expect(missingRequiredFields(stage, variant, { opcional: "", opcional_cb: false })).toEqual(
+      []
+    );
+  });
+
+  it("campo obrigatório de outra variante é ignorado quando a variante é universal", () => {
+    const stage = stageWith([
+      {
+        key: "so_mudelar",
+        label: "Só Mudelar",
+        type: "text",
+        required: true,
+        variants: ["mudelar_obra"],
+      },
+    ]);
+    // universal não vê o campo → nada em falta
+    expect(missingRequiredFields(stage, "universal", {})).toEqual([]);
+    // mudelar_obra vê o campo → em falta
+    expect(missingRequiredFields(stage, "mudelar_obra", {}).map((f) => f.key)).toEqual([
+      "so_mudelar",
+    ]);
+  });
+
+  it("vários campos obrigatórios em falta devolve todos", () => {
+    const stage = stageWith([
+      { key: "a", label: "A", type: "text", required: true },
+      { key: "b", label: "B", type: "checkbox", required: true },
+      { key: "c", label: "C", type: "phases", required: true },
+      { key: "d", label: "D", type: "text" }, // não obrigatório
+      { key: "e", label: "E", type: "text", required: true },
+    ]);
+    // e preenchido, os restantes obrigatórios em falta
+    const missing = missingRequiredFields(stage, variant, { e: "ok" }).map((f) => f.key);
+    expect(missing).toEqual(["a", "b", "c"]);
+  });
+
+  it("block undefined: todos os obrigatórios contam como em falta", () => {
+    const stage = stageWith([
+      { key: "a", label: "A", type: "text", required: true },
+      { key: "b", label: "B", type: "checkbox", required: true },
+      { key: "c", label: "C", type: "phases", required: true },
+      { key: "d", label: "D", type: "text" }, // não obrigatório → não conta
+    ]);
+    expect(missingRequiredFields(stage, variant, undefined).map((f) => f.key)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
   });
 });

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog } from "./ui";
-import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart } from "./icons";
+import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart, FileText } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
 
@@ -18,6 +18,19 @@ export function DucLayout() {
   const location = useLocation();
   const isDetail = location.pathname !== "/";
   const [confirmingLogout, setConfirmingLogout] = useState(false);
+
+  // Rotas de detalhe do DUC já têm barra de ações fixa no fundo — evita colisão
+  const isDucDetail = location.pathname.startsWith("/duc/");
+  const showFooterNav = !isDucDetail;
+
+  // Itens da footer nav (mobile)
+  const navItems = [
+    { to: "/", label: "Início", Icon: FileText, active: location.pathname === "/" },
+    { to: "/dashboard", label: "Dashboard", Icon: Chart, active: location.pathname === "/dashboard" },
+    { to: "/notificacoes", label: "Notif.", Icon: Bell, active: location.pathname === "/notificacoes" },
+    { to: "/config", label: "Config", Icon: Settings, active: location.pathname === "/config" },
+    { to: "/ajuda", label: "Ajuda", Icon: Help, active: location.pathname === "/ajuda" },
+  ];
 
   return (
     <div className="app-canvas min-h-screen">
@@ -125,7 +138,13 @@ export function DucLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main
+        className={
+          "mx-auto max-w-6xl px-4 py-6 " +
+          // Espaço extra em baixo (mobile) só quando a footer nav está visível
+          (showFooterNav ? "pb-20 md:pb-6" : "")
+        }
+      >
         {isDetail && (
           <Link
             to="/"
@@ -136,6 +155,27 @@ export function DucLayout() {
         )}
         <Outlet />
       </main>
+
+      {/* Bottom nav — apenas mobile; escondida no detalhe do DUC para não colidir */}
+      {showFooterNav && (
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[max(0.4rem,env(safe-area-inset-bottom))] md:hidden print:hidden">
+          <div className="mx-auto flex max-w-6xl justify-around">
+            {navItems.map(({ to, label, Icon, active }) => (
+              <Link
+                key={to}
+                to={to}
+                className={
+                  "flex flex-col items-center gap-0.5 px-2 py-1.5 text-[10px] transition-colors " +
+                  (active ? "text-brand" : "text-slate-400 hover:text-slate-600")
+                }
+              >
+                <Icon width={20} height={20} />
+                {label}
+              </Link>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {confirmingLogout && (
         <ConfirmDialog

@@ -17,6 +17,7 @@ import {
 } from "../components/ui";
 import { Plus, Search, Trash, FileText, Building, ChevronRight } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
+import { StatusSelect } from "../components/StatusSelect";
 import {
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -27,7 +28,7 @@ import {
 import { entityDisplayName } from "../lib/names";
 import { fetchClientOlyviaInfo, prefillBlocksFromInfo } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
-import type { ClientOption, DucRecord, TrackingEntry } from "../lib/types";
+import type { ClientOption, DucRecord, DucStatus, TrackingEntry } from "../lib/types";
 
 function entityName(row: {
   display_name?: string | null;
@@ -83,15 +84,18 @@ function OpenBadge({ duc }: { duc: DucRecord }) {
 async function fetchValidContractClients(orgId: string): Promise<ClientOption[]> {
   const { data: contracts } = await supabase
     .from("client_contracts")
-    .select("client_id, entity_id, assigned_to")
+    .select("client_id, entity_id, assigned_to, signature_date, created_at")
     .eq("organization_id", orgId)
     .in("status", ["signed", "active"])
     .is("deleted_at", null)
     .not("client_id", "is", null)
     .limit(1000);
 
-  // Um registo por cliente (dedupe), guardando entity_id/assigned_to do contrato.
-  const byClient = new Map<string, { entity_id: string | null; assigned_to: string | null }>();
+  // Um registo por cliente (dedupe), guardando entity_id/assigned_to/data do contrato.
+  const byClient = new Map<
+    string,
+    { entity_id: string | null; assigned_to: string | null; since: string | null }
+  >();
   (contracts ?? []).forEach((c) => {
     const cid = c.client_id as string;
     if (!cid) return;
@@ -99,6 +103,7 @@ async function fetchValidContractClients(orgId: string): Promise<ClientOption[]>
       byClient.set(cid, {
         entity_id: (c.entity_id as string) ?? null,
         assigned_to: (c.assigned_to as string) ?? null,
+        since: ((c.signature_date as string) ?? (c.created_at as string)) ?? null,
       });
     }
   });
@@ -144,6 +149,7 @@ async function fetchValidContractClients(orgId: string): Promise<ClientOption[]>
       id,
       entity_id: rec.entity_id,
       assigned_to: rec.assigned_to,
+      since: rec.since,
       name: (rec.entity_id ? nameByEntity.get(rec.entity_id) : undefined) ?? "Cliente sem nome",
     };
   });
@@ -445,6 +451,12 @@ export default function DucList() {
     }
   };
 
+  // Mudar o estado de um DUC diretamente na lista (persiste + atualiza local).
+  const changeDucStatus = async (id: string, status: DucStatus) => {
+    const { error } = await supabase.from("anew_client_ducs").update({ status }).eq("id", id);
+    if (!error) setDucs((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)));
+  };
+
   const confirmDelete = async () => {
     if (!deleting) return;
     const { error } = await supabase
@@ -529,25 +541,41 @@ export default function DucList() {
           onOpen={(id) => navigate(`/duc/${id}`)}
           onNew={() => openCreate(null)}
           onDelete={setDeleting}
+          onStatusChange={changeDucStatus}
         />
       ) : view === "kanban" ? (
-        loading ? (
-          <Card>
-            <Spinner label="A carregar Kanban…" />
-          </Card>
-        ) : kanbanStages.length === 0 ? (
-          <Card>
-            <Spinner label="A carregar etapas…" />
-          </Card>
-        ) : (
-          <DucKanban
-            ducs={filtered}
-            clientNames={clientNames}
-            stages={kanbanStages}
-            onDropCard={requestMove}
-            onOpen={(id) => navigate(`/duc/${id}`)}
-          />
-        )
+        <div className="space-y-3">
+          <div className="relative sm:max-w-xs">
+            <Search
+              width={16}
+              height={16}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <Input
+              className="pl-9"
+              placeholder="Pesquisar no quadro…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          {loading ? (
+            <Card>
+              <Spinner label="A carregar Kanban…" />
+            </Card>
+          ) : kanbanStages.length === 0 ? (
+            <Card>
+              <Spinner label="A carregar etapas…" />
+            </Card>
+          ) : (
+            <DucKanban
+              ducs={filtered}
+              clientNames={clientNames}
+              stages={kanbanStages}
+              onDropCard={requestMove}
+              onOpen={(id) => navigate(`/duc/${id}`)}
+            />
+          )}
+        </div>
       ) : (
         <PendingView
           loading={loadingPending}
@@ -675,6 +703,7 @@ function DucsView({
   onOpen,
   onNew,
   onDelete,
+  onStatusChange,
 }: {
   loading: boolean;
   ducs: DucRecord[];
@@ -696,6 +725,7 @@ function DucsView({
   onOpen: (id: string) => void;
   onNew: () => void;
   onDelete: (d: DucRecord) => void;
+  onStatusChange: (id: string, status: DucStatus) => void;
 }) {
   // Só faz sentido "Carregar mais" quando não há pesquisa/filtro ativo a
   // esconder resultados (a filtragem é client-side sobre o já carregado).
@@ -787,9 +817,12 @@ function DucsView({
                         {d.duc_number ?? "—"}
                       </div>
                     </div>
-                    <Badge className={STATUS_STYLES[d.status]}>
-                      {STATUS_LABELS[d.status] ?? d.status}
-                    </Badge>
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <StatusSelect
+                        value={d.status}
+                        onChange={(s) => onStatusChange(d.id, s)}
+                      />
+                    </div>
                   </div>
 
                   <div className="mt-3 flex items-center gap-2">
@@ -903,10 +936,8 @@ function DucsView({
                           <span className="text-xs tabular-nums text-slate-500">{done}/{total}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3">
-                        <Badge className={STATUS_STYLES[d.status]}>
-                          {STATUS_LABELS[d.status] ?? d.status}
-                        </Badge>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <StatusSelect value={d.status} onChange={(s) => onStatusChange(d.id, s)} />
                       </td>
                       <td className="px-4 py-3">
                         <OpenBadge duc={d} />
@@ -1067,7 +1098,11 @@ function PendingView({
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate font-medium text-slate-800">{c.name}</p>
-              <p className="text-xs text-slate-400">Contrato válido · sem DUC</p>
+              <p className="text-xs text-slate-400">
+                {c.since
+                  ? `Contrato há ${daysSince(c.since)} dias · sem DUC`
+                  : "Contrato válido · sem DUC"}
+              </p>
             </div>
             <Button size="sm" onClick={() => onCreate(c)}>
               <Plus width={14} height={14} /> Criar DUC <ChevronRight width={14} height={14} />
