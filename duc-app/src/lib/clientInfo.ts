@@ -15,6 +15,10 @@ export interface ClientOlyviaInfo {
   email: string | null;
   phone: string | null;
   address: string | null;
+  /** Código postal isolado da morada (quando disponível em anew_addresses). */
+  addressPostal?: string | null;
+  /** Cidade isolada da morada (quando disponível em anew_addresses). */
+  addressCity?: string | null;
   nif: string | null;
   responsavel: string | null;
   dataAdjudicacao: string | null; // yyyy-mm-dd
@@ -43,7 +47,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
 
   const assignedTo = (client?.assigned_to as string) ?? null;
 
-  const [entRes, emailRes, phoneRes, addrRes, userRes, contractRes] = await Promise.all([
+  const [entRes, emailRes, phoneRes, addrRes, fiscalRes, userRes, contractRes] = await Promise.all([
     supabase.from("anew_entities").select("*").eq("id", entityId).maybeSingle(),
     supabase
       .from("anew_entity_emails")
@@ -57,9 +61,18 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
       .eq("entity_id", entityId)
       .order("is_primary", { ascending: false })
       .limit(1),
+    // A morada real vive em anew_addresses (street/number/postal_code/city);
+    // anew_entity_addresses é só a ligação via address_id. Fazemos join.
     supabase
       .from("anew_entity_addresses")
-      .select("*")
+      .select("is_primary, is_fiscal, anew_addresses(street, number, postal_code, city, district)")
+      .eq("entity_id", entityId)
+      .order("is_primary", { ascending: false })
+      .limit(1),
+    // O NIF vive em fiscal_entities, ligado à entidade por anew_entity_fiscal_entities.
+    supabase
+      .from("anew_entity_fiscal_entities")
+      .select("is_primary, fiscal_entities(nif)")
       .eq("entity_id", entityId)
       .order("is_primary", { ascending: false })
       .limit(1),
@@ -84,25 +97,38 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
         last_name: ent.last_name as string | null,
       })
     : "Cliente";
-  // NIF só se for mesmo um NIF (9 dígitos) — evita mostrar hashes/valores protegidos.
-  const rawNif =
-    (ent?.vat as string) ||
-    (ent?.nif as string) ||
-    (ent?.tax_number as string) ||
-    (ent?.fiscal_number as string) ||
-    "";
-  const nif = /^\d{9}$/.test((rawNif ?? "").trim()) ? rawNif.trim() : null;
+  // NIF vem de fiscal_entities.nif (via anew_entity_fiscal_entities). Só o usamos
+  // se for mesmo um NIF (9 dígitos) — evita mostrar hashes/valores protegidos.
+  const fiscalRow = fiscalRes.data?.[0] as
+    | { fiscal_entities?: { nif?: string | null } | { nif?: string | null }[] | null }
+    | undefined;
+  const fe = Array.isArray(fiscalRow?.fiscal_entities)
+    ? fiscalRow?.fiscal_entities[0]
+    : fiscalRow?.fiscal_entities;
+  const rawNif = (fe?.nif as string) || "";
+  const nif = /^\d{9}$/.test(rawNif.trim()) ? rawNif.trim() : null;
   const email = (emailRes.data?.[0]?.email as string) ?? null;
   const phone = (phoneRes.data?.[0]?.phone_number as string) ?? null;
   const responsavel = ((userRes.data as { name?: string } | null)?.name as string) ?? null;
 
+  // Compõe a morada a partir de anew_addresses (join). Guardamos também as partes
+  // separadas caso um destino futuro precise de código postal / cidade isolados.
   let address: string | null = null;
-  const a = addrRes.data?.[0] as Record<string, unknown> | undefined;
+  let addressPostal: string | null = null;
+  let addressCity: string | null = null;
+  const addrRow = addrRes.data?.[0] as
+    | { anew_addresses?: Record<string, unknown> | Record<string, unknown>[] | null }
+    | undefined;
+  const a = Array.isArray(addrRow?.anew_addresses)
+    ? (addrRow?.anew_addresses[0] as Record<string, unknown> | undefined)
+    : (addrRow?.anew_addresses as Record<string, unknown> | undefined);
   if (a) {
-    const street = (a.street as string) || (a.address_line1 as string) || (a.address as string) || "";
+    const street = (a.street as string) || "";
     const number = (a.number as string) || "";
-    const postal = (a.postal_code as string) || (a.zip_code as string) || "";
-    const city = (a.city as string) || (a.locality as string) || "";
+    const postal = (a.postal_code as string) || "";
+    const city = (a.city as string) || "";
+    addressPostal = postal.trim() || null;
+    addressCity = city.trim() || null;
     const line1 = [street, number].filter(Boolean).join(" ").trim();
     const line2 = [postal, city].filter(Boolean).join(" ").trim();
     address = [line1, line2].filter(Boolean).join(", ") || null;
@@ -163,6 +189,8 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     email,
     phone,
     address,
+    addressPostal,
+    addressCity,
     nif,
     responsavel,
     dataAdjudicacao,
@@ -193,6 +221,10 @@ export function prefillBlocksFromInfo(
 
   const financeiro: Record<string, string> = {};
   if (faturacao) financeiro.nif_dados_faturacao = faturacao;
+  // NOTA: no schema, `condicoes_faseamento` é do tipo `phases` (PaymentPhase[]),
+  // não texto. Mantemos aqui as condições de pagamento (payment_terms) como texto
+  // por retrocompatibilidade; a UI de fases (toPhases) ignora não-arrays, por isso
+  // é não-destrutivo. Prefill de fases estruturadas fica por fazer conservadoramente.
   if (info.condicoes) financeiro.condicoes_faseamento = info.condicoes;
 
   const entrega: Record<string, string> = { cliente: info.name };

@@ -208,6 +208,8 @@ export default function DucList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [variantFilter, setVariantFilter] = useState<string>("all");
+  const [sortKey, setSortKey] = useState<string>("updated");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Kanban: etapas efetivas da variante da org (full, para validar obrigatórios)
   // + movimento pendente + movimento bloqueado por campos obrigatórios em falta.
@@ -406,6 +408,43 @@ export default function DucList() {
     });
   }, [ducs, search, statusFilter, variantFilter, clientNames]);
 
+  // Ordenação client-side (sobre o conjunto já carregado/filtrado) — clicar num
+  // cabeçalho alterna asc/desc.
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const val = (d: DucRecord): string | number => {
+      switch (sortKey) {
+        case "number":
+          return d.duc_number ?? "";
+        case "client":
+          return ((d.client_id ? clientNames.get(d.client_id) : d.title) ?? "").toLowerCase();
+        case "variant":
+          return d.variant;
+        case "progress":
+          return doneCount(d.tracking) / (d.tracking?.length || 1);
+        case "status":
+          return d.status;
+        case "open":
+          return new Date(d.created_at).getTime();
+        default:
+          return new Date(d.updated_at).getTime();
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const va = val(a);
+      const vb = val(b);
+      return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+    });
+  }, [filtered, sortKey, sortDir, clientNames]);
+
+  const toggleSort = (key: string) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir(key === "updated" || key === "open" || key === "progress" ? "desc" : "asc");
+    }
+  };
+
   const confirmDelete = async () => {
     if (!deleting) return;
     const { error } = await supabase
@@ -472,7 +511,7 @@ export default function DucList() {
         <DucsView
           loading={loading}
           ducs={ducs}
-          filtered={filtered}
+          filtered={sorted}
           clientNames={clientNames}
           search={search}
           setSearch={setSearch}
@@ -480,6 +519,9 @@ export default function DucList() {
           setStatusFilter={setStatusFilter}
           variantFilter={variantFilter}
           setVariantFilter={setVariantFilter}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={toggleSort}
           activeOrgId={activeOrgId}
           hasMore={hasMore}
           loadingMore={loadingMore}
@@ -623,6 +665,9 @@ function DucsView({
   setStatusFilter,
   variantFilter,
   setVariantFilter,
+  sortKey,
+  sortDir,
+  onSort,
   activeOrgId,
   hasMore,
   loadingMore,
@@ -641,6 +686,9 @@ function DucsView({
   setStatusFilter: (v: string) => void;
   variantFilter: string;
   setVariantFilter: (v: string) => void;
+  sortKey: string;
+  sortDir: "asc" | "desc";
+  onSort: (key: string) => void;
   activeOrgId: string | null;
   hasMore: boolean;
   loadingMore: boolean;
@@ -788,13 +836,33 @@ function DucsView({
             <table className="w-full text-sm">
               <thead className="border-b border-slate-100 bg-slate-50/60 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-3">Nº</th>
-                  <th className="px-4 py-3">Cliente / Título</th>
-                  <th className="px-4 py-3">Variante</th>
-                  <th className="px-4 py-3">Progresso</th>
-                  <th className="px-4 py-3">Estado</th>
-                  <th className="px-4 py-3">Aberto</th>
-                  <th className="px-4 py-3">Atualizado</th>
+                  {(
+                    [
+                      ["number", "Nº"],
+                      ["client", "Cliente / Título"],
+                      ["variant", "Variante"],
+                      ["progress", "Progresso"],
+                      ["status", "Estado"],
+                      ["open", "Aberto"],
+                      ["updated", "Atualizado"],
+                    ] as Array<[string, string]>
+                  ).map(([key, label]) => (
+                    <th key={key} className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => onSort(key)}
+                        className={cx(
+                          "inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-slate-700",
+                          sortKey === key && "text-brand"
+                        )}
+                      >
+                        {label}
+                        <span className="text-[9px] leading-none">
+                          {sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "↕"}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
