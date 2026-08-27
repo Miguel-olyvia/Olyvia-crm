@@ -469,9 +469,14 @@ export default function AnewLeads() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Deep-link: ?open=<leadId> opens the details dialog (Olyvia chat links)
+  // Deep-link: ?open=<leadId> opens the details dialog (Olyvia chat links).
+  // ?open_lead=<uuid> is the equivalent used by notification alert links and
+  // requires a valid UUID before it is honoured.
   useEffect(() => {
-    const openId = searchParams.get("open");
+    const openIdParam = searchParams.get("open");
+    const openLeadParam = searchParams.get("open_lead");
+    const openLeadIsValidUuid = !!openLeadParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(openLeadParam);
+    const openId = openIdParam || (openLeadIsValidUuid ? openLeadParam : null);
     if (!openId || !activeCompanyId || selectedLead) return;
     let cancelled = false;
     (async () => {
@@ -531,6 +536,7 @@ export default function AnewLeads() {
         if (!cancelled) {
           const next = new URLSearchParams(searchParams);
           next.delete("open");
+          next.delete("open_lead");
           setSearchParams(next, { replace: true });
         }
       }
@@ -4639,7 +4645,45 @@ export default function AnewLeads() {
         </div>
       ) : (
       <div className="space-y-6">
-        <ModuleAlertsBanner alerts={leadAlerts} onDismiss={dismissLeadAlert} onAction={() => {}} onAlertClick={(alert) => {
+        <ModuleAlertsBanner alerts={leadAlerts} onDismiss={dismissLeadAlert} onAction={async (alert) => {
+          // "Ligar agora" — mirrors the phone-resolution pattern used in AnewClients.tsx.
+          // Lead alerts are grouped per-user, so action_config.entity_ids holds one or
+          // more anew_leads.id values; the button acts on the first one in the list.
+          const callTargetIds = alert.action_config?.entity_ids as string[] | undefined;
+          const callTargetRef = callTargetIds?.[0];
+          if (!callTargetRef) return;
+
+          let callTargetLead: Lead | undefined = leads.find(
+            (l) => l.id === callTargetRef || l.entity_id === callTargetRef
+          );
+
+          if (!callTargetLead) {
+            const { data: fetchedLeadForCall } = await supabase
+              .from("anew_leads")
+              .select("id, entity_id, organization_id")
+              .eq("organization_id", activeCompanyId)
+              .or(`id.eq.${callTargetRef},entity_id.eq.${callTargetRef}`)
+              .maybeSingle();
+
+            if (fetchedLeadForCall?.entity_id) {
+              await resolveEntities([fetchedLeadForCall.entity_id]);
+              callTargetLead = fetchedLeadForCall as unknown as Lead;
+            }
+          }
+
+          if (!callTargetLead?.entity_id) {
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
+            return;
+          }
+
+          const callIdentity = getIdentity(callTargetLead.entity_id);
+          if (callIdentity?.phone) {
+            const callPhoneNumber = `${(callIdentity.phone_country_code || '+351').replace(/\s/g, '')}${callIdentity.phone.replace(/\s/g, '')}`;
+            window.location.href = `tel:${callPhoneNumber}`;
+          } else {
+            toast({ title: "Sem telefone", description: "Este lead não tem telefone associado.", variant: "destructive" });
+          }
+        }} onAlertClick={(alert) => {
           const entityIds = alert.action_config?.entity_ids as string[] | undefined;
           const alertRef = entityIds?.[0] || alert.entity_id;
           if (!alertRef) return;
