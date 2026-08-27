@@ -15,7 +15,7 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
@@ -495,29 +495,29 @@ export default function DucList() {
         <button
           onClick={() => setView("ducs")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
             (view === "ducs" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          DUCs {totalDucs > 0 && `(${totalDucs})`}
+          <FileText width={15} height={15} /> DUCs {totalDucs > 0 && `(${totalDucs})`}
         </button>
         <button
           onClick={() => setView("kanban")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
             (view === "kanban" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          Kanban
+          <Sheet width={15} height={15} /> Kanban
         </button>
         <button
           onClick={() => setView("pending")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
             (view === "pending" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          Por documentar
+          <Building width={15} height={15} /> Por documentar
         </button>
       </div>
 
