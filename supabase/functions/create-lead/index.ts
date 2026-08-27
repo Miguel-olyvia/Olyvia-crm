@@ -1,9 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { sanitizeTracking } from '../_shared/leadTracking.ts';
+import { resolveOriginFromReferrer } from '../_shared/referrerSource.ts';
 
 const requestSchema = z.object({
-  campaign_id: z.string().uuid(),
+  // Optional: forms without an associated campaign must still create a lead
+  // instead of 400ing (confirmed live: the recommended embed snippet never
+  // sends campaign_id for such forms). When absent, the campaign is resolved
+  // from campaigns.form_id below; if none exists either, the lead is created
+  // without a campaign.
+  campaign_id: z.string().uuid().optional(),
   form_id: z.string().uuid().optional(),
   business_unit_id: z.string().uuid().optional(),
   step_number: z.number().optional(),
@@ -187,37 +193,92 @@ Deno.serve(async (req) => {
       from_chat_widget, field_count: Object.keys(field_values || {}).length
     }));
 
-    // Get campaign and its company
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('id, name, organization_id, status, form_id, location_required')
-      .eq('id', campaign_id)
-      .single();
-
-    if (campaignError || !campaign) {
+    if (!campaign_id && !form_id) {
       return new Response(
-        JSON.stringify({ error: 'Campaign not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Check if campaign is active
-    if (campaign.status !== 'active') {
-      return new Response(
-        JSON.stringify({ error: 'Campaign is not active', status: campaign.status }),
+        JSON.stringify({ error: 'campaign_id or form_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const organization_id = campaign.organization_id;
-    const canonicalForm = resolveCanonicalFormId(form_id, campaign.form_id);
-    if (canonicalForm.error) {
-      return new Response(
-        JSON.stringify({ error: canonicalForm.error }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    type CampaignRow = {
+      id: string;
+      name: string | null;
+      organization_id: string;
+      status: string;
+      form_id: string | null;
+      location_required: boolean | null;
+    };
+
+    let campaign: CampaignRow | null = null;
+
+    if (campaign_id) {
+      // Explicit campaign_id: existing, unchanged behavior — 404 when it
+      // doesn't exist, 400 when it isn't active.
+      const { data, error: campaignError } = await supabase
+        .from('campaigns')
+        .select('id, name, organization_id, status, form_id, location_required')
+        .eq('id', campaign_id)
+        .single();
+
+      if (campaignError || !data) {
+        return new Response(
+          JSON.stringify({ error: 'Campaign not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (data.status !== 'active') {
+        return new Response(
+          JSON.stringify({ error: 'Campaign is not active', status: data.status }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      campaign = data;
+    } else if (form_id) {
+      // No campaign_id supplied — resolve the campaign that owns this form
+      // (campaigns.form_id), preferring an active one. A form with no
+      // campaign at all (or none active) is valid: the lead is still
+      // created below, just without campaign attribution.
+      const { data: campaignsForForm } = await supabase
+        .from('campaigns')
+        .select('id, name, organization_id, status, form_id, location_required')
+        .eq('form_id', form_id)
+        .order('created_at', { ascending: true });
+      campaign = (campaignsForForm || []).find((c: CampaignRow) => c.status === 'active') || null;
     }
-    const canonicalFormId = canonicalForm.formId;
+
+    // Resolved campaign id used for every downstream campaign-scoped
+    // read/write below (null when this submission has no campaign).
+    const resolvedCampaignId: string | null = campaign?.id ?? null;
+
+    let organization_id: string;
+    let canonicalFormId: string | null;
+
+    if (campaign) {
+      organization_id = campaign.organization_id;
+      const canonicalForm = resolveCanonicalFormId(form_id, campaign.form_id);
+      if (canonicalForm.error) {
+        return new Response(
+          JSON.stringify({ error: canonicalForm.error }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      canonicalFormId = canonicalForm.formId;
+    } else {
+      // No campaign at all — organization comes from the form itself.
+      const { data: formRow, error: formRowError } = await supabase
+        .from('forms')
+        .select('id, organization_id')
+        .eq('id', form_id)
+        .maybeSingle();
+      if (formRowError || !formRow?.organization_id) {
+        return new Response(
+          JSON.stringify({ error: 'Form not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      organization_id = formRow.organization_id;
+      canonicalFormId = form_id as string;
+    }
 
     if (!field_values || typeof field_values !== 'object') {
       return new Response(
@@ -273,11 +334,12 @@ Deno.serve(async (req) => {
       definitions = formFieldDefs || [];
       console.log('Using form-level steps/fields. form_id:', canonicalFormId, 'totalSteps:', totalSteps, 'fields:', definitions.length);
     } else {
-      // Fallback: use campaign-level tables
+      // Fallback: use campaign-level tables (only reachable when a campaign
+      // was resolved above, so resolvedCampaignId is guaranteed non-null here).
       const { data: stepsData } = await supabase
         .from('campaign_form_steps')
         .select('step_number')
-        .eq('campaign_id', campaign_id)
+        .eq('campaign_id', resolvedCampaignId)
         .order('step_number', { ascending: false })
         .limit(1);
       totalSteps = stepsData?.[0]?.step_number || 1;
@@ -285,7 +347,7 @@ Deno.serve(async (req) => {
       const { data: fieldDefs, error: fieldDefsError } = await supabase
         .from('lead_field_definitions')
         .select('*')
-        .eq('campaign_id', campaign_id)
+        .eq('campaign_id', resolvedCampaignId)
         .eq('is_active', true)
         .order('sort_order');
       if (fieldDefsError) {
@@ -367,12 +429,18 @@ Deno.serve(async (req) => {
     for (const def of uniqueFields) {
       const value = field_values[def.field_key];
       if (value) {
-        const { data: existing } = await supabase
+        // Scope dedup by campaign when there is one; otherwise scope by
+        // organization + "no campaign" so a campaignless form still only
+        // dedups against its own kind of submissions, never cross-org.
+        let dedupQuery = supabase
           .from('anew_leads')
           .select('id')
-          .eq('campaign_id', campaign_id)
-          .filter('field_values->>'+def.field_key, 'eq', value)
-          .maybeSingle();
+          .eq('organization_id', organization_id)
+          .filter('field_values->>'+def.field_key, 'eq', value);
+        dedupQuery = resolvedCampaignId
+          ? dedupQuery.eq('campaign_id', resolvedCampaignId)
+          : dedupQuery.is('campaign_id', null);
+        const { data: existing } = await dedupQuery.maybeSingle();
 
         if (existing) {
           return new Response(
@@ -393,8 +461,8 @@ Deno.serve(async (req) => {
     // must be rejected here, mirroring the calculation in get-form-data.
     const locationValidation = await validateLocationDistrict({
       supabase,
-      campaignId: campaign_id,
-      campaignLocationRequired: campaign.location_required,
+      campaignId: resolvedCampaignId,
+      campaignLocationRequired: campaign?.location_required ?? false,
       formId: canonicalFormId,
       formLocationRequired,
       definitions,
@@ -621,7 +689,7 @@ Deno.serve(async (req) => {
             organizationId: organization_id,
             entityId,
             summary,
-            campaignId: campaign_id ?? null,
+            campaignId: resolvedCampaignId,
             formId: canonicalFormId ?? null,
             fieldValuesDiff: diff,
             displayName: composeDisplayName(leadFirstName, leadLastName) || null,
@@ -789,7 +857,7 @@ Deno.serve(async (req) => {
         p_root_organization_id: rootOrgId,
         p_entity_id: entityId,
         p_form_id: canonicalFormId ?? null,
-        p_campaign_id: campaign_id ?? null,
+        p_campaign_id: resolvedCampaignId,
         p_target_type: contactOrClientTarget.targetType,
         p_target_id: contactOrClientTarget.targetId,
         p_field_values: fieldValuesWithMeta,
@@ -1007,13 +1075,28 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 3b. Referrer fallback (GA-style, only a resource): when there is no
+      // utm_source at all and no already-validated source_id, derive the
+      // origin name from the referrer's domain (e.g. "Instagram") so the
+      // lead reflects reality instead of the generic "public_form" text.
+      // Never overrides an explicit utm_source (step 3, above) or a locked
+      // source_id. Unknown domains resolve to null and change nothing.
+      // source_id resolution for this candidate happens asynchronously in
+      // marketingAttribution.ts (same as the utm_source path above).
+      if (embedKind === 'utm' && !sourceIdLocked && !safeTracking?.utm_source) {
+        const referrerOrigin = resolveOriginFromReferrer(safeTracking?.referrer);
+        if (referrerOrigin) {
+          resolvedSource = referrerOrigin;
+          console.log('Resolved source from referrer domain:', referrerOrigin);
+        }
+      }
 
       // 4. Fallback: campaign_sources.is_default (only if nothing resolved).
-      if (!sourceIdLocked && !resolvedSourceId && resolvedSource === 'public_api' && campaign_id) {
+      if (!sourceIdLocked && !resolvedSourceId && resolvedSource === 'public_api' && resolvedCampaignId) {
         const { data: defaultCampaignSource } = await supabase
           .from('campaign_sources')
           .select('source_id')
-          .eq('campaign_id', campaign_id)
+          .eq('campaign_id', resolvedCampaignId)
           .eq('is_default', true)
           .maybeSingle();
         if (defaultCampaignSource?.source_id) {
@@ -1037,7 +1120,7 @@ Deno.serve(async (req) => {
     const { data: lead, error: insertError } = await supabase
       .from('anew_leads')
       .insert({
-        campaign_id,
+        campaign_id: resolvedCampaignId,
         organization_id,
         root_organization_id: rootOrgId,
         entity_id: entityId,

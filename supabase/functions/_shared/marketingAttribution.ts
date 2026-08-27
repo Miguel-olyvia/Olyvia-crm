@@ -2,34 +2,39 @@
 // Should only be called when embedKind === "utm" AND lead has campaign_id + id.
 
 import { resolveChannel } from "./resolveChannel.ts";
-
-const UTM_ALIAS_RE = /^[a-z0-9_-]+$/;
+import { normalizeSourceText, resolveOriginFromReferrer } from "./referrerSource.ts";
 
 /**
- * Resolve source_id by matching utm_source against lead_sources.utm_aliases.
- * - Normalizes utm_source to lowercase + trim.
- * - Only allows [a-z0-9_-] (defence-in-depth; UI enforces same shape).
+ * Resolve source_id by matching a candidate value (utm_source, or a
+ * referrer-derived origin name like "Instagram") against lead_sources.name
+ * OR lead_sources.utm_aliases -- matched on the SAME normalized text
+ * (lowercase, no accents, no spaces). This is what makes attribution work
+ * "automatically" (a la Google Analytics): a lead_sources row named
+ * "Instagram" matches without anyone configuring an alias. Aliases remain
+ * useful as synonyms for names the candidate text won't spell out (e.g. "ig",
+ * "fb", "meta").
+ * - Exact match only on the normalized text -- never partial/substring.
  * - Scope: org-local + globals (organization_id IS NULL).
- * - Tie-break: org-local wins over global; then created_at ASC, id ASC.
+ * - Tie-break: org-local wins over global. If there is more than one match
+ *   within the winning scope, the match is ambiguous and this returns null
+ *   (never guesses) -- a warning is logged so it can be investigated.
  * - Fully fail-soft: returns null on any error.
  */
 async function resolveSourceDirect(
   supabase: any,
   organizationId: string,
-  utmSourceRaw: unknown,
+  candidateRaw: unknown,
 ): Promise<string | null> {
   try {
-    if (typeof utmSourceRaw !== "string") return null;
-    const normalized = utmSourceRaw.toLowerCase().trim();
-    if (!normalized || !UTM_ALIAS_RE.test(normalized)) return null;
+    const normalized = normalizeSourceText(candidateRaw);
+    if (!normalized) return null;
 
     const { data, error } = await supabase
       .from("lead_sources")
-      .select("id, organization_id, created_at")
+      .select("id, name, organization_id, utm_aliases, created_at")
       .eq("is_active", true)
-      .contains("utm_aliases", [normalized])
       .or(`organization_id.eq.${organizationId},organization_id.is.null`)
-      .limit(10);
+      .limit(500);
 
     if (error) {
       console.warn("[attribution] resolveSourceDirect query error", error);
@@ -38,27 +43,35 @@ async function resolveSourceDirect(
     const rows = (data as any[]) || [];
     if (rows.length === 0) return null;
 
+    const matches = rows.filter((r) => {
+      if (normalizeSourceText(r.name) === normalized) return true;
+      const aliases: unknown[] = Array.isArray(r.utm_aliases) ? r.utm_aliases : [];
+      return aliases.some((a) => normalizeSourceText(a) === normalized);
+    });
+    if (matches.length === 0) return null;
+
     const sortKey = (r: any) =>
       `${String(r.created_at ?? "")}\u0000${String(r.id ?? "")}`;
-    const local = rows
+    const local = matches
       .filter((r) => r.organization_id === organizationId)
       .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
-    const global = rows
+    const global = matches
       .filter((r) => r.organization_id == null)
       .sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
-    const chosen = local[0] ?? global[0] ?? null;
-    if (!chosen) return null;
-
-    if (local.length + global.length > 1) {
-      console.warn("[attribution] resolveSourceDirect multiple matches; picking deterministic", {
+    // Org-local always wins over global -- but if there's more than one
+    // candidate within the winning scope, don't guess: leave unresolved.
+    const winning = local.length > 0 ? local : global;
+    if (winning.length > 1) {
+      console.warn("[attribution] resolveSourceDirect ambiguous match; leaving source_id unresolved", {
         normalized,
         organizationId,
-        chosenId: chosen.id,
-        totalMatches: local.length + global.length,
+        candidateIds: winning.map((r) => r.id),
+        scope: local.length > 0 ? "org-local" : "global",
       });
+      return null;
     }
-    return chosen.id ?? null;
+    return winning[0]?.id ?? null;
   } catch (e) {
     console.warn("[attribution] resolveSourceDirect failed", e);
     return null;
@@ -123,14 +136,24 @@ export async function runMarketingAttribution(args: RunArgs): Promise<void> {
     }
 
     // 2d. Fallback: if no source via channel AND channel is a fallback one (or none),
-    //     try to resolve source by matching utm_source against lead_sources.utm_aliases.
+    //     try to resolve source by matching utm_source against lead_sources.name/utm_aliases.
     const isFallbackChannel =
       !channelId ||
       chType === "direct" ||
       String(chName ?? "").toLowerCase().includes("default");
 
-    if (!channelSourceId && isFallbackChannel && tracking?.utm_source && organizationId) {
-      channelSourceId = await resolveSourceDirect(supabase, organizationId, tracking.utm_source);
+    if (!channelSourceId && isFallbackChannel && organizationId) {
+      if (tracking?.utm_source) {
+        channelSourceId = await resolveSourceDirect(supabase, organizationId, tracking.utm_source);
+      } else if (tracking?.referrer) {
+        // GA-style fallback: no UTMs at all, so the referrer's domain is the
+        // only signal left. Only reached when nothing else already resolved
+        // a source_id above (utm_source, when present, always wins).
+        const referrerOrigin = resolveOriginFromReferrer(tracking.referrer);
+        if (referrerOrigin) {
+          channelSourceId = await resolveSourceDirect(supabase, organizationId, referrerOrigin);
+        }
+      }
     }
 
     const applyLeadSource = async () => {
