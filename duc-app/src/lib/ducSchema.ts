@@ -22,7 +22,8 @@ export type FieldType =
   | "checkbox"
   | "number"
   | "select"
-  | "phases";
+  | "phases"
+  | "address";
 
 /** Uma fase de pagamento (linha do campo `phases`). Guardada como array no bloco. */
 export interface PaymentPhase {
@@ -31,6 +32,14 @@ export interface PaymentPhase {
   amount: string;
   due: string;
   note: string;
+}
+
+/** Morada estruturada (campo `address`). Guardada como objeto no bloco. */
+export interface AddressValue {
+  street: string;
+  number: string;
+  postal: string;
+  city: string;
 }
 
 /** Destinatário de notificação de uma etapa. */
@@ -140,7 +149,7 @@ export const DUC_STAGES: DucStage[] = [
       { key: "contacto_tel", label: "Contacto — telefone", type: "text" },
       { key: "contacto_email", label: "Contacto — email", type: "text" },
       { key: "contacto_urgencia", label: "Contacto de urgência / 2.º", type: "text" },
-      { key: "morada_obra", label: "Morada da obra / instalação", type: "text" },
+      { key: "morada_obra", label: "Morada da obra / instalação", type: "address" },
       { key: "comercial_responsavel", label: "Comercial responsável", type: "text" },
       { key: "data_adjudicacao", label: "Data de adjudicação", type: "date" },
       {
@@ -360,7 +369,7 @@ export const DUC_STAGES: DucStage[] = [
     intro: "Auto de entrega · assinatura obrigatória do cliente.",
     fields: [
       { key: "obra_ref", label: "Obra / Referência", type: "text" },
-      { key: "morada", label: "Morada", type: "text" },
+      { key: "morada", label: "Morada", type: "address" },
       { key: "cliente", label: "Cliente", type: "text" },
       { key: "tipo_obra_contrato", label: "Tipo de obra / contrato", type: "text" },
       { key: "data_inicio", label: "Data de início", type: "date" },
@@ -437,6 +446,10 @@ export function missingRequiredFields(
     const v = block?.[f.key];
     if (f.type === "checkbox") return v !== true;
     if (f.type === "phases") return !Array.isArray(v) || v.length === 0;
+    if (f.type === "address") {
+      const a = v as Partial<AddressValue> | undefined;
+      return !a || (!a.street?.trim() && !a.city?.trim());
+    }
     return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
   });
 }

@@ -28,6 +28,7 @@ export const FIELD_TYPES: FieldType[] = [
   "number",
   "select",
   "phases",
+  "address",
 ];
 
 export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
@@ -38,6 +39,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: "Número",
   select: "Lista (opções)",
   phases: "Fases de pagamento",
+  address: "Morada (estruturada)",
 };
 
 export const SECTION_KEYS: DucSection[] = [

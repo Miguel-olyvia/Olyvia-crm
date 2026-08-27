@@ -30,6 +30,7 @@ import {
   type DucItemSection,
   type DucStage,
   type PaymentPhase,
+  type AddressValue,
 } from "../lib/ducSchema";
 import type { DucRecord, DucSection, DucStatus, DucVariant, TrackingEntry } from "../lib/types";
 
@@ -1187,6 +1188,16 @@ function FieldRenderer({
     );
   }
 
+  if (field.type === "address") {
+    return (
+      <div className="sm:col-span-2">
+        <span className="text-sm font-medium text-slate-700">{field.label}</span>
+        <AddressField value={value} onChange={onChange} />
+        {field.hint && <span className="mt-1 block text-xs text-slate-400">{field.hint}</span>}
+      </div>
+    );
+  }
+
   if (field.type === "select") {
     return (
       <label className="block space-y-1">
@@ -1347,6 +1358,61 @@ function PhasesField({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+const EMPTY_ADDRESS: AddressValue = { street: "", number: "", postal: "", city: "" };
+
+function toAddress(v: unknown): AddressValue {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return { ...EMPTY_ADDRESS, ...(v as Partial<AddressValue>) };
+  }
+  // Retrocompat: morada antiga guardada como texto → vai para a rua.
+  if (typeof v === "string") return { ...EMPTY_ADDRESS, street: v };
+  return EMPTY_ADDRESS;
+}
+
+/** Editor de morada estruturada (rua/número/código postal/localidade). */
+function AddressField({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const a = toAddress(value);
+  const set = (patch: Partial<AddressValue>) => onChange({ ...a, ...patch });
+  const inputCls =
+    "w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand";
+  return (
+    <div className="mt-1.5 grid grid-cols-6 gap-2">
+      <input
+        className={cx(inputCls, "col-span-6 sm:col-span-4")}
+        value={a.street}
+        onChange={(e) => set({ street: e.target.value })}
+        placeholder="Rua / morada"
+      />
+      <input
+        className={cx(inputCls, "col-span-2")}
+        value={a.number}
+        onChange={(e) => set({ number: e.target.value })}
+        placeholder="Nº"
+      />
+      <input
+        className={cx(inputCls, "col-span-3 sm:col-span-2")}
+        value={a.postal}
+        onChange={(e) => set({ postal: e.target.value })}
+        placeholder="Cód. postal"
+      />
+      <input
+        className={cx(inputCls, "col-span-3 sm:col-span-4")}
+        value={a.city}
+        onChange={(e) => set({ city: e.target.value })}
+        placeholder="Localidade"
+      />
     </div>
   );
 }
