@@ -12,6 +12,7 @@ import DucDetail from "./pages/DucDetail";
 const DucConfig = lazy(() => import("./pages/DucConfig"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Help = lazy(() => import("./pages/Help"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
 
 export default function App() {
   return (
@@ -25,6 +26,14 @@ export default function App() {
         }
       >
         <Route path="/" element={<DucList />} />
+        <Route
+          path="/dashboard"
+          element={
+            <Suspense fallback={<Spinner label="A carregar dashboard…" />}>
+              <Dashboard />
+            </Suspense>
+          }
+        />
         <Route path="/duc/:id" element={<DucDetail />} />
         <Route
           path="/config"

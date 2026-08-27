@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog } from "./ui";
-import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help } from "./icons";
+import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
 
@@ -59,6 +59,17 @@ export function DucLayout() {
                 <div className="text-[11px] text-slate-400">{userEmail}</div>
               </div>
             </div>
+
+            <Link
+              to="/dashboard"
+              title="Dashboard"
+              className={
+                "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 " +
+                (location.pathname === "/dashboard" ? "text-brand" : "text-slate-400 hover:text-slate-700")
+              }
+            >
+              <Chart width={17} height={17} />
+            </Link>
 
             <Link
               to="/notificacoes"

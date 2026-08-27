@@ -340,11 +340,21 @@ export function Field({
 
 export function Spinner({ label }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-3 py-12 text-slate-500">
-      <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-      {label && <span className="text-sm">{label}</span>}
+    <div className="flex flex-col items-center justify-center gap-3 py-12 text-slate-500">
+      <span className="relative flex h-9 w-9 items-center justify-center">
+        {/* halo pulsante + anel a girar */}
+        <span className="absolute h-9 w-9 animate-ping rounded-full bg-brand/15" />
+        <span className="absolute h-9 w-9 rounded-full bg-brand/5" />
+        <span className="h-6 w-6 animate-spin rounded-full border-2 border-brand/25 border-t-brand" />
+      </span>
+      {label && <span className="animate-pulse text-sm">{label}</span>}
     </div>
   );
+}
+
+/** Bloco "esqueleto" para estados de carregamento (shimmer). */
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cx("animate-pulse rounded-md bg-slate-100", className)} />;
 }
 
 export function Badge({

@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle } from "../components/icons";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
@@ -489,6 +489,7 @@ export default function DucDetail() {
       no: s.no,
     })),
     { key: "registo", label: "Registo de alterações" },
+    { key: "historico", label: "Histórico" },
     { key: "anexos", label: "Anexos" },
   ];
 
@@ -665,6 +666,10 @@ export default function DucDetail() {
                 onRemove={removeItem}
               />
             </Card>
+          </Section>
+
+          <Section active={activeKey === "historico"} keyName="historico">
+            <HistoryTimeline duc={duc} tracking={tracking} stages={visibleStages} />
           </Section>
 
           <Section active={activeKey === "anexos"} keyName="anexos">
@@ -909,6 +914,83 @@ function StageCard({
 }
 
 // ---------------------------------------------------------------------------
+
+function HistoryTimeline({
+  duc,
+  tracking,
+  stages,
+}: {
+  duc: DucRecord;
+  tracking: TrackingEntry[];
+  stages: DucStage[];
+}) {
+  const stageTitle = (no: number) =>
+    stages.find((s) => s.no === no)?.title.split(" — ")[0] ?? `Etapa ${no}`;
+
+  type Ev = { when: string; title: string; who?: string | null; kind: "create" | "close" | "update" };
+  const events: Ev[] = [{ when: duc.created_at, title: "DUC criado", kind: "create" }];
+  tracking
+    .filter((t) => t.state === "done" && t.date)
+    .forEach((t) =>
+      events.push({
+        when: t.date as string,
+        title: `Etapa ${t.stage} fechada — ${stageTitle(t.stage)}`,
+        who: t.signed_by,
+        kind: "close",
+      })
+    );
+  if (duc.updated_at) events.push({ when: duc.updated_at, title: "Última alteração", kind: "update" });
+
+  const sorted = [...events].sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime());
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime())
+      ? "—"
+      : d.toLocaleString("pt-PT", { dateStyle: "medium", timeStyle: "short" });
+  };
+
+  return (
+    <Card className="p-5 print:border-0 print:shadow-none">
+      <div className="mb-4 flex items-center gap-2">
+        <Clock width={16} height={16} className="text-slate-400" />
+        <h2 className="text-base font-semibold text-slate-800">Histórico da ficha</h2>
+      </div>
+      <ol className="relative space-y-4 border-l border-slate-200 pl-5">
+        {sorted.map((e, i) => (
+          <li key={i} className="relative">
+            <span
+              className={cx(
+                "absolute -left-[27px] flex h-5 w-5 items-center justify-center rounded-full ring-2 ring-white",
+                e.kind === "close"
+                  ? "bg-emerald-500 text-white"
+                  : e.kind === "create"
+                    ? "bg-brand text-white"
+                    : "bg-slate-300 text-white"
+              )}
+            >
+              {e.kind === "close" ? (
+                <Check width={11} height={11} />
+              ) : e.kind === "create" ? (
+                <FileText width={11} height={11} />
+              ) : (
+                <Clock width={11} height={11} />
+              )}
+            </span>
+            <p className="text-sm font-medium text-slate-800">{e.title}</p>
+            <p className="text-xs text-slate-400">
+              {fmt(e.when)}
+              {e.who ? ` · ${e.who}` : ""}
+            </p>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-4 text-[11px] text-slate-400">
+        Reconstruído dos dados da ficha (criação, fechos de etapa assinados e última alteração). Um
+        registo de CADA edição exige uma tabela de auditoria dedicada.
+      </p>
+    </Card>
+  );
+}
 
 function TrackingBoard({
   stages,
