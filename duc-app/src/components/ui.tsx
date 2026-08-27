@@ -172,6 +172,7 @@ export function Combobox({
   searchPlaceholder = "Pesquisar…",
   className,
   disabled,
+  icon,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -180,6 +181,7 @@ export function Combobox({
   searchPlaceholder?: string;
   className?: string;
   disabled?: boolean;
+  icon?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -222,8 +224,9 @@ export function Combobox({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
+        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors hover:border-slate-300 focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
       >
+        {icon && <span className="shrink-0 text-slate-400">{icon}</span>}
         <span className={cx("min-w-0 flex-1 truncate text-left", !selected && "text-slate-400")}>
           {selected ? selected.label : placeholder}
         </span>
@@ -416,7 +419,7 @@ export function ConfirmDialog({
 }: {
   title: string;
   message: ReactNode;
-  confirmLabel?: string;
+  confirmLabel?: ReactNode;
   /** "danger" (vermelho, default) ou "brand" (ação positiva, ex.: fechar etapa). */
   tone?: "danger" | "brand";
   icon?: ReactNode;
@@ -435,7 +438,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" onClick={onCancel}>
-            Cancelar
+            <X width={15} height={15} /> Cancelar
           </Button>
           <Button variant={tone === "brand" ? "primary" : "danger"} onClick={onConfirm}>
             {confirmLabel}

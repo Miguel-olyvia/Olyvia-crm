@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog } from "./ui";
-import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart, FileText } from "./icons";
+import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart, FileText, Building } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 
@@ -40,11 +40,12 @@ export function DucLayout() {
           <div className="flex flex-1 items-center">
             {orgs.length > 0 && (
               <Combobox
-                className="w-full max-w-[210px]"
+                className="w-full max-w-[220px]"
                 value={activeOrgId ?? ""}
                 onChange={setActiveOrgId}
                 placeholder="Organização…"
                 searchPlaceholder="Pesquisar organização…"
+                icon={<Building width={15} height={15} />}
                 options={orgs.map((o) => ({ value: o.id, label: o.name }))}
               />
             )}
@@ -180,7 +181,11 @@ export function DucLayout() {
       {confirmingLogout && (
         <ConfirmDialog
           title="Terminar sessão"
-          confirmLabel="Sair"
+          confirmLabel={
+            <>
+              <LogOut width={15} height={15} /> Sair
+            </>
+          }
           tone="brand"
           icon={<LogOut width={18} height={18} />}
           message={
