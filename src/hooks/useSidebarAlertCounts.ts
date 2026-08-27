@@ -117,6 +117,16 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
     queryFn: () => fetchSidebarAlertData(activeOrgId),
     refetchInterval: POLL_INTERVAL_MS,
     initialData: emptySidebarAlertData,
+    // The global QueryClient default is staleTime: 5min. initialData here is
+    // only a zero-filled placeholder for first paint — without an explicit
+    // staleTime override, React Query treats that placeholder as fresh for
+    // 5 minutes and skips the real fetch on mount entirely, so the badge
+    // stays empty until either 5 min pass or refetchInterval (3 min) completes
+    // a full cycle without the component remounting (e.g. a page reload
+    // restarts that timer). Found in production 2026-08-27 testing the
+    // inventory alerts: a fresh reload showed zero network requests for this
+    // query at all.
+    staleTime: 0,
   });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
