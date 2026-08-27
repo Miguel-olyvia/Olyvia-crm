@@ -586,34 +586,42 @@ export default function DucDetail() {
       <style>{PRINT_CSS}</style>
 
       {/* Cabeçalho + progresso + ações */}
-      <Card className="mb-6 p-5 print:border-0 print:shadow-none">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-slate-400">{duc.duc_number}</span>
+      <Card className="mb-6 overflow-hidden p-0 print:border-0 print:shadow-none">
+        <div className="flex flex-wrap items-start justify-between gap-5 border-b border-slate-100 bg-gradient-to-br from-brand-50/60 via-white to-white p-5 print:bg-none">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-slate-900/5 px-2 py-0.5 font-mono text-xs font-medium tracking-tight text-slate-500">
+                {duc.duc_number}
+              </span>
               <Badge className="bg-brand-50 text-brand-800 ring-brand-100">{VARIANT_LABELS[variant]}</Badge>
             </div>
-            <h1 className="mt-1 text-xl font-semibold text-slate-800">
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
               {clientName ?? duc.title ?? "DUC"}
             </h1>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-100">
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-2.5 w-52 max-w-full overflow-hidden rounded-full bg-slate-200/70 ring-1 ring-inset ring-slate-200">
                 <div
-                  className="h-full rounded-full bg-brand transition-all"
+                  className="h-full rounded-full bg-gradient-to-r from-brand to-brand-light transition-all duration-500"
                   style={{ width: `${(doneStages / totalStages) * 100}%` }}
                 />
               </div>
-              <span className="text-xs text-slate-500">{doneStages}/{totalStages} etapas fechadas</span>
+              <span className="text-xs font-medium tabular-nums text-slate-600">
+                {doneStages}/{totalStages} <span className="font-normal text-slate-400">etapas fechadas</span>
+              </span>
             </div>
           </div>
 
           <div className="flex w-full flex-col gap-3 print:hidden sm:w-auto sm:items-end">
-            <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end sm:gap-1">
-              <span className="text-xs font-medium text-slate-500">Estado</span>
+            <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end sm:gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Estado</span>
               <StatusSelect value={status} onChange={changeStatus} />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-auto text-xs text-slate-400 sm:mr-0">
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 px-5 py-3 print:hidden">
+          <div className="flex flex-1 flex-wrap items-center gap-2">
+            <span className="mr-auto text-xs text-slate-400 sm:mr-0">
                 {error ? (
                   <span className="text-red-600">{error}</span>
                 ) : saving ? (
@@ -625,49 +633,58 @@ export default function DucDetail() {
                 ) : (
                   "Tudo guardado"
                 )}
-              </span>
-              <PdfMenu
-                open={pdfMenuOpen}
-                onOpenChange={setPdfMenuOpen}
-                onPrint={runPrint}
-              />
-              <Button variant="secondary" onClick={() => void handleShare()} disabled={sharingHeader}>
-                <ExternalLink /> {sharingHeader ? "A gerar…" : "Partilhar"}
-              </Button>
-              <Button onClick={() => void save()} disabled={saving || !dirty}>
-                <Save /> Guardar
-              </Button>
-            </div>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <PdfMenu
+              open={pdfMenuOpen}
+              onOpenChange={setPdfMenuOpen}
+              onPrint={runPrint}
+            />
+            <Button variant="secondary" onClick={() => void handleShare()} disabled={sharingHeader}>
+              <ExternalLink /> {sharingHeader ? "A gerar…" : "Partilhar"}
+            </Button>
+            <Button onClick={() => void save()} disabled={saving || !dirty}>
+              <Save /> Guardar
+            </Button>
           </div>
         </div>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[248px_1fr]">
         {/* Rail de navegação */}
-        <nav className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-2 print:hidden lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0 lg:sticky lg:top-20 lg:self-start">
+        <nav className="-mx-4 flex gap-1.5 overflow-x-auto scroll-px-4 px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:rounded-xl lg:border lg:border-slate-200/70 lg:bg-white/60 lg:p-2 lg:px-2 lg:pb-2 lg:shadow-sm lg:sticky lg:top-20 lg:self-start">
           {navItems.map((n) => {
             const active = activeKey === n.key;
             return (
               <button
                 key={n.key}
                 type="button"
+                aria-current={active ? "page" : undefined}
                 onClick={() => setActiveKey(n.key)}
                 className={cx(
-                  "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-all lg:w-full",
+                  "group relative flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm font-medium transition-all lg:w-full",
                   active
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-slate-600 hover:bg-slate-100"
+                    ? "bg-brand text-white shadow-sm shadow-brand/20 lg:bg-brand-50 lg:font-semibold lg:text-brand-800 lg:shadow-none"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 )}
               >
+                {/* Indicador de item ativo (desktop) */}
+                <span
+                  className={cx(
+                    "absolute left-0 top-1/2 hidden h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand transition-all lg:block",
+                    active ? "opacity-100" : "opacity-0"
+                  )}
+                />
                 {n.no != null ? (
                   <span
                     className={cx(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset",
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset transition-colors",
                       n.done
                         ? "bg-emerald-500 text-white ring-emerald-500"
                         : active
-                          ? "bg-white/20 text-white ring-white/30"
-                          : "bg-white text-slate-500 ring-slate-200"
+                          ? "bg-white/20 text-white ring-white/30 lg:bg-brand lg:text-white lg:ring-brand"
+                          : "bg-white text-slate-500 ring-slate-200 group-hover:ring-slate-300"
                     )}
                   >
                     {n.done ? <Check width={13} height={13} /> : n.no}
@@ -675,8 +692,10 @@ export default function DucDetail() {
                 ) : (
                   <span
                     className={cx(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
-                      active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                      active
+                        ? "bg-white/20 text-white lg:bg-brand-100 lg:text-brand-800"
+                        : "bg-slate-100 text-slate-400 group-hover:text-slate-500"
                     )}
                   >
                     {n.key === "anexos" ? (
@@ -1139,22 +1158,43 @@ function StageCard({
   return (
     <Card
       className={cx(
-        "p-5 print:border-0 print:shadow-none",
+        "p-5 print:border-0 print:shadow-none sm:p-6",
         done && "ring-1 ring-emerald-100"
       )}
     >
-      <div className="mb-4 flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-800">
-          <span className="mr-2 text-brand">{stage.no}</span>
-          {stage.title}
-        </h2>
+      <div className="mb-5 flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className={cx(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold tabular-nums ring-1 ring-inset",
+              done
+                ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                : isCurrent
+                  ? "bg-brand text-white ring-brand"
+                  : "bg-brand-50 text-brand-800 ring-brand-100"
+            )}
+          >
+            {stage.no}
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold leading-snug text-slate-900">
+              {stage.title}
+            </h2>
+            {stage.responsible && (
+              <p className="mt-0.5 text-xs text-slate-400">
+                Responsável: <span className="font-medium text-slate-500">{stage.responsible}</span>
+              </p>
+            )}
+          </div>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
-          {done && (
+          {done ? (
             <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
               <Check width={12} height={12} /> Fechada
             </Badge>
-          )}
-          <span className="text-xs text-slate-400">{stage.responsible}</span>
+          ) : isCurrent ? (
+            <Badge className="bg-brand-50 text-brand-800 ring-brand-100">Etapa atual</Badge>
+          ) : null}
         </div>
       </div>
       {isStale && (
@@ -1164,10 +1204,14 @@ function StageCard({
           devem ser alertados.
         </div>
       )}
-      {stage.intro && <p className="mb-4 text-xs text-slate-500">{stage.intro}</p>}
+      {stage.intro && (
+        <p className="mb-5 rounded-lg bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-500 ring-1 ring-inset ring-slate-100">
+          {stage.intro}
+        </p>
+      )}
 
       {fields.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
           {fields.map((field) => (
             <FieldRenderer
               key={field.key}
@@ -1191,14 +1235,24 @@ function StageCard({
       ))}
 
       {/* Fecho da etapa — assinatura (quem/quando) + botão fechar/reabrir */}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 print:hidden">
+      <div
+        className={cx(
+          "mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3.5 ring-1 ring-inset print:hidden",
+          done
+            ? "bg-emerald-50/60 ring-emerald-100"
+            : "bg-slate-50 ring-slate-100"
+        )}
+      >
         {done ? (
-          <p className="text-xs text-slate-500">
-            Fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
-            {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+          <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+            <Check width={14} height={14} className="shrink-0" />
+            <span>
+              Fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+              {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+            </span>
           </p>
         ) : (
-          <p className="text-xs text-slate-400">Etapa por fechar.</p>
+          <p className="text-xs font-medium text-slate-500">Etapa por fechar.</p>
         )}
         <Button
           variant={done ? "secondary" : "primary"}
@@ -1983,20 +2037,20 @@ function ItemsTable({
   };
 
   return (
-    <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-700">{section.title}</h3>
-          {section.hint && <p className="text-xs text-slate-400">{section.hint}</p>}
+    <div className="mt-6 border-t border-dashed border-slate-200 pt-5 first:mt-5 first:border-t-0 first:pt-0">
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-800">{section.title}</h3>
+          {section.hint && <p className="mt-0.5 text-xs text-slate-400">{section.hint}</p>}
         </div>
-        <Button variant="secondary" onClick={onAdd} className="px-2 py-1 text-xs print:hidden">
+        <Button variant="secondary" onClick={onAdd} className="shrink-0 px-2 py-1 text-xs print:hidden">
           <Plus width={14} height={14} /> Linha
         </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-slate-200">
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
+          <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
             <tr>
               {section.columns.map((c) => (
                 <th key={c.field} className="px-2 py-2">
