@@ -2463,6 +2463,20 @@ export default function AnewLeads() {
     void refreshSingleLead(leadId);
   }, [invalidateEntities, refreshSingleLead, selectedLead]);
 
+  /**
+   * O cartao de qualificacao do separador Percurso acabou de gravar MQL/SQL.
+   *
+   * Reutiliza o mesmo ponto de entrada dos dialogos em vez de um caminho
+   * paralelo. Chamado sem payload de proposito: a qualificacao nao altera a
+   * identidade da entidade (nome/email/telefone/NIF), por isso nao ha cache de
+   * identidades para invalidar — basta o refreshSingleLead, que re-le a linha
+   * (incluindo qualification_type) e chama loadStatusCounts, onde os queryKeys
+   * do painel sao invalidados para os cartoes de qualificacao acompanharem.
+   */
+  const handleLeadQualificationUpdated = useCallback(() => {
+    handleLeadDialogUpdate();
+  }, [handleLeadDialogUpdate]);
+
   // Load more leads for infinite scroll
   const loadMoreLeads = useCallback(() => {
     if (!loading && !loadingMore && hasMore) {
@@ -6200,6 +6214,7 @@ export default function AnewLeads() {
                         dealValue={0}
                         organizationId={selectedLead.organization_id}
                         userId={scopeAnewUserId || scopeAuthUserId || ""}
+                        onQualificationUpdated={handleLeadQualificationUpdated}
                       />
                     </TabsContent>
 
