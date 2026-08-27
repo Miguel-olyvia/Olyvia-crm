@@ -250,11 +250,13 @@ export default function DucList() {
     }
 
     const rows = (data ?? []) as DucRecord[];
+    const total = count ?? rows.length;
     setDucs(rows);
-    setTotalDucs(count ?? rows.length);
+    setTotalDucs(total);
     setClientNames(await resolveClientNames(rows));
-    // Há mais se a página veio cheia (pode haver outra página a seguir).
-    setHasMore(rows.length === PAGE_SIZE);
+    // Há mais se ainda não carregámos o total (evita o "carregar mais" fantasma
+    // quando o total é múltiplo exato de PAGE_SIZE).
+    setHasMore(rows.length < total);
     setLoading(false);
   }, [activeOrgId]);
 
@@ -285,9 +287,9 @@ export default function DucList() {
     // Funde os nomes novos com os já resolvidos (não substitui).
     const newNames = await resolveClientNames(rows);
     setClientNames((prev) => new Map([...prev, ...newNames]));
-    setHasMore(rows.length === PAGE_SIZE);
+    setHasMore(from + rows.length < totalDucs);
     setLoadingMore(false);
-  }, [activeOrgId, ducs.length, hasMore, loadingMore]);
+  }, [activeOrgId, ducs.length, hasMore, loadingMore, totalDucs]);
 
   useEffect(() => {
     void load();
@@ -301,13 +303,22 @@ export default function DucList() {
     setLoadingPending(true);
     const valid = await fetchValidContractClients(activeOrgId);
     // Client_ids que JÁ têm DUC — consulta server-side (não depende da paginação).
-    const { data: withDucRows } = await supabase
+    const { data: withDucRows, error: withDucErr } = await supabase
       .from("anew_client_ducs")
       .select("client_id")
       .eq("organization_id", activeOrgId)
       .is("deleted_at", null)
       .not("client_id", "is", null)
       .limit(5000);
+    if (withDucErr) {
+      // Não mostrar todos como "por documentar" por causa de um erro de query.
+      // eslint-disable-next-line no-console
+      console.error("[DUC] erro a apurar DUCs existentes:", withDucErr);
+      setContractCount(valid.length);
+      setPending([]);
+      setLoadingPending(false);
+      return;
+    }
     const withDuc = new Set((withDucRows ?? []).map((r) => r.client_id as string));
     setContractCount(valid.length);
     setPending(valid.filter((c) => !withDuc.has(c.id)));
@@ -358,14 +369,19 @@ export default function DucList() {
     if (!pendingMove) return;
     const { duc, targetStage } = pendingMove;
     const today = new Date().toISOString().slice(0, 10);
-    const tracking = [...(duc.tracking ?? [])];
-    const markDone = (no: number) => {
-      const i = tracking.findIndex((t) => t.stage === no);
-      if (i >= 0) tracking[i] = { ...tracking[i], state: "done", date: tracking[i].date ?? today };
-      else tracking.push({ stage: no, state: "done", date: today });
-    };
-    // Fecha todas as etapas ANTES da alvo (cascata para a frente).
-    for (let n = 1; n < targetStage; n++) markDone(n);
+    const byStage = new Map((duc.tracking ?? []).map((t) => [t.stage, t]));
+    // Reconcilia TODAS as etapas (trata avanço E recuo sem deixar fechos a mais):
+    // anteriores à alvo = fechadas; a alvo e seguintes = pendentes (assinatura limpa).
+    const stageNos = kanbanStages.length
+      ? kanbanStages.map((s) => s.no)
+      : (duc.tracking ?? []).map((t) => t.stage);
+    const tracking = stageNos.map((no) => {
+      const ex = byStage.get(no);
+      if (no < targetStage) {
+        return { ...(ex ?? { stage: no }), stage: no, state: "done" as const, date: ex?.date ?? today };
+      }
+      return { ...(ex ?? { stage: no }), stage: no, state: "pending" as const, date: null, signed_by: null };
+    });
 
     const { error } = await supabase
       .from("anew_client_ducs")
@@ -373,7 +389,7 @@ export default function DucList() {
       .eq("id", duc.id);
     setPendingMove(null);
     if (!error) void load();
-  }, [pendingMove, load]);
+  }, [pendingMove, load, kanbanStages]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

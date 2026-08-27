@@ -209,18 +209,36 @@ export default function DucDetail() {
   };
   // Fecha/reabre uma etapa registando QUEM fechou e QUANDO (assinatura). Ao
   // reabrir, limpa a assinatura e a data para não ficar registo enganador.
-  const closeStage = (stage: number, close: boolean) => {
-    setTrackingEntry(stage, {
-      state: close ? "done" : "pending",
+  // Fecha/reabre e PERSISTE já (não depende do autosave debounced — a assinatura
+  // não se pode perder). Devolve true se gravou. Calcula o tracking novo à mão
+  // para poder enviá-lo ao servidor sem esperar pelo setState.
+  const closeStage = async (stage: number, close: boolean): Promise<boolean> => {
+    const patch = {
+      state: (close ? "done" : "pending") as TrackingEntry["state"],
       date: close ? new Date().toISOString().slice(0, 10) : null,
       signed_by: close ? userName ?? businessUserId ?? "—" : null,
-    });
+    };
+    const newTracking: TrackingEntry[] = tracking.some((t) => t.stage === stage)
+      ? tracking.map((t) => (t.stage === stage ? { ...t, ...patch } : t))
+      : [...tracking, { stage, ...patch }];
+    setTracking(newTracking);
+    if (!id) return false;
+    const { error: upErr } = await supabase
+      .from("anew_client_ducs")
+      .update({ tracking: newTracking })
+      .eq("id", id);
+    if (upErr) {
+      setError(upErr.message);
+      return false;
+    }
+    setSavedAt(new Date().toLocaleTimeString("pt-PT"));
+    return true;
   };
   // Fechar pede confirmação (ação com peso: assina a etapa); reabrir é direto.
   // Antes de confirmar, valida os campos OBRIGATÓRIOS da etapa.
   const requestToggleClose = (stage: number, close: boolean) => {
     if (!close) {
-      closeStage(stage, false);
+      void closeStage(stage, false);
       return;
     }
     const st = configStages.find((s) => s.no === stage);
@@ -268,23 +286,31 @@ export default function DucDetail() {
     markDirty();
   };
   const changeStage = (n: number) => {
-    // Notifica "entrada" na nova etapa (se configurado) apenas quando muda mesmo.
-    if (n !== currentStage && duc) {
-      const st = configStages.find((s) => s.no === n);
-      if (st) {
-        void notifyStage(st, {
-          organizationId: duc.organization_id,
-          ducNumber: duc.duc_number,
-          clientName: clientName ?? duc.title,
-          stageNo: st.no,
-          stageTitle: st.title.split(" — ")[0],
-          event: "enter",
-          ducUrl: window.location.href,
-        });
-      }
-    }
+    const advancing = n > currentStage;
     setCurrentStage(n);
     markDirty();
+    if (!id) return;
+    // Persiste já a etapa atual e notifica "entrada" SÓ ao avançar (não ao
+    // recuar nem ao consultar uma etapa anterior) e só após gravar com sucesso.
+    void supabase
+      .from("anew_client_ducs")
+      .update({ current_stage: n })
+      .eq("id", id)
+      .then(({ error: upErr }) => {
+        if (upErr || !advancing || !duc) return;
+        const st = configStages.find((s) => s.no === n);
+        if (st) {
+          void notifyStage(st, {
+            organizationId: duc.organization_id,
+            ducNumber: duc.duc_number,
+            clientName: clientName ?? duc.title,
+            stageNo: st.no,
+            stageTitle: st.title.split(" — ")[0],
+            event: "enter",
+            ducUrl: window.location.href,
+          });
+        }
+      });
   };
 
   // ---- gravar -------------------------------------------------------------
@@ -669,10 +695,11 @@ export default function DucDetail() {
             </>
           }
           onCancel={() => setConfirmingClose(null)}
-          onConfirm={() => {
+          onConfirm={async () => {
             const st = visibleStages.find((s) => s.no === confirmingClose);
-            closeStage(confirmingClose, true);
-            if (st && duc) {
+            // Notifica SÓ depois de a gravação ter tido sucesso.
+            const ok = await closeStage(confirmingClose, true);
+            if (ok && st && duc) {
               void notifyStage(st, {
                 organizationId: duc.organization_id,
                 ducNumber: duc.duc_number,

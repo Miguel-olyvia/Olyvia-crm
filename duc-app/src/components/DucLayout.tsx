@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { Combobox } from "./ui";
+import { Combobox, ConfirmDialog } from "./ui";
 import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
@@ -16,6 +17,7 @@ export function DucLayout() {
   const { userName, userEmail, orgs, activeOrgId, setActiveOrgId, signOut } = useAuth();
   const location = useLocation();
   const isDetail = location.pathname !== "/";
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   return (
     <div className="app-canvas min-h-screen">
@@ -40,9 +42,10 @@ export function DucLayout() {
             to="/"
             title="Documento Único de Cliente"
             aria-label="Início"
-            className="shrink-0 text-brand transition-transform hover:-rotate-2 hover:scale-105"
+            className="flex shrink-0 items-center gap-2 text-brand transition-transform hover:scale-105"
           >
             <DucMark />
+            <span className="text-lg font-semibold tracking-tight text-slate-800">DUC</span>
           </Link>
 
           {/* Direita: ações */}
@@ -79,7 +82,7 @@ export function DucLayout() {
             </a>
 
             <button
-              onClick={() => void signOut()}
+              onClick={() => setConfirmingLogout(true)}
               title="Sair"
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
             >
@@ -100,6 +103,26 @@ export function DucLayout() {
         )}
         <Outlet />
       </main>
+
+      {confirmingLogout && (
+        <ConfirmDialog
+          title="Terminar sessão"
+          confirmLabel="Sair"
+          tone="brand"
+          icon={<LogOut width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que queres sair da conta{" "}
+              <span className="font-medium text-slate-800">{userName ?? userEmail}</span>?
+            </>
+          }
+          onCancel={() => setConfirmingLogout(false)}
+          onConfirm={() => {
+            setConfirmingLogout(false);
+            void signOut();
+          }}
+        />
+      )}
     </div>
   );
 }

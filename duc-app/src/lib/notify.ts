@@ -30,17 +30,25 @@ async function resolveRecipientEmails(notify: StageNotify): Promise<string[]> {
   return Array.from(emails);
 }
 
+/** Escapa texto para interpolar em HTML de email (evita injeção via dados). */
+function esc(s: string | number | null | undefined): string {
+  return String(s ?? "").replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string
+  );
+}
+
 function buildHtml(ctx: NotifyContext): string {
   const closed = ctx.event === "close";
   const accent = closed ? "#10b981" : "#0d9488";
   const title = closed ? "Etapa fechada" : "Etapa ativa";
   const line = closed
-    ? `A etapa <strong>${ctx.stageNo}. ${ctx.stageTitle}</strong> foi fechada${
-        ctx.signedBy ? ` por <strong>${ctx.signedBy}</strong>` : ""
+    ? `A etapa <strong>${ctx.stageNo}. ${esc(ctx.stageTitle)}</strong> foi fechada${
+        ctx.signedBy ? ` por <strong>${esc(ctx.signedBy)}</strong>` : ""
       }.`
-    : `A etapa <strong>${ctx.stageNo}. ${ctx.stageTitle}</strong> está agora ativa e aguarda ação.`;
+    : `A etapa <strong>${ctx.stageNo}. ${esc(ctx.stageTitle)}</strong> está agora ativa e aguarda ação.`;
   const button = ctx.ducUrl
-    ? `<a href="${ctx.ducUrl}" style="display:inline-block;margin-top:16px;background:${accent};color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px">Abrir DUC</a>`
+    ? `<a href="${esc(ctx.ducUrl)}" style="display:inline-block;margin-top:16px;background:${accent};color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600;font-size:14px">Abrir DUC</a>`
     : "";
   return `
   <div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;color:#0f172a">
@@ -48,8 +56,8 @@ function buildHtml(ctx: NotifyContext): string {
       <div style="background:${accent};height:6px"></div>
       <div style="padding:24px">
         <p style="margin:0 0 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${accent};font-weight:700">${title}</p>
-        <h1 style="margin:0 0 12px;font-size:18px">DUC ${ctx.ducNumber ?? ""}${
-          ctx.clientName ? ` · ${ctx.clientName}` : ""
+        <h1 style="margin:0 0 12px;font-size:18px">DUC ${esc(ctx.ducNumber)}${
+          ctx.clientName ? ` · ${esc(ctx.clientName)}` : ""
         }</h1>
         <p style="margin:0;font-size:14px;line-height:1.6;color:#334155">${line}</p>
         ${button}

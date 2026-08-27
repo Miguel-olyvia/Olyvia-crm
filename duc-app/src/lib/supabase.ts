@@ -20,6 +20,16 @@ const REMEMBER_KEY = "duc-app-remember";
 export function setRememberSession(remember: boolean): void {
   try {
     localStorage.setItem(REMEMBER_KEY, remember ? "1" : "0");
+    // Migra a sessão JÁ existente para o storage certo, senão fica órfã (gravada
+    // num storage e lida noutro) ao alternar o toggle depois do login.
+    const AUTH_KEY = "duc-app-auth";
+    const from = remember ? sessionStorage : localStorage;
+    const to = remember ? localStorage : sessionStorage;
+    const val = from.getItem(AUTH_KEY);
+    if (val !== null) {
+      to.setItem(AUTH_KEY, val);
+      from.removeItem(AUTH_KEY);
+    }
   } catch {
     // storage indisponível (modo privado restrito) — ignora
   }
