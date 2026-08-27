@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { Button, Field, Input, Toggle } from "../components/ui";
 import { DucMark, AlertTriangle, Eye, EyeOff, ExternalLink } from "../components/icons";
 
-const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia.pt";
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 
 export default function Login() {
   const { session, loading } = useAuth();
