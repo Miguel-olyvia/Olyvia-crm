@@ -636,3 +636,99 @@ CREATE POLICY anew_client_duc_messages_insert
 
 -- Sem UPDATE/DELETE pela app (conversa imutável).
 GRANT SELECT, INSERT ON public.anew_client_duc_messages TO authenticated;
+
+-- ============================================================
+-- 11. Link PÚBLICO (token) — visualização só-leitura, sem login
+-- ============================================================
+-- Gera-se um token por DUC; quem tiver o link vê o documento (só leitura) SEM
+-- conta. O acesso público NÃO passa pela RLS de utilizador: passa por uma função
+-- SECURITY DEFINER validada pelo token (revogável e com expiração opcional).
+
+CREATE TABLE IF NOT EXISTS public.anew_client_duc_public_shares (
+  id               uuid        NOT NULL DEFAULT gen_random_uuid(),
+  duc_id           uuid        NOT NULL REFERENCES public.anew_client_ducs (id) ON DELETE CASCADE,
+  organization_id  uuid        NOT NULL,
+  token            text        NOT NULL,
+  created_by       uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  revoked_at       timestamptz,
+  expires_at       timestamptz,
+  CONSTRAINT anew_client_duc_public_shares_pkey PRIMARY KEY (id),
+  CONSTRAINT anew_client_duc_public_shares_token_unique UNIQUE (token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_duc_shares_duc
+  ON public.anew_client_duc_public_shares (duc_id) WHERE revoked_at IS NULL;
+
+ALTER TABLE public.anew_client_duc_public_shares ENABLE ROW LEVEL SECURITY;
+
+-- Gestão dos tokens: membros da org (área) do DUC.
+DROP POLICY IF EXISTS anew_client_duc_shares_manage ON public.anew_client_duc_public_shares;
+CREATE POLICY anew_client_duc_shares_manage
+  ON public.anew_client_duc_public_shares
+  FOR ALL TO authenticated
+  USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))))
+  WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_public_shares TO authenticated;
+
+-- Leitura PÚBLICA por token (só-leitura). SECURITY DEFINER: ignora a RLS de
+-- utilizador, mas só devolve dados se o token for válido/ativo. Devolve o
+-- cabeçalho + blocos + rastreio + itens (subconjunto seguro, sem ids internos
+-- sensíveis para além do necessário).
+CREATE OR REPLACE FUNCTION public.get_duc_public(p_token text)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_duc_id uuid;
+  v_result jsonb;
+BEGIN
+  SELECT s.duc_id INTO v_duc_id
+  FROM public.anew_client_duc_public_shares s
+  WHERE s.token = p_token
+    AND s.revoked_at IS NULL
+    AND (s.expires_at IS NULL OR s.expires_at > now())
+  LIMIT 1;
+
+  IF v_duc_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT jsonb_build_object(
+    'duc', jsonb_build_object(
+      'duc_number', d.duc_number,
+      'title', d.title,
+      'variant', d.variant,
+      'status', d.status,
+      'current_stage', d.current_stage,
+      'blocks', d.blocks,
+      'tracking', d.tracking,
+      'created_at', d.created_at,
+      'updated_at', d.updated_at
+    ),
+    'client_name', COALESCE(
+      e.display_name,
+      NULLIF(trim(COALESCE(e.first_name, '') || ' ' || COALESCE(e.last_name, '')), '')
+    ),
+    'items', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'section', i.section, 'position', i.position, 'label', i.label,
+        'description', i.description, 'qty', i.qty, 'unit', i.unit,
+        'included', i.included, 'meta', i.meta
+      ) ORDER BY i.section, i.position)
+      FROM public.anew_client_duc_items i WHERE i.duc_id = d.id
+    ), '[]'::jsonb)
+  ) INTO v_result
+  FROM public.anew_client_ducs d
+  LEFT JOIN public.anew_clients c ON c.id = d.client_id
+  LEFT JOIN public.anew_entities e ON e.id = c.entity_id
+  WHERE d.id = v_duc_id AND d.deleted_at IS NULL;
+
+  RETURN v_result;
+END;
+$$;
+
+-- Executável por visitantes anónimos (link público) e autenticados.
+GRANT EXECUTE ON FUNCTION public.get_duc_public(text) TO anon, authenticated;

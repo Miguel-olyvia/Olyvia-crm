@@ -13,11 +13,20 @@ const DucConfig = lazy(() => import("./pages/DucConfig"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Help = lazy(() => import("./pages/Help"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const PublicDuc = lazy(() => import("./pages/PublicDuc"));
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route
+        path="/share/:token"
+        element={
+          <Suspense fallback={<Spinner label="A carregar documento…" />}>
+            <PublicDuc />
+          </Suspense>
+        }
+      />
       <Route
         element={
           <ProtectedRoute>

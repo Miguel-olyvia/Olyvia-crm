@@ -28,6 +28,12 @@ import {
   type DucCollaborator,
 } from "../lib/collaborators";
 import {
+  fetchShares,
+  createShare,
+  revokeShare,
+  type PublicShare,
+} from "../lib/publicShare";
+import {
   CHANGE_LOG_COLUMNS,
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -1269,12 +1275,37 @@ function CollaboratorsPanel({
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Links públicos (só leitura, por token).
+  const [shares, setShares] = useState<PublicShare[]>([]);
+  const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const shareUrl = (token: string) =>
+    `${window.location.origin}${import.meta.env.BASE_URL}share/${token}`;
+
   const load = useCallback(() => {
     void fetchCollaborators(ducId).then(setRows);
+    void fetchShares(ducId).then(setShares);
   }, [ducId]);
   useEffect(() => {
     load();
   }, [load]);
+
+  const generateLink = async () => {
+    setSharing(true);
+    const res = await createShare(ducId, orgId, businessUserId);
+    setSharing(false);
+    if ("error" in res) {
+      setMsg(
+        /exist|relation|schema cache|permission|denied|not find/i.test(res.error)
+          ? "Falta aplicar a tabela de partilhas no Supabase (duc-app/db/schema.sql §11)."
+          : res.error
+      );
+      return;
+    }
+    void navigator.clipboard?.writeText(shareUrl(res.token)).catch(() => {});
+    setCopied(res.token);
+    load();
+  };
 
   const invite = async () => {
     const e = email.trim().toLowerCase();
@@ -1286,7 +1317,11 @@ function CollaboratorsPanel({
     setMsg(null);
     const err = await addCollaborator(ducId, orgId, e, role, businessUserId);
     if (err) {
-      setMsg(err);
+      setMsg(
+        /exist|relation|schema cache|permission|denied|not find/i.test(err)
+          ? "Não foi possível convidar. Falta aplicar a tabela de colaboradores no Supabase (duc-app/db/schema.sql §9)."
+          : err
+      );
       setBusy(false);
       return;
     }
@@ -1361,9 +1396,62 @@ function CollaboratorsPanel({
           ))
         )}
       </div>
+
+      {/* Link público (só leitura, por token) */}
+      <div className="mt-6 border-t border-slate-100 pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">Link público (só leitura)</h3>
+            <p className="text-xs text-slate-400">
+              Qualquer pessoa com o link vê o documento completo — sem conta. Não é indexado no
+              Google.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => void generateLink()} disabled={sharing}>
+            <Plus width={14} height={14} /> {sharing ? "A gerar…" : "Gerar link"}
+          </Button>
+        </div>
+
+        {shares.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {shares.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-2"
+              >
+                <input
+                  readOnly
+                  value={shareUrl(s.token)}
+                  onFocus={(e) => e.target.select()}
+                  className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-slate-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(shareUrl(s.token)).catch(() => {});
+                    setCopied(s.token);
+                  }}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-brand hover:bg-brand-50"
+                >
+                  {copied === s.token ? "Copiado!" : "Copiar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void revokeShare(s.id).then(load)}
+                  title="Revogar link"
+                  className="shrink-0 text-slate-300 transition-colors hover:text-red-500"
+                >
+                  <Trash width={14} height={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <p className="mt-4 text-[11px] text-slate-400">
-        Requer a tabela de colaboradores aplicada (duc-app/db/schema.sql §9) e o magic link ativo no
-        Supabase Auth.
+        Requer as tabelas aplicadas no Supabase (duc-app/db/schema.sql §9 colaboradores, §11 links
+        públicos) e o magic link ativo no Auth.
       </p>
     </Card>
   );
