@@ -16839,6 +16839,10 @@ export type Database = {
         Args: { p_bundle_id: string; p_id: string }
         Returns: undefined
       }
+      rpc_delete_bundle_components: {
+        Args: { p_bundle_id: string; p_ids: string[] }
+        Returns: number
+      }
       rpc_delete_lead_workflow_automation: {
         Args: { p_id: string }
         Returns: undefined

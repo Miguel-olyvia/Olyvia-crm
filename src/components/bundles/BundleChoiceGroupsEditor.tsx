@@ -95,6 +95,15 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
   const [localSearchTerm, setLocalSearchTerm] = useState("");
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
+  // Selection of EXISTING options inside one choice group. Deliberately a
+  // separate state from `selectedItems` (which holds catalog item ids for the
+  // "add options" dialog): these are bundle_components ids, and mixing both in
+  // one Set would let "delete selected" act on ids it never rendered.
+  // `selectionGroupId` scopes the selection to one group at a time, so a
+  // selection made in one group is never applied to another.
+  const [selectionGroupId, setSelectionGroupId] = useState<string | null>(null);
+  const [selectedComponentIds, setSelectedComponentIds] = useState<Set<string>>(new Set());
+
   // Debounced search → server-side via hook
   const debouncedSearch = useDebounce(localSearchTerm, 300);
 
@@ -363,6 +372,66 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
 
       if (error) throw error;
 
+      // Keep the bulk selection consistent: an option removed one-by-one must
+      // not linger in the selection and be re-sent to the bulk RPC later.
+      setSelectedComponentIds(prev => {
+        if (!prev.has(compId)) return prev;
+        const next = new Set(prev);
+        next.delete(compId);
+        return next;
+      });
+
+      loadGroups();
+    } catch (error: any) {
+      toast({
+        title: t('common.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const selectionCountFor = (groupId: string) =>
+    selectionGroupId === groupId ? selectedComponentIds.size : 0;
+
+  const isComponentSelected = (groupId: string, compId: string) =>
+    selectionGroupId === groupId && selectedComponentIds.has(compId);
+
+  const toggleComponentSelection = (groupId: string, compId: string) => {
+    const sameGroup = selectionGroupId === groupId;
+    setSelectionGroupId(groupId);
+    setSelectedComponentIds(prev => {
+      const next = new Set(sameGroup ? prev : []);
+      if (next.has(compId)) {
+        next.delete(compId);
+      } else {
+        next.add(compId);
+      }
+      return next;
+    });
+  };
+
+  const handleDeleteSelectedComponents = async (groupId: string) => {
+    if (selectionGroupId !== groupId) return;
+
+    const ids = Array.from(selectedComponentIds);
+    if (ids.length === 0) return;
+
+    try {
+      // ONE server round trip for the whole batch: the ids travel in the POST
+      // body of the RPC, so there is no ~300-id/12 kB URL ceiling like a
+      // DELETE ... in.(...) would have, and the action produces exactly one
+      // audit row (same contract as the other bundle child-editor RPCs).
+      const { error } = await supabase.rpc("rpc_delete_bundle_components", {
+        p_ids: ids,
+        p_bundle_id: bundleId,
+      });
+
+      if (error) throw error;
+
+      setSelectionGroupId(null);
+      setSelectedComponentIds(new Set());
+
       loadGroups();
     } catch (error: any) {
       toast({
@@ -468,6 +537,14 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
                       <div className="space-y-2">
                         {group.components?.map((comp) => (
                           <div key={comp.id} className="flex items-center gap-3 p-2 bg-muted/30 rounded-md">
+                            <Checkbox
+                              aria-label={t('bundles.choices.selectOption', {
+                                name: comp.product?.name || comp.service?.name || '',
+                              })}
+                              data-testid={`choice-option-checkbox-${comp.id}`}
+                              checked={isComponentSelected(group.id, comp.id)}
+                              onCheckedChange={() => toggleComponentSelection(group.id, comp.id)}
+                            />
                             {comp.product_id ? (
                               <Package className="h-4 w-4 text-blue-500" />
                             ) : (
@@ -496,14 +573,27 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
                     )}
                     
                     <div className="flex justify-between pt-2 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setAddItemsGroupId(group.id)}
-                      >
-                        <Plus className="h-4 w-4 mr-2" />
-                        {t('bundles.choices.addOption')}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAddItemsGroupId(group.id)}
+                        >
+                          <Plus className="h-4 w-4 mr-2" />
+                          {t('bundles.choices.addOption')}
+                        </Button>
+                        {selectionCountFor(group.id) > 0 && (
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            data-testid="choice-options-delete-selected"
+                            onClick={() => handleDeleteSelectedComponents(group.id)}
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            {t('bundles.choices.deleteSelected')} ({selectionCountFor(group.id)})
+                          </Button>
+                        )}
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -689,6 +779,7 @@ export default function BundleChoiceGroupsEditor({ bundleId }: BundleChoiceGroup
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }
