@@ -13,7 +13,7 @@ import {
 } from "../lib/ducSchema";
 import type { DucVariant } from "../lib/types";
 import { Badge, Button, Spinner, cx } from "../components/ui";
-import { DucMark, Check, Clock, Printer } from "../components/icons";
+import { DucMark, Check, Clock, Printer, ChevronRight } from "../components/icons";
 
 /* --- CSS de impressão: "Guardar em PDF" gera um documento A4 limpo --- */
 const PRINT_CSS = `
@@ -158,20 +158,20 @@ export default function PublicDuc() {
   return (
     <div className="app-canvas min-h-screen py-6 sm:py-10">
       <style>{PRINT_CSS}</style>
-      <div className="mx-auto max-w-3xl px-4">
+      <div className="mx-auto max-w-3xl px-3 pb-24 sm:px-4 md:pb-0">
         {/* Barra: só-leitura + guardar PDF */}
         <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">
             <DucMark width={13} height={13} className="text-brand" /> Documento público · só leitura
           </span>
-          <Button onClick={() => window.print()}>
+          <Button onClick={() => window.print()} className="hidden sm:inline-flex">
             <Printer /> Guardar em PDF
           </Button>
         </div>
 
         <article className="duc-doc overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
           {/* Cabeçalho */}
-          <header className="duc-hero border-b border-slate-100 bg-gradient-to-br from-brand-50 via-white to-teal-50/40 px-6 py-6 sm:px-9 sm:py-8">
+          <header className="duc-hero border-b border-slate-100 bg-gradient-to-br from-brand-50 via-white to-teal-50/40 px-5 py-6 sm:px-9 sm:py-8">
             <div className="flex items-center gap-2 text-brand">
               <DucMark width={22} height={22} />
               <span className="text-[11px] font-semibold uppercase tracking-wide">
@@ -208,14 +208,14 @@ export default function PublicDuc() {
           </header>
 
           {/* Etapas */}
-          <div className="space-y-8 px-6 py-7 sm:px-9">
+          <div className="space-y-8 px-4 py-6 sm:px-9 sm:py-7">
             {stages.map((stage) => {
               const fields = fieldsForVariant(stage.fields, variant);
               const sections = sectionsForVariant(stage, variant);
               const block = duc.blocks?.[stage.key] ?? {};
               const done = doneNos.has(stage.no);
               return (
-                <section key={stage.key} className="duc-stage">
+                <section key={stage.key} id={`sec-${stage.no}`} className="duc-stage scroll-mt-4">
                   <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-slate-100 pb-2">
                     <h2 className="text-base font-semibold text-slate-800">
                       <span className="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-lg bg-brand-50 text-xs font-bold text-brand-800 ring-1 ring-brand-100">
@@ -313,7 +313,7 @@ export default function PublicDuc() {
             })}
 
             {/* Rastreio */}
-            <section className="duc-stage">
+            <section id="sec-rastreio" className="duc-stage scroll-mt-4">
               <h2 className="mb-3 border-b border-slate-100 pb-2 text-base font-semibold text-slate-800">
                 Rastreio das etapas
               </h2>
@@ -361,6 +361,41 @@ export default function PublicDuc() {
           Este documento é de acesso público por link e não é indexado em motores de busca.
         </p>
       </div>
+
+      {/* Barra fixa (só mobile): saltar para secção + Guardar PDF */}
+      <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur md:hidden">
+        <div className="mx-auto flex max-w-3xl items-center gap-2">
+          <div className="relative flex-1">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const el = document.getElementById(e.target.value);
+                el?.scrollIntoView({ behavior: "smooth", block: "start" });
+                e.currentTarget.selectedIndex = 0;
+              }}
+              className="w-full appearance-none rounded-lg border border-slate-200 bg-white px-3 py-2.5 pr-8 text-sm text-slate-700 outline-none focus:border-brand"
+            >
+              <option value="" disabled>
+                Ir para secção…
+              </option>
+              {stages.map((s) => (
+                <option key={s.no} value={`sec-${s.no}`}>
+                  {s.no}. {s.title.split(" — ")[0]}
+                </option>
+              ))}
+              <option value="sec-rastreio">Rastreio das etapas</option>
+            </select>
+            <ChevronRight
+              width={15}
+              height={15}
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-slate-400"
+            />
+          </div>
+          <Button onClick={() => window.print()} className="shrink-0 px-4 py-2.5">
+            <Printer /> PDF
+          </Button>
+        </div>
+      </nav>
     </div>
   );
 }
