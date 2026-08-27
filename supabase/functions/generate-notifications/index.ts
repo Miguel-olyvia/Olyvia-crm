@@ -944,7 +944,9 @@ Deno.serve(async (req) => {
         (q) => q,
         "id, product_id, warehouse_id, quantity, reorder_point, minimum_quantity, maximum_quantity, organization_id",
       );
-      const lowStocks = (allStocksForAlert || []).filter((s: any) => s.quantity <= s.reorder_point);
+      // reorder_point=0 significa "nunca configurado", não "reencomendar já" — só
+      // dispara quando alguém definiu mesmo um ponto de reencomenda (>0).
+      const lowStocks = (allStocksForAlert || []).filter((s: any) => s.reorder_point > 0 && s.quantity <= s.reorder_point);
 
       if (lowStocks.length > 0) {
         const lowStockProductIds = [...new Set(lowStocks.map((s: any) => s.product_id))];
