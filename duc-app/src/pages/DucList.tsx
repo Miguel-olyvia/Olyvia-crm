@@ -19,6 +19,7 @@ import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, Al
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
+import { fetchDismissedClientIds, dismissClient, restoreClient } from "../lib/dismissed";
 import {
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -210,6 +211,7 @@ export default function DucList() {
   const [celebrateId, setCelebrateId] = useState<string | null>(null);
 
   const [pending, setPending] = useState<ClientOption[]>([]);
+  const [dismissedClients, setDismissedClients] = useState<ClientOption[]>([]);
   const [contractCount, setContractCount] = useState(0);
   const [loadingPending, setLoadingPending] = useState(false);
 
@@ -331,9 +333,30 @@ export default function DucList() {
     }
     const withDuc = new Set((withDucRows ?? []).map((r) => r.client_id as string));
     setContractCount(valid.length);
-    setPending(valid.filter((c) => !withDuc.has(c.id)));
+    // Exclui os "dispensados" (não precisam de DUC) da lista de por documentar.
+    const dismissed = await fetchDismissedClientIds(activeOrgId);
+    const notDocumented = valid.filter((c) => !withDuc.has(c.id));
+    setPending(notDocumented.filter((c) => !dismissed.has(c.id)));
+    setDismissedClients(notDocumented.filter((c) => dismissed.has(c.id)));
     setLoadingPending(false);
   }, [activeOrgId, businessUserId]);
+
+  const handleDismiss = useCallback(
+    async (c: ClientOption) => {
+      if (!activeOrgId) return;
+      await dismissClient(c.id, activeOrgId, businessUserId);
+      void loadPending();
+    },
+    [activeOrgId, businessUserId, loadPending]
+  );
+  const handleRestore = useCallback(
+    async (c: ClientOption) => {
+      if (!activeOrgId) return;
+      await restoreClient(c.id, activeOrgId);
+      void loadPending();
+    },
+    [activeOrgId, loadPending]
+  );
 
   useEffect(() => {
     if (view === "pending") void loadPending();
@@ -582,9 +605,12 @@ export default function DucList() {
         <PendingView
           loading={loadingPending}
           pending={pending}
+          dismissedClients={dismissedClients}
           contractCount={contractCount}
           ducCount={Math.max(0, contractCount - pending.length)}
           onCreate={(c) => openCreate(c)}
+          onDismiss={handleDismiss}
+          onRestore={handleRestore}
         />
       )}
 
@@ -1126,15 +1152,21 @@ function initials(name: string): string {
 function PendingView({
   loading,
   pending,
+  dismissedClients,
   contractCount,
   ducCount,
   onCreate,
+  onDismiss,
+  onRestore,
 }: {
   loading: boolean;
   pending: ClientOption[];
+  dismissedClients: ClientOption[];
   contractCount: number;
   ducCount: number;
   onCreate: (c: ClientOption) => void;
+  onDismiss: (c: ClientOption) => void;
+  onRestore: (c: ClientOption) => void;
 }) {
   const [q, setQ] = useState("");
 
@@ -1283,14 +1315,24 @@ function PendingView({
                         </div>
                       </div>
 
-                      <Button
-                        size="sm"
-                        className="w-full justify-center sm:w-auto"
-                        onClick={() => onCreate(c)}
-                      >
-                        <Plus width={14} height={14} /> Criar DUC{" "}
-                        <ChevronRight width={14} height={14} />
-                      </Button>
+                      <div className="flex w-full gap-2 sm:w-auto">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onDismiss(c)}
+                          title="Este cliente não precisa de DUC"
+                        >
+                          Não precisa
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 justify-center sm:flex-none"
+                          onClick={() => onCreate(c)}
+                        >
+                          <Plus width={14} height={14} /> Criar DUC{" "}
+                          <ChevronRight width={14} height={14} />
+                        </Button>
+                      </div>
                     </Card>
                   </li>
                 );
@@ -1298,6 +1340,29 @@ function PendingView({
             </ul>
           )}
         </>
+      )}
+
+      {/* Dispensados — clientes marcados como "não precisa de DUC" (reversível). */}
+      {dismissedClients.length > 0 && (
+        <Card className="p-4">
+          <p className="mb-2 text-sm font-medium text-slate-600">
+            Dispensados ({dismissedClients.length}){" "}
+            <span className="font-normal text-slate-400">— não precisam de DUC</span>
+          </p>
+          <ul className="divide-y divide-slate-100">
+            {dismissedClients.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 py-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-500">
+                  {initials(c.name)}
+                </span>
+                <p className="min-w-0 flex-1 truncate text-sm text-slate-500">{c.name}</p>
+                <Button variant="ghost" size="sm" onClick={() => onRestore(c)}>
+                  Repor
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
   );

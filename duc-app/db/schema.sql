@@ -732,3 +732,34 @@ $$;
 
 -- Executável por visitantes anónimos (link público) e autenticados.
 GRANT EXECUTE ON FUNCTION public.get_duc_public(text) TO anon, authenticated;
+
+-- ============================================================
+-- 12. Clientes DISPENSADOS de DUC ("não precisa de documento")
+-- ============================================================
+-- Alguns clientes com contrato podem não precisar de DUC. Marca-os como
+-- dispensados para deixarem de aparecer em "Por documentar" (reversível).
+
+CREATE TABLE IF NOT EXISTS public.anew_client_duc_dismissed (
+  id               uuid        NOT NULL DEFAULT gen_random_uuid(),
+  client_id        uuid        NOT NULL,
+  organization_id  uuid        NOT NULL,
+  reason           text,
+  dismissed_by     uuid,
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT anew_client_duc_dismissed_pkey PRIMARY KEY (id),
+  CONSTRAINT anew_client_duc_dismissed_unique UNIQUE (organization_id, client_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_duc_dismissed_org
+  ON public.anew_client_duc_dismissed (organization_id);
+
+ALTER TABLE public.anew_client_duc_dismissed ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS anew_client_duc_dismissed_manage ON public.anew_client_duc_dismissed;
+CREATE POLICY anew_client_duc_dismissed_manage
+  ON public.anew_client_duc_dismissed
+  FOR ALL TO authenticated
+  USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))))
+  WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_dismissed TO authenticated;
