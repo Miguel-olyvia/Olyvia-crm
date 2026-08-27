@@ -20,6 +20,13 @@ import { fetchEffectiveStages } from "../lib/ducConfig";
 import { notifyStage } from "../lib/notify";
 import { logDucEvent, fetchDucEvents, type DucEvent } from "../lib/events";
 import {
+  fetchCollaborators,
+  addCollaborator,
+  removeCollaborator,
+  sendMagicLink,
+  type DucCollaborator,
+} from "../lib/collaborators";
+import {
   CHANGE_LOG_COLUMNS,
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -514,6 +521,7 @@ export default function DucDetail() {
     { key: "registo", label: "Registo de alterações" },
     { key: "historico", label: "Histórico" },
     { key: "anexos", label: "Anexos" },
+    ...(businessUserId ? [{ key: "colaboradores", label: "Colaboradores" }] : []),
   ];
 
   return (
@@ -698,6 +706,16 @@ export default function DucDetail() {
           <Section active={activeKey === "anexos"} keyName="anexos">
             {businessUserId ? (
               <AttachmentsPanel ducId={duc.id} orgId={duc.organization_id} businessUserId={businessUserId} />
+            ) : null}
+          </Section>
+
+          <Section active={activeKey === "colaboradores"} keyName="colaboradores">
+            {businessUserId ? (
+              <CollaboratorsPanel
+                ducId={duc.id}
+                orgId={duc.organization_id}
+                businessUserId={businessUserId}
+              />
             ) : null}
           </Section>
         </div>
@@ -1037,6 +1055,121 @@ function HistoryTimeline({
         {fromDb.length > 0
           ? "Histórico de auditoria (append-only) — cada ação fica registada por quem e quando."
           : "Reconstruído dos dados da ficha. Aplica a tabela de auditoria (duc-app/db/schema.sql §8) para registo completo de cada ação."}
+      </p>
+    </Card>
+  );
+}
+
+function CollaboratorsPanel({
+  ducId,
+  orgId,
+  businessUserId,
+}: {
+  ducId: string;
+  orgId: string;
+  businessUserId: string;
+}) {
+  const [rows, setRows] = useState<DucCollaborator[]>([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"viewer" | "editor">("viewer");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    void fetchCollaborators(ducId).then(setRows);
+  }, [ducId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const invite = async () => {
+    const e = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
+      setMsg("Email inválido.");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    const err = await addCollaborator(ducId, orgId, e, role, businessUserId);
+    if (err) {
+      setMsg(err);
+      setBusy(false);
+      return;
+    }
+    // Envia o magic link para o externo entrar.
+    await sendMagicLink(e, window.location.origin + import.meta.env.BASE_URL);
+    setEmail("");
+    setMsg(`Convite enviado para ${e}.`);
+    setBusy(false);
+    load();
+  };
+
+  const remove = async (id: string) => {
+    await removeCollaborator(id);
+    load();
+  };
+
+  return (
+    <Card className="p-5 print:hidden">
+      <h2 className="mb-1 text-base font-semibold text-slate-800">Colaboradores externos</h2>
+      <p className="mb-4 text-xs text-slate-400">
+        Convida pessoas de fora da organização para ver ou editar este DUC. Recebem um link de
+        acesso (magic link) por email.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void invite();
+          }}
+          placeholder="email@externo.pt"
+          className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+        />
+        <Combobox
+          className="sm:w-36"
+          value={role}
+          onChange={(v) => setRole(v as "viewer" | "editor")}
+          options={[
+            { value: "viewer", label: "Ver" },
+            { value: "editor", label: "Editar" },
+          ]}
+        />
+        <Button onClick={() => void invite()} disabled={busy}>
+          <Plus width={14} height={14} /> Convidar
+        </Button>
+      </div>
+      {msg && <p className="mt-2 text-xs text-slate-500">{msg}</p>}
+
+      <div className="mt-4 divide-y divide-slate-100">
+        {rows.length === 0 ? (
+          <p className="py-3 text-center text-xs text-slate-400">Sem colaboradores externos.</p>
+        ) : (
+          rows.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-slate-800">{c.email}</p>
+                <p className="text-xs text-slate-400">
+                  {c.role === "editor" ? "Pode editar" : "Só leitura"}
+                  {c.accepted_at ? " · aceitou" : " · convite pendente"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void remove(c.id)}
+                className="text-slate-300 transition-colors hover:text-red-500"
+                title="Remover colaborador"
+              >
+                <Trash width={15} height={15} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      <p className="mt-4 text-[11px] text-slate-400">
+        Requer a tabela de colaboradores aplicada (duc-app/db/schema.sql §9) e o magic link ativo no
+        Supabase Auth.
       </p>
     </Card>
   );

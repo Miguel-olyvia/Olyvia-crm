@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { supabase, getRememberSession, setRememberSession } from "../lib/supabase";
+import { sendMagicLink } from "../lib/collaborators";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Field, Input, Toggle } from "../components/ui";
 import { DucMark, AlertTriangle, Eye, EyeOff, ExternalLink } from "../components/icons";
@@ -16,8 +17,27 @@ export default function Login() {
   const [remember, setRemember] = useState(getRememberSession());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [magicSending, setMagicSending] = useState(false);
+  const [magicMsg, setMagicMsg] = useState<string | null>(null);
 
   if (!loading && session) return <Navigate to="/" replace />;
+
+  // Externos: entrar por link mágico (sem password). Usa o email do formulário.
+  const sendMagic = async () => {
+    if (!email.trim()) {
+      setError("Escreve o teu email primeiro.");
+      return;
+    }
+    setError(null);
+    setMagicMsg(null);
+    setMagicSending(true);
+    setRememberSession(remember);
+    const redirectTo = window.location.origin + import.meta.env.BASE_URL;
+    const err = await sendMagicLink(email, redirectTo);
+    setMagicSending(false);
+    if (err) setError(err);
+    else setMagicMsg("Enviámos um link de acesso para o teu email. Abre-o para entrar.");
+  };
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -107,6 +127,25 @@ export default function Login() {
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? "A entrar…" : "Entrar"}
             </Button>
+
+            <div className="flex items-center gap-2 pt-1">
+              <span className="h-px flex-1 bg-slate-100" />
+              <span className="text-[11px] uppercase tracking-wide text-slate-300">ou</span>
+              <span className="h-px flex-1 bg-slate-100" />
+            </div>
+            <button
+              type="button"
+              onClick={sendMagic}
+              disabled={magicSending}
+              className="w-full rounded-lg border border-slate-200 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
+            >
+              {magicSending ? "A enviar…" : "Sou externo — entrar por link mágico"}
+            </button>
+            {magicMsg && (
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-center text-xs text-emerald-700 ring-1 ring-inset ring-emerald-100">
+                {magicMsg}
+              </p>
+            )}
           </form>
         </div>
 

@@ -461,3 +461,133 @@ CREATE POLICY anew_client_duc_events_insert
 -- Sem políticas de UPDATE/DELETE → negado por RLS (histórico imutável).
 
 GRANT SELECT, INSERT ON public.anew_client_duc_events TO authenticated;
+
+-- ============================================================
+-- 9. Colaboradores EXTERNOS (convite + magic link)
+-- ============================================================
+-- Permite convidar pessoas de FORA da organização para ver/editar um DUC
+-- específico. O externo autentica-se por magic link (Supabase Auth) com o email
+-- convidado; a RLS abaixo dá-lhe acesso APENAS aos DUCs onde é colaborador.
+-- Tudo ADITIVO: acrescenta políticas novas, NÃO altera as existentes.
+
+CREATE TABLE IF NOT EXISTS public.anew_client_duc_collaborators (
+  id               uuid        NOT NULL DEFAULT gen_random_uuid(),
+  duc_id           uuid        NOT NULL REFERENCES public.anew_client_ducs (id) ON DELETE CASCADE,
+  organization_id  uuid        NOT NULL,
+  email            text        NOT NULL,
+  role             text        NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer','editor')),
+  invited_by       uuid,
+  auth_user_id     uuid,       -- preenchido quando o externo aceita/entra
+  invited_at       timestamptz NOT NULL DEFAULT now(),
+  accepted_at      timestamptz,
+  revoked_at       timestamptz,
+  CONSTRAINT anew_client_duc_collab_pkey PRIMARY KEY (id),
+  CONSTRAINT anew_client_duc_collab_unique UNIQUE (duc_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_duc_collab_duc
+  ON public.anew_client_duc_collaborators (duc_id) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_client_duc_collab_email
+  ON public.anew_client_duc_collaborators (lower(email)) WHERE revoked_at IS NULL;
+
+-- É o utilizador atual colaborador (ativo) deste DUC? (por auth_user_id ou email do JWT)
+CREATE OR REPLACE FUNCTION public.is_duc_collaborator(p_duc_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.anew_client_duc_collaborators c
+    WHERE c.duc_id = p_duc_id
+      AND c.revoked_at IS NULL
+      AND (
+        c.auth_user_id = (SELECT auth.uid())
+        OR lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+      )
+  );
+$$;
+
+-- ... e é colaborador com papel de EDITOR?
+CREATE OR REPLACE FUNCTION public.is_duc_editor_collaborator(p_duc_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.anew_client_duc_collaborators c
+    WHERE c.duc_id = p_duc_id
+      AND c.revoked_at IS NULL
+      AND c.role = 'editor'
+      AND (
+        c.auth_user_id = (SELECT auth.uid())
+        OR lower(c.email) = lower((SELECT auth.jwt() ->> 'email'))
+      )
+  );
+$$;
+
+ALTER TABLE public.anew_client_duc_collaborators ENABLE ROW LEVEL SECURITY;
+
+-- Gestão da lista: membros da org (área) do DUC gerem os colaboradores.
+DROP POLICY IF EXISTS anew_client_duc_collab_manage ON public.anew_client_duc_collaborators;
+CREATE POLICY anew_client_duc_collab_manage
+  ON public.anew_client_duc_collaborators
+  FOR ALL
+  TO authenticated
+  USING (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))))
+  WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
+
+-- O próprio colaborador pode VER as suas linhas (para saber a que DUCs tem acesso).
+DROP POLICY IF EXISTS anew_client_duc_collab_self_select ON public.anew_client_duc_collaborators;
+CREATE POLICY anew_client_duc_collab_self_select
+  ON public.anew_client_duc_collaborators
+  FOR SELECT
+  TO authenticated
+  USING (
+    revoked_at IS NULL
+    AND (auth_user_id = (SELECT auth.uid())
+         OR lower(email) = lower((SELECT auth.jwt() ->> 'email')))
+  );
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_collaborators TO authenticated;
+
+-- ---- Acesso do EXTERNO ao DUC e dependências (políticas ADITIVAS) -----------
+-- RLS: várias políticas permissivas são combinadas por OR — estas acrescentam
+-- acesso a colaboradores SEM mexer nas políticas por organização já existentes.
+
+DROP POLICY IF EXISTS anew_client_ducs_collab_select ON public.anew_client_ducs;
+CREATE POLICY anew_client_ducs_collab_select
+  ON public.anew_client_ducs
+  FOR SELECT TO authenticated
+  USING (public.is_duc_collaborator(id));
+
+DROP POLICY IF EXISTS anew_client_ducs_collab_update ON public.anew_client_ducs;
+CREATE POLICY anew_client_ducs_collab_update
+  ON public.anew_client_ducs
+  FOR UPDATE TO authenticated
+  USING (public.is_duc_editor_collaborator(id))
+  WITH CHECK (public.is_duc_editor_collaborator(id));
+
+DROP POLICY IF EXISTS anew_client_duc_items_collab_select ON public.anew_client_duc_items;
+CREATE POLICY anew_client_duc_items_collab_select
+  ON public.anew_client_duc_items
+  FOR SELECT TO authenticated
+  USING (public.is_duc_collaborator(duc_id));
+
+DROP POLICY IF EXISTS anew_client_duc_items_collab_write ON public.anew_client_duc_items;
+CREATE POLICY anew_client_duc_items_collab_write
+  ON public.anew_client_duc_items
+  FOR ALL TO authenticated
+  USING (public.is_duc_editor_collaborator(duc_id))
+  WITH CHECK (public.is_duc_editor_collaborator(duc_id));
+
+DROP POLICY IF EXISTS anew_client_duc_events_collab_select ON public.anew_client_duc_events;
+CREATE POLICY anew_client_duc_events_collab_select
+  ON public.anew_client_duc_events
+  FOR SELECT TO authenticated
+  USING (public.is_duc_collaborator(duc_id));
+
+DROP POLICY IF EXISTS anew_client_duc_attachments_collab_select ON public.anew_client_duc_attachments;
+CREATE POLICY anew_client_duc_attachments_collab_select
+  ON public.anew_client_duc_attachments
+  FOR SELECT TO authenticated
+  USING (public.is_duc_collaborator(duc_id));
