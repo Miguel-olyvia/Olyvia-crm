@@ -145,6 +145,9 @@ export default function PublicDuc() {
   const doneNos = new Set((duc.tracking ?? []).filter((t) => t.state === "done").map((t) => t.stage));
   const totalStages = stages.length || 1;
   const donePct = Math.round((doneNos.size / totalStages) * 100);
+  const pendingStages = stages.filter((s) => !doneNos.has(s.no));
+  const jumpTo = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
   const meta: Array<{ label: string; value: string }> = [
     { label: "Número", value: duc.duc_number ?? "—" },
@@ -204,6 +207,46 @@ export default function PublicDuc() {
                 <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${donePct}%` }} />
               </div>
               <span className="text-xs font-medium tabular-nums text-slate-500">{donePct}%</span>
+            </div>
+
+            {/* Estado das etapas — vê logo quais faltam fechar (clica para saltar) */}
+            <div className="mt-4">
+              <div className="flex flex-wrap gap-1.5">
+                {stages.map((s) => {
+                  const done = doneNos.has(s.no);
+                  const current = s.no === duc.current_stage && !done;
+                  return (
+                    <button
+                      key={s.no}
+                      type="button"
+                      onClick={() => jumpTo(`sec-${s.no}`)}
+                      title={s.title.split(" — ")[0]}
+                      className={cx(
+                        "inline-flex h-7 min-w-[1.75rem] items-center justify-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset transition-colors",
+                        done
+                          ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
+                          : current
+                            ? "bg-brand text-white ring-brand"
+                            : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"
+                      )}
+                    >
+                      {done ? <Check width={12} height={12} /> : s.no}
+                    </button>
+                  );
+                })}
+              </div>
+              {pendingStages.length > 0 ? (
+                <p className="mt-2 text-xs text-slate-500">
+                  <span className="font-semibold text-amber-700">
+                    Falta{pendingStages.length === 1 ? "" : "m"} fechar {pendingStages.length}:
+                  </span>{" "}
+                  {pendingStages.map((s) => s.title.split(" — ")[0]).join(" · ")}
+                </p>
+              ) : (
+                <p className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
+                  <Check width={13} height={13} /> Todas as etapas fechadas
+                </p>
+              )}
             </div>
           </header>
 
