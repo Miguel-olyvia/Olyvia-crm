@@ -399,3 +399,65 @@ CREATE POLICY anew_client_duc_configs_write
   WITH CHECK (organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid()))));
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.anew_client_duc_configs TO authenticated;
+
+-- ============================================================
+-- 8. anew_client_duc_events — histórico / auditoria da ficha
+-- ============================================================
+-- Regista CADA ação relevante de um DUC (criação, fecho/reabertura de etapa,
+-- mudança de estado, movimento no fluxo, alteração de campo). É APPEND-ONLY:
+-- a app só faz INSERT/SELECT (sem UPDATE/DELETE), por isso o histórico não é
+-- adulterável. Alimenta a vista "Histórico" (quem fez o quê e quando).
+
+CREATE TABLE IF NOT EXISTS public.anew_client_duc_events (
+  id               uuid        NOT NULL DEFAULT gen_random_uuid(),
+  duc_id           uuid        NOT NULL REFERENCES public.anew_client_ducs (id) ON DELETE CASCADE,
+  organization_id  uuid        NOT NULL,
+  event_type       text        NOT NULL
+                     CHECK (event_type IN ('created','stage_closed','stage_reopened',
+                                           'status_changed','stage_moved','field_changed','note')),
+  stage_no         integer,
+  field_key        text,
+  detail           text,       -- descrição legível (ex.: "Estado: Rascunho → Em curso")
+  actor_id         uuid,       -- anew_users.id de quem fez a ação
+  actor_name       text,       -- nome no momento (desnormalizado, imutável no histórico)
+  created_at       timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT anew_client_duc_events_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_duc_events_duc
+  ON public.anew_client_duc_events (duc_id, created_at DESC);
+
+ALTER TABLE public.anew_client_duc_events ENABLE ROW LEVEL SECURITY;
+
+-- SELECT: qualquer utilizador com acesso à organização do DUC pai (por área).
+DROP POLICY IF EXISTS anew_client_duc_events_select ON public.anew_client_duc_events;
+CREATE POLICY anew_client_duc_events_select
+  ON public.anew_client_duc_events
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.anew_client_ducs d
+      WHERE d.id = anew_client_duc_events.duc_id
+        AND d.organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    )
+  );
+
+-- INSERT: append-only; o ator tem de ser o próprio utilizador e ter acesso à org.
+DROP POLICY IF EXISTS anew_client_duc_events_insert ON public.anew_client_duc_events;
+CREATE POLICY anew_client_duc_events_insert
+  ON public.anew_client_duc_events
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    actor_id = public.current_business_user_id()
+    AND EXISTS (
+      SELECT 1 FROM public.anew_client_ducs d
+      WHERE d.id = anew_client_duc_events.duc_id
+        AND d.organization_id IN (SELECT public.get_user_visible_org_ids((SELECT auth.uid())))
+    )
+  );
+
+-- Sem políticas de UPDATE/DELETE → negado por RLS (histórico imutável).
+
+GRANT SELECT, INSERT ON public.anew_client_duc_events TO authenticated;

@@ -18,6 +18,7 @@ import {
 } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
 import { notifyStage } from "../lib/notify";
+import { logDucEvent, fetchDucEvents, type DucEvent } from "../lib/events";
 import {
   CHANGE_LOG_COLUMNS,
   STATUS_LABELS,
@@ -231,6 +232,17 @@ export default function DucDetail() {
       return false;
     }
     setSavedAt(new Date().toLocaleTimeString("pt-PT"));
+    if (duc) {
+      void logDucEvent({
+        duc_id: id,
+        organization_id: duc.organization_id,
+        event_type: close ? "stage_closed" : "stage_reopened",
+        stage_no: stage,
+        detail: close ? `Etapa ${stage} fechada` : `Etapa ${stage} reaberta`,
+        actor_id: businessUserId,
+        actor_name: userName ?? null,
+      });
+    }
     return true;
   };
   // Fechar pede confirmação (ação com peso: assina a etapa); reabrir é direto.
@@ -299,6 +311,16 @@ export default function DucDetail() {
     markDirty();
   };
   const changeStatus = (s: DucStatus) => {
+    if (id && duc && s !== status) {
+      void logDucEvent({
+        duc_id: id,
+        organization_id: duc.organization_id,
+        event_type: "status_changed",
+        detail: `Estado: ${STATUS_LABELS[status]} → ${STATUS_LABELS[s]}`,
+        actor_id: businessUserId,
+        actor_name: userName ?? null,
+      });
+    }
     setStatus(s);
     markDirty();
   };
@@ -929,20 +951,46 @@ function HistoryTimeline({
     stages.find((s) => s.no === no)?.title.split(" — ")[0] ?? `Etapa ${no}`;
 
   type Ev = { when: string; title: string; who?: string | null; kind: "create" | "close" | "update" };
-  const events: Ev[] = [{ when: duc.created_at, title: "DUC criado", kind: "create" }];
+
+  // Eventos reais da tabela de auditoria (quando aplicada).
+  const [dbEvents, setDbEvents] = useState<DucEvent[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchDucEvents(duc.id).then((rows) => {
+      if (alive) setDbEvents(rows);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [duc.id]);
+
+  // Fallback reconstruído dos dados da ficha (enquanto a tabela não tiver registos).
+  const reconstructed: Ev[] = [{ when: duc.created_at, title: "DUC criado", kind: "create" }];
   tracking
     .filter((t) => t.state === "done" && t.date)
     .forEach((t) =>
-      events.push({
+      reconstructed.push({
         when: t.date as string,
         title: `Etapa ${t.stage} fechada — ${stageTitle(t.stage)}`,
         who: t.signed_by,
         kind: "close",
       })
     );
-  if (duc.updated_at) events.push({ when: duc.updated_at, title: "Última alteração", kind: "update" });
+  if (duc.updated_at)
+    reconstructed.push({ when: duc.updated_at, title: "Última alteração", kind: "update" });
 
-  const sorted = [...events].sort((a, b) => new Date(b.when).getTime() - new Date(a.when).getTime());
+  const fromDb: Ev[] = (dbEvents ?? []).map((e) => ({
+    when: e.created_at ?? "",
+    title: e.detail ?? e.event_type,
+    who: e.actor_name,
+    kind:
+      e.event_type === "created" ? "create" : e.event_type === "stage_closed" ? "close" : "update",
+  }));
+
+  // Prefere o histórico real da BD; se ainda não houver, mostra o reconstruído.
+  const sorted = (fromDb.length > 0 ? fromDb : reconstructed).sort(
+    (a, b) => new Date(b.when).getTime() - new Date(a.when).getTime()
+  );
   const fmt = (iso: string) => {
     const d = new Date(iso);
     return isNaN(d.getTime())
@@ -986,8 +1034,9 @@ function HistoryTimeline({
         ))}
       </ol>
       <p className="mt-4 text-[11px] text-slate-400">
-        Reconstruído dos dados da ficha (criação, fechos de etapa assinados e última alteração). Um
-        registo de CADA edição exige uma tabela de auditoria dedicada.
+        {fromDb.length > 0
+          ? "Histórico de auditoria (append-only) — cada ação fica registada por quem e quando."
+          : "Reconstruído dos dados da ficha. Aplica a tabela de auditoria (duc-app/db/schema.sql §8) para registo completo de cada ação."}
       </p>
     </Card>
   );
