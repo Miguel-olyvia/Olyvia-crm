@@ -40,22 +40,25 @@ import path from 'node:path'
  *
  * ## Which `create-lead` is under test
  *
- * The deployed edge function still runs the OLD code (deploying is explicitly
- * out of scope for this session), so every `POST .../functions/v1/create-lead`
- * the browser makes is forwarded — body, method and headers untouched — to a
- * local instance of the very same source file
- * (`supabase/functions/create-lead/index.ts`) served by Deno on
- * LOCAL_CREATE_LEAD_URL, writing to the SAME remote database this spec then
- * queries. Nothing about the request or the response is faked; only the
- * hostname the request lands on changes. Start it before running this spec:
+ * Controlled by LOCAL_CREATE_LEAD_URL:
  *
- *   SUPABASE_URL=https://<ref>.supabase.co \
- *   SUPABASE_SERVICE_ROLE_KEY=<service role key> \
- *   deno run -A --node-modules-dir=none supabase/functions/create-lead/index.ts
+ *  - Pointed at the DEPLOYED function
+ *    (`https://<ref>.supabase.co/functions/v1/create-lead`) - the default mode
+ *    of proof - no network interception is installed at all: the browser's own
+ *    `POST .../functions/v1/create-lead`, carrying the `apikey`/`Authorization`
+ *    headers the app itself attaches, travels straight to the published edge
+ *    function. Re-fetching it through `route.fetch()` would only add a hop and
+ *    a chance to lose those headers, so the route is deliberately NOT
+ *    registered.
  *
- * and serve the built app on APP_ORIGIN (`npm run build && npx vite preview
- * --port 8080`). Every other edge function (get-form-data, ...) is untouched
- * and still hits production.
+ *  - Pointed at anything else (e.g. `http://127.0.0.1:8000/`, a local
+ *    `deno run supabase/functions/create-lead/index.ts`) - the request is
+ *    forwarded there with body, method and headers untouched, for iterating on
+ *    the function before deploying.
+ *
+ * Either way it is the same remote database this spec then queries. Serve the
+ * built app on APP_ORIGIN (`npm run build && npx vite preview --port 8080`).
+ * Every other edge function (get-form-data, ...) always hits production.
  */
 
 const NIKE_ORG_ID = 'b6ffce4f-f630-4933-833a-008649757a33'
@@ -79,6 +82,13 @@ const GLOBAL_GOOGLE_ADS_SOURCE_ID = 'd9830942-17c1-40c8-b702-085289019868'
 const APP_ORIGIN = 'http://localhost:8080'
 const LOCAL_CREATE_LEAD_URL =
   process.env.LOCAL_CREATE_LEAD_URL ?? 'http://127.0.0.1:8000/'
+/**
+ * True when LOCAL_CREATE_LEAD_URL is the published edge function itself, i.e.
+ * exactly the endpoint the app already calls - there is then nothing to
+ * redirect, and interception is skipped entirely (see file header).
+ */
+const TESTING_DEPLOYED_CREATE_LEAD =
+  /^https:[/][/][^/]+[.]supabase[.]co[/]functions[/]v1[/]create-lead/.test(LOCAL_CREATE_LEAD_URL)
 
 test.describe.configure({ mode: 'serial', timeout: 300_000 })
 
@@ -178,11 +188,14 @@ const legacyIframeSiteFixture = (formId: string) =>
   })
 
 /**
- * Forwards the browser's real `create-lead` call to the locally-served copy of
- * the same edge function source (see file header). Body/method/headers are
- * passed through untouched and the real response is returned to the page.
+ * No-op when LOCAL_CREATE_LEAD_URL is the deployed function: the browser
+ * already calls exactly that endpoint by itself, with its own
+ * apikey/Authorization headers. Otherwise forwards the browser's real
+ * `create-lead` call to that URL with body/method/headers untouched, returning
+ * the real response to the page. See file header.
  */
 async function useLocalCreateLead(page: import('@playwright/test').Page): Promise<void> {
+  if (TESTING_DEPLOYED_CREATE_LEAD) return
   await page.route('**/functions/v1/create-lead*', async (route) => {
     const response = await route.fetch({ url: LOCAL_CREATE_LEAD_URL })
     await route.fulfill({ response })
