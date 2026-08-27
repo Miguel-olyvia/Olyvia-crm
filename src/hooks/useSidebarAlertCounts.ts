@@ -13,6 +13,9 @@ export interface AlertCounts {
   lead: number;
   quote: number;
   email_tracking: number;
+  stock: number;
+  purchase_order: number;
+  item_supplier: number;
 }
 
 const emptyCounts: AlertCounts = {
@@ -23,6 +26,9 @@ const emptyCounts: AlertCounts = {
   lead: 0,
   quote: 0,
   email_tracking: 0,
+  stock: 0,
+  purchase_order: 0,
+  item_supplier: 0,
 };
 
 interface SidebarAlertData {
@@ -168,6 +174,7 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
   const sectionCounts = {
     crm: counts.contact + counts.client + counts.lead,
     acquisition: counts.proposal + counts.contract + counts.quote,
+    inventory: counts.stock + counts.purchase_order + counts.item_supplier,
   };
 
   return { counts, sectionCounts, totalUnread };

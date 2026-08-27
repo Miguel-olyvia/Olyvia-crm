@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, UserCheck, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar } from "lucide-react";
+import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, UserCheck, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar, Warehouse } from "lucide-react";
 
 // ─── Alert type definitions with defaults ───
 interface AlertDef {
@@ -18,6 +18,7 @@ interface AlertDef {
   hasDays: boolean;
   defaultDays: number | null;
   defaultActive: boolean;
+  daysUnit?: string;
 }
 
 interface ModuleDef {
@@ -95,6 +96,17 @@ const ALERT_MODULES: ModuleDef[] = [
       { type: "quote_stale", label: "Rascunho parado", description: "Se está em rascunho há X dias sem ser enviado", hasDays: true, defaultDays: 7, defaultActive: true },
       { type: "quote_pending_sent", label: "Enviado sem resposta", description: "Se foi enviado há X dias sem resposta do cliente", hasDays: true, defaultDays: 5, defaultActive: true },
       { type: "quote_no_value", label: "Sem valor definido", description: "Alertar quando o pedido não tem valor definido", hasDays: false, defaultDays: null, defaultActive: true },
+    ],
+  },
+  {
+    id: "inventory",
+    label: "Inventário",
+    icon: Warehouse,
+    iconColor: "text-teal-500",
+    alerts: [
+      { type: "stock_low", label: "Stock baixo", description: "Avisa quando o stock de um produto num armazém desce até ao ponto de reencomenda.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "purchase_order_overdue", label: "Encomenda em atraso", description: "Avisa quando a data de entrega esperada de uma encomenda é ultrapassada sem ter sido recebida.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "supplier_price_change", label: "Aumento de preço de fornecedor", description: "Avisa quando o preço de compra de um fornecedor sobe acima da percentagem definida (valor abaixo em %).", hasDays: true, defaultDays: 10, defaultActive: true, daysUnit: "%" },
     ],
   },
 ];
@@ -356,7 +368,7 @@ export default function AlertSettings() {
                             onChange={(e) => handleDays(kind, alert.type, parseInt(e.target.value) || 1)}
                             disabled={!s.is_active}
                           />
-                          <Label className="text-xs text-muted-foreground whitespace-nowrap">dias</Label>
+                          <Label className="text-xs text-muted-foreground whitespace-nowrap">{alert.daysUnit ?? "dias"}</Label>
                         </div>
                       )}
                     </div>

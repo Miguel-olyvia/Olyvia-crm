@@ -34,6 +34,9 @@ const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> =
   contract_expired: { days: null, active: true },
   quote_stale: { days: 30, active: true },
   quote_no_value: { days: null, active: true },
+  stock_low: { days: null, active: true },
+  purchase_order_overdue: { days: null, active: true },
+  supplier_price_change: { days: 10, active: true }, // days_threshold reaproveitado como percentagem (10 = 10%)
 };
 
 interface LegacySettings {
@@ -246,6 +249,7 @@ Deno.serve(async (req) => {
         "proposal_no_validity", "proposal_expired", "proposal_draft_stale",
         "contract_draft_stale", "contract_expiring", "contract_expiring_urgent", "contract_expired",
         "quote_stale", "quote_no_value",
+        "stock_low", "purchase_order_overdue", "supplier_price_change",
       ]);
 
       const stillPending: typeof pendingNotifications = [];
@@ -889,6 +893,161 @@ Deno.serve(async (req) => {
               priority: "low",
             });
           }
+        }
+      }
+
+      // ★ Preload: quem tem que permissão, por organização.
+      // Padrão novo neste ficheiro — destinatários são todos os utilizadores da
+      // organização com uma permissão específica (via role ativo), não o
+      // created_by da entidade. anew_memberships.user_id referencia anew_users.id
+      // (mesmo domínio que created_by nas outras tabelas) — passa por resolveUserId.
+      // anew_role_permissions.role_id referencia anew_roles.id diretamente, o
+      // mesmo role_id usado em anew_memberships — não é preciso ir a anew_roles.
+      const [allActiveMemberships, allRolePermissions] = await Promise.all([
+        fetchAll<any>(supabase, "anew_memberships", (q) => q.eq("status", "active"), "user_id, organization_id, role_id"),
+        fetchAll<any>(supabase, "anew_role_permissions", (q) => q, "role_id, permission_code"),
+      ]);
+
+      const roleIdsWithPermission = new Map<string, Set<string>>(); // permission_code -> Set<role_id>
+      for (const rp of allRolePermissions || []) {
+        if (!roleIdsWithPermission.has(rp.permission_code)) roleIdsWithPermission.set(rp.permission_code, new Set());
+        roleIdsWithPermission.get(rp.permission_code)!.add(rp.role_id);
+      }
+
+      const membershipsByOrg = new Map<string, any[]>();
+      for (const m of allActiveMemberships || []) {
+        if (!membershipsByOrg.has(m.organization_id)) membershipsByOrg.set(m.organization_id, []);
+        membershipsByOrg.get(m.organization_id)!.push(m);
+      }
+
+      function getUsersWithPermission(orgId: string, permissionCode: string): string[] {
+        const roleIds = roleIdsWithPermission.get(permissionCode);
+        if (!roleIds || roleIds.size === 0) return [];
+        const orgMemberships = membershipsByOrg.get(orgId);
+        if (!orgMemberships) return [];
+        const result: string[] = [];
+        for (const m of orgMemberships) {
+          if (roleIds.has(m.role_id)) {
+            const authUserId = resolveUserId(m.user_id);
+            if (authUserId) result.push(authUserId);
+          }
+        }
+        return [...new Set(result)];
+      }
+
+      // ── STOCK LOW (destinatários: utilizadores com permissão inventory.view) ──
+      // stocks.quantity/reorder_point são 2 colunas da mesma linha — não dá para
+      // filtrar isto no PostgREST, filtra-se em JS (mesmo padrão de src/pages/Stocks.tsx).
+      const allStocksForAlert = await fetchAll<any>(
+        supabase,
+        "stocks",
+        (q) => q,
+        "id, product_id, warehouse_id, quantity, reorder_point, minimum_quantity, maximum_quantity, organization_id",
+      );
+      const lowStocks = (allStocksForAlert || []).filter((s: any) => s.quantity <= s.reorder_point);
+
+      if (lowStocks.length > 0) {
+        const lowStockProductIds = [...new Set(lowStocks.map((s: any) => s.product_id))];
+        const lowStockProducts = await fetchAll<any>(supabase, "products", (q) => q.in("id", lowStockProductIds), "id, name, sku");
+        const lowStockProductMap = new Map((lowStockProducts || []).map((p: any) => [p.id, p]));
+
+        for (const stock of lowStocks) {
+          const orgId = stock.organization_id;
+          if (!orgId) continue;
+          const cfg = getAlertConfig(orgId, "stock_low");
+          if (!cfg.is_active) continue;
+
+          const product = lowStockProductMap.get(stock.product_id);
+          const productLabel = product ? `${product.name} (${product.sku})` : `o produto ${stock.product_id}`;
+
+          const recipients = getUsersWithPermission(orgId, "inventory.view");
+          for (const userId of recipients) {
+            if (shouldSkip(stock.id, "stock_low", userId)) continue;
+            queueNotification({
+              user_id: userId, organization_id: orgId, kind: "alert",
+              type: "stock_low", entity_type: "stock", entity_id: stock.id,
+              title: "Stock baixo",
+              message: `${productLabel} está com stock baixo (${stock.quantity} unidades, ponto de reencomenda: ${stock.reorder_point}).`,
+              priority: "medium",
+              action_config: { stock_id: stock.id, product_id: stock.product_id, warehouse_id: stock.warehouse_id },
+              link: "/stocks",
+            });
+          }
+        }
+      }
+
+      // ── PURCHASE ORDER OVERDUE (destinatários: utilizadores com permissão purchase_orders.view) ──
+      const openPurchaseOrders = await fetchAll<any>(
+        supabase,
+        "purchase_orders",
+        (q) => q.in("status", ["pending", "ordered"]).not("expected_delivery", "is", null),
+        "id, expected_delivery, status, organization_id",
+      );
+
+      for (const po of openPurchaseOrders || []) {
+        const orgId = po.organization_id;
+        if (!orgId || !po.expected_delivery) continue;
+        const cfg = getAlertConfig(orgId, "purchase_order_overdue");
+        if (!cfg.is_active) continue;
+
+        const daysOverdue = calendarDayDiff(new Date(po.expected_delivery), now);
+        if (daysOverdue <= 0) continue;
+
+        const recipients = getUsersWithPermission(orgId, "purchase_orders.view");
+        for (const userId of recipients) {
+          if (shouldSkip(po.id, "purchase_order_overdue", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "purchase_order_overdue", entity_type: "purchase_order", entity_id: po.id,
+            title: "Encomenda em atraso",
+            message: `Esta encomenda tem entrega prevista há ${daysOverdue} dia${daysOverdue === 1 ? "" : "s"} e ainda não foi recebida.`,
+            priority: "high",
+            action_config: { purchase_order_id: po.id },
+            link: "/purchase-orders",
+          });
+        }
+      }
+
+      // ── SUPPLIER PRICE CHANGE (destinatários: utilizadores com permissão suppliers.view) ──
+      // Só linhas recentes (últimas 24h) — mesmo padrão do email tracking, evita
+      // reprocessar histórico antigo a cada run. days_threshold é reaproveitado
+      // como percentagem (10 = 10%), tal como o resto da infra de alert_settings.
+      const oneDayAgoPriceHistory = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const recentPriceChanges = await fetchAll<any>(
+        supabase,
+        "item_supplier_price_history",
+        (q) => q
+          .gte("changed_at", oneDayAgoPriceHistory)
+          .not("old_price", "is", null)
+          .not("new_price", "is", null)
+          .gt("old_price", 0),
+        "id, item_supplier_id, old_price, new_price, changed_at, organization_id",
+      );
+
+      for (const row of recentPriceChanges || []) {
+        const orgId = row.organization_id;
+        if (!orgId) continue;
+        const cfg = getAlertConfig(orgId, "supplier_price_change");
+        if (!cfg.is_active) continue;
+
+        const thresholdPct = cfg.days_threshold ?? 10;
+        const oldPrice = Number(row.old_price);
+        const newPrice = Number(row.new_price);
+        if (!(newPrice > oldPrice * (1 + thresholdPct / 100))) continue;
+
+        const pctChange = ((newPrice - oldPrice) / oldPrice) * 100;
+        const recipients = getUsersWithPermission(orgId, "suppliers.view");
+        for (const userId of recipients) {
+          if (shouldSkip(row.id, "supplier_price_change", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "supplier_price_change", entity_type: "item_supplier", entity_id: row.id,
+            title: "Aumento de preço de fornecedor",
+            message: `O preço subiu ${pctChange.toFixed(1)}% (de ${oldPrice.toFixed(2)}€ para ${newPrice.toFixed(2)}€).`,
+            priority: "medium",
+            action_config: { item_supplier_id: row.item_supplier_id },
+            link: "/suppliers",
+          });
         }
       }
     }
