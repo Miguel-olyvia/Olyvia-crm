@@ -15,7 +15,7 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
@@ -1007,10 +1007,41 @@ function StatRow({
   ducCount: number;
   pendingCount: number;
 }) {
-  const items = [
-    { label: "Clientes com contrato", value: contractCount, color: "text-slate-800", dot: "bg-slate-300" },
-    { label: "Com DUC", value: ducCount, color: "text-emerald-600", dot: "bg-emerald-500" },
-    { label: "Por documentar", value: pendingCount, color: "text-amber-600", dot: "bg-amber-500" },
+  // Destaca "Por documentar" quando há pendentes: acento âmbar (>0) ou vermelho
+  // se o volume for elevado. Cada cartão tem ícone próprio.
+  const alert = pendingCount > 0;
+  const items: Array<{
+    label: string;
+    value: number;
+    icon: JSX.Element;
+    accent: string; // cor do valor + ícone
+    ring: string; // moldura do cartão (destaque)
+    iconBg: string; // fundo do ícone
+  }> = [
+    {
+      label: "Clientes com contrato",
+      value: contractCount,
+      icon: <Building width={16} height={16} />,
+      accent: "text-slate-800",
+      ring: "ring-slate-200",
+      iconBg: "bg-slate-100 text-slate-500",
+    },
+    {
+      label: "Com DUC",
+      value: ducCount,
+      icon: <FileText width={16} height={16} />,
+      accent: "text-emerald-600",
+      ring: "ring-emerald-100",
+      iconBg: "bg-emerald-50 text-emerald-600",
+    },
+    {
+      label: "Por documentar",
+      value: pendingCount,
+      icon: alert ? <AlertTriangle width={16} height={16} /> : <FileText width={16} height={16} />,
+      accent: alert ? "text-amber-600" : "text-slate-800",
+      ring: alert ? "ring-2 ring-amber-200" : "ring-slate-200",
+      iconBg: alert ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-500",
+    },
   ];
   const pct = contractCount > 0 ? Math.round((ducCount / contractCount) * 100) : 0;
   return (
@@ -1019,30 +1050,77 @@ function StatRow({
         {items.map((s) => (
           <Card
             key={s.label}
-            className="p-3.5 transition-shadow duration-150 hover:shadow-elevated sm:p-4"
+            className={cx(
+              "p-3.5 transition-shadow duration-150 hover:shadow-elevated sm:p-4",
+              s.ring
+            )}
           >
-            <div className={cx("text-2xl font-semibold tabular-nums sm:text-3xl", s.color)}>
-              {s.value}
+            <div className="flex items-center justify-between gap-2">
+              <div className={cx("text-2xl font-semibold tabular-nums sm:text-3xl", s.accent)}>
+                {s.value}
+              </div>
+              <span
+                className={cx(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                  s.iconBg
+                )}
+              >
+                {s.icon}
+              </span>
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:text-[11px]">
-              <span className={cx("h-1.5 w-1.5 shrink-0 rounded-full", s.dot)} />
+            <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:text-[11px]">
               <span className="truncate">{s.label}</span>
             </div>
           </Card>
         ))}
       </div>
       {/* Barra de cobertura — quantos clientes já têm DUC */}
-      <div className="flex items-center gap-3 px-0.5">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-          <div
-            className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
+      <div className="space-y-1 px-0.5">
+        <div className="flex items-center gap-3">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-xs font-medium tabular-nums text-slate-600">{pct}%</span>
         </div>
-        <span className="text-xs tabular-nums text-slate-500">{pct}% documentado</span>
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span>{ducCount} documentados</span>
+          <span>{pendingCount > 0 ? `${pendingCount} por documentar` : "tudo documentado"}</span>
+        </div>
       </div>
     </div>
   );
+}
+
+/** Tom (classes) do badge de urgência a partir dos dias sem DUC. */
+function urgencyTone(days: number): { badge: string; avatar: string } {
+  if (days <= 7) {
+    return {
+      badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      avatar: "bg-emerald-50 text-emerald-600 ring-emerald-100",
+    };
+  }
+  if (days <= 30) {
+    return {
+      badge: "bg-amber-50 text-amber-700 ring-amber-200",
+      avatar: "bg-amber-50 text-amber-600 ring-amber-100",
+    };
+  }
+  return {
+    badge: "bg-red-50 text-red-700 ring-red-200",
+    avatar: "bg-red-50 text-red-600 ring-red-100",
+  };
+}
+
+/** Iniciais do cliente para o avatar (fallback a "?"). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last).toUpperCase() || "?";
 }
 
 function PendingView({
@@ -1059,10 +1137,31 @@ function PendingView({
   onCreate: (c: ClientOption) => void;
 }) {
   const [q, setQ] = useState("");
+
+  // Ordena por urgência: mais dias sem DUC primeiro. Sem `since` vai para o fim.
+  const sorted = useMemo(() => {
+    return [...pending].sort((a, b) => {
+      const da = a.since ? daysSince(a.since) : -1;
+      const db = b.since ? daysSince(b.since) : -1;
+      return db - da; // descendente por dias → mais antigo primeiro
+    });
+  }, [pending]);
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return s ? pending.filter((c) => c.name.toLowerCase().includes(s)) : pending;
-  }, [pending, q]);
+    return s ? sorted.filter((c) => c.name.toLowerCase().includes(s)) : sorted;
+  }, [sorted, q]);
+
+  // Cliente mais antigo à espera de DUC (para o hero).
+  const oldest = useMemo(() => {
+    let best: { c: ClientOption; days: number } | null = null;
+    for (const c of pending) {
+      if (!c.since) continue;
+      const d = daysSince(c.since);
+      if (!best || d > best.days) best = { c, days: d };
+    }
+    return best;
+  }, [pending]);
 
   if (loading) {
     return (
@@ -1084,6 +1183,37 @@ function PendingView({
         </Card>
       ) : (
         <>
+          {/* Hero — resumo da área com o caso mais urgente em destaque */}
+          <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 ring-amber-100 sm:p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200">
+                  <Clock width={22} height={22} />
+                </span>
+                <div>
+                  <p className="text-lg font-semibold text-slate-900">
+                    {pending.length} cliente{pending.length === 1 ? "" : "s"} à espera de DUC
+                  </p>
+                  {oldest ? (
+                    <p className="text-sm text-slate-500">
+                      O mais antigo é{" "}
+                      <span className="font-medium text-slate-700">{oldest.c.name}</span>, há{" "}
+                      <span className="font-medium text-amber-700">{oldest.days} dias</span> sem
+                      documentar.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
+                  )}
+                </div>
+              </div>
+              {oldest && (
+                <Button size="sm" onClick={() => onCreate(oldest.c)}>
+                  <Plus width={14} height={14} /> Documentar o mais antigo
+                </Button>
+              )}
+            </div>
+          </Card>
+
           <div className="relative">
             <Search
               width={16}
@@ -1106,28 +1236,66 @@ function PendingView({
               />
             </Card>
           ) : (
-            <Card className="overflow-hidden">
-      <ul className="divide-y divide-slate-100">
-        {filtered.map((c) => (
-          <li key={c.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50/60">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-inset ring-brand-100">
-              <Building width={16} height={16} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium text-slate-800">{c.name}</p>
-              <p className="text-xs text-slate-400">
-                {c.since
-                  ? `Contrato há ${daysSince(c.since)} dias · sem DUC`
-                  : "Contrato válido · sem DUC"}
-              </p>
-            </div>
-            <Button size="sm" onClick={() => onCreate(c)}>
-              <Plus width={14} height={14} /> Criar DUC <ChevronRight width={14} height={14} />
-            </Button>
-          </li>
-        ))}
-      </ul>
-            </Card>
+            <ul className="space-y-2.5">
+              {filtered.map((c) => {
+                const days = c.since ? daysSince(c.since) : null;
+                const tone = urgencyTone(days ?? 0);
+                const daysLabel =
+                  days === null
+                    ? "sem data de contrato"
+                    : days === 0
+                      ? "hoje"
+                      : days === 1
+                        ? "há 1 dia"
+                        : `há ${days} dias`;
+                return (
+                  <li key={c.id}>
+                    <Card className="flex flex-col gap-3 p-4 transition-shadow duration-150 hover:shadow-elevated sm:flex-row sm:items-center">
+                      {/* Avatar com iniciais, cor por urgência */}
+                      <span
+                        className={cx(
+                          "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ring-1 ring-inset",
+                          days === null ? "bg-slate-100 text-slate-500 ring-slate-200" : tone.avatar
+                        )}
+                      >
+                        {initials(c.name)}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-800">{c.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {days === null ? (
+                            <Badge className="bg-slate-50 text-slate-500 ring-slate-200">
+                              <Clock width={12} height={12} className="mr-1" />
+                              sem data · sem DUC
+                            </Badge>
+                          ) : (
+                            <Badge className={tone.badge}>
+                              <Clock width={12} height={12} className="mr-1" />
+                              {daysLabel} sem DUC
+                            </Badge>
+                          )}
+                          {days !== null && days > 30 && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
+                              <AlertTriangle width={12} height={12} /> urgente
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <Button
+                        size="sm"
+                        className="w-full justify-center sm:w-auto"
+                        onClick={() => onCreate(c)}
+                      >
+                        <Plus width={14} height={14} /> Criar DUC{" "}
+                        <ChevronRight width={14} height={14} />
+                      </Button>
+                    </Card>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </>
       )}
