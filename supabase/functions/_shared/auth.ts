@@ -33,8 +33,7 @@ export async function resolveCallerIdentity(
   const token = authHeader.replace("Bearer ", "");
 
   // Check if this is a SERVICE_ROLE call (internal function-to-function)
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (token === serviceRoleKey) {
+  if (isServiceRoleToken(token)) {
     return { authUid: "service_role", anewUserId: "service_role", isServiceRole: true };
   }
 
@@ -185,13 +184,45 @@ export async function requireAdminRole(
 }
 
 /**
+ * True if `token` is a valid internal/service credential.
+ *
+ * Checks two independent secrets, either is sufficient:
+ * 1. SUPABASE_SERVICE_ROLE_KEY — the platform-injected service role key.
+ * 2. CRON_SHARED_SECRET — a secret we own (function secret, mirrored in
+ *    vault.decrypted_secrets as 'cron_service_role_key' for the 4 pg_cron
+ *    jobs), decoupled from Supabase's own key rotation/format. Added
+ *    2026-08-27 after SUPABASE_SERVICE_ROLE_KEY's injected value stopped
+ *    matching what the gateway accepts as a Bearer token for this project
+ *    (new vs legacy API key formats out of sync) — see git history for the
+ *    incident. Keeps this a pure additive fallback: neither check is weakened.
+ */
+function isServiceRoleToken(token: string): boolean {
+  if (token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) return true;
+  const cronSecret = Deno.env.get("CRON_SHARED_SECRET");
+  if (cronSecret && token === cronSecret) return true;
+  return false;
+}
+
+/**
+ * Returns a service-role key known to actually work against this project's
+ * PostgREST/Auth APIs — prefers our own DB_SERVICE_ROLE_KEY (set 2026-08-27,
+ * a copy of the legacy service_role key, confirmed working) over the
+ * platform-injected SUPABASE_SERVICE_ROLE_KEY, whose value stopped being
+ * valid for this project (same incident as isServiceRoleToken above). Falls
+ * back automatically if DB_SERVICE_ROLE_KEY is ever removed.
+ */
+export function getServiceRoleKey(): string {
+  return Deno.env.get("DB_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+}
+
+/**
  * Validates that a SERVICE_ROLE key is being used (for CRON/internal functions).
  */
 export function requireServiceRole(req: Request): boolean {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return false;
   const token = authHeader.replace("Bearer ", "");
-  return token === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  return isServiceRoleToken(token);
 }
 
 /**

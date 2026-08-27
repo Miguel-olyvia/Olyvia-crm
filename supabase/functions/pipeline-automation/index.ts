@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { resolveCallerIdentity, validateOrgScope, authErrorResponse, getServiceRoleKey } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeaders } from "../_shared/cors.ts";
@@ -84,7 +84,7 @@ serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseServiceKey = getServiceRoleKey();
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // ── Auth: resolve caller identity ──

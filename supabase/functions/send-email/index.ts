@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
@@ -88,7 +88,7 @@ const handler = async (req: Request): Promise<Response> => {
   try {
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      getServiceRoleKey()
     );
 
     // ── Auth: mandatory — either SERVICE_ROLE (internal/cron) or valid user JWT ──
@@ -276,7 +276,7 @@ const handler = async (req: Request): Promise<Response> => {
     try {
       const supabaseClient = createClient(
         Deno.env.get("SUPABASE_URL") ?? "",
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+        getServiceRoleKey()
       );
       await supabaseClient.from("email_logs").insert({
         to_email: "",

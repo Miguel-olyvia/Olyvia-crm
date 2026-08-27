@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -122,6 +122,29 @@ async function fetchAll<T>(
   return results;
 }
 
+// Chunks a large `.in("id", ids)` lookup into safe-sized requests (same 100-id
+// chunk size already used for the resolve-notifications UPDATE below), then
+// merges results. A single unchunked `.in()` over thousands of ids produces a
+// multi-KB URL that can trip an HTTP/2 protocol error at the edge — hit in
+// production 2026-08-27 when STEP 1 tried to re-verify a 37-day backlog of
+// unresolved contact_no_deal notifications in one request.
+async function fetchByIds<T>(supabase: any, table: string, ids: string[], selectColumns: string, column = "id", chunkSize = 100): Promise<T[]> {
+  return chunkedFetch<T>(supabase, table, ids, selectColumns, (q, chunk) => q.in(column, chunk), chunkSize);
+}
+
+// Same idea as fetchByIds, but for queries that filter on the chunked ids
+// PLUS other fixed conditions (e.g. `.in("entity_id", chunk).in("organization_id", orgIds)`)
+// — queryFn receives the chunk and builds the full filter itself.
+async function chunkedFetch<T>(supabase: any, table: string, ids: string[], selectColumns: string, queryFn: (q: any, chunk: string[]) => any, chunkSize = 100): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+  const results = await Promise.all(
+    chunks.map(chunk => fetchAll<T>(supabase, table, (q) => queryFn(q, chunk), selectColumns))
+  );
+  return results.flat();
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -137,7 +160,7 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceRoleKey = getServiceRoleKey();
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const url = new URL(req.url);
@@ -290,12 +313,12 @@ Deno.serve(async (req) => {
       const quoteIds = [...new Set(quoteNotifs.map(n => n.entity_id))];
 
       const [leads, contacts, clients, proposals, contracts, quotesPre] = await Promise.all([
-        leadIds.length > 0 ? fetchAll<any>(supabase, "anew_leads", (q) => q.in("id", leadIds), "id, last_contact_at, status") : [],
-        contactIds.length > 0 ? fetchAll<any>(supabase, "anew_contacts", (q) => q.in("id", contactIds), "id, last_interaction_at, converted_to_client_id, status") : [],
-        clientIds.length > 0 ? fetchAll<any>(supabase, "anew_clients", (q) => q.in("id", clientIds), "id, last_interaction_at, status, entity_id") : [],
-        proposalIds.length > 0 ? fetchAll<any>(supabase, "proposals", (q) => q.in("id", proposalIds), "id, status, sent_at, created_at, organization_id") : [],
-        contractIds.length > 0 ? fetchAll<any>(supabase, "client_contracts", (q) => q.in("id", contractIds), "id, status, end_date, client_id, created_at") : [],
-        quoteIds.length > 0 ? fetchAll<any>(supabase, "quotes", (q) => q.in("id", quoteIds), "id, estado, total, updated_at, created_at") : [],
+        fetchByIds<any>(supabase, "anew_leads", leadIds, "id, last_contact_at, status"),
+        fetchByIds<any>(supabase, "anew_contacts", contactIds, "id, last_interaction_at, converted_to_client_id, status"),
+        fetchByIds<any>(supabase, "anew_clients", clientIds, "id, last_interaction_at, status, entity_id"),
+        fetchByIds<any>(supabase, "proposals", proposalIds, "id, status, sent_at, created_at, organization_id"),
+        fetchByIds<any>(supabase, "client_contracts", contractIds, "id, status, end_date, client_id, created_at"),
+        fetchByIds<any>(supabase, "quotes", quoteIds, "id, estado, total, updated_at, created_at"),
       ]);
 
       const leadMap = new Map((leads || []).map((l: any) => [l.id, l]));
@@ -332,7 +355,7 @@ Deno.serve(async (req) => {
       // ── Contacts: no deal (batch deals count) ──
       if (contactNoDealNotifs.length > 0) {
         const noDealContactIds = [...new Set(contactNoDealNotifs.map(n => n.entity_id))];
-        const dealsForContacts = await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", noDealContactIds), "contact_id");
+        const dealsForContacts = await fetchByIds<any>(supabase, "deals", noDealContactIds, "contact_id", "contact_id");
         const contactsWithDeals = new Set((dealsForContacts || []).map((d: any) => d.contact_id));
 
         for (const n of contactNoDealNotifs) {
@@ -360,9 +383,7 @@ Deno.serve(async (req) => {
         const nifClientEntityIds = [...new Set(
           clientNifNotifs.map(n => clientMap.get(n.entity_id)?.entity_id).filter(Boolean)
         )] as string[];
-        const fiscalEntities = nifClientEntityIds.length > 0
-          ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", nifClientEntityIds), "entity_id")
-          : [];
+        const fiscalEntities = await fetchByIds<any>(supabase, "anew_entity_fiscal_entities", nifClientEntityIds, "entity_id", "entity_id");
         const entitiesWithFiscal = new Set((fiscalEntities || []).map((f: any) => f.entity_id));
 
         for (const n of clientNifNotifs) {
@@ -774,10 +795,10 @@ Deno.serve(async (req) => {
         const actionOrgIds = [...new Set(scheduledActions.map(a => a.organization_id))];
 
         const [entityNames, actionClients, actionContacts, actionLeads] = await Promise.all([
-          fetchAll<any>(supabase, "anew_entities", (q) => q.in("id", actionEntityIds), "id, display_name"),
-          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_leads", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "converted"), "id, entity_id, organization_id"),
+          fetchByIds<any>(supabase, "anew_entities", actionEntityIds, "id, display_name"),
+          chunkedFetch<any>(supabase, "anew_clients", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).neq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_contacts", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_leads", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).neq("status", "converted")),
         ]);
 
         const entityNameMap = new Map((entityNames || []).map((e: any) => [e.id, e.display_name]));
@@ -950,7 +971,7 @@ Deno.serve(async (req) => {
 
       if (lowStocks.length > 0) {
         const lowStockProductIds = [...new Set(lowStocks.map((s: any) => s.product_id))];
-        const lowStockProducts = await fetchAll<any>(supabase, "products", (q) => q.in("id", lowStockProductIds), "id, name, sku");
+        const lowStockProducts = await fetchByIds<any>(supabase, "products", lowStockProductIds, "id, name, sku");
         const lowStockProductMap = new Map((lowStockProducts || []).map((p: any) => [p.id, p]));
 
         for (const stock of lowStocks) {
@@ -1095,9 +1116,9 @@ Deno.serve(async (req) => {
 
         // ★ OPTIMIZATION: Batch all chain validation queries in parallel
         const [inactiveContacts, convertedContacts, inactiveDirectClients] = await Promise.all([
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).eq("status", "inactive"), "entity_id"),
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).not("converted_to_client_id", "is", null), "entity_id, converted_to_client_id"),
-          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", leadEntityIds).in("status", ["inactive", "lost", "churned", "lost_definitive"]), "entity_id"),
+          chunkedFetch<any>(supabase, "anew_contacts", leadEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).eq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_contacts", leadEntityIds, "entity_id, converted_to_client_id", (q, chunk) => q.in("entity_id", chunk).not("converted_to_client_id", "is", null)),
+          chunkedFetch<any>(supabase, "anew_clients", leadEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).in("status", ["inactive", "lost", "churned", "lost_definitive"])),
         ]);
 
         inactiveContacts?.forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -1105,11 +1126,12 @@ Deno.serve(async (req) => {
 
         if (convertedContacts?.length) {
           const clientIds = convertedContacts.map((c: any) => c.converted_to_client_id).filter(Boolean);
-          const activeClients = await fetchAll<any>(
+          const activeClients = await chunkedFetch<any>(
             supabase,
             "anew_clients",
-            (q) => q.in("id", clientIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+            clientIds,
             "id",
+            (q, chunk) => q.in("id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
           );
           const activeClientIds = new Set(activeClients?.map((c: any) => c.id));
           // All converted contacts exclude the lead entity (whether client active or not)
@@ -1120,8 +1142,8 @@ Deno.serve(async (req) => {
         const remainingEntityIds = leadEntityIds.filter(id => !excludedEntityIds.has(id));
         if (remainingEntityIds.length > 0) {
           const [activeContacts, directActiveClients] = await Promise.all([
-            fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", remainingEntityIds).neq("status", "inactive"), "entity_id, converted_to_client_id"),
-            fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", remainingEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'), "entity_id"),
+            chunkedFetch<any>(supabase, "anew_contacts", remainingEntityIds, "entity_id, converted_to_client_id", (q, chunk) => q.in("entity_id", chunk).neq("status", "inactive")),
+            chunkedFetch<any>(supabase, "anew_clients", remainingEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")')),
           ]);
 
           const directActiveClientEntityIds = new Set((directActiveClients || []).map((c: any) => c.entity_id));
@@ -1130,11 +1152,12 @@ Deno.serve(async (req) => {
             const withClient = activeContacts.filter((c: any) => c.converted_to_client_id);
             if (withClient.length) {
               const cIds = withClient.map((c: any) => c.converted_to_client_id);
-              const activeCli = await fetchAll<any>(
+              const activeCli = await chunkedFetch<any>(
                 supabase,
                 "anew_clients",
-                (q) => q.in("id", cIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+                cIds,
                 "id",
+                (q, chunk) => q.in("id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
               );
               const activeCliIds = new Set(activeCli?.map((c: any) => c.id));
               withClient.filter((c: any) => activeCliIds.has(c.converted_to_client_id)).forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -1215,12 +1238,13 @@ Deno.serve(async (req) => {
       let filteredContacts = rawContacts || [];
       const contactEntityIds = filteredContacts.map(c => c.entity_id).filter(Boolean) as string[];
 
-      if (contactEntityIds.length > 0) {
-        const activeClientsForContacts = await fetchAll<any>(
+      {
+        const activeClientsForContacts = await chunkedFetch<any>(
           supabase,
           "anew_clients",
-          (q) => q.in("entity_id", contactEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+          contactEntityIds,
           "entity_id",
+          (q, chunk) => q.in("entity_id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
         );
 
         if (activeClientsForContacts?.length) {
@@ -1232,9 +1256,7 @@ Deno.serve(async (req) => {
 
       // ★ OPTIMIZATION: Batch preload deals for contact_no_deal check
       const contactIdsForDeal = filteredContacts.filter(c => c.converted_at).map(c => c.id);
-      const dealsForDailyContacts = contactIdsForDeal.length > 0
-        ? await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", contactIdsForDeal), "contact_id")
-        : [];
+      const dealsForDailyContacts = await fetchByIds<any>(supabase, "deals", contactIdsForDeal, "contact_id", "contact_id");
       const contactsWithDealsDaily = new Set((dealsForDailyContacts || []).map((d: any) => d.contact_id));
 
       const contactsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; noDeal: string[] }>();
@@ -1319,9 +1341,7 @@ Deno.serve(async (req) => {
 
       // ★ OPTIMIZATION: Batch preload fiscal entities for all clients
       const clientEntityIdsForNif = (clients || []).map((c: any) => c.entity_id).filter(Boolean) as string[];
-      const clientFiscalEntities = clientEntityIdsForNif.length > 0
-        ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", clientEntityIdsForNif), "entity_id")
-        : [];
+      const clientFiscalEntities = await fetchByIds<any>(supabase, "anew_entity_fiscal_entities", clientEntityIdsForNif, "entity_id", "entity_id");
       const entitiesWithFiscalDaily = new Set((clientFiscalEntities || []).map((f: any) => f.entity_id));
 
       const clientsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; missingNif: string[] }>();
@@ -1394,9 +1414,31 @@ Deno.serve(async (req) => {
     }
 
     // ─── INSERT ALL (with dedup safety) ───
-    if (notifications.length > 0) {
-      const { error } = await supabase.from("notifications").insert(notifications, { onConflict: "type,entity_id,user_id", ignoreDuplicates: true } as any);
-      if (error && !error.message?.includes('duplicate key')) throw error;
+    // supabase-js's `ignoreDuplicates`/`onConflict` on .insert() does not
+    // correctly target notifications_dedup, a PARTIAL unique index
+    // (`WHERE is_resolved = false`) — PostgREST falls back to a bare
+    // multi-row INSERT, so a single colliding row makes Postgres reject the
+    // *entire* batch with 23505 ("duplicate key ..."), silently dropping
+    // every row, not just the duplicate one. Found in production 2026-08-27:
+    // a 897-notification batch reported "generated: 897" but 0 rows were
+    // actually written. Fix: insert in small batches; a batch that collides
+    // retries row-by-row so only the genuine duplicates are skipped.
+    let insertedCount = 0;
+    let duplicateCount = 0;
+    const INSERT_BATCH = 50;
+    for (let i = 0; i < notifications.length; i += INSERT_BATCH) {
+      const batch = notifications.slice(i, i + INSERT_BATCH);
+      const { error } = await supabase.from("notifications").insert(batch);
+      if (!error) { insertedCount += batch.length; continue; }
+      if (!error.message?.includes("duplicate key")) throw error;
+      // Batch had at least one collision — retry individually so only the
+      // actual duplicates are skipped.
+      for (const row of batch) {
+        const { error: rowError } = await supabase.from("notifications").insert(row);
+        if (!rowError) insertedCount++;
+        else if (rowError.message?.includes("duplicate key")) duplicateCount++;
+        else throw rowError;
+      }
     }
 
     // ─── AUDIT LOG ───
@@ -1406,10 +1448,10 @@ Deno.serve(async (req) => {
       .eq("is_resolved", false)
       .eq("is_dismissed", false);
 
-    console.log(`[notifications] Done: mode=${mode}, generated=${notifications.length}, skipped_batch_dups=${queuedNotificationKeys.size - notifications.length}, resolved=${resolvedCount}, cleanup={orphans:${cleanupOrphans},dups:${cleanupDuplicates},old:${cleanupOld}}, active_total=${finalActiveCount || 0}`);
+    console.log(`[notifications] Done: mode=${mode}, queued=${notifications.length}, inserted=${insertedCount}, duplicates=${duplicateCount}, resolved=${resolvedCount}, cleanup={orphans:${cleanupOrphans},dups:${cleanupDuplicates},old:${cleanupOld}}, active_total=${finalActiveCount || 0}`);
 
     return new Response(
-      JSON.stringify({ ok: true, mode, generated: notifications.length, resolved: resolvedCount, cleanup_orphans: cleanupOrphans, cleanup_duplicates: cleanupDuplicates, cleanup_old: cleanupOld }),
+      JSON.stringify({ ok: true, mode, queued: notifications.length, inserted: insertedCount, duplicates: duplicateCount, resolved: resolvedCount, cleanup_orphans: cleanupOrphans, cleanup_duplicates: cleanupDuplicates, cleanup_old: cleanupOld }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

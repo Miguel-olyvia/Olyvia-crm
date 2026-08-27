@@ -83,6 +83,9 @@ verify_jwt = false
 [functions.trigger-email-template]
 verify_jwt = false
 
+[functions.generate-notifications]
+verify_jwt = false
+
 [functions.export-data]
 verify_jwt = true
 
