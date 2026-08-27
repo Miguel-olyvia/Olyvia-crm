@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { sanitizeTracking } from '../_shared/leadTracking.ts';
-import { resolveOriginFromReferrer } from '../_shared/referrerSource.ts';
+import { resolveOriginWithoutUtmSource } from '../_shared/paidClickSource.ts';
 
 const requestSchema = z.object({
   // Optional: forms without an associated campaign must still create a lead
@@ -1075,19 +1075,22 @@ Deno.serve(async (req) => {
         }
       }
 
-      // 3b. Referrer fallback (GA-style, only a resource): when there is no
-      // utm_source at all and no already-validated source_id, derive the
-      // origin name from the referrer's domain (e.g. "Instagram") so the
-      // lead reflects reality instead of the generic "public_form" text.
+      // 3b. Click-id + referrer fallback (GA-style, only a resource): when
+      // there is no utm_source at all and no already-validated source_id,
+      // derive the origin name from the ad-platform click id (gclid ->
+      // "Google Ads", fbclid -> the Meta property) and, failing that, from the
+      // referrer's domain (e.g. "Instagram") — so the lead reflects reality
+      // instead of the generic "public_form" text, and paid is not silently
+      // reported as organic.
       // Never overrides an explicit utm_source (step 3, above) or a locked
       // source_id. Unknown domains resolve to null and change nothing.
       // source_id resolution for this candidate happens asynchronously in
       // marketingAttribution.ts (same as the utm_source path above).
       if (embedKind === 'utm' && !sourceIdLocked && !safeTracking?.utm_source) {
-        const referrerOrigin = resolveOriginFromReferrer(safeTracking?.referrer);
-        if (referrerOrigin) {
-          resolvedSource = referrerOrigin;
-          console.log('Resolved source from referrer domain:', referrerOrigin);
+        const derivedOrigin = resolveOriginWithoutUtmSource(safeTracking);
+        if (derivedOrigin) {
+          resolvedSource = derivedOrigin;
+          console.log('Resolved source without utm_source:', derivedOrigin);
         }
       }
 

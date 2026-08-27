@@ -2,7 +2,8 @@
 // Should only be called when embedKind === "utm" AND lead has campaign_id + id.
 
 import { resolveChannel } from "./resolveChannel.ts";
-import { normalizeSourceText, resolveOriginFromReferrer } from "./referrerSource.ts";
+import { normalizeSourceText } from "./referrerSource.ts";
+import { resolvePaidClickAttribution, resolveOriginWithoutUtmSource } from "./paidClickSource.ts";
 
 /**
  * Resolve source_id by matching a candidate value (utm_source, or a
@@ -145,13 +146,15 @@ export async function runMarketingAttribution(args: RunArgs): Promise<void> {
     if (!channelSourceId && isFallbackChannel && organizationId) {
       if (tracking?.utm_source) {
         channelSourceId = await resolveSourceDirect(supabase, organizationId, tracking.utm_source);
-      } else if (tracking?.referrer) {
-        // GA-style fallback: no UTMs at all, so the referrer's domain is the
-        // only signal left. Only reached when nothing else already resolved
-        // a source_id above (utm_source, when present, always wins).
-        const referrerOrigin = resolveOriginFromReferrer(tracking.referrer);
-        if (referrerOrigin) {
-          channelSourceId = await resolveSourceDirect(supabase, organizationId, referrerOrigin);
+      } else {
+        // GA-style fallback: no utm_source at all, so the ad click id
+        // (gclid/fbclid/msclkid) and then the referrer's domain are the only
+        // signals left. The click id comes first because it is the ONLY thing
+        // that separates paid from organic. Only reached when nothing else
+        // already resolved a source_id above (utm_source always wins).
+        const derivedOrigin = resolveOriginWithoutUtmSource(tracking);
+        if (derivedOrigin) {
+          channelSourceId = await resolveSourceDirect(supabase, organizationId, derivedOrigin);
         }
       }
     }
@@ -167,8 +170,11 @@ export async function runMarketingAttribution(args: RunArgs): Promise<void> {
     };
 
     const t = tracking ?? {};
+    // Paid-click medium ("cpc" / "paid_social") is only a FALLBACK: an
+    // explicit utm_medium the visit actually carried always wins.
+    const paidClick = resolvePaidClickAttribution(t);
     const newSource: string | null = t.utm_source ?? null;
-    const newMedium: string | null = t.utm_medium ?? null;
+    const newMedium: string | null = t.utm_medium ?? paidClick?.medium ?? null;
     const newContent: string | null = t.utm_content ?? null;
     const newTerm: string | null = t.utm_term ?? null;
     const newLand: string | null = t.landing_page ?? null;

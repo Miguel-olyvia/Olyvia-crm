@@ -101,25 +101,51 @@
     } catch (e) {}
 
     var hasNew = Object.keys(fromCurrentUrl).length > 0;
-    var tracking = hasNew
+
+    // Is this page view the START of a visit from outside? Like Google
+    // Analytics, the origin of a visit is decided ONCE — at the entry page —
+    // and then kept for the rest of the session. An EXTERNAL referrer marks an
+    // entry just as much as a UTM/click-id does; without this, an organic
+    // Instagram click that browses two pages before reaching the form would
+    // arrive with the client's OWN page as referrer and lose its origin
+    // (measured: it did).
+    var currentReferrer = "";
+    try { currentReferrer = document.referrer || ""; } catch (e) {}
+    var referrerIsExternal = false;
+    try {
+      if (currentReferrer) {
+        referrerIsExternal = new URL(currentReferrer).host !== window.location.host;
+      }
+    } catch (e) {}
+
+    var isVisitStart = hasNew || referrerIsExternal;
+    var tracking = isVisitStart
       ? fromCurrentUrl
-      : Object.assign({}, fromStorage); // fallback only when current URL is empty
+      : Object.assign({}, fromStorage); // continuing the visit: keep its origin
 
-    // landing_page (origin + pathname, no query)
-    try {
-      tracking.landing_page = trim(window.location.origin + window.location.pathname);
-    } catch (e) {}
-    // referrer
-    try {
-      var ref = document.referrer || "";
-      if (ref) tracking.referrer = trim(ref);
-    } catch (e) {}
-    // captured_at
-    try { tracking.captured_at = new Date().toISOString(); } catch (e) {}
+    if (isVisitStart) {
+      // landing_page (origin + pathname, no query) = the page they entered on
+      try {
+        tracking.landing_page = trim(window.location.origin + window.location.pathname);
+      } catch (e) {}
+      if (currentReferrer) tracking.referrer = trim(currentReferrer);
+      try { tracking.captured_at = new Date().toISOString(); } catch (e) {}
+    } else {
+      // Continuing the same visit: never overwrite the remembered origin with
+      // this page's INTERNAL referrer, and keep the first-touch landing page.
+      if (!tracking.landing_page) {
+        try {
+          tracking.landing_page = trim(window.location.origin + window.location.pathname);
+        } catch (e) {}
+      }
+      if (!tracking.captured_at) {
+        try { tracking.captured_at = new Date().toISOString(); } catch (e) {}
+      }
+    }
 
-    // Persist (only when current URL had something — never overwrite real UTMs with empty).
+    // Persist (only at the start of a visit — never overwrite a real origin with empty).
     try {
-      if (hasNew && window.sessionStorage) {
+      if (isVisitStart && window.sessionStorage) {
         window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(tracking));
       }
     } catch (e) {}

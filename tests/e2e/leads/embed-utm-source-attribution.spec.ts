@@ -73,6 +73,9 @@ const INSTAGRAM_SOURCE_ID = '11111111-2222-4333-8444-555555550003'
 // nike has no org-local "Facebook", so a Facebook referrer must fall through to
 // the global row — again purely by name.
 const GLOBAL_FACEBOOK_SOURCE_ID = '3c99d816-87da-40d5-a400-c2ca65c9986a'
+// Pre-existing GLOBAL lead source (organization_id IS NULL) used to represent
+// PAID Google traffic (gclid). No new source row was created by this session.
+const GLOBAL_GOOGLE_ADS_SOURCE_ID = 'd9830942-17c1-40c8-b702-085289019868'
 const APP_ORIGIN = 'http://localhost:8080'
 const LOCAL_CREATE_LEAD_URL =
   process.env.LOCAL_CREATE_LEAD_URL ?? 'http://127.0.0.1:8000/'
@@ -106,6 +109,34 @@ const clientSiteFixture = (formId: string) =>
       html(`
         <h1>Site do cliente</h1>
         <!-- Olyvia Form com UTMs (recomendado) -->
+        <div id="olyvia-form"></div>
+        <script
+          src="${APP_ORIGIN}/embed/olyvia-form.js"
+          data-form-id="${formId}"
+          data-routing="url"
+          data-lang="pt"
+          async></script>
+      `),
+    )
+  })
+
+/**
+ * The client's own website with THREE pages, the recommended snippet present
+ * on all of them (the realistic setup for a site-wide embed script: script in
+ * the global template, form container on the page that needs it). The visitor
+ * lands on `/`, browses to `/p2` and `/p3`, and only submits on `/p3` — where
+ * `document.referrer` is the client's OWN previous page, so the Instagram
+ * origin can only survive through the snippet's sessionStorage.
+ */
+const multiPageClientSiteFixture = (formId: string) =>
+  listen((req, res) => {
+    const url = req.url ?? '/'
+    const next = url.startsWith('/p2') ? '/p3' : url.startsWith('/p3') ? null : '/p2'
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(
+      html(`
+        <h1>Site do cliente ${url}</h1>
+        ${next ? `<a id="next" href="${next}">Continuar</a>` : '<p>Contacte-nos</p>'}
         <div id="olyvia-form"></div>
         <script
           src="${APP_ORIGIN}/embed/olyvia-form.js"
@@ -603,5 +634,227 @@ test.describe('embed snippet forwards lead origin to the database', () => {
     } finally {
       legacySite.server.close()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GA-parity matrix (this session): origin surviving internal navigation, and
+// paid vs organic separated by the ad click id (gclid / fbclid) — the one
+// signal a referrer can never provide.
+// ---------------------------------------------------------------------------
+
+/** Fills and submits the embedded form on whatever page is currently open. */
+async function fillAndSubmitEmbeddedForm(
+  page: import('@playwright/test').Page,
+  email: string,
+  label: string,
+) {
+  const frame = page.frameLocator('iframe[title="Olyvia form"]')
+  await frame.locator('#first_name').waitFor({ timeout: 180_000 })
+  await frame.locator('#first_name').fill(label)
+  await frame.locator('#last_name').fill('EmbedTracking')
+  await frame.locator('#email').fill(email)
+  await frame.locator('#phone').fill('912345678')
+  const iframeSrc = (await page.locator('iframe[title="Olyvia form"]').getAttribute('src')) ?? ''
+  const submit = frame.locator('button:has-text("Enviar")').last()
+  await submit.scrollIntoViewIfNeeded()
+  await submit.click()
+  await expect(frame.locator('#first_name')).toBeHidden({ timeout: 180_000 })
+  await page.waitForTimeout(4000)
+  return { iframeSrc }
+}
+
+const logCreateLead = (page: import('@playwright/test').Page) => {
+  page.on('response', async (r) => {
+    if (!r.url().includes('create-lead')) return
+    let body = ''
+    try { body = (await r.text()).slice(0, 500) } catch { body = '<unreadable>' }
+    console.log(`[create-lead] ${r.status()} ${body}`)
+  })
+}
+
+const mediumOf = (lead: LeadRow): unknown =>
+  (lead.campaign_lead as Record<string, unknown> | null)?.medium ?? null
+
+test.describe('GA parity: session origin and paid vs organic', () => {
+  let site: Fixture
+  let multiSite: Fixture
+
+  test.beforeAll(async () => {
+    site = await clientSiteFixture(FORM_ID)
+    multiSite = await multiPageClientSiteFixture(FORM_ID)
+  })
+
+  test.afterAll(async () => {
+    for (const f of [site, multiSite]) f?.server.close()
+  })
+
+  test.beforeEach(async ({ page }) => {
+    await useLocalCreateLead(page)
+    logCreateLead(page)
+  })
+
+  // -- MATRIX #2: the one the user cares most about. Instagram click, then TWO
+  //    internal page views, and only then the submit. On the last page
+  //    `document.referrer` is the client's own site, so the ONLY way the
+  //    origin can still be Instagram is the snippet's per-session memory. --
+  test('organic Instagram click survives two internal navigations before submitting', async ({ page }) => {
+    const s = suffix()
+    const email = `e2eignav${s}@example.test`
+    await mockReferrerOrigin(page, 'http://www.instagram.com', () => `${multiSite.origin}/`)
+
+    await page.goto('http://www.instagram.com/', { waitUntil: 'domcontentloaded' })
+    await Promise.all([
+      page.waitForURL((u) => u.origin === multiSite.origin, { timeout: 60_000 }),
+      page.locator('#cta').click(),
+    ])
+    expect(await page.evaluate(() => document.referrer)).toContain('instagram.com')
+
+    // Two internal navigations: /  ->  /p2  ->  /p3
+    await Promise.all([
+      page.waitForURL(`${multiSite.origin}/p2`, { timeout: 60_000 }),
+      page.locator('#next').click(),
+    ])
+    await Promise.all([
+      page.waitForURL(`${multiSite.origin}/p3`, { timeout: 60_000 }),
+      page.locator('#next').click(),
+    ])
+    // On the submit page the browser's own referrer is INTERNAL...
+    const lastReferrer = await page.evaluate(() => document.referrer)
+    expect(lastReferrer, 'referrer on the submit page is the client site itself').toContain(
+      new URL(multiSite.origin).host,
+    )
+
+    const { iframeSrc } = await fillAndSubmitEmbeddedForm(page, email, `E2EIGNAV${s}`)
+    // ...yet the snippet must still be forwarding the Instagram referrer.
+    expect(decodeURIComponent(iframeSrc), 'session origin must survive internal navigation').toContain(
+      'instagram.com',
+    )
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[IG-NAV] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.referrer).toContain('instagram.com')
+    expect(lead.source).toBe('Instagram')
+    expect(lead.source_id).toBe(INSTAGRAM_SOURCE_ID)
+  })
+
+  // -- MATRIX #3: Google ORGANIC. Same google.* referrer as an ad click, but
+  //    no gclid: must NOT be reported as paid. --
+  test('organic Google search click is attributed to Google and never marked paid', async ({ page }) => {
+    const s = suffix()
+    const email = `e2egorg${s}@example.test`
+    await mockReferrerOrigin(page, 'http://www.google.com', () => `${site.origin}/lp`)
+    const { iframeSrc } = await submitThroughEmbed(
+      page, 'http://www.google.com', site.origin, email, `E2EGORG${s}`,
+    )
+    expect(iframeSrc).not.toContain('utm_source')
+    expect(iframeSrc).not.toContain('gclid')
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[GOOGLE-ORGANIC] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.referrer).toContain('google.com')
+    expect(lead.tracking?.gclid, 'no click id on an organic click').toBeUndefined()
+    expect(lead.source, 'organic google is "Google", not "Google Ads"').toBe('Google')
+    // There is no lead_sources row named "Google" in this database, so the
+    // internal id stays unresolved rather than being invented.
+    expect(lead.source_id).toBeNull()
+    expect(mediumOf(lead), 'organic traffic must not get a paid medium').toBeNull()
+  })
+
+  // -- MATRIX #4: Google ADS. Identical referrer, gclid present -> paid. --
+  test('Google Ads click (gclid) is separated from organic and recorded as paid', async ({ page }) => {
+    const s = suffix()
+    const email = `e2egads${s}@example.test`
+    await mockReferrerOrigin(page, 'http://www.google.com', () =>
+      `${site.origin}/lp?gclid=Cj0KCQe2e${s}`,
+    )
+    const { iframeSrc } = await submitThroughEmbed(
+      page, 'http://www.google.com', site.origin, email, `E2EGADS${s}`,
+    )
+    expect(iframeSrc).not.toContain('utm_source')
+    expect(iframeSrc).toContain('gclid=')
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[GOOGLE-ADS] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.gclid).toBe(`Cj0KCQe2e${s}`)
+    expect(lead.source, 'gclid must be read as paid Google traffic').toBe('Google Ads')
+    expect(lead.source_id, 'matched against the EXISTING global "Google Ads" row').toBe(
+      GLOBAL_GOOGLE_ADS_SOURCE_ID,
+    )
+    expect(mediumOf(lead), 'paid search is recorded as cpc in campaign_leads.medium').toBe('cpc')
+  })
+
+  // -- MATRIX #5: Meta paid click (fbclid), no utm params at all. --
+  test('Facebook click with fbclid and no UTMs is attributed to Facebook as paid social', async ({ page }) => {
+    const s = suffix()
+    const email = `e2efbclid${s}@example.test`
+    await mockReferrerOrigin(page, 'http://www.facebook.com', () =>
+      `${site.origin}/lp?fbclid=IwAR_e2e_${s}`,
+    )
+    const { iframeSrc } = await submitThroughEmbed(
+      page, 'http://www.facebook.com', site.origin, email, `E2EFBCLID${s}`,
+    )
+    expect(iframeSrc).not.toContain('utm_source')
+    expect(iframeSrc).toContain('fbclid=')
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[FBCLID] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.fbclid).toBe(`IwAR_e2e_${s}`)
+    expect(lead.source).toBe('Facebook')
+    expect(lead.source_id).toBe(GLOBAL_FACEBOOK_SOURCE_ID)
+    expect(mediumOf(lead), 'paid social is recorded in campaign_leads.medium').toBe('paid_social')
+  })
+})
+
+test.describe('GA parity: expanded referrer table, end to end', () => {
+  let site: Fixture
+
+  test.beforeAll(async () => {
+    site = await clientSiteFixture(FORM_ID)
+  })
+
+  test.afterAll(async () => {
+    site?.server.close()
+  })
+
+  test.beforeEach(async ({ page }) => {
+    await useLocalCreateLead(page)
+    logCreateLead(page)
+  })
+
+  // -- MATRIX #6 (E2E sample): the rest of the expanded domain table is
+  //    covered by unit tests; this proves one of the newly added origins
+  //    travels the whole pipeline into the database. TikTok has no
+  //    lead_sources row in this database, so the textual origin is set and
+  //    source_id is deliberately left unresolved (nothing is invented). --
+  test('a newly supported referrer domain (TikTok) reaches the database as its own origin', async ({ page }) => {
+    const s = suffix()
+    const email = `e2etiktok${s}@example.test`
+    await mockReferrerOrigin(page, 'http://www.tiktok.com', () => `${site.origin}/lp`)
+    await submitThroughEmbed(page, 'http://www.tiktok.com', site.origin, email, `E2ETIKTOK${s}`)
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[TIKTOK] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.referrer).toContain('tiktok.com')
+    expect(lead.source).toBe('TikTok')
+    // No "TikTok" row exists -> id stays null rather than being guessed.
+    expect(lead.source_id).toBeNull()
+  })
+
+  // -- MATRIX #7 (security): `notinstagram.com` is a domain anybody can
+  //    register. Proven end to end, not just in the unit test, that it can
+  //    never forge the origin of a real lead. --
+  test('a look-alike domain is never attributed to the brand it imitates', async ({ page }) => {
+    const s = suffix()
+    const email = `e2elookalike${s}@example.test`
+    const lookAlike = 'http://www.notinstagram.com'
+    await mockReferrerOrigin(page, lookAlike, () => `${site.origin}/lp`)
+    await submitThroughEmbed(page, lookAlike, site.origin, email, `E2ELOOKALIKE${s}`)
+
+    const lead = await fetchLeadByEmail(email)
+    console.log('[LOOK-ALIKE] lead:', JSON.stringify(lead, null, 2))
+    expect(lead.tracking?.referrer).toContain('notinstagram.com')
+    expect(lead.source, 'a look-alike domain must not become Instagram').toBe('public_form')
+    expect(lead.source_id).toBeNull()
   })
 })
