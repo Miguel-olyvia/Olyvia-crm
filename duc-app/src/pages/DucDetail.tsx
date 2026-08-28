@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink } from "../components/icons";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink, X } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
@@ -93,8 +93,13 @@ export default function DucDetail() {
 
   // Etapa a aguardar confirmação de fecho (null = sem diálogo aberto).
   const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
-  // Fecho bloqueado (ordem das etapas OU campos obrigatórios em falta).
-  const [blockedClose, setBlockedClose] = useState<{ title: string; items: string[] } | null>(null);
+  // Etapa a dispensar ("Não precisa") a aguardar confirmação.
+  const [confirmingSkip, setConfirmingSkip] = useState<number | null>(null);
+  // Fecho/avanço bloqueado (ordem das etapas OU campos obrigatórios em falta).
+  // `intro` permite reaproveitar o modal para o fecho e para o avanço de etapa.
+  const [blockedClose, setBlockedClose] = useState<
+    { title: string; items: string[]; intro?: string } | null
+  >(null);
   // Link público gerado a partir do cabeçalho.
   const [shareModalUrl, setShareModalUrl] = useState<string | null>(null);
   const [sharingHeader, setSharingHeader] = useState(false);
@@ -269,6 +274,50 @@ export default function DucDetail() {
     }
     return true;
   };
+  // Dispensa/reativa uma etapa ("Não precisa"). Persiste já (como o fecho) e
+  // regista quem/quando dispensou. Reativar volta ao estado `pending` e limpa a
+  // assinatura. Devolve true se gravou.
+  const skipStage = async (stage: number, skip: boolean): Promise<boolean> => {
+    const patch = {
+      state: (skip ? "skipped" : "pending") as TrackingEntry["state"],
+      date: skip ? new Date().toISOString().slice(0, 10) : null,
+      signed_by: skip ? userName ?? businessUserId ?? "—" : null,
+    };
+    const newTracking: TrackingEntry[] = tracking.some((t) => t.stage === stage)
+      ? tracking.map((t) => (t.stage === stage ? { ...t, ...patch } : t))
+      : [...tracking, { stage, ...patch }];
+    setTracking(newTracking);
+    if (!id) return false;
+    const { error: upErr } = await supabase
+      .from("anew_client_ducs")
+      .update({ tracking: newTracking })
+      .eq("id", id);
+    if (upErr) {
+      setError(upErr.message);
+      return false;
+    }
+    setSavedAt(new Date().toLocaleTimeString("pt-PT"));
+    if (duc) {
+      void logDucEvent({
+        duc_id: id,
+        organization_id: duc.organization_id,
+        event_type: skip ? "stage_skipped" : "stage_unskipped",
+        stage_no: stage,
+        detail: skip ? `Etapa ${stage} dispensada (não precisa)` : `Etapa ${stage} reativada`,
+        actor_id: businessUserId,
+        actor_name: userName ?? null,
+      });
+    }
+    return true;
+  };
+  // Dispensar pede confirmação (fica registada); reativar é direto.
+  const requestSkip = (stage: number, skip: boolean) => {
+    if (!skip) {
+      void skipStage(stage, false);
+      return;
+    }
+    setConfirmingSkip(stage);
+  };
   // Fechar pede confirmação (ação com peso: assina a etapa); reabrir é direto.
   // Antes de confirmar, valida os campos OBRIGATÓRIOS da etapa.
   const requestToggleClose = (stage: number, close: boolean) => {
@@ -370,6 +419,22 @@ export default function DucDetail() {
   };
   const changeStage = (n: number) => {
     const advancing = n > currentStage;
+    // Ao AVANÇAR de fase, valida os campos obrigatórios da etapa que se deixa —
+    // se faltarem, mostra QUAIS e não deixa passar (recuar/consultar é livre).
+    if (advancing) {
+      const leaving = configStages.find((s) => s.no === currentStage);
+      if (leaving) {
+        const gaps = missingRequiredFields(leaving, variant, blocks[leaving.key]);
+        if (gaps.length > 0) {
+          setBlockedClose({
+            title: "Faltam campos obrigatórios",
+            intro: `Preenche estes campos da etapa ${leaving.no}. ${leaving.title.split(" — ")[0]} antes de avançar:`,
+            items: gaps.map((f) => f.label),
+          });
+          return;
+        }
+      }
+    }
     setCurrentStage(n);
     markDirty();
     if (!id) return;
@@ -752,6 +817,7 @@ export default function DucDetail() {
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Fechada</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" /> Atual</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> Pendente</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-400" /> Não precisa</span>
                 </div>
               </div>
               <StageFlowView
@@ -800,6 +866,7 @@ export default function DucDetail() {
                 onUpdateItem={updateItem}
                 onRemoveItem={removeItem}
                 onToggleClose={requestToggleClose}
+                onSkip={requestSkip}
               />
             </Section>
           ))}
@@ -919,6 +986,31 @@ export default function DucDetail() {
         />
       )}
 
+      {confirmingSkip !== null && (
+        <ConfirmDialog
+          title="Marcar como “Não precisa”"
+          tone="neutral"
+          confirmLabel="Não precisa"
+          icon={<X width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que a etapa{" "}
+              <span className="font-medium text-slate-800">
+                {confirmingSkip}.{" "}
+                {visibleStages.find((s) => s.no === confirmingSkip)?.title.split(" — ")[0]}
+              </span>{" "}
+              não é necessária para este DUC? Deixa de contar como pendente (mas fica registada) e
+              podes reativá-la a qualquer momento.
+            </>
+          }
+          onCancel={() => setConfirmingSkip(null)}
+          onConfirm={async () => {
+            await skipStage(confirmingSkip, true);
+            setConfirmingSkip(null);
+          }}
+        />
+      )}
+
       {blockedClose && (
         <Modal
           title={blockedClose.title}
@@ -927,7 +1019,9 @@ export default function DucDetail() {
           footer={<Button onClick={() => setBlockedClose(null)}>Entendi</Button>}
         >
           <div className="space-y-2">
-            <p className="text-sm text-slate-600">Não é possível fechar esta etapa ainda:</p>
+            <p className="text-sm text-slate-600">
+              {blockedClose.intro ?? "Não é possível fechar esta etapa ainda:"}
+            </p>
             <ul className="max-h-52 space-y-1 overflow-y-auto rounded-lg bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-inset ring-amber-100">
               {blockedClose.items.map((m, i) => (
                 <li key={i} className="flex gap-1.5">
@@ -1142,6 +1236,7 @@ function StageCard({
   onUpdateItem,
   onRemoveItem,
   onToggleClose,
+  onSkip,
 }: {
   stage: DucStage;
   variant: DucVariant;
@@ -1155,10 +1250,12 @@ function StageCard({
   onUpdateItem: (key: string, patch: Partial<LocalItem>) => void;
   onRemoveItem: (key: string) => void;
   onToggleClose: (stageNo: number, close: boolean) => void;
+  onSkip: (stageNo: number, skip: boolean) => void;
 }) {
   const fields = fieldsForVariant(stage.fields, variant);
   const sections = sectionsForVariant(stage, variant);
   const done = entry?.state === "done";
+  const skipped = entry?.state === "skipped";
   // Alerta de etapa parada: só na etapa atual, por fechar, com limite configurado.
   const alertDays = stage.notify?.alertAfterDays ?? 0;
   const openDays =
@@ -1203,6 +1300,8 @@ function StageCard({
             <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
               <Check width={12} height={12} /> Fechada
             </Badge>
+          ) : skipped ? (
+            <Badge className="bg-slate-200 text-slate-600 ring-slate-300">Não precisa</Badge>
           ) : isCurrent ? (
             <Badge className="bg-brand-50 text-brand-800 ring-brand-100">Etapa atual</Badge>
           ) : null}
@@ -1245,13 +1344,15 @@ function StageCard({
         />
       ))}
 
-      {/* Fecho da etapa — assinatura (quem/quando) + botão fechar/reabrir */}
+      {/* Fecho da etapa — assinatura (quem/quando) + fechar/reabrir/dispensar */}
       <div
         className={cx(
           "mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3.5 ring-1 ring-inset print:hidden",
           done
             ? "bg-emerald-50/60 ring-emerald-100"
-            : "bg-slate-50 ring-slate-100"
+            : skipped
+              ? "bg-slate-100/70 ring-slate-200"
+              : "bg-slate-50 ring-slate-100"
         )}
       >
         {done ? (
@@ -1262,28 +1363,64 @@ function StageCard({
               {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
             </span>
           </p>
+        ) : skipped ? (
+          <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <X width={14} height={14} className="shrink-0" />
+            <span>
+              Não precisa{entry?.signed_by ? ` · dispensada por ${entry.signed_by}` : ""}
+              {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+            </span>
+          </p>
         ) : (
           <p className="text-xs font-medium text-slate-500">Etapa por fechar.</p>
         )}
-        <Button
-          variant={done ? "secondary" : "primary"}
-          onClick={() => onToggleClose(stage.no, !done)}
-          className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
-        >
-          {done ? (
-            "Reabrir etapa"
-          ) : (
-            <>
-              <Check /> Fechar etapa
-            </>
-          )}
-        </Button>
+        {skipped ? (
+          <Button
+            variant="secondary"
+            onClick={() => onSkip(stage.no, false)}
+            className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
+          >
+            Reativar etapa
+          </Button>
+        ) : (
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            {!done && (
+              <Button
+                variant="ghost"
+                onClick={() => onSkip(stage.no, true)}
+                className="w-full justify-center py-2.5 text-slate-500 sm:w-auto sm:py-2"
+              >
+                <X width={15} height={15} /> Não precisa
+              </Button>
+            )}
+            <Button
+              variant={done ? "secondary" : "primary"}
+              onClick={() => onToggleClose(stage.no, !done)}
+              className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
+            >
+              {done ? (
+                "Reabrir etapa"
+              ) : (
+                <>
+                  <Check /> Fechar etapa
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Registo de assinatura visível também na impressão */}
+      {/* Registo visível também na impressão */}
       {done && (
         <p className="mt-4 hidden text-xs text-slate-500 print:block">
           Etapa fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+          {entry?.date ? ` em ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}.
+        </p>
+      )}
+      {skipped && (
+        <p className="mt-4 hidden text-xs text-slate-500 print:block">
+          Etapa dispensada (não precisa)
+          {entry?.signed_by ? ` por ${entry.signed_by}` : ""}
           {entry?.date ? ` em ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}.
         </p>
       )}
@@ -1621,6 +1758,7 @@ function TrackingBoard({
           const entry =
             tracking.find((t) => t.stage === stage.no) ?? { stage: stage.no, state: "pending" as const };
           const done = entry.state === "done";
+          const skipped = entry.state === "skipped";
           const isCurrent = stage.no === currentStage;
           return (
             <div
@@ -1633,7 +1771,12 @@ function TrackingBoard({
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800">
+                  <p
+                    className={cx(
+                      "text-sm font-medium text-slate-800",
+                      skipped && "line-through text-slate-400"
+                    )}
+                  >
                     {stage.no} · {stage.title.split(" — ")[0]}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-400">{stage.responsible}</p>
@@ -1647,15 +1790,21 @@ function TrackingBoard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleClose(stage.no, !done);
+                    // Numa etapa dispensada, o pill não fecha — abre a etapa para reativar.
+                    if (skipped) onStageChange(stage.no);
+                    else onToggleClose(stage.no, !done);
                   }}
                   className={cx(
                     "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
-                    done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                    done
+                      ? "bg-emerald-100 text-emerald-700"
+                      : skipped
+                        ? "bg-slate-200 text-slate-500"
+                        : "bg-slate-100 text-slate-500"
                   )}
                 >
                   {done && <Check width={12} height={12} />}
-                  {done ? "Fechado" : "Pendente"}
+                  {done ? "Fechado" : skipped ? "Não precisa" : "Pendente"}
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1695,13 +1844,19 @@ function TrackingBoard({
               const entry =
                 tracking.find((t) => t.stage === stage.no) ?? { stage: stage.no, state: "pending" as const };
               const done = entry.state === "done";
+              const skipped = entry.state === "skipped";
               return (
                 <tr
                   key={stage.no}
                   className={cx("cursor-pointer", stage.no === currentStage && "bg-teal-50/50")}
                   onClick={() => onStageChange(stage.no)}
                 >
-                  <td className="py-2 pr-3 font-medium text-slate-700">
+                  <td
+                    className={cx(
+                      "py-2 pr-3 font-medium text-slate-700",
+                      skipped && "line-through text-slate-400"
+                    )}
+                  >
                     {stage.no} · {stage.title.split(" — ")[0]}
                   </td>
                   <td className="py-2 pr-3 text-slate-500">{stage.responsible}</td>
@@ -1710,15 +1865,20 @@ function TrackingBoard({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onToggleClose(stage.no, !done);
+                        if (skipped) onStageChange(stage.no);
+                        else onToggleClose(stage.no, !done);
                       }}
                       className={cx(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                        done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                        done
+                          ? "bg-emerald-100 text-emerald-700"
+                          : skipped
+                            ? "bg-slate-200 text-slate-500"
+                            : "bg-slate-100 text-slate-500"
                       )}
                     >
                       {done && <Check width={12} height={12} />}
-                      {done ? "Fechado" : "Pendente"}
+                      {done ? "Fechado" : skipped ? "Não precisa" : "Pendente"}
                     </button>
                     {done && entry.signed_by && (
                       <span className="mt-0.5 block text-[11px] text-slate-400">

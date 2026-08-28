@@ -8,13 +8,29 @@ export type DucSection =
   | "change_log"
   | "service_map";
 
+/**
+ * Estado de uma etapa dentro de um DUC:
+ * - `pending`  — por tratar
+ * - `done`     — fechada/assinada (quem + quando)
+ * - `skipped`  — "Não precisa": dispensada para este DUC (conta como tratada,
+ *                mas fica visualmente distinta e é reversível)
+ */
+export type TrackingState = "pending" | "done" | "skipped";
+
 export interface TrackingEntry {
   stage: number;
-  state: "pending" | "done";
+  state: TrackingState;
   date?: string | null;
   signed_by?: string | null;
   note?: string | null;
 }
+
+/**
+ * Uma etapa está "tratada" (não conta como pendente / não aparece em "faltam
+ * fechar") quando está fechada OU dispensada.
+ */
+export const isStageResolved = (state?: TrackingState | string | null): boolean =>
+  state === "done" || state === "skipped";
 
 export interface DucRecord {
   id: string;

@@ -4,6 +4,8 @@ export type DucEventType =
   | "created"
   | "stage_closed"
   | "stage_reopened"
+  | "stage_skipped"
+  | "stage_unskipped"
   | "status_changed"
   | "stage_moved"
   | "field_changed"

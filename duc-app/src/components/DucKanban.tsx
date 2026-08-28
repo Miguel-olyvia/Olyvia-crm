@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { DucRecord, DucStatus } from "../lib/types";
+import { isStageResolved, type DucRecord, type DucStatus } from "../lib/types";
 import { STATUS_LABELS, VARIANT_LABELS } from "../lib/ducSchema";
 import { Badge, Card, cx } from "./ui";
 
@@ -18,10 +18,10 @@ const STATUS_BADGE: Record<DucStatus, string> = {
   closed: "bg-emerald-50 text-emerald-700 ring-emerald-200",
 };
 
-// Conta etapas concluídas no tracking de um DUC.
+// Conta etapas tratadas (fechadas OU dispensadas) no tracking de um DUC.
 function progressOf(d: DucRecord): { done: number; total: number } {
   const total = d.tracking.length;
-  const done = d.tracking.filter((t) => t.state === "done").length;
+  const done = d.tracking.filter((t) => isStageResolved(t.state)).length;
   return { done, total };
 }
 

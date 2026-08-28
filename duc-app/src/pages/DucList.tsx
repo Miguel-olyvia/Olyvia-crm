@@ -15,7 +15,7 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
@@ -30,6 +30,7 @@ import {
 import { entityDisplayName } from "../lib/names";
 import { fetchClientOlyviaInfo, prefillBlocksFromInfo } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
+import { isStageResolved } from "../lib/types";
 import type { ClientOption, DucRecord, DucStatus, TrackingEntry } from "../lib/types";
 
 function entityName(row: {
@@ -41,7 +42,7 @@ function entityName(row: {
 }
 
 function doneCount(tracking: TrackingEntry[] | null | undefined): number {
-  return (tracking ?? []).filter((t) => t.state === "done").length;
+  return (tracking ?? []).filter((t) => isStageResolved(t.state)).length;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -1185,6 +1186,8 @@ function PendingView({
   onRestore: (c: ClientOption) => void;
 }) {
   const [q, setQ] = useState("");
+  // Hero do resumo pode ser fechado (só nesta sessão) — não é um alerta permanente.
+  const [heroClosed, setHeroClosed] = useState(false);
 
   // Ordena por urgência: mais dias sem DUC primeiro. Sem `since` vai para o fim.
   const sorted = useMemo(() => {
@@ -1224,47 +1227,58 @@ function PendingView({
       {pending.length === 0 ? (
         <Card>
           <EmptyState
-            icon={<Building width={22} height={22} />}
+            icon={<ClientSketch width={24} height={24} />}
             title="Nada por documentar"
-            description="Todos os clientes da área com contrato válido já têm DUC. 🎉"
+            description="Todos os clientes da área com contrato válido já têm DUC."
           />
         </Card>
       ) : (
         <>
-          {/* Hero — resumo da área com o caso mais urgente em destaque */}
-          <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 ring-amber-100 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <div className="flex items-start gap-3 sm:items-center">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200">
-                  <Clock width={22} height={22} />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-base font-semibold text-slate-900 sm:text-lg">
-                    {pending.length} cliente{pending.length === 1 ? "" : "s"} à espera de DUC
-                  </p>
-                  {oldest ? (
-                    <p className="text-sm text-slate-500">
-                      O mais antigo é{" "}
-                      <span className="font-medium text-slate-700">{oldest.c.name}</span>, há{" "}
-                      <span className="font-medium text-amber-700">{oldest.days} dias</span> sem
-                      documentar.
+          {/* Hero — resumo da área com o caso mais urgente em destaque (fechável) */}
+          {!heroClosed && (
+            <Card className="relative border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 ring-amber-100 sm:p-5">
+              <button
+                type="button"
+                onClick={() => setHeroClosed(true)}
+                aria-label="Fechar resumo"
+                title="Fechar resumo"
+                className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-amber-500/70 transition-colors hover:bg-amber-100/70 hover:text-amber-700"
+              >
+                <X width={16} height={16} />
+              </button>
+              <div className="flex flex-col gap-3 pr-8 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3 sm:items-center">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200">
+                    <ClientSketch width={24} height={24} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-slate-900 sm:text-lg">
+                      {pending.length} cliente{pending.length === 1 ? "" : "s"} à espera de DUC
                     </p>
-                  ) : (
-                    <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
-                  )}
+                    {oldest ? (
+                      <p className="text-sm text-slate-500">
+                        O mais antigo é{" "}
+                        <span className="font-medium text-slate-700">{oldest.c.name}</span>, há{" "}
+                        <span className="font-medium text-amber-700">{oldest.days} dias</span> sem
+                        documentar.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
+                    )}
+                  </div>
                 </div>
+                {oldest && (
+                  <Button
+                    size="sm"
+                    onClick={() => onCreate(oldest.c)}
+                    className="w-full justify-center sm:w-auto"
+                  >
+                    <Plus width={14} height={14} /> Documentar o mais antigo
+                  </Button>
+                )}
               </div>
-              {oldest && (
-                <Button
-                  size="sm"
-                  onClick={() => onCreate(oldest.c)}
-                  className="w-full justify-center sm:w-auto"
-                >
-                  <Plus width={14} height={14} /> Documentar o mais antigo
-                </Button>
-              )}
-            </div>
-          </Card>
+            </Card>
+          )}
 
           <div className="relative">
             <Search

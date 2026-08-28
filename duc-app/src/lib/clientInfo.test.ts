@@ -19,6 +19,10 @@ function makeInfo(overrides: Partial<ClientOlyviaInfo> = {}): ClientOlyviaInfo {
     email: "geral@acme.pt",
     phone: "912345678",
     address: "Rua A 10, 1000-001 Lisboa",
+    addressStreet: "Rua A",
+    addressNumber: "10",
+    addressPostal: "1000-001",
+    addressCity: "Lisboa",
     nif: "123456789",
     responsavel: "Ana Comercial",
     dataAdjudicacao: "2026-01-15",
@@ -39,7 +43,7 @@ describe("prefillBlocksFromInfo", () => {
       contacto_nome: "Acme Lda",
       contacto_tel: "912345678",
       contacto_email: "geral@acme.pt",
-      morada_obra: "Rua A 10, 1000-001 Lisboa",
+      morada_obra: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa" },
       comercial_responsavel: "Ana Comercial",
       data_adjudicacao: "2026-01-15",
       valor_mensal_anual: "10.000,00 EUR",
@@ -52,6 +56,10 @@ describe("prefillBlocksFromInfo", () => {
         phone: null,
         email: null,
         address: null,
+        addressStreet: null,
+        addressNumber: null,
+        addressPostal: null,
+        addressCity: null,
         responsavel: null,
         dataAdjudicacao: null,
         valor: null,
@@ -97,7 +105,7 @@ describe("prefillBlocksFromInfo", () => {
     const { entrega } = prefillBlocksFromInfo(makeInfo());
     expect(entrega).toEqual({
       cliente: "Acme Lda",
-      morada: "Rua A 10, 1000-001 Lisboa",
+      morada: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa" },
       data_inicio: "2026-01-15", // dataAdjudicacao
       data_entrega: "2026-06-30", // dataFim
       obra_ref: "CT-2026-001", // contractNumber
@@ -108,6 +116,10 @@ describe("prefillBlocksFromInfo", () => {
     const { entrega } = prefillBlocksFromInfo(
       makeInfo({
         address: null,
+        addressStreet: null,
+        addressNumber: null,
+        addressPostal: null,
+        addressCity: null,
         dataAdjudicacao: null,
         dataFim: null,
         contractNumber: null,

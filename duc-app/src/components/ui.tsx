@@ -420,8 +420,11 @@ export function ConfirmDialog({
   title: string;
   message: ReactNode;
   confirmLabel?: ReactNode;
-  /** "danger" (vermelho, default) ou "brand" (ação positiva, ex.: fechar etapa). */
-  tone?: "danger" | "brand";
+  /**
+   * "danger" (vermelho, default), "brand" (ação positiva, ex.: fechar etapa) ou
+   * "neutral" (slate, ação sem peso, ex.: dispensar etapa).
+   */
+  tone?: "danger" | "brand" | "neutral";
   icon?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
@@ -429,7 +432,9 @@ export function ConfirmDialog({
   const bubble =
     tone === "brand"
       ? "bg-brand-50 text-brand-700 ring-brand-100"
-      : "bg-red-50 text-red-500 ring-red-100";
+      : tone === "neutral"
+        ? "bg-slate-100 text-slate-500 ring-slate-200"
+        : "bg-red-50 text-red-500 ring-red-100";
   return (
     <Modal
       title={title}
@@ -440,7 +445,10 @@ export function ConfirmDialog({
           <Button variant="secondary" onClick={onCancel}>
             <X width={15} height={15} /> Cancelar
           </Button>
-          <Button variant={tone === "brand" ? "primary" : "danger"} onClick={onConfirm}>
+          <Button
+            variant={tone === "brand" ? "primary" : tone === "neutral" ? "secondary" : "danger"}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </Button>
         </>

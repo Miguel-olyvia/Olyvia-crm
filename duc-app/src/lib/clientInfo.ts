@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { entityDisplayName } from "./names";
+import type { AddressValue } from "./ducSchema";
 
 /** Uma linha do orçamento vendido → alimenta o âmbito ("o que foi VENDIDO") do DUC. */
 export interface ScopeLine {
@@ -15,6 +16,10 @@ export interface ClientOlyviaInfo {
   email: string | null;
   phone: string | null;
   address: string | null;
+  /** Rua isolada da morada (quando disponível em anew_addresses). */
+  addressStreet?: string | null;
+  /** Número isolado da morada (quando disponível em anew_addresses). */
+  addressNumber?: string | null;
   /** Código postal isolado da morada (quando disponível em anew_addresses). */
   addressPostal?: string | null;
   /** Cidade isolada da morada (quando disponível em anew_addresses). */
@@ -114,6 +119,8 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
   // Compõe a morada a partir de anew_addresses (join). Guardamos também as partes
   // separadas caso um destino futuro precise de código postal / cidade isolados.
   let address: string | null = null;
+  let addressStreet: string | null = null;
+  let addressNumber: string | null = null;
   let addressPostal: string | null = null;
   let addressCity: string | null = null;
   const addrRow = addrRes.data?.[0] as
@@ -127,6 +134,8 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     const number = (a.number as string) || "";
     const postal = (a.postal_code as string) || "";
     const city = (a.city as string) || "";
+    addressStreet = street.trim() || null;
+    addressNumber = number.trim() || null;
     addressPostal = postal.trim() || null;
     addressCity = city.trim() || null;
     const line1 = [street, number].filter(Boolean).join(" ").trim();
@@ -189,6 +198,8 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     email,
     phone,
     address,
+    addressStreet,
+    addressNumber,
     addressPostal,
     addressCity,
     nif,
@@ -202,24 +213,41 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
   };
 }
 
+/**
+ * Constrói a morada ESTRUTURADA (objeto `AddressValue`) para os campos do tipo
+ * `address`, a partir das partes isoladas (rua/número/CP/cidade). Assim os campos
+ * separados aparecem preenchidos, em vez de tudo numa só caixa. Retrocompat: se só
+ * existir a morada composta (string), coloca-a na rua.
+ */
+function moradaFromInfo(info: ClientOlyviaInfo): AddressValue | null {
+  const street = (info.addressStreet ?? "").trim();
+  const number = (info.addressNumber ?? "").trim();
+  const postal = (info.addressPostal ?? "").trim();
+  const city = (info.addressCity ?? "").trim();
+  if (street || number || postal || city) return { street, number, postal, city };
+  if (info.address) return { street: info.address, number: "", postal: "", city: "" };
+  return null;
+}
+
 /** Mapeia os dados da Olyvia para os campos dos blocos do DUC. */
 export function prefillBlocksFromInfo(
   info: ClientOlyviaInfo
-): Record<string, Record<string, string>> {
+): Record<string, Record<string, unknown>> {
   const faturacao = [info.name, info.nif ? `NIF: ${info.nif}` : null, info.address]
     .filter(Boolean)
     .join("\n");
+  const morada = moradaFromInfo(info);
 
-  const comercial: Record<string, string> = { cliente_ref: info.name };
+  const comercial: Record<string, unknown> = { cliente_ref: info.name };
   comercial.contacto_nome = info.name;
   if (info.phone) comercial.contacto_tel = info.phone;
   if (info.email) comercial.contacto_email = info.email;
-  if (info.address) comercial.morada_obra = info.address;
+  if (morada) comercial.morada_obra = morada;
   if (info.responsavel) comercial.comercial_responsavel = info.responsavel;
   if (info.dataAdjudicacao) comercial.data_adjudicacao = info.dataAdjudicacao;
   if (info.valor) comercial.valor_mensal_anual = info.valor;
 
-  const financeiro: Record<string, string> = {};
+  const financeiro: Record<string, unknown> = {};
   if (faturacao) financeiro.nif_dados_faturacao = faturacao;
   // NOTA: no schema, `condicoes_faseamento` é do tipo `phases` (PaymentPhase[]),
   // não texto. Mantemos aqui as condições de pagamento (payment_terms) como texto
@@ -227,8 +255,8 @@ export function prefillBlocksFromInfo(
   // é não-destrutivo. Prefill de fases estruturadas fica por fazer conservadoramente.
   if (info.condicoes) financeiro.condicoes_faseamento = info.condicoes;
 
-  const entrega: Record<string, string> = { cliente: info.name };
-  if (info.address) entrega.morada = info.address;
+  const entrega: Record<string, unknown> = { cliente: info.name };
+  if (morada) entrega.morada = morada;
   if (info.dataAdjudicacao) entrega.data_inicio = info.dataAdjudicacao;
   if (info.dataFim) entrega.data_entrega = info.dataFim;
   if (info.contractNumber) entrega.obra_ref = info.contractNumber;
@@ -266,7 +294,7 @@ export function prefillServiceItemsFromInfo(info: ClientOlyviaInfo): ScopeLine[]
 /** Funde os valores de pré-preenchimento apenas em campos ainda vazios. */
 export function mergePrefill(
   blocks: Record<string, Record<string, unknown>>,
-  prefill: Record<string, Record<string, string>>
+  prefill: Record<string, Record<string, unknown>>
 ): Record<string, Record<string, unknown>> {
   const merged: Record<string, Record<string, unknown>> = { ...blocks };
   for (const [stageKey, fields] of Object.entries(prefill)) {

@@ -16,6 +16,9 @@ import {
   ChevronRight,
   X,
   Settings,
+  FileText,
+  Sheet,
+  Bell,
 } from "../icons";
 
 // ---------------------------------------------------------------------------
@@ -117,17 +120,17 @@ export function StageInspector({
 
   return (
     <aside className="flex h-full w-full flex-col bg-white">
-      {/* Cabeçalho do inspector */}
-      <div className="flex items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-5 py-4">
-        <div className="flex items-start gap-3">
+      {/* Cabeçalho do inspector (fica fixo no topo enquanto o corpo faz scroll). */}
+      <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-3.5 sm:px-5 sm:py-4">
+        <div className="flex min-w-0 items-start gap-3">
           <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-sm font-bold text-brand-800 ring-1 ring-brand-100">
             {stage.no}
           </span>
-          <div>
+          <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
               <Settings width={12} height={12} /> Editar etapa
             </p>
-            <p className="mt-0.5 max-w-[16rem] truncate text-sm font-semibold text-slate-800">
+            <p className="mt-0.5 truncate text-sm font-semibold text-slate-800">
               {stage.title || "Sem título"}
             </p>
           </div>
@@ -136,14 +139,14 @@ export function StageInspector({
           type="button"
           onClick={onClose}
           aria-label="Fechar inspetor"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-200/60 hover:text-slate-700"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-200/60 hover:text-slate-700"
         >
-          <X width={16} height={16} />
+          <X width={18} height={18} />
         </button>
       </div>
 
       {/* Corpo com scroll */}
-      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:px-5">
         {/* Metadados da etapa */}
         <section className="space-y-3">
           <LabeledInput
@@ -170,8 +173,9 @@ export function StageInspector({
         {/* Campos */}
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">
-              Campos <Badge className="ml-1">{stage.fields.length}</Badge>
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+              <FileText width={14} height={14} className="text-slate-400" />
+              Campos <Badge className="ml-0.5">{stage.fields.length}</Badge>
             </h3>
             <Button
               variant="secondary"
@@ -210,8 +214,9 @@ export function StageInspector({
         {/* Tabelas de itens */}
         <section>
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">
-              Tabelas de itens <Badge className="ml-1">{sections.length}</Badge>
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+              <Sheet width={14} height={14} className="text-slate-400" />
+              Tabelas de itens <Badge className="ml-0.5">{sections.length}</Badge>
             </h3>
             <Button
               variant="secondary"
@@ -248,8 +253,8 @@ export function StageInspector({
         />
       </div>
 
-      {/* Rodapé: eliminar etapa */}
-      <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3.5">
+      {/* Rodapé: eliminar etapa (fica sempre acessível; respeita a safe-area em mobile). */}
+      <div className="shrink-0 border-t border-slate-100 bg-slate-50/60 px-4 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] sm:px-5">
         <Button variant="danger" size="sm" className="w-full" onClick={onDelete}>
           <Trash width={14} height={14} /> Eliminar esta etapa
         </Button>
@@ -297,8 +302,9 @@ function NotifySection({
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Notificações <Badge className="ml-1">{recipients.length}</Badge>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+          <Bell width={14} height={14} className="text-slate-400" />
+          Notificações <Badge className="ml-0.5">{recipients.length}</Badge>
         </h3>
       </div>
       <p className="mb-3 text-xs text-slate-400">

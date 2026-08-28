@@ -45,13 +45,22 @@ export function DucLayout() {
   const isDucDetail = location.pathname.startsWith("/duc/");
   const showFooterNav = !isDucDetail;
 
-  // Itens da footer nav (mobile)
+  // Itens da bottom nav (mobile)
   const navItems = [
     { to: "/", label: "Início", Icon: FileText, active: location.pathname === "/" },
     { to: "/dashboard", label: "Dashboard", Icon: Chart, active: location.pathname === "/dashboard" },
     { to: "/notificacoes", label: "Notif.", Icon: Bell, active: location.pathname === "/notificacoes" },
     { to: "/config", label: "Config", Icon: Settings, active: location.pathname === "/config" },
     { to: "/ajuda", label: "Ajuda", Icon: Help, active: location.pathname === "/ajuda" },
+  ];
+
+  // Links do rodapé (desktop) — todos os destinos da app, com rótulos completos.
+  const footerLinks = [
+    { to: "/", label: "DUCs", Icon: FileText },
+    { to: "/dashboard", label: "Dashboard", Icon: Chart },
+    { to: "/notificacoes", label: "Notificações", Icon: Bell },
+    { to: "/config", label: "Configurações", Icon: Settings },
+    { to: "/ajuda", label: "Ajuda", Icon: Help },
   ];
 
   return (
@@ -189,6 +198,106 @@ export function DucLayout() {
         )}
         <Outlet />
       </main>
+
+      {/* Footer rico — só desktop (mobile já tem a bottom nav). Todos os links do DUC. */}
+      <footer className="mt-10 hidden border-t border-slate-200/80 bg-white/60 print:hidden md:block">
+        <div className="mx-auto max-w-6xl px-4 py-9">
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            {/* Marca + tagline */}
+            <div className="max-w-xs">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-2 text-brand transition-transform hover:scale-105"
+              >
+                <DucMark />
+                <span className="text-lg font-semibold tracking-tight text-slate-800">DUC</span>
+              </Link>
+              <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
+                Documento Único de Cliente — todo o percurso do cliente, etapa a etapa, num só sítio.
+              </p>
+            </div>
+
+            {/* Todos os links, agrupados */}
+            <nav aria-label="Navegação do rodapé" className="grid grid-cols-2 gap-x-12 gap-y-6 sm:grid-cols-2">
+              <div>
+                <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Navegar
+                </p>
+                <ul className="space-y-1.5">
+                  {footerLinks.map(({ to, label, Icon }) => (
+                    <li key={to}>
+                      <Link
+                        to={to}
+                        className={cx(
+                          "group inline-flex items-center gap-2 text-sm transition-colors",
+                          location.pathname === to
+                            ? "font-medium text-brand"
+                            : "text-slate-500 hover:text-brand"
+                        )}
+                      >
+                        <Icon
+                          width={15}
+                          height={15}
+                          className="text-slate-400 transition-colors group-hover:text-brand"
+                        />
+                        {label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Mais
+                </p>
+                <ul className="space-y-1.5">
+                  <li>
+                    <a
+                      href={OLYVIA_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group inline-flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-brand"
+                    >
+                      <ExternalLink
+                        width={15}
+                        height={15}
+                        className="text-slate-400 transition-colors group-hover:text-brand"
+                      />
+                      Plataforma Olyvia
+                    </a>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingLogout(true)}
+                      className="group inline-flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-red-600"
+                    >
+                      <LogOut
+                        width={15}
+                        height={15}
+                        className="text-slate-400 transition-colors group-hover:text-red-500"
+                      />
+                      Terminar sessão
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </nav>
+          </div>
+
+          <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-slate-100 pt-5 text-[11px] text-slate-400 sm:flex-row">
+            <span>© {new Date().getFullYear()} Olyvia · Documento Único de Cliente</span>
+            <a
+              href={OLYVIA_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-brand"
+            >
+              olyvia-ai.com <ExternalLink width={12} height={12} />
+            </a>
+          </div>
+        </div>
+      </footer>
 
       {/* Bottom nav — apenas mobile; escondida no detalhe do DUC para não colidir */}
       {showFooterNav && (

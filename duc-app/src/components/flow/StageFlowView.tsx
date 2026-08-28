@@ -13,11 +13,11 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { cx } from "../ui";
-import { Check } from "../icons";
+import { Check, X } from "../icons";
 import type { DucStage } from "../../lib/ducSchema";
 import type { TrackingEntry } from "../../lib/types";
 
-type StageStatus = "done" | "current" | "pending";
+type StageStatus = "done" | "skipped" | "current" | "pending";
 
 interface ProgressData extends Record<string, unknown> {
   no: number;
@@ -39,9 +39,11 @@ function ProgressNodeImpl({ data }: NodeProps<ProgressNode>) {
         "w-[260px] cursor-pointer rounded-2xl border bg-white px-5 py-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-lg",
         status === "done"
           ? "border-emerald-200 hover:border-emerald-300"
-          : status === "current"
-            ? "border-brand ring-2 ring-brand/25 hover:ring-brand/40"
-            : "border-slate-200 hover:border-slate-300"
+          : status === "skipped"
+            ? "border-slate-200 opacity-70 hover:opacity-100"
+            : status === "current"
+              ? "border-brand ring-2 ring-brand/25 hover:ring-brand/40"
+              : "border-slate-200 hover:border-slate-300"
       )}
     >
       {!data.isFirst && <Handle type="target" position={Position.Top} className="!opacity-0" />}
@@ -51,17 +53,32 @@ function ProgressNodeImpl({ data }: NodeProps<ProgressNode>) {
             "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold",
             status === "done"
               ? "bg-emerald-500 text-white"
-              : status === "current"
-                ? "bg-brand text-white"
-                : "bg-slate-100 text-slate-500"
+              : status === "skipped"
+                ? "bg-slate-300 text-slate-600"
+                : status === "current"
+                  ? "bg-brand text-white"
+                  : "bg-slate-100 text-slate-500"
           )}
         >
-          {status === "done" ? <Check width={18} height={18} /> : data.no}
+          {status === "done" ? (
+            <Check width={18} height={18} />
+          ) : status === "skipped" ? (
+            <X width={18} height={18} />
+          ) : (
+            data.no
+          )}
         </span>
         <div className="min-w-0">
-          <p className="truncate text-base font-semibold text-slate-800">{data.title}</p>
+          <p
+            className={cx(
+              "truncate text-base font-semibold text-slate-800",
+              status === "skipped" && "line-through text-slate-400"
+            )}
+          >
+            {data.title}
+          </p>
           <p className="truncate text-xs text-slate-400">
-            {data.responsible || "—"}
+            {status === "skipped" ? "Não precisa" : data.responsible || "—"}
             {status === "current" && " · em curso"}
           </p>
         </div>
@@ -94,7 +111,13 @@ export function StageFlowView({
   /** Opcional: clicar num nó leva a essa etapa (nº da etapa). */
   onSelectStage?: (stageNo: number) => void;
 }) {
-  const isDone = (no: number) => tracking.find((t) => t.stage === no)?.state === "done";
+  const stateOf = (no: number) => tracking.find((t) => t.stage === no)?.state;
+  const isDone = (no: number) => stateOf(no) === "done";
+  // Uma etapa "tratada" (fechada ou dispensada) colore a ligação seguinte.
+  const isResolved = (no: number) => {
+    const s = stateOf(no);
+    return s === "done" || s === "skipped";
+  };
 
   // Clique num nó → seleciona a etapa correspondente (id === String(stage.no))
   const handleNodeClick: NodeMouseHandler = (_event, node) => {
@@ -104,11 +127,15 @@ export function StageFlowView({
   const nodes = useMemo<ProgressNode[]>(
     () =>
       stages.map((s, i) => {
-        const status: StageStatus = isDone(s.no)
-          ? "done"
-          : s.no === currentStage
-            ? "current"
-            : "pending";
+        const st = stateOf(s.no);
+        const status: StageStatus =
+          st === "done"
+            ? "done"
+            : st === "skipped"
+              ? "skipped"
+              : s.no === currentStage
+                ? "current"
+                : "pending";
         return {
           id: String(s.no),
           type: "progress",
@@ -132,14 +159,14 @@ export function StageFlowView({
   const edges = useMemo<Edge[]>(
     () =>
       stages.slice(0, -1).map((s, i) => {
-        const done = isDone(s.no);
+        const resolved = isResolved(s.no);
         return {
           id: `e-${s.no}`,
           source: String(s.no),
           target: String(stages[i + 1].no),
           type: "smoothstep",
-          animated: done,
-          style: { stroke: done ? "#10b981" : "#cbd5e1", strokeWidth: 1.5 },
+          animated: isDone(s.no),
+          style: { stroke: resolved ? "#10b981" : "#cbd5e1", strokeWidth: 1.5 },
         };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps

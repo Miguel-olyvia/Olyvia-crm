@@ -11,7 +11,7 @@ import {
   type PaymentPhase,
   type AddressValue,
 } from "../lib/ducSchema";
-import type { DucVariant } from "../lib/types";
+import { isStageResolved, type DucVariant } from "../lib/types";
 import { Badge, Button, Spinner, cx } from "../components/ui";
 import { DucMark, Check, Clock, Printer, ChevronRight } from "../components/icons";
 
@@ -142,10 +142,14 @@ export default function PublicDuc() {
   const { duc, client_name, items } = data;
   const variant = duc.variant as DucVariant;
   const stages = stagesForVariant(variant);
-  const doneNos = new Set((duc.tracking ?? []).filter((t) => t.state === "done").map((t) => t.stage));
+  const track = duc.tracking ?? [];
+  const doneNos = new Set(track.filter((t) => t.state === "done").map((t) => t.stage));
+  const skippedNos = new Set(track.filter((t) => t.state === "skipped").map((t) => t.stage));
+  // "Tratadas" = fechadas OU dispensadas (para progresso e "faltam fechar").
+  const resolvedNos = new Set([...doneNos, ...skippedNos]);
   const totalStages = stages.length || 1;
-  const donePct = Math.round((doneNos.size / totalStages) * 100);
-  const pendingStages = stages.filter((s) => !doneNos.has(s.no));
+  const donePct = Math.round((resolvedNos.size / totalStages) * 100);
+  const pendingStages = stages.filter((s) => !resolvedNos.has(s.no));
   const jumpTo = (id: string) =>
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -155,7 +159,7 @@ export default function PublicDuc() {
     { label: "Variante", value: VARIANT_LABELS[variant] ?? variant },
     { label: "Criado", value: fmtDate(duc.created_at) },
     { label: "Atualizado", value: fmtDate(duc.updated_at) },
-    { label: "Progresso", value: `${doneNos.size}/${totalStages} etapas` },
+    { label: "Progresso", value: `${resolvedNos.size}/${totalStages} etapas` },
   ];
 
   return (
@@ -214,20 +218,27 @@ export default function PublicDuc() {
               <div className="flex flex-wrap gap-1.5">
                 {stages.map((s) => {
                   const done = doneNos.has(s.no);
-                  const current = s.no === duc.current_stage && !done;
+                  const skipped = skippedNos.has(s.no);
+                  const current = s.no === duc.current_stage && !done && !skipped;
                   return (
                     <button
                       key={s.no}
                       type="button"
                       onClick={() => jumpTo(`sec-${s.no}`)}
-                      title={s.title.split(" — ")[0]}
+                      title={
+                        skipped
+                          ? `${s.title.split(" — ")[0]} · não precisa`
+                          : s.title.split(" — ")[0]
+                      }
                       className={cx(
                         "inline-flex h-7 min-w-[1.75rem] items-center justify-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset transition-colors",
                         done
                           ? "bg-emerald-100 text-emerald-700 ring-emerald-200"
-                          : current
-                            ? "bg-brand text-white ring-brand"
-                            : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"
+                          : skipped
+                            ? "bg-slate-100 text-slate-400 line-through ring-slate-200"
+                            : current
+                              ? "bg-brand text-white ring-brand"
+                              : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"
                       )}
                     >
                       {done ? <Check width={12} height={12} /> : s.no}
@@ -257,6 +268,7 @@ export default function PublicDuc() {
               const sections = sectionsForVariant(stage, variant);
               const block = duc.blocks?.[stage.key] ?? {};
               const done = doneNos.has(stage.no);
+              const skipped = skippedNos.has(stage.no);
               return (
                 <section key={stage.key} id={`sec-${stage.no}`} className="duc-stage scroll-mt-4">
                   <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-slate-100 pb-2">
@@ -270,6 +282,8 @@ export default function PublicDuc() {
                       <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
                         <Check width={12} height={12} /> Fechada
                       </Badge>
+                    ) : skipped ? (
+                      <Badge className="bg-slate-100 text-slate-500 ring-slate-200">Não precisa</Badge>
                     ) : (
                       <span className="text-xs text-slate-400">{stage.responsible}</span>
                     )}

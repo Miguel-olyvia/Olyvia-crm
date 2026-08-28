@@ -71,6 +71,32 @@ export const DucMark = (p: IconProps) => (
   </svg>
 );
 
+/**
+ * Cliente à espera — pessoa desenhada "à mão" (traço irregular, só outline), no
+ * mesmo espírito do DucMark. Sem emojis.
+ */
+export const ClientSketch = (p: IconProps) => (
+  <svg
+    width={26}
+    height={26}
+    viewBox="0 0 32 32"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.7}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+    {...p}
+  >
+    {/* cabeça (círculo com traço irregular) */}
+    <path d="M16 5.4c2.6-.1 4.5 1.9 4.4 4.4 0 2.5-2 4.5-4.4 4.4-2.4 0-4.3-1.9-4.3-4.3-.1-2.5 1.8-4.4 4.3-4.5z" />
+    {/* ombros/corpo */}
+    <path d="M7.4 25.9c.1-4.6 4-7.9 8.6-7.9 4.7 0 8.5 3.3 8.6 8" />
+    {/* chão à mão */}
+    <path d="M8.6 28.2c3.6-.4 11.2-.3 14.8 0" />
+  </svg>
+);
+
 export const Search = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="11" cy="11" r="8" />
