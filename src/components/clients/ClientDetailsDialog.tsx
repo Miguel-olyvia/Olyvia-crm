@@ -28,6 +28,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 import { RequestErasureButton } from "@/components/RequestErasureButton";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -646,6 +647,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
       setProposals(mergedProposals as Proposal[]);
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: "Erro ao carregar dados", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -756,6 +758,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       onOpenChange(false);
       onClientUpdated?.();
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -902,6 +905,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setDealLineItems([]);
       loadClientDetails();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setCreatingDeal(false);
@@ -953,6 +957,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setSelectedDeal("");
       loadClientDetails();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setCreatingProposal(false);

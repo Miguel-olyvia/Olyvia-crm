@@ -15,6 +15,7 @@ import { resolveEntityVariables } from "@/utils/emailTemplateVariables";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { MultiEmailInput } from "@/components/email/MultiEmailInput";
 import { sendDocumentEmailSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface SendProposalDialogProps {
   open: boolean;
@@ -151,6 +152,7 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
       onSent?.();
     } catch (error: any) {
       console.error("Error sending proposal:", error);
+      captureFlowError(error, "proposal-document-export");
       toast({ title: "Erro ao enviar", description: error.message || "Não foi possível enviar a proposta", variant: "destructive" });
     } finally {
       setSending(false);

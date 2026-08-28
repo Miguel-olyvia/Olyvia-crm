@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const FIELD_TYPES = [
   { value: "text", label: "Texto", icon: Type },
@@ -274,6 +275,7 @@ export default function NeedsAssessmentConfig() {
       setTemplateDialogOpen(false);
       loadData();
     } catch (err: any) {
+      captureFlowError(err, "config-partial-write");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     }
   };

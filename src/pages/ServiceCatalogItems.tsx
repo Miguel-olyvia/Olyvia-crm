@@ -47,6 +47,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useCompany } from "@/contexts/CompanyContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Service {
   id: string;
@@ -321,6 +322,7 @@ export default function ServiceCatalogItems() {
     try {
       downloadServicesTemplate();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('serviceCatalog.toast.error'),
         description: error.message,
@@ -370,6 +372,7 @@ export default function ServiceCatalogItems() {
       setShowBulkUploadDialog(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('services.toast.importError'),
         description: error.message,

@@ -27,6 +27,7 @@ import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
@@ -194,6 +195,7 @@ export default function PendingFormSubmissions() {
       setRows((prev) => prev.filter((r) => r.id !== pendingAction.submission.id));
     } catch (err: any) {
       console.error("[PendingFormSubmissions] resolve failed:", err);
+      captureFlowError(err, "form-submission-intake");
       toast({ variant: "destructive", title: "Erro ao resolver submissão", description: err?.message });
     } finally {
       setResolving(false);

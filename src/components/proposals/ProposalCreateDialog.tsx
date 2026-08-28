@@ -27,6 +27,7 @@ import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote, calcInline
 import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposals/ProposalItemsEditor";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -361,6 +362,7 @@ export function ProposalCreateDialog({
       onSaved?.(data.id);
       navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
     } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
       toast({ title: "Erro ao criar proposta", description: err.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -536,6 +538,7 @@ export function ProposalCreateDialog({
       resetForm();
       if (savedProposalId && onSaved) onSaved(savedProposalId);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;

@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 /**
  * Hook to handle reversion of contact→client conversions.
@@ -28,6 +29,7 @@ export const useConversionRevert = () => {
       });
       return true;
     } catch (error: any) {
+      captureFlowError(error, "entity-conversion");
       toast({ title: t('conversion.revert.error'), description: error.message, variant: "destructive" });
       return false;
     }
@@ -43,6 +45,7 @@ export const useConversionRevert = () => {
       });
       return true;
     } catch (error: any) {
+      captureFlowError(error, "entity-conversion");
       toast({ title: t('conversion.revert.error'), description: error.message, variant: "destructive" });
       return false;
     }

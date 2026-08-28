@@ -38,6 +38,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { WorkflowAutomationRules } from "@/components/workflows/WorkflowAutomationRules";
 import { ProposalFlowchart } from "./ProposalFlowchart";
 import { ProposalStageActionsConfig } from "./ProposalStageActionsConfig";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface ProposalWorkflowStage {
   id: string;
@@ -200,7 +201,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
     const count = proposalCountByStage[deletingStage.id] || 0;
     if (count > 0 && migrationTargetId) {
       const { error: migrateError } = await supabase.from("proposals").update({ stage_id: migrationTargetId } as any).eq("stage_id", deletingStage.id).eq("organization_id", companyId!);
-      if (migrateError) { toast({ title: "Erro ao migrar propostas", description: migrateError.message, variant: "destructive" }); return; }
+      if (migrateError) { captureFlowError(migrateError, "proposal-lifecycle"); toast({ title: "Erro ao migrar propostas", description: migrateError.message, variant: "destructive" }); return; }
     }
     const { error } = await (supabase.from("proposal_workflow_stages" as any) as any).update({ is_active: false }).eq("id", deletingStage.id);
     if (error) { toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" }); }

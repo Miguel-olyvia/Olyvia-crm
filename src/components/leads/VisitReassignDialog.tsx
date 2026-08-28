@@ -31,6 +31,7 @@ import { findScheduleItemForLead } from "./leadVisitMatching";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ScheduledVisit {
   id: string;
@@ -307,6 +308,7 @@ export function VisitReassignDialog({
       setManualVisits(Array.from(merged.values()));
     } catch (error: any) {
       console.error("[VisitReassignDialog] Error loading manual visits", error);
+      captureFlowError(error, "lead-lifecycle");
       toast({
         title: "Erro ao procurar visitas",
         description: error.message,
@@ -790,6 +792,7 @@ export function VisitReassignDialog({
       });
       onOpenChange(false);
     } catch (error: any) {
+      captureFlowError(error, "lead-lifecycle");
       toast({
         title: "Erro ao reatribuir visita",
         description: error.message,

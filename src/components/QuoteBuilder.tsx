@@ -88,6 +88,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -802,6 +803,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       await fetchTemplates();
     } catch (error: any) {
       console.error("Error saving quote as template:", error);
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: "Erro ao guardar template",
         description: error?.message || "Não foi possível guardar o template. Tente novamente.",
@@ -1272,6 +1274,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       });
     } catch (error: any) {
       console.error("Error loading template items:", error);
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorLoadingTemplate'),
         description: error.message,
@@ -1898,6 +1901,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         setFeeVatOverrides(overrides);
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorLoadingQuote'),
         description: error.message,
@@ -1963,6 +1967,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const { blob, fileName } = await generateQuotePdfBlob(quoteId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
+      captureFlowError(e, "quote-document-export");
       toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
     } finally {
       setDownloadingPdf(false);
@@ -2338,6 +2343,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         onClose();
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
         description: error.message,

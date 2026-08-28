@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ export function FirstLoginModal({ open, onPasswordChanged }: FirstLoginModalProp
       toast({ title: "Password alterada com sucesso", description: "A sua nova password está ativa." });
       onPasswordChanged();
     } catch (err: any) {
+      captureFlowError(err, "client-portal-access");
       toast({ title: "Erro ao alterar password", description: err.message, variant: "destructive" });
     } finally {
       setLoading(false);

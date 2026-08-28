@@ -35,6 +35,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExportImport";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { warehouseSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type WarehouseData = Database["public"]["Tables"]["warehouses"]["Row"];
 
@@ -283,6 +284,7 @@ const Warehouses = () => {
       setImportDialogOpen(false);
       fetchWarehouses();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("warehouses.toast.importError"),
         description: error.message,

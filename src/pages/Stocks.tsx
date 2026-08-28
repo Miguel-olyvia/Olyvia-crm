@@ -39,6 +39,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string };
@@ -111,6 +112,7 @@ const Stocks = () => {
       if (error) throw error;
       setStocks(data as Stock[] || []);
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.loadError'),
         description: error.message,
@@ -228,6 +230,7 @@ const Stocks = () => {
       resetForm();
       fetchStocks();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -250,6 +253,7 @@ const Stocks = () => {
 
       fetchStocks();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -267,6 +271,7 @@ const Stocks = () => {
 
       fetchStocks();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -471,6 +476,7 @@ const Stocks = () => {
       setImportDialogOpen(false);
       fetchStocks();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('stocks.toast.importError'),
         description: error.message,

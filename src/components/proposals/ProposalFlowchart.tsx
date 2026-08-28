@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Save, RotateCcw, Undo2, Redo2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface WorkflowStage {
   id: string;
@@ -131,6 +132,7 @@ export function ProposalFlowchart({ stages, companyId }: Props) {
       setHasChanges(false);
       resetHistory();
     } catch (e: any) {
+      captureFlowError(e, "proposal-lifecycle");
       toast({ title: "Erro ao guardar", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);

@@ -9,6 +9,7 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { clientMeetingScheduleSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ScheduleClientMeetingDialogProps {
   open: boolean;
@@ -93,6 +94,7 @@ export function ScheduleClientMeetingDialog({
       onScheduled?.();
       onOpenChange(false);
     } catch (err: any) {
+      captureFlowError(err, "client-lifecycle");
       toast({ title: "Erro ao agendar reunião", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);

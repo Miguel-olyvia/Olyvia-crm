@@ -44,6 +44,7 @@ import {
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 import { leadContactSchema } from "@/lib/validations";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Lead {
   id: string;
@@ -1229,6 +1230,7 @@ export function AnewLeadContactDialog({
 
     } catch (error: any) {
       console.error("[AnewLeadContactDialog] Error:", error);
+      captureFlowError(error, "lead-contact-update");
       toast({ 
         title: "Erro ao registar contacto", 
         description: error.message || "Erro desconhecido",

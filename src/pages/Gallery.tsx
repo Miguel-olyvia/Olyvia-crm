@@ -38,6 +38,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface MediaAsset {
   id: string;
@@ -415,6 +416,7 @@ export default function Gallery() {
       toast({ title: t('gallery.toast.deleteSuccess') });
       loadAssets();
     } catch (error: unknown) {
+      captureFlowError(error, "media-asset-delete");
       toast({ title: t('gallery.toast.deleteError'), description: (error as Error).message, variant: "destructive" });
     }
   };

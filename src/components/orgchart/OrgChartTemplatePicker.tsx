@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { withAuditContext } from '@/utils/auditContext';
 import { callNifWriteProxy } from '@/lib/nif/callNifWriteProxy';
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface TemplateNode {
   name: string;
@@ -369,6 +370,7 @@ export function OrgChartTemplatePicker({ open, onOpenChange, rootOrgId, rootOrgN
       handleClose();
     } catch (error: any) {
       console.error('Error applying template:', error);
+      captureFlowError(error, "org-structure-partial-write");
       toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
     } finally {
       setApplying(false);

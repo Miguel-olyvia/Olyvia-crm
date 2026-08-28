@@ -8,6 +8,7 @@ import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface EditActionDialogProps {
   open: boolean;
@@ -60,6 +61,7 @@ export function EditActionDialog({
       onSaved?.();
       onOpenChange(false);
     } catch (err: any) {
+      captureFlowError(err, "entity-interaction-tracking");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
@@ -79,6 +81,7 @@ export function EditActionDialog({
       onSaved?.();
       onOpenChange(false);
     } catch (err: any) {
+      captureFlowError(err, "entity-interaction-tracking");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);

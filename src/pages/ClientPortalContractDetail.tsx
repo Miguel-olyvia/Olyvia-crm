@@ -22,6 +22,7 @@ import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
 import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const REJECTION_REASONS = [
   "Condições não adequadas",
@@ -123,6 +124,7 @@ const ClientPortalContractDetail = () => {
       await downloadContractDocumentPdf(resolved, label, label);
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
+      captureFlowError(error, "client-portal-contract");
       toast({ title: "Erro ao gerar o PDF", description: error?.message || "Tente novamente.", variant: "destructive" });
     } finally {
       setDownloadingPdf(false);
@@ -156,6 +158,7 @@ const ClientPortalContractDetail = () => {
     } catch (err: any) {
       setOtpError(err.message);
       setOtpStep("idle");
+      captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
     }
   }
@@ -234,6 +237,7 @@ const ClientPortalContractDetail = () => {
       toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });
       await loadData(); // M11
     } catch (err: any) {
+      captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro ao assinar", description: err.message, variant: "destructive" });
       throw err; // M9 — propagate so verify catch resets step
     } finally {
@@ -254,6 +258,7 @@ const ClientPortalContractDetail = () => {
       setRejectNotes("");
       await loadData(); // M11
     } catch (err: any) {
+      captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -271,6 +276,7 @@ const ClientPortalContractDetail = () => {
       setShowQuestion(false);
       setQuestionText("");
     } catch (err: any) {
+      captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setActionLoading(false);

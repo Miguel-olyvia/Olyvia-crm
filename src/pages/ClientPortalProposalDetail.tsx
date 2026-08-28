@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const STATUS_LABELS: Record<string, string> = {
   sent: "A aguardar decisão",
@@ -103,6 +104,7 @@ const ClientPortalProposalDetail = () => {
   async function handleDownloadAttachment(att: any) {
     const { data, error } = await supabase.storage.from("documents").download(att.file_url);
     if (error || !data) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro ao descarregar", description: error?.message, variant: "destructive" });
       return;
     }
@@ -143,6 +145,7 @@ const ClientPortalProposalDetail = () => {
       toast({ title: "Orçamento aceite", description: "O orçamento foi aceite com sucesso." });
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -158,6 +161,7 @@ const ClientPortalProposalDetail = () => {
       toast({ title: "Orçamento rejeitado" });
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -203,6 +207,7 @@ const ClientPortalProposalDetail = () => {
     } catch (err: any) {
       setOtpError(err.message);
       setOtpStep("idle");
+      captureFlowError(err, "client-portal-proposal");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
     }
   }
@@ -306,6 +311,7 @@ const ClientPortalProposalDetail = () => {
 
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro ao assinar", description: error.message, variant: "destructive" });
       throw error; // M9 — let verify catch reset the OTP step
     } finally {
@@ -326,6 +332,7 @@ const ClientPortalProposalDetail = () => {
       setRejectNotes("");
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -348,6 +355,7 @@ const ClientPortalProposalDetail = () => {
       setShowQuestion(false);
       setQuestionText("");
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);

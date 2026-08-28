@@ -19,6 +19,7 @@ import {
   Sparkles, Search, User, Package, Loader2, AlertCircle,
   ChevronRight, Plus, Check,
 } from "lucide-react";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const formatCurrency = (value: number) => {
   const fixed = Math.abs(value).toFixed(2);
@@ -83,7 +84,7 @@ export function AIProposalGeneratorDialog({ open, onOpenChange, onApply }: AIPro
       const { data, error: fnError } = await supabase.functions.invoke("generate-proposal-ai", { body: { entity_id: selectedEntity.id, organization_id: activeCompany.id, extra_context: extraContext || undefined } });
       if (fnError) throw fnError; if (data?.error) throw new Error(data.error);
       setResult(data as AIProposalResult); setSelectedItems(new Set((data.items || []).map((_: any, i: number) => i))); setStep("result");
-    } catch (err: any) { setError(err.message || "Erro ao gerar proposta"); setStep("search"); toast({ title: "Erro", description: err.message, variant: "destructive" }); } finally { setGenerating(false); }
+    } catch (err: any) { setError(err.message || "Erro ao gerar proposta"); setStep("search"); captureFlowError(err, "proposal-document-export"); toast({ title: "Erro", description: err.message, variant: "destructive" }); } finally { setGenerating(false); }
   };
 
   const handleApply = () => { if (!result) return; onApply({ title: result.title, description: result.description, items: result.items.filter((_, i) => selectedItems.has(i)) }); onOpenChange(false); };

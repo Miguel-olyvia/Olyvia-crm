@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 
 interface Props {
@@ -498,6 +499,7 @@ export default function ProductConfigurableOptionsDialog({
       toast({ title: "Guardado" });
       loadData();
     } catch (err: any) {
+      captureFlowError(err, "pricing-partial-write");
       toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);

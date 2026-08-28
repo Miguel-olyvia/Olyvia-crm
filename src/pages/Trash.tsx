@@ -16,6 +16,7 @@ import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
 import { getContactScopeUserIds, buildContactScopeOrFilter } from "@/lib/contacts/scope";
 import { getLeadScopeUserIds } from "@/pages/anewLeadsHelpers";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
@@ -273,6 +274,7 @@ export default function Trash() {
         contracts: mapBusiness(k.data || []),
       });
     } catch (e: any) {
+      captureFlowError(e, "soft-delete-restore");
       toast({ title: "Erro a carregar", description: e.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -290,6 +292,7 @@ export default function Trash() {
       toast({ title: "Restaurado", description: "Registo restaurado com sucesso." });
       load();
     } catch (e: any) {
+      captureFlowError(e, "soft-delete-restore");
       toast({ title: "Erro a restaurar", description: e.message, variant: "destructive" });
     }
   };
@@ -306,6 +309,7 @@ export default function Trash() {
       setPurgeTarget(null);
       load();
     } catch (e: any) {
+      captureFlowError(e, "soft-delete-restore");
       toast({ title: "Erro a eliminar", description: e.message, variant: "destructive" });
     }
   };

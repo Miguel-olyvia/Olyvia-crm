@@ -42,6 +42,7 @@ import { CatalogItemPicker, CatalogLineItem } from "@/components/clients/detail/
 import { EditActionDialog } from "@/components/shared/EditActionDialog";
 import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialog";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ContactDetailsDialogProps {
   contact: any;
@@ -505,6 +506,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
 
       setStatusHistory([]);
     } catch (error: any) {
+      captureFlowError(error, "contact-lifecycle");
       toast({ title: t('contacts.details.loadError'), description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -570,6 +572,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       onOpenChange(false);
       onContactUpdated?.();
     } catch (error: any) {
+      captureFlowError(error, "contact-lifecycle");
       toast({ title: t('contacts.details.updateError'), description: error.message, variant: "destructive" });
     } finally {
       setSavingContact(false);
@@ -639,6 +642,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       setDealFormData({ title: "", description: "", value: "", stage_id: "", expected_close_date: "" });
       loadContactDetails();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: t('contacts.details.dealCreateError'), description: error.message, variant: "destructive" });
     } finally {
       setCreatingDeal(false);
@@ -670,6 +674,7 @@ export const ContactDetailsDialog = ({ contact, open, onOpenChange, onContactUpd
       setSelectedDeal("");
       loadContactDetails();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('contacts.details.proposalCreateError'), description: error.message, variant: "destructive" });
     } finally {
       setCreatingProposal(false);

@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
@@ -817,6 +818,7 @@ export default function Quotes() {
         }
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('quotes.toast.loadError'), description: error.message, variant: "destructive" });
     } finally {
       if (fetchRequestIdRef.current === requestId) {
@@ -1164,6 +1166,7 @@ export default function Quotes() {
       toast({ title: t('quotes.toast.deleteSuccess'), description: t('quotes.toast.deleteDescription') });
       fetchQuotes();
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('quotes.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteQuoteId(null);
@@ -1195,6 +1198,7 @@ export default function Quotes() {
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.size} ${t('quotes.records')} ${t('common.updated')}.` });
       clearSelection(); setBulkStatusDialogOpen(false); setBulkLostReason(""); fetchQuotes();
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setProcessing(false);
@@ -1228,6 +1232,7 @@ export default function Quotes() {
         description: `${result.rowCount} orçamentos exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
     } catch (error: any) {
+      captureFlowError(error, "quote-document-export");
       toast({ title: t('quotes.toast.exportError'), description: error.message, variant: "destructive" });
     } finally {
       setExporting(false);
@@ -1270,6 +1275,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1279,16 +1285,27 @@ export default function Quotes() {
       });
       console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
       if (wfError) {
+        captureFlowError(wfError, "quote-acceptance-workflow");
         toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowErrorDesc', { message: wfError.message }), variant: "destructive" });
       } else if (wfData && (wfData as any).stageActions === 0) {
         const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
         const errLog = logs?.find(l => l.status === "error");
+        // There is no thrown error here: the workflow reported success but ran
+        // zero stage actions, so the proposal was never created. Synthesise an
+        // Error so Sentry gets a real event instead of `undefined`.
+        captureFlowError(
+          errLog
+            ? new Error(`Quote accepted but workflow reported an error: ${errLog.message}`)
+            : new Error("Quote accepted but workflow ran zero stage actions"),
+          "quote-acceptance-workflow",
+        );
         toast({ title: t('quotes.toast.accepted'), description: errLog ? t('quotes.toast.proposalNotCreatedDesc', { message: errLog.message }) : t('quotes.toast.workflowNoActionsDesc'), variant: "destructive" });
       } else {
         toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.proposalCreatedDesc') });
       }
     } catch (wfErr: any) {
       console.error("Quote workflow error:", wfErr);
+      captureFlowError(wfErr, "quote-acceptance-workflow");
       toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowExceptionDesc', { message: wfErr?.message || wfErr }), variant: "destructive" });
     }
     fetchQuotes();
@@ -1303,6 +1320,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1323,6 +1341,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1351,6 +1370,7 @@ export default function Quotes() {
       }
     } catch (e: any) {
       console.error("[duplicate-quote] error", e);
+      captureFlowError(e, "quote-lifecycle");
       toast({ title: t('quotes.toast.duplicateError'), description: e?.message || String(e), variant: "destructive" });
     }
   };
@@ -1363,7 +1383,7 @@ export default function Quotes() {
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'enviado' }).eq("id", quoteId);
-    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    if (error) { captureFlowError(error, "quote-lifecycle"); toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
 
     // Register a manual send event so it shows up in the contact/client timeline & emails tab
     try {
@@ -1417,6 +1437,7 @@ export default function Quotes() {
       URL.revokeObjectURL(url);
       toast({ title: t('quotes.toast.pdfSuccess'), description: t('quotes.toast.pdfDescription') });
     } catch (error: any) {
+      captureFlowError(error, "quote-document-export");
       toast({ title: t('quotes.toast.pdfError'), description: error.message, variant: "destructive" });
     }
   };

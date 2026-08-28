@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { generateQuotePdfBlob, blobToBase64 } from "@/utils/generateQuotePdfBlob";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { contactCallSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface DealProposalOption {
   id: string;
@@ -263,6 +264,7 @@ export function RegisterCallDialog({
         openChannel(selectedChannel);
       }
     } catch (err: any) {
+      captureFlowError(err, "entity-interaction-tracking");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);
