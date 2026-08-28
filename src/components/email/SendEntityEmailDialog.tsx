@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, Send, AlertCircle, Settings, Paperclip, X, Plus, Mail } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { TemplateSelector } from "@/components/email-templates/TemplateSelector";
@@ -240,13 +241,25 @@ export function SendEntityEmailDialog({
       let interactionCreatedBy: string | null = null;
       if (userId) {
         try {
-          const { data: anewUser } = await supabase
+          // `.maybeSingle()` resolves with `{ error }` instead of throwing, so
+          // the try/catch alone only covered network faults — an RLS denial
+          // came back as `data: null` and vanished.
+          const { data: anewUser, error: lookupError } = await supabase
             .from("anew_users")
             .select("id")
             .eq("auth_user_id", userId)
             .maybeSingle();
+          if (lookupError) {
+            console.error("[email-sender-identity] anew_users lookup failed", lookupError);
+            captureFlowError(lookupError, "email-sender-identity");
+          }
           interactionCreatedBy = anewUser?.id || null;
-        } catch {}
+        } catch (e) {
+          // Behaviour is unchanged — the interaction is still recorded, just
+          // without an author. What changes is that the loss is now visible.
+          console.error("[email-sender-identity] anew_users lookup failed", e);
+          captureFlowError(e, "email-sender-identity");
+        }
       }
 
       // contract_sends para módulo contratos
@@ -255,7 +268,10 @@ export function SendEntityEmailDialog({
           if (interactionCreatedBy) {
             await supabase.rpc('set_audit_context', { p_user_id: interactionCreatedBy, p_source: 'ui' });
           }
-          await (supabase as any).from("contract_sends").insert({
+          // `.insert()` resolves with `{ error }` instead of throwing, so the
+          // surrounding try/catch alone left a rejected insert (RLS, constraint)
+          // completely invisible. Report it, but keep swallowing it.
+          const { error: insertError } = await (supabase as any).from("contract_sends").insert({
             contract_id: contractId,
             organization_id: organizationId || null,
             sent_by: interactionCreatedBy,
@@ -266,15 +282,20 @@ export function SendEntityEmailDialog({
             status: "sent",
             sent_at: new Date().toISOString(),
           });
+          if (insertError) {
+            console.error("[contract-sends] tracking failed", insertError);
+            captureFlowError(insertError, "contract-send-tracking");
+          }
         } catch (e) {
           console.error("[contract-sends] tracking failed", e);
+          captureFlowError(e, "contract-send-tracking");
         }
       }
 
       // Register in entity_interactions for timeline visibility
       if (entityId && organizationId) {
         try {
-          await supabase.from("entity_interactions").insert({
+          const { error: interactionError } = await supabase.from("entity_interactions").insert({
             entity_id: entityId,
             organization_id: organizationId,
             interaction_type: "email",
@@ -283,11 +304,18 @@ export function SendEntityEmailDialog({
             interaction_at: new Date().toISOString(),
             created_by: interactionCreatedBy,
           });
+          // Same as above: a failed insert resolves normally. The timeline event
+          // is still dispatched exactly as before — only the reporting is new.
+          if (interactionError) {
+            console.error("[entity-interactions] tracking failed", interactionError);
+            captureFlowError(interactionError, "entity-interaction-tracking");
+          }
           window.dispatchEvent(new CustomEvent("entity-interaction-created", {
             detail: { entityId },
           }));
         } catch (e) {
           console.error("[entity-interactions] tracking failed", e);
+          captureFlowError(e, "entity-interaction-tracking");
         }
 
         // Update lead contact fields if this is a leads module email
@@ -299,7 +327,7 @@ export function SendEntityEmailDialog({
               .eq("id", leadId)
               .maybeSingle();
 
-            await supabase
+            const { error: leadUpdateError } = await supabase
               .from("anew_leads")
               .update({
                 last_contact_at: new Date().toISOString(),
@@ -308,8 +336,13 @@ export function SendEntityEmailDialog({
                 contact_attempts: ((currentLead?.contact_attempts as number) || 0) + 1,
               })
               .eq("id", leadId);
+            if (leadUpdateError) {
+              console.error("[leads-contact-update] failed", leadUpdateError);
+              captureFlowError(leadUpdateError, "lead-contact-update");
+            }
           } catch (e) {
             console.error("[leads-contact-update] failed", e);
+            captureFlowError(e, "lead-contact-update");
           }
         }
       }
