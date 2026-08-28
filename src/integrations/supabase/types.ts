@@ -12475,6 +12475,8 @@ export type Database = {
           order_date: string
           order_number: string
           organization_id: string
+          source_id: string | null
+          source_type: string | null
           status: string
           supplier_id: string | null
           total_value: number
@@ -12492,6 +12494,8 @@ export type Database = {
           order_date: string
           order_number: string
           organization_id: string
+          source_id?: string | null
+          source_type?: string | null
           status?: string
           supplier_id?: string | null
           total_value?: number
@@ -12509,6 +12513,8 @@ export type Database = {
           order_date?: string
           order_number?: string
           organization_id?: string
+          source_id?: string | null
+          source_type?: string | null
           status?: string
           supplier_id?: string | null
           total_value?: number
@@ -18287,6 +18293,8 @@ export type Database = {
           order_date: string
           order_number: string
           organization_id: string
+          source_id: string | null
+          source_type: string | null
           status: string
           supplier_id: string | null
           total_value: number
@@ -19900,6 +19908,8 @@ export type Database = {
           order_date: string
           order_number: string
           organization_id: string
+          source_id: string | null
+          source_type: string | null
           status: string
           supplier_id: string | null
           total_value: number
