@@ -9,6 +9,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
+import { resolveContractsScopeUserIds } from "@/lib/contracts/scope";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
@@ -343,17 +344,42 @@ const ClientContracts = () => {
       // contem sempre sobre o MESMO conjunto de organizacoes.
       const subtreeIds = await resolveContractsOrgSubtree(activeCompany.id);
 
-      // Visibilidade por ÁREA/organização: quem tem acesso à org (subárvore da
-      // empresa ativa) vê TODOS os contratos dela, independentemente de quem os
-      // criou. O scope OWNED/TEAM deixa de esconder contratos assinados nesta
-      // lista — o botão "Só meus" (onlyMine) continua disponível como opção do
-      // utilizador, e a RLS do Supabase mantém-se como fronteira de segurança.
-      const { data: rows, error } = await (supabase as any)
+      // Ambito de client_contracts.view: ORG ve toda a subarvore; TEAM/OWNED
+      // restringem por `created_by` OU `assigned_to`.
+      //
+      // A uniao dos dois campos e deliberada, e nao o `created_by` isolado que
+      // o commit 54d65378 tinha antes de o remover. Medido na Mudelar: a Sonia
+      // criou 8 contratos e tem 9 atribuidos — ha um que lhe foi ATRIBUIDO sem
+      // ela o ter criado. So com `created_by` esse desaparecia-lhe do ecra,
+      // apesar de a coluna COMERCIAL o mostrar como dela (essa coluna usa
+      // `assigned_to ?? created_by`, ver getContractComercialId). O produto
+      // diria "este contrato e da Sonia" e escondia-lho, e reatribuir um
+      // contrato a alguem deixava de lhe dar acesso.
+      //
+      // E a mesma regra das Leads (`assigned_to.in.(...) OR created_by.in.(...)`
+      // em anewLeadsHelpers.applyLeadVisibilityFilter). Repoe o predicado que o
+      // commit 54d65378 ("visibilidade por area em vez de por criador",
+      // 22/08) removeu — essa decisao foi revertida pelo dono do produto.
+      // Isto e uma convencao aplicada AQUI, no cliente — tal como nos outros
+      // modulos — e NAO uma fronteira de seguranca: a RLS
+      // `client_contracts_select` continua a isolar apenas por organizacao +
+      // permissao binaria, sem clausula por dono.
+      // `scopeUserIds === null` significa "sem restricao" (ORG); um array
+      // vazio significa "nao mostrar nada" (NONE, ou OWNED/TEAM antes do id
+      // do utilizador estar resolvido).
+      const scopeUserIds = resolveContractsScopeUserIds(viewScope, scopeAnewUserId, teamMemberIds);
+      if (scopeUserIds !== null && scopeUserIds.length === 0) return [];
+
+      let contractsQuery = (supabase as any)
         .from("client_contracts")
         .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
         .in("organization_id", subtreeIds)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .is("deleted_at", null);
+      if (scopeUserIds !== null) {
+        const ids = scopeUserIds.join(",");
+        contractsQuery = contractsQuery.or(`created_by.in.(${ids}),assigned_to.in.(${ids})`);
+      }
+      const { data: rows, error } = await contractsQuery.order("created_at", { ascending: false });
       if (error) throw error;
       let data: any[] = rows || [];
 
@@ -709,10 +735,14 @@ const ClientContracts = () => {
   // a dizer 113.
   //
   // Ambito: a RPC NAO decide autorizacao. Recebe a mesma subarvore de
-  // organizacoes que a query da lista (resolveOrgSubtree) e e SECURITY INVOKER,
-  // por isso a RLS de client_contracts continua a ser a fronteira real — um
-  // utilizador nunca soma nos cartoes contratos que a lista nao lhe mostra.
-  // `viewScope === "NONE"` desliga a query, tal como desliga a lista.
+  // organizacoes que a query da lista (resolveOrgSubtree) e o mesmo conjunto
+  // de `created_by` permitidos (resolveContractsScopeUserIds,
+  // `_allowed_user_ids`) — NULL para ORG (sem restricao), lista vazia para
+  // NONE/OWNED-TEAM sem id resolvido — a MESMA regra de dono que a query da
+  // lista aplica (`created_by` OU `assigned_to`). E SECURITY INVOKER, por isso a
+  // RLS de client_contracts continua a aplicar-se por baixo: esta funcao
+  // filtra convencao de ambito, nao decide autorizacao. `viewScope ===
+  // "NONE"` desliga a query, tal como desliga a lista.
   //
   // Os predicados dos filtros estao duplicados entre `filteredContracts` (aqui)
   // e a RPC (no SQL). Sao duas copias da MESMA regra: qualquer filtro novo tem
@@ -720,13 +750,15 @@ const ClientContracts = () => {
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { data: metrics, isLoading: metricsLoading } = useQuery({
     queryKey: [
-      "client-contracts-metrics", activeCompany?.id, viewScope,
+      "client-contracts-metrics", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey,
       statusFilter, debouncedSearch.trim(), onlyMine, currentUserId,
       dateFrom?.toISOString() ?? null, dateTo?.toISOString() ?? null, comercialFilter,
     ],
     queryFn: async () => {
       if (!activeCompany?.id) return null;
       const organizationIds = await resolveContractsOrgSubtree(activeCompany.id);
+      const scopeUserIds = resolveContractsScopeUserIds(viewScope, scopeAnewUserId, teamMemberIds);
+      if (scopeUserIds !== null && scopeUserIds.length === 0) return null;
       const { data, error } = await (supabase as any).rpc("client_contracts_list_metrics", {
         _organization_ids: organizationIds,
         _status_filter: statusFilter,
@@ -736,6 +768,7 @@ const ClientContracts = () => {
         _only_mine: onlyMine && currentUserId ? currentUserId : null,
         _comercial: comercialFilter !== "all" && comercialFilter !== "none" ? comercialFilter : null,
         _comercial_none: comercialFilter === "none",
+        _allowed_user_ids: scopeUserIds,
         // Calculado a cada execucao (e nao incluido na queryKey) para os cartoes
         // "a expirar"/"expirado" usarem sempre a hora do fetch sem invalidar a
         // cache a cada render.
