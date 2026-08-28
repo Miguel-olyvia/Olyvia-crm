@@ -64,6 +64,32 @@ function mapFriendly(raw: string): string {
   return raw;
 }
 
+/**
+ * Synchronous variant of `mapFriendly`, exported for callers that already
+ * have a plain string and just need the `FRIENDLY_MAP` lookup (no Supabase
+ * error-shape parsing, no `await`). Used by `sanitizeDbErrorForDisplay.ts` to
+ * turn a recognized raw database error into the SAME specific friendly text
+ * (e.g. "This record already exists.") that `getFriendlyErrorMessage` would
+ * have produced, instead of duplicating the map.
+ *
+ * Returns the input unchanged when nothing in `FRIENDLY_MAP` matches — callers
+ * that need a generic fallback in that case must supply their own, exactly
+ * like `getFriendlyErrorMessage`'s callers already do.
+ */
+export function mapFriendlyErrorText(raw: string): string {
+  return mapFriendly(raw);
+}
+
+/**
+ * The generic fallback used when a raw error is recognized as technical but
+ * has no specific entry in `FRIENDLY_MAP`. Exposed so `sanitizeDbErrorForDisplay.ts`
+ * uses the exact same localized string as every other unmapped-error fallback
+ * in the app, instead of inventing its own.
+ */
+export function getGenericFriendlyFallback(): string {
+  return translate("friendlyError.unexpectedRetry");
+}
+
 export async function getFriendlyErrorMessage(
   error: unknown,
   fallback = translate("friendlyError.unexpected"),
