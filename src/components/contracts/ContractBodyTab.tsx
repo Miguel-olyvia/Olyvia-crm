@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
 import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";

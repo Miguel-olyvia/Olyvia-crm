@@ -8,7 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAdministrativeDivisions } from '@/hooks/useAdministrativeDivisions';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 
 interface DistrictCoverage {

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { Star } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { teamFormSchema } from "@/lib/validations";
 import type { Team, TeamFormData } from "@/hooks/useOrganizationTeams";
 

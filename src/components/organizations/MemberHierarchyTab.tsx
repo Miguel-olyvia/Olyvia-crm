@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Users, Plus, ChevronRight, ChevronDown, User, GripVertical,

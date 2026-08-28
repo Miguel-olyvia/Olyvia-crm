@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Plus, Pencil, Trash2, Copy, Eye, Loader2, FileText, ShieldAlert, ArrowLeft, Star, ChevronDown, FileEdit, Settings2, Download, PenTool, User } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PermissionGate } from "@/components/PermissionGate";

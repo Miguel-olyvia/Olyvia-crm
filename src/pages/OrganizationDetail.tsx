@@ -29,7 +29,7 @@ import { OrganizationDetailFAQ } from "@/components/organizations/OrganizationDe
 import { AnewEntityHistoryDialog } from "@/components/AnewEntityHistoryDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { OrganizationAddressManager } from "@/components/organizations/OrganizationAddressManager";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ChildOrganizationsTree } from "@/components/organizations/ChildOrganizationsTree";
 import { OrganizationMembersDialog } from "@/components/organizations/OrganizationMembersDialog";

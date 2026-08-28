@@ -13,7 +13,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { OrganizationsHelpDialog } from "@/components/organizations/OrganizationsHelpDialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
 import { upsertOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { useTranslation } from "@/hooks/useTranslation";
