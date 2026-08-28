@@ -152,6 +152,7 @@ export const DUC_STAGES: DucStage[] = [
       { key: "contacto_email", label: "Contacto — email", type: "text" },
       { key: "contacto_urgencia", label: "Contacto de urgência / 2.º", type: "text" },
       { key: "morada_obra", label: "Morada da obra / instalação", type: "address" },
+      { key: "num_contrato", label: "Nº do contrato", type: "text" },
       { key: "comercial_responsavel", label: "Comercial responsável", type: "text" },
       { key: "data_adjudicacao", label: "Data de adjudicação", type: "date" },
       {
@@ -218,6 +219,7 @@ export const DUC_STAGES: DucStage[] = [
       },
       { key: "condicoes_faseamento", label: "Fases de pagamento", type: "phases" },
       { key: "nif_dados_faturacao", label: "NIF / dados de faturação", type: "textarea" },
+      { key: "morada_fiscal", label: "Morada de faturação (fiscal)", type: "address" },
       {
         key: "periodicidade_faturacao",
         label: "Periodicidade de faturação",

@@ -30,6 +30,8 @@ export interface ClientOlyviaInfo {
   addressCity?: string | null;
   /** Distrito isolado da morada (quando disponível em anew_addresses). */
   addressDistrict?: string | null;
+  /** Morada fiscal (faturação) estruturada, quando difere/existe. */
+  addressFiscal?: AddressValue | null;
   nif: string | null;
   responsavel: string | null;
   dataAdjudicacao: string | null; // yyyy-mm-dd
@@ -60,7 +62,8 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
 
   const assignedTo = (client?.assigned_to as string) ?? null;
 
-  const [entRes, emailRes, phoneRes, addrRes, fiscalRes, userRes, contractRes] = await Promise.all([
+  const [entRes, emailRes, phoneRes, addrRes, fiscalAddrRes, fiscalRes, userRes, contractRes] =
+    await Promise.all([
     supabase.from("anew_entities").select("*").eq("id", entityId).maybeSingle(),
     supabase
       .from("anew_entity_emails")
@@ -81,6 +84,13 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
       .select("is_primary, is_fiscal, anew_addresses(street, number, postal_code, city, district)")
       .eq("entity_id", entityId)
       .order("is_primary", { ascending: false })
+      .limit(1),
+    // Morada FISCAL (faturação) — pode ser diferente da principal.
+    supabase
+      .from("anew_entity_addresses")
+      .select("is_fiscal, anew_addresses(street, number, postal_code, city, district)")
+      .eq("entity_id", entityId)
+      .eq("is_fiscal", true)
       .limit(1),
     // O NIF vive em fiscal_entities, ligado à entidade por anew_entity_fiscal_entities.
     supabase
@@ -157,6 +167,26 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     address = [line1, line2].filter(Boolean).join(", ") || null;
   }
 
+  // Morada fiscal (faturação) — objeto estruturado, quando existe.
+  let addressFiscal: AddressValue | null = null;
+  const fiscalRow2 = fiscalAddrRes.data?.[0] as
+    | { anew_addresses?: Record<string, unknown> | Record<string, unknown>[] | null }
+    | undefined;
+  const af = Array.isArray(fiscalRow2?.anew_addresses)
+    ? (fiscalRow2?.anew_addresses[0] as Record<string, unknown> | undefined)
+    : (fiscalRow2?.anew_addresses as Record<string, unknown> | undefined);
+  if (af) {
+    const fiscal: AddressValue = {
+      street: ((af.street as string) || "").trim(),
+      number: ((af.number as string) || "").trim(),
+      postal: ((af.postal_code as string) || "").trim(),
+      city: ((af.city as string) || "").trim(),
+      district: ((af.district as string) || "").trim(),
+    };
+    if (fiscal.street || fiscal.number || fiscal.postal || fiscal.city || fiscal.district)
+      addressFiscal = fiscal;
+  }
+
   const contract = contractRes.data?.[0] as Record<string, unknown> | undefined;
   let valor: string | null = null;
   let condicoes: string | null = null;
@@ -219,6 +249,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     addressPostal,
     addressCity,
     addressDistrict,
+    addressFiscal,
     nif,
     responsavel,
     dataAdjudicacao,
@@ -269,9 +300,11 @@ export function prefillBlocksFromInfo(
   if (info.responsavel) comercial.comercial_responsavel = info.responsavel;
   if (info.dataAdjudicacao) comercial.data_adjudicacao = info.dataAdjudicacao;
   if (info.valor) comercial.valor_mensal_anual = info.valor;
+  if (info.contractNumber) comercial.num_contrato = info.contractNumber;
 
   const financeiro: Record<string, unknown> = {};
   if (faturacao) financeiro.nif_dados_faturacao = faturacao;
+  if (info.addressFiscal) financeiro.morada_fiscal = info.addressFiscal;
   // NOTA: no schema, `condicoes_faseamento` é do tipo `phases` (PaymentPhase[]),
   // não texto. Mantemos aqui as condições de pagamento (payment_terms) como texto
   // por retrocompatibilidade; a UI de fases (toPhases) ignora não-arrays, por isso

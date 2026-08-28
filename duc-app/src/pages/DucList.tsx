@@ -1273,6 +1273,8 @@ function PendingView({
   const [q, setQ] = useState("");
   // Hero do resumo pode ser fechado (só nesta sessão) — não é um alerta permanente.
   const [heroClosed, setHeroClosed] = useState(false);
+  // Cliente a dispensar ("não precisa de DUC") a aguardar confirmação.
+  const [confirmingDismiss, setConfirmingDismiss] = useState<ClientOption | null>(null);
 
   // Ordena por urgência: mais dias sem DUC primeiro. Sem `since` vai para o fim.
   const sorted = useMemo(() => {
@@ -1438,7 +1440,7 @@ function PendingView({
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => onDismiss(c)}
+                          onClick={() => setConfirmingDismiss(c)}
                           title="Este cliente não precisa de DUC"
                           className="min-h-[40px] flex-1 justify-center whitespace-nowrap border border-slate-200 sm:min-h-0 sm:flex-none sm:border-0"
                         >
@@ -1462,12 +1464,39 @@ function PendingView({
         </>
       )}
 
+      {confirmingDismiss && (
+        <ConfirmDialog
+          title="Marcar cliente como “Não precisa”"
+          tone="neutral"
+          confirmLabel={
+            <>
+              <X width={15} height={15} /> Não precisa
+            </>
+          }
+          icon={<ClientSketch width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que{" "}
+              <span className="font-medium text-slate-800">{confirmingDismiss.name}</span> não
+              precisa de DUC? Sai da lista de pendentes e vai para “Dispensados”, de onde podes
+              repor a qualquer momento.
+            </>
+          }
+          onCancel={() => setConfirmingDismiss(null)}
+          onConfirm={() => {
+            onDismiss(confirmingDismiss);
+            setConfirmingDismiss(null);
+          }}
+        />
+      )}
+
       {/* Dispensados — clientes marcados como "não precisa de DUC" (reversível). */}
       {dismissedClients.length > 0 && (
         <Card className="p-4">
-          <p className="mb-2 text-sm font-medium text-slate-600">
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-600">
+            <ClientSketch width={16} height={16} className="text-slate-400" />
             Dispensados ({dismissedClients.length}){" "}
-            <span className="font-normal text-slate-400">— não precisam de DUC</span>
+            <span className="font-normal text-slate-400">— não precisam de DUC · podes repor</span>
           </p>
           <ul className="divide-y divide-slate-100">
             {dismissedClients.map((c) => (

@@ -48,6 +48,7 @@ describe("prefillBlocksFromInfo", () => {
       comercial_responsavel: "Ana Comercial",
       data_adjudicacao: "2026-01-15",
       valor_mensal_anual: "10.000,00 EUR",
+      num_contrato: "CT-2026-001",
     });
   });
 
