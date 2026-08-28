@@ -28,7 +28,7 @@ import {
   Loader2,
   BarChart3
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { TrackingPixelsManager } from "./TrackingPixelsManager";
 import { LANGUAGES } from "@/constants/languages";

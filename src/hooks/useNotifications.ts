@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedAuthUser } from '@/lib/cachedAuth';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { resolveOrgSubtree } from '@/lib/orgSubtree';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 

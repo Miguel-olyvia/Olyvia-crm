@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AlignLeft, AlignCenter, AlignRight, Upload, Image as ImageIcon, Loader2, X, LayoutTemplate } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";

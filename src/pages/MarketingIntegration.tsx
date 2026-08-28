@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import * as LucideIcons from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { HelpButton } from "@/components/HelpButton";

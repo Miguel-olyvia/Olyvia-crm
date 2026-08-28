@@ -11,7 +11,7 @@ import { useInternalChat, type ChatColleague } from "@/hooks/useInternalChat";
 import { usePresence } from "@/hooks/usePresence";
 import { formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import AIAssistant from "@/components/AIAssistant";
 import olyviaIcon from "@/assets/olyvia-icon.png";
 

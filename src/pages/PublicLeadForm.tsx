@@ -15,7 +15,7 @@ import { ChevronLeft, ChevronRight, Check, Loader2, AlertCircle, Zap, Clock, Hom
 import { FormLoadingSkeleton } from "@/components/FormLoadingSkeleton";
 import { FormLocaleSwitcher } from "@/components/forms/FormLocaleSwitcher";
 
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Progress } from "@/components/ui/progress";
 import * as LucideIcons from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";

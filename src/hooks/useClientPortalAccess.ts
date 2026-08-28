@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { toast as sonnerToast } from "sonner";
+import { toast as sonnerToast } from "@/lib/toast";
 import { useCompany } from "@/contexts/CompanyContext";
 
 // Friendly mapping for backend error codes returned by create-client-portal-access

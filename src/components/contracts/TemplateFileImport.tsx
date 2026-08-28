@@ -3,7 +3,7 @@ import DOMPurify from "dompurify";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Upload, FileText, FileWarning, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import mammoth from "mammoth";
 import { supabase } from "@/integrations/supabase/client";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
