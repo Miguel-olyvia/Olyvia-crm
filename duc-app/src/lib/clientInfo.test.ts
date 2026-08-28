@@ -30,6 +30,7 @@ function makeInfo(overrides: Partial<ClientOlyviaInfo> = {}): ClientOlyviaInfo {
     valor: "10.000,00 EUR",
     condicoes: "50% adjudicação, 50% entrega",
     contractNumber: "CT-2026-001",
+    proposalId: "prop-1",
     scopeLines: [],
     ...overrides,
   };

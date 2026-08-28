@@ -31,6 +31,8 @@ export interface ClientOlyviaInfo {
   valor: string | null;
   condicoes: string | null;
   contractNumber: string | null;
+  /** Id da proposta ligada ao contrato — para o deep-link "Ver proposta" na Olyvia. */
+  proposalId: string | null;
   /** Linhas do orçamento assinado (produtos/serviços vendidos). */
   scopeLines: ScopeLine[];
 }
@@ -209,6 +211,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     valor,
     condicoes,
     contractNumber,
+    proposalId,
     scopeLines,
   };
 }

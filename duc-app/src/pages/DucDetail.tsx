@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink, X } from "../components/icons";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink, X, Upload } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
@@ -66,6 +66,9 @@ const nextKey = () => `tmp-${keyCounter++}`;
 
 const AUTOSAVE_MS = 2500;
 
+// Base da plataforma Olyvia (o CRM) — para deep-links como "Ver proposta".
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
+
 export default function DucDetail() {
   const { id } = useParams<{ id: string }>();
   const { businessUserId, userName } = useAuth();
@@ -81,6 +84,8 @@ export default function DucDetail() {
   const [currentStage, setCurrentStage] = useState(1);
   const [items, setItems] = useState<LocalItem[]>([]);
   const [clientName, setClientName] = useState<string | null>(null);
+  // Id da proposta ligada (para o deep-link "Ver proposta" na Olyvia).
+  const [proposalId, setProposalId] = useState<string | null>(null);
   // Estrutura efetiva das etapas para esta organização (config dinâmica por
   // entidade; cai no template base quando a org não tem override guardado).
   const [configStages, setConfigStages] = useState<DucStage[]>([]);
@@ -182,6 +187,7 @@ export default function DucDetail() {
       const info = await fetchClientOlyviaInfo(row.client_id);
       if (info) {
         setClientName(info.name);
+        setProposalId(info.proposalId);
         setBlocks(mergePrefill(row.blocks ?? {}, prefillBlocksFromInfo(info)));
         // Semeia itens a partir das linhas do orçamento assinado nas secções que
         // a configuração desta organização tem — âmbito ("o que foi VENDIDO"),
@@ -710,6 +716,18 @@ export default function DucDetail() {
                 onPrint={runPrint}
               />
             </div>
+            {proposalId && (
+              <a
+                href={`${OLYVIA_URL}/proposals?open=${proposalId}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir a proposta na plataforma Olyvia"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-brand sm:flex-none"
+              >
+                <FileText width={15} height={15} /> Ver proposta
+                <ExternalLink width={13} height={13} />
+              </a>
+            )}
             <Button
               variant="secondary"
               onClick={() => void handleShare()}
@@ -1442,7 +1460,12 @@ function HistoryTimeline({
   const stageTitle = (no: number) =>
     stages.find((s) => s.no === no)?.title.split(" — ")[0] ?? `Etapa ${no}`;
 
-  type Ev = { when: string; title: string; who?: string | null; kind: "create" | "close" | "update" };
+  type Ev = {
+    when: string;
+    title: string;
+    who?: string | null;
+    kind: "create" | "close" | "status" | "skip" | "update";
+  };
 
   // Eventos reais da tabela de auditoria (quando aplicada).
   const [dbEvents, setDbEvents] = useState<DucEvent[] | null>(null);
@@ -1471,12 +1494,26 @@ function HistoryTimeline({
   if (duc.updated_at)
     reconstructed.push({ when: duc.updated_at, title: "Última alteração", kind: "update" });
 
+  const kindOf = (t: DucEvent["event_type"]): Ev["kind"] => {
+    switch (t) {
+      case "created":
+        return "create";
+      case "stage_closed":
+        return "close";
+      case "status_changed":
+        return "status";
+      case "stage_skipped":
+      case "stage_unskipped":
+        return "skip";
+      default:
+        return "update";
+    }
+  };
   const fromDb: Ev[] = (dbEvents ?? []).map((e) => ({
     when: e.created_at ?? "",
     title: e.detail ?? e.event_type,
     who: e.actor_name,
-    kind:
-      e.event_type === "created" ? "create" : e.event_type === "stage_closed" ? "close" : "update",
+    kind: kindOf(e.event_type),
   }));
 
   // Prefere o histórico real da BD; se ainda não houver, mostra o reconstruído.
@@ -1506,13 +1543,21 @@ function HistoryTimeline({
                   ? "bg-emerald-500 text-white"
                   : e.kind === "create"
                     ? "bg-brand text-white"
-                    : "bg-slate-300 text-white"
+                    : e.kind === "status"
+                      ? "bg-blue-500 text-white"
+                      : e.kind === "skip"
+                        ? "bg-slate-400 text-white"
+                        : "bg-slate-300 text-white"
               )}
             >
               {e.kind === "close" ? (
                 <Check width={11} height={11} />
               ) : e.kind === "create" ? (
                 <FileText width={11} height={11} />
+              ) : e.kind === "status" ? (
+                <Upload width={11} height={11} />
+              ) : e.kind === "skip" ? (
+                <X width={11} height={11} />
               ) : (
                 <Clock width={11} height={11} />
               )}

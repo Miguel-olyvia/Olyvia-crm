@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ComponentType, SVGProps } from "react";
 import { Check, CheckCircle, Clock, FileText, Upload } from "./icons";
-import { cx } from "./ui";
+import { ConfirmDialog, cx } from "./ui";
 import type { DucStatus } from "../lib/types";
 
 interface StatusDef {
@@ -29,6 +29,8 @@ export function StatusSelect({
   onChange: (v: DucStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // Estado escolhido a aguardar confirmação (mudar o estado é uma ação com peso).
+  const [pending, setPending] = useState<StatusDef | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const current = STATUSES.find((s) => s.key === value) ?? STATUSES[0];
 
@@ -66,8 +68,9 @@ export function StatusSelect({
               key={s.key}
               type="button"
               onClick={() => {
-                onChange(s.key);
                 setOpen(false);
+                // Só pede confirmação se for mesmo uma mudança.
+                if (s.key !== value) setPending(s);
               }}
               className={cx(
                 "flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-slate-50",
@@ -82,6 +85,31 @@ export function StatusSelect({
             </button>
           ))}
         </div>
+      )}
+
+      {pending && (
+        <ConfirmDialog
+          title="Mudar o estado do DUC"
+          tone="brand"
+          confirmLabel={
+            <>
+              <pending.Icon width={15} height={15} /> Mudar para {pending.label}
+            </>
+          }
+          icon={<pending.Icon width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que queres mudar o estado de{" "}
+              <span className="font-medium text-slate-800">{current.label}</span> para{" "}
+              <span className="font-medium text-slate-800">{pending.label}</span>?
+            </>
+          }
+          onCancel={() => setPending(null)}
+          onConfirm={() => {
+            onChange(pending.key);
+            setPending(null);
+          }}
+        />
       )}
     </div>
   );
