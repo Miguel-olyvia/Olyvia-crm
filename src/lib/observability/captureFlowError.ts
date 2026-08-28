@@ -75,7 +75,14 @@ export type BusinessFlow =
   | "ai-assistant"
   | "account-deletion-request"
   | "media-asset-delete"
-  | "onboarding-completion";
+  | "onboarding-completion"
+  // A raw database/PostgREST error reached the UI unfiltered and was hidden
+  // by `sanitizeDbErrorForDisplay`. This tag is deliberately generic (it
+  // covers every call site, not one flow): it exists so production tells us
+  // which of the ~500 uninstrumented toast sites still leak technical text,
+  // instead of someone having to guess or grep for it. See
+  // vault/ficheiros/infraestrutura-seguranca/classificacao-erros-toast.md.
+  | "db-error-leaked-to-ui";
 
 /**
  * Reports an error that the calling code deliberately swallows.
