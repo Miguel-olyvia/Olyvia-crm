@@ -53,7 +53,13 @@ type PurchaseOrderItem = {
 
 // Receção parcial (migration 20261114040000): tipo de conveniência para as
 // linhas de purchase_order_items usadas no fluxo de receção.
-type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"];
+// `products` (join) é usado para mostrar o nome REAL/atual do produto no
+// diálogo — a `description` da linha é um snapshot da altura da encomenda e
+// não distingue variantes cujo nome só difere na medida (ex.: "Base Duche
+// Stone Plus" 70x70 vs 70x90 guardam a mesma description genérica).
+type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"] & {
+  products?: { name: string } | null;
+};
 
 type ProductCatalogItem = {
   id: string;
@@ -678,7 +684,7 @@ const PurchaseOrders = () => {
         .order("name"),
       supabase
         .from("purchase_order_items")
-        .select("*")
+        .select("*, products(name)")
         .eq("purchase_order_id", order.id)
         .eq("item_type", "product"),
     ]);
@@ -1952,7 +1958,7 @@ const PurchaseOrders = () => {
                       return (
                         <TableRow key={item.id} className={fullyReceived ? "opacity-50" : ""}>
                           <TableCell className={fullyReceived ? "line-through" : ""}>
-                            <div className="font-medium">{item.description}</div>
+                            <div className="font-medium">{item.products?.name || item.description}</div>
                             {item.sku && (
                               <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>
                             )}
