@@ -75,6 +75,24 @@ const DB_ERROR_SIGNATURES: RegExp[] = [
   /permission denied for\s+\w+/i,
   // PostgREST error codes, e.g. PGRST116, PGRST200.
   /\bPGRST\d{3}\b/,
+  // ---------------------------------------------------------------------
+  // Erros de ESQUEMA do PostgREST. Acrescentados a 28/08 depois de uma
+  // passagem ao vivo na org de testes: criar um produto falhou e o toast
+  // mostrou ao utilizador, em cru, "Could not choose the best candidate
+  // function between: public.rpc_create_product(p_sku => text, ...)" -- as
+  // DUAS assinaturas completas da funcao, com todos os nomes de parametros.
+  //
+  // Nao eram apanhados porque o codigo PGRST vem noutro campo do erro e nao
+  // no texto da mensagem, e o texto em si nao contem nenhuma das assinaturas
+  // acima. Sao frases fixas do PostgREST: nenhuma mensagem escrita a mao tem
+  // razao para as dizer.
+  /Could not choose the best candidate function/i,
+  /Could not find the function/i,
+  /Perhaps you meant to call the function/i,
+  /Could not find a relationship between/i,
+  /Could not embed because more than one relationship was found/i,
+  /JSON object requested, multiple \(or no\) rows returned/i,
+  /The schema must be one of the following/i,
   // Postgres SQLSTATE, only when explicitly labeled — see rejected patterns.
   /\bSQLSTATE\s+[0-9A-Za-z]{5}\b/,
 ];

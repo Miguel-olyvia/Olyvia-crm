@@ -111,6 +111,37 @@ describe("sanitizeDbErrorForDisplay — blocks raw database errors", () => {
     expect(result.text).not.toContain("foreign key");
   });
 
+  // A mensagem exacta que apareceu num toast, ao utilizador, durante a
+  // passagem ao vivo de 28/08 ao tentar criar um produto na org de testes.
+  // O build estava verde e os 583 testes passavam; so o browser a apanhou.
+  it("hides PostgREST's ambiguous-function error, which dumps whole function signatures", () => {
+    const raw =
+      "Could not choose the best candidate function between: " +
+      "public.rpc_create_product(p_sku => text, p_name => text, p_status => text, " +
+      "p_category_id => uuid, p_primary_org_id => uuid), " +
+      "public.rpc_create_product(p_sku => text, p_name => text, p_status => text, " +
+      "p_category_id => uuid, p_primary_org_id => uuid, p_manages_stock => boolean)";
+
+    const result = sanitizeDbErrorForDisplay(raw);
+
+    expect(result.wasSanitized).toBe(true);
+    expect(result.text).not.toContain("rpc_create_product");
+    expect(result.text).not.toContain("p_manages_stock");
+    expect(result.text).not.toContain("=>");
+  });
+
+  it.each([
+    "Could not find the function public.rpc_missing(p_id) in the schema cache",
+    "Perhaps you meant to call the function public.rpc_other",
+    "Could not find a relationship between 'leads' and 'clients' in the schema cache",
+    "JSON object requested, multiple (or no) rows returned",
+    "The schema must be one of the following: public, graphql_public",
+  ])("hides the PostgREST schema error %s", (raw) => {
+    const result = sanitizeDbErrorForDisplay(raw);
+    expect(result.wasSanitized).toBe(true);
+    expect(result.text).not.toBe(raw);
+  });
+
   it("hides a row-level security policy violation", () => {
     const raw = 'new row violates row-level security policy for table "proposals"';
 
