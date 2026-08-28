@@ -87,6 +87,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -99,6 +100,7 @@ interface Product {
   is_active: boolean;
   is_sellable?: boolean;
   is_purchasable?: boolean;
+  manages_stock?: boolean;
   barcode: string;
   category_id?: string | null;
   subcategory_id?: string | null;
@@ -189,6 +191,7 @@ export default function Products() {
     subcategory_id: "",
     brand_id: "",
     product_type: "sale", // "sale", "purchase", or "both"
+    manages_stock: false,
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -747,6 +750,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
+          p_manages_stock: formData.manages_stock,
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -779,6 +783,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
+          p_manages_stock: formData.manages_stock,
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -877,7 +882,7 @@ export default function Products() {
       const [productRes, companyRes, pricesRes, attributesRes] = await Promise.all([
         supabase
           .from("products")
-          .select("is_sellable, is_purchasable, uom_id")
+          .select("is_sellable, is_purchasable, manages_stock, uom_id")
           .eq("id", product.id)
           .single(),
         supabase
@@ -956,6 +961,7 @@ export default function Products() {
         subcategory_id: product.subcategory_id || "",
         brand_id: product.brand_id || "",
         product_type: productType,
+        manages_stock: data.manages_stock ?? false,
       });
       
       // Set organization selection from organization associations
@@ -1008,6 +1014,7 @@ export default function Products() {
       subcategory_id: "",
       brand_id: "",
       product_type: "sale",
+      manages_stock: false,
     });
     setFieldErrors({});
     setOrganizationSelection(defaultOrgSelection());
@@ -1081,11 +1088,12 @@ export default function Products() {
         category_id: lastProduct.category_id || "",
         subcategory_id: lastProduct.subcategory_id || "",
         brand_id: lastProduct.brand_id || "",
-        product_type: lastProduct.is_sellable && lastProduct.is_purchasable 
-          ? "both" 
-          : lastProduct.is_purchasable 
-            ? "purchase" 
+        product_type: lastProduct.is_sellable && lastProduct.is_purchasable
+          ? "both"
+          : lastProduct.is_purchasable
+            ? "purchase"
             : "sale",
+        manages_stock: (lastProduct as any).manages_stock ?? false,
       });
 
       // Set organization
@@ -2167,6 +2175,22 @@ export default function Products() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <div className="space-y-2 rounded-md border p-4">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="manages_stock"
+                      checked={formData.manages_stock}
+                      onCheckedChange={(checked) => setFormData({ ...formData, manages_stock: checked })}
+                    />
+                    <Label htmlFor="manages_stock" className="cursor-pointer">
+                      {t('products.form.manageStock')}
+                    </Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {t('products.form.manageStockHelp')}
+                  </p>
                 </div>
 
                 <ProductFormPrices prices={priceFormData} onChange={setPriceFormData} />
