@@ -320,17 +320,44 @@ const ClientContracts = () => {
         }
       } catch { /* fallback to just activeCompany */ }
 
-      // Visibilidade por ÁREA/organização: quem tem acesso à org (subárvore da
-      // empresa ativa) vê TODOS os contratos dela, independentemente de quem os
-      // criou. O scope OWNED/TEAM deixa de esconder contratos assinados nesta
-      // lista — o botão "Só meus" (onlyMine) continua disponível como opção do
-      // utilizador, e a RLS do Supabase mantém-se como fronteira de segurança.
-      const { data: rows, error } = await (supabase as any)
+      // Âmbito de `client_contracts.view`: ORG vê toda a subárvore; TEAM e
+      // OWNED restringem por `created_by` OU `assigned_to`.
+      //
+      // Repõe o predicado que o commit 54d65378 ("visibilidade por área em vez
+      // de por criador", 22/08) removeu. Com ele removido, um utilizador de
+      // âmbito OWNED via a carteira de contratos inteira da organização:
+      // medido na produção, uma comercial com âmbito próprio via 66 contratos
+      // e 527.390,76 € quando só 9 e 109.141,17 € eram dela.
+      //
+      // A união dos dois campos é deliberada, e não o `created_by` isolado que
+      // existia antes: há contratos ATRIBUÍDOS a alguém que outra pessoa criou,
+      // e a coluna COMERCIAL mostra-os como dessa pessoa (usa
+      // `assigned_to ?? created_by`). Só com `created_by`, o produto dizia
+      // "este contrato é teu" e escondia-o, e reatribuir deixava de dar acesso.
+      // É a mesma regra das Leads e das Propostas.
+      //
+      // Isto é uma convenção aplicada AQUI, no cliente, tal como nos outros
+      // módulos — e NÃO uma fronteira de segurança: a RLS `client_contracts_select`
+      // isola apenas por organização + permissão, sem cláusula por dono. Era
+      // esta a afirmação errada do comentário anterior.
+      //
+      // Os cartões de KPI derivam de `filteredContracts`, por isso acompanham
+      // este filtro automaticamente. O botão "Só meus" (onlyMine) continua a
+      // funcionar por cima, como opção do utilizador.
+      let contractsQuery = (supabase as any)
         .from("client_contracts")
         .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
         .in("organization_id", subtreeIds)
-        .is("deleted_at", null)
-        .order("created_at", { ascending: false });
+        .is("deleted_at", null);
+      if (viewScope !== "ORG" && !isSystemAdmin) {
+        const allowedUserIds = new Set<string>();
+        if (scopeAnewUserId) allowedUserIds.add(scopeAnewUserId);
+        if (viewScope === "TEAM") teamMemberIds.forEach((id) => allowedUserIds.add(id));
+        if (allowedUserIds.size === 0) return [];
+        const ids = Array.from(allowedUserIds).join(",");
+        contractsQuery = contractsQuery.or(`created_by.in.(${ids}),assigned_to.in.(${ids})`);
+      }
+      const { data: rows, error } = await contractsQuery.order("created_at", { ascending: false });
       if (error) throw error;
       let data: any[] = rows || [];
 
