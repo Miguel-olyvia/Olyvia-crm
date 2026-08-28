@@ -4,6 +4,7 @@ import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
+import { detectClientIp } from "../_shared/clientIp.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -234,9 +235,11 @@ serve(async (req) => {
     }
 
 
-    // Server-side IP detection (do not trust client-provided IP)
-    const xff = req.headers.get("x-forwarded-for") || "";
-    const detectedIp = xff.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+    // Server-side IP detection (do not trust client-provided IP).
+    // Was inlined here; now in _shared/clientIp.ts so the public-link accept
+    // path and the OTP path derive the evidence IP the exact same way instead
+    // of each inventing their own (one of them wrote the literal "client").
+    const detectedIp = detectClientIp(req);
 
     // Validate rejection reason text (10..500 chars, basic HTML strip)
     function sanitizeReason(text: unknown): string | null {
