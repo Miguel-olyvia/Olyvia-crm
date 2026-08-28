@@ -130,7 +130,8 @@ import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
-  getLeadScopeUserIds,
+  applyLeadVisibilityFilter,
+  filterUsersByLeadScope,
   mapWithConcurrency,
   normalizeLeadScope,
   reconcileRefreshedLead,
@@ -369,13 +370,13 @@ function buildLeadsBaseQuery(params: {
 
   query = query.eq("organization_id", params.organizationId);
 
-  if (params.requestedScope === "OWNED" && params.scopeAnewUserId) {
-    const ownerIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId);
-    query = query.or(`assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`);
-  } else if (params.requestedScope === "TEAM" && params.scopeAnewUserId) {
-    const visibleUserIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId, params.teamMemberIds);
-    query = query.or(`assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`);
-  }
+  query = applyLeadVisibilityFilter(
+    query,
+    params.requestedScope as "ORG" | "TEAM" | "OWNED",
+    params.scopeAnewUserId,
+    params.scopeAuthUserId,
+    params.teamMemberIds,
+  );
 
   return applyLeadsServerFilters(query, params.filters);
 }
@@ -507,17 +508,13 @@ export default function AnewLeads() {
             .eq("organization_id", activeCompanyId)
             .is("deleted_at", null);
           const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-          if (requestedScope === "OWNED" && scopeAnewUserId) {
-            const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-            openQuery = openQuery.or(
-              `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-            );
-          } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-            const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-            openQuery = openQuery.or(
-              `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-            );
-          }
+          openQuery = applyLeadVisibilityFilter(
+            openQuery,
+            requestedScope,
+            scopeAnewUserId,
+            scopeAuthUserId,
+            teamMemberIds,
+          );
           const { data } = await openQuery.maybeSingle();
           if (!cancelled && data) {
             setSelectedLead({
@@ -903,17 +900,13 @@ export default function AnewLeads() {
         .lte("callback_scheduled_at", todayEnd.toISOString());
       callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId as string);
 
-      if (callbacksScope === "OWNED" && scopeAnewUserId) {
-        const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-        callbacksQuery = callbacksQuery.or(
-          `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-        );
-      } else if (callbacksScope === "TEAM" && scopeAnewUserId) {
-        const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-        callbacksQuery = callbacksQuery.or(
-          `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-        );
-      }
+      callbacksQuery = applyLeadVisibilityFilter(
+        callbacksQuery,
+        callbacksScope,
+        scopeAnewUserId,
+        scopeAuthUserId,
+        teamMemberIds,
+      );
 
       const { data } = await callbacksQuery;
       return (data || []) as unknown as Lead[];
@@ -1425,24 +1418,14 @@ export default function AnewLeads() {
 
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
   // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
-  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  // filterUsersByLeadScope's TEAM branch is the only place allowed to read
+  // teamMemberIds -- it is session-global and must never leak into the
+  // OWNED/NONE fallback (same rule enforced in applyLeadVisibilityFilter).
   const assignableCompanyUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return companyUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return companyUsers.filter(u => allowedIds.has(u.id));
-    }
-    return companyUsers.filter(u => u.id === scopeAnewUserId);
+    return filterUsersByLeadScope(companyUsers, getPermissionScope("leads.view"), scopeAnewUserId, teamMemberIds);
   }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
   const assignableComercialUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return comercialUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return comercialUsers.filter(u => allowedIds.has(u.id));
-    }
-    return comercialUsers.filter(u => u.id === scopeAnewUserId);
+    return filterUsersByLeadScope(comercialUsers, getPermissionScope("leads.view"), scopeAnewUserId, teamMemberIds);
   }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
 
@@ -2339,17 +2322,13 @@ export default function AnewLeads() {
     refreshQuery = refreshQuery.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-    if (requestedScope === "OWNED" && scopeAnewUserId) {
-      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-      refreshQuery = refreshQuery.or(
-        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-      );
-    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-      refreshQuery = refreshQuery.or(
-        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-      );
-    }
+    refreshQuery = applyLeadVisibilityFilter(
+      refreshQuery,
+      requestedScope,
+      scopeAnewUserId,
+      scopeAuthUserId,
+      teamMemberIds,
+    );
 
     const { data: d, error } = await refreshQuery.maybeSingle();
 
