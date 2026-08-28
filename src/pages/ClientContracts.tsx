@@ -1398,6 +1398,20 @@ const ClientContracts = () => {
   const getSignatureBadge = (contract: ClientContract) => {
     if (contract.status === "signed" || contract.status === "active") {
       const date = contract.updated_at ? new Date(contract.updated_at).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" }) : "";
+      // Um contrato pode ficar "signed"/"active" por duas vias muito diferentes:
+      // o cliente assinou de facto no portal (signed_by_name preenchido, com
+      // IP/data/imagem) ou alguém do CRM aceitou internamente pelo botão de
+      // mudar estado (só company_signed_by_name preenchido). Mostrar as duas
+      // como "Assinado" sem distinção esconde que o cliente, de facto, não
+      // assinou — por isso quando não há assinatura do cliente mas há
+      // aceitação interna, o rótulo tem de o dizer, e por quem.
+      if (!contract.signed_by_name && contract.company_signed_by_name) {
+        return (
+          <span className="text-xs text-blue-600 font-medium">
+            ✔️ Aceite internamente por {contract.company_signed_by_name} {date}
+          </span>
+        );
+      }
       return <span className="text-xs text-green-600 font-medium">✍️ Assinado {date}</span>;
     }
     if (contract.status === "pending_signature") return <span className="text-xs text-yellow-600 font-medium">✍️ A aguardar assinatura</span>;
