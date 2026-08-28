@@ -16171,6 +16171,7 @@ export type Database = {
       clear_audit_context: { Args: never; Returns: undefined }
       client_contracts_list_metrics: {
         Args: {
+          _allowed_user_ids: string[]
           _comercial: string
           _comercial_none: boolean
           _date_from: string
@@ -18051,50 +18052,28 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_create_product:
-        | {
-            Args: {
-              p_all_org_ids: string[]
-              p_attribute_values: Json
-              p_barcode: string
-              p_brand_id: string
-              p_category_id: string
-              p_description: string
-              p_is_purchasable: boolean
-              p_is_sellable: boolean
-              p_name: string
-              p_prices: Json
-              p_primary_org_id: string
-              p_sku: string
-              p_status: string
-              p_subcategory_id: string
-              p_supplier_id: string
-              p_uom_id: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_all_org_ids: string[]
-              p_attribute_values: Json
-              p_barcode: string
-              p_brand_id: string
-              p_category_id: string
-              p_description: string
-              p_is_purchasable: boolean
-              p_is_sellable: boolean
-              p_manages_stock?: boolean
-              p_name: string
-              p_prices: Json
-              p_primary_org_id: string
-              p_sku: string
-              p_status: string
-              p_subcategory_id: string
-              p_supplier_id: string
-              p_uom_id: string
-            }
-            Returns: string
-          }
+      rpc_create_product: {
+        Args: {
+          p_all_org_ids: string[]
+          p_attribute_values: Json
+          p_barcode: string
+          p_brand_id: string
+          p_category_id: string
+          p_description: string
+          p_is_purchasable: boolean
+          p_is_sellable: boolean
+          p_manages_stock?: boolean
+          p_name: string
+          p_prices: Json
+          p_primary_org_id: string
+          p_sku: string
+          p_status: string
+          p_subcategory_id: string
+          p_supplier_id: string
+          p_uom_id: string
+        }
+        Returns: string
+      }
       rpc_create_product_attribute: {
         Args: {
           p_code: string
@@ -18914,6 +18893,7 @@ export type Database = {
       rpc_register_sale_stock_movement: {
         Args: {
           p_document_number: string
+          p_organization_id?: string
           p_product_id: string
           p_quantity: number
           p_quote_line_id: string
@@ -19683,56 +19663,31 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_update_product:
-        | {
-            Args: {
-              p_active_org_id: string
-              p_all_org_ids: string[]
-              p_attribute_ids: string[]
-              p_attribute_values: Json
-              p_barcode: string
-              p_brand_id: string
-              p_category_id: string
-              p_description: string
-              p_id: string
-              p_is_purchasable: boolean
-              p_is_sellable: boolean
-              p_name: string
-              p_prices: Json
-              p_primary_org_id: string
-              p_sku: string
-              p_status: string
-              p_subcategory_id: string
-              p_supplier_id: string
-              p_uom_id: string
-            }
-            Returns: string
-          }
-        | {
-            Args: {
-              p_active_org_id: string
-              p_all_org_ids: string[]
-              p_attribute_ids: string[]
-              p_attribute_values: Json
-              p_barcode: string
-              p_brand_id: string
-              p_category_id: string
-              p_description: string
-              p_id: string
-              p_is_purchasable: boolean
-              p_is_sellable: boolean
-              p_manages_stock?: boolean
-              p_name: string
-              p_prices: Json
-              p_primary_org_id: string
-              p_sku: string
-              p_status: string
-              p_subcategory_id: string
-              p_supplier_id: string
-              p_uom_id: string
-            }
-            Returns: string
-          }
+      rpc_update_product: {
+        Args: {
+          p_active_org_id: string
+          p_all_org_ids: string[]
+          p_attribute_ids: string[]
+          p_attribute_values: Json
+          p_barcode: string
+          p_brand_id: string
+          p_category_id: string
+          p_description: string
+          p_id: string
+          p_is_purchasable: boolean
+          p_is_sellable: boolean
+          p_manages_stock?: boolean
+          p_name: string
+          p_prices: Json
+          p_primary_org_id: string
+          p_sku: string
+          p_status: string
+          p_subcategory_id: string
+          p_supplier_id: string
+          p_uom_id: string
+        }
+        Returns: string
+      }
       rpc_update_product_attribute: {
         Args: {
           p_active_org_id: string
