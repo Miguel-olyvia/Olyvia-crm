@@ -60,6 +60,8 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
     icon: <ClipboardList className="w-4 h-4 text-amber-600" />,
     description: "Cria uma atividade/tarefa automaticamente",
   },
+  // Mantido apenas para rotular linhas já existentes na tabela (ver
+  // SELECTABLE_ACTION_TYPES abaixo) — deixou de ser oferecido como opção nova.
   send_notification: {
     label: "Enviar Notificação",
     icon: <Send className="w-4 h-4 text-blue-600" />,
@@ -79,6 +81,26 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
     description: "Regista a criação automática de contrato (executada pelo motor de workflow ao aceitar a proposta)",
   },
 };
+
+/**
+ * Tipos de acção oferecidos ao criar uma acção NOVA. `ACTION_LABELS` acima é o
+ * dicionário de apresentação (tem de continuar a cobrir tudo o que já exista
+ * guardado na tabela, senão a lista passa a mostrar o `action_type` em cru);
+ * esta é a lista do que pode ser escolhido.
+ *
+ * `send_notification` foi retirado da escolha: a string não aparece em lado
+ * nenhum de `supabase/` — nem edge function, nem migração, nem trigger de BD.
+ * Não existe nada que a execute, aqui ou noutro módulo.
+ *
+ * Nota mais ampla, para quem vier a seguir: o motor
+ * (`supabase/functions/execute-workflow`) lê `lead_stage_actions`,
+ * `deal_stage_actions`, `quote_stage_actions` e `contract_stage_actions`, mas
+ * NÃO lê `proposal_stage_actions`. `create_task` e `send_email` continuam
+ * escolhíveis por decisão deliberada de âmbito, não por estarem confirmados
+ * como executados nesta superfície — antes de confiar em qualquer um deles,
+ * verificar o motor.
+ */
+const SELECTABLE_ACTION_TYPES = ["create_task", "send_email", "create_contract"] as const;
 
 export function ProposalStageActionsConfig({ stages, companyId }: Props) {
   const { toast } = useToast();
@@ -314,11 +336,11 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
                       <SelectValue placeholder="Selecionar acção..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.entries(ACTION_LABELS).map(([key, meta]) => (
+                      {SELECTABLE_ACTION_TYPES.map((key) => (
                         <SelectItem key={key} value={key}>
                           <div className="flex items-center gap-2">
-                            {meta.icon}
-                            {meta.label}
+                            {ACTION_LABELS[key].icon}
+                            {ACTION_LABELS[key].label}
                           </div>
                         </SelectItem>
                       ))}
