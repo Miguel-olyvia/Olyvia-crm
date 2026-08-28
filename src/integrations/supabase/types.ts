@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   graphql_public: {
     Tables: {
@@ -9821,6 +9821,55 @@ export type Database = {
           },
         ]
       }
+      organization_inventory_settings: {
+        Row: {
+          created_at: string
+          created_by: string
+          default_warehouse_id: string | null
+          organization_id: string
+          stock_deduction_trigger: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          default_warehouse_id?: string | null
+          organization_id: string
+          stock_deduction_trigger?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          default_warehouse_id?: string | null
+          organization_id?: string
+          stock_deduction_trigger?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_inventory_settings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_inventory_settings_default_warehouse_id_fkey"
+            columns: ["default_warehouse_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_inventory_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_pipeline_config: {
         Row: {
           created_at: string | null
@@ -11416,6 +11465,7 @@ export type Database = {
           is_purchasable: boolean
           is_sellable: boolean
           long_description: string | null
+          manages_stock: boolean
           model_id: string | null
           name: string
           organization_id: string | null
@@ -11444,6 +11494,7 @@ export type Database = {
           is_purchasable?: boolean
           is_sellable?: boolean
           long_description?: string | null
+          manages_stock?: boolean
           model_id?: string | null
           name: string
           organization_id?: string | null
@@ -11472,6 +11523,7 @@ export type Database = {
           is_purchasable?: boolean
           is_sellable?: boolean
           long_description?: string | null
+          manages_stock?: boolean
           model_id?: string | null
           name?: string
           organization_id?: string | null
@@ -14711,6 +14763,8 @@ export type Database = {
           quantity: number
           reference_id: string | null
           reversal_of_movement_id: string | null
+          sale_source_id: string | null
+          sale_source_type: string | null
           supplier_sku_at_time: string | null
           transfer_group_id: string | null
           unit_cost_at_time: number | null
@@ -14733,6 +14787,8 @@ export type Database = {
           quantity: number
           reference_id?: string | null
           reversal_of_movement_id?: string | null
+          sale_source_id?: string | null
+          sale_source_type?: string | null
           supplier_sku_at_time?: string | null
           transfer_group_id?: string | null
           unit_cost_at_time?: number | null
@@ -14755,6 +14811,8 @@ export type Database = {
           quantity?: number
           reference_id?: string | null
           reversal_of_movement_id?: string | null
+          sale_source_id?: string | null
+          sale_source_type?: string | null
           supplier_sku_at_time?: string | null
           transfer_group_id?: string | null
           unit_cost_at_time?: number | null
@@ -17993,27 +18051,50 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_create_product: {
-        Args: {
-          p_all_org_ids: string[]
-          p_attribute_values: Json
-          p_barcode: string
-          p_brand_id: string
-          p_category_id: string
-          p_description: string
-          p_is_purchasable: boolean
-          p_is_sellable: boolean
-          p_name: string
-          p_prices: Json
-          p_primary_org_id: string
-          p_sku: string
-          p_status: string
-          p_subcategory_id: string
-          p_supplier_id: string
-          p_uom_id: string
-        }
-        Returns: string
-      }
+      rpc_create_product:
+        | {
+            Args: {
+              p_all_org_ids: string[]
+              p_attribute_values: Json
+              p_barcode: string
+              p_brand_id: string
+              p_category_id: string
+              p_description: string
+              p_is_purchasable: boolean
+              p_is_sellable: boolean
+              p_name: string
+              p_prices: Json
+              p_primary_org_id: string
+              p_sku: string
+              p_status: string
+              p_subcategory_id: string
+              p_supplier_id: string
+              p_uom_id: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_all_org_ids: string[]
+              p_attribute_values: Json
+              p_barcode: string
+              p_brand_id: string
+              p_category_id: string
+              p_description: string
+              p_is_purchasable: boolean
+              p_is_sellable: boolean
+              p_manages_stock?: boolean
+              p_name: string
+              p_prices: Json
+              p_primary_org_id: string
+              p_sku: string
+              p_status: string
+              p_subcategory_id: string
+              p_supplier_id: string
+              p_uom_id: string
+            }
+            Returns: string
+          }
       rpc_create_product_attribute: {
         Args: {
           p_code: string
@@ -18830,6 +18911,19 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_register_sale_stock_movement: {
+        Args: {
+          p_document_number: string
+          p_product_id: string
+          p_quantity: number
+          p_quote_line_id: string
+          p_sale_source_id: string
+          p_sale_source_type: string
+          p_unit_cost_at_time?: number
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
       rpc_register_stock_entry: {
         Args: {
           p_counterparty?: string
@@ -19589,30 +19683,56 @@ export type Database = {
           isSetofReturn: false
         }
       }
-      rpc_update_product: {
-        Args: {
-          p_active_org_id: string
-          p_all_org_ids: string[]
-          p_attribute_ids: string[]
-          p_attribute_values: Json
-          p_barcode: string
-          p_brand_id: string
-          p_category_id: string
-          p_description: string
-          p_id: string
-          p_is_purchasable: boolean
-          p_is_sellable: boolean
-          p_name: string
-          p_prices: Json
-          p_primary_org_id: string
-          p_sku: string
-          p_status: string
-          p_subcategory_id: string
-          p_supplier_id: string
-          p_uom_id: string
-        }
-        Returns: string
-      }
+      rpc_update_product:
+        | {
+            Args: {
+              p_active_org_id: string
+              p_all_org_ids: string[]
+              p_attribute_ids: string[]
+              p_attribute_values: Json
+              p_barcode: string
+              p_brand_id: string
+              p_category_id: string
+              p_description: string
+              p_id: string
+              p_is_purchasable: boolean
+              p_is_sellable: boolean
+              p_name: string
+              p_prices: Json
+              p_primary_org_id: string
+              p_sku: string
+              p_status: string
+              p_subcategory_id: string
+              p_supplier_id: string
+              p_uom_id: string
+            }
+            Returns: string
+          }
+        | {
+            Args: {
+              p_active_org_id: string
+              p_all_org_ids: string[]
+              p_attribute_ids: string[]
+              p_attribute_values: Json
+              p_barcode: string
+              p_brand_id: string
+              p_category_id: string
+              p_description: string
+              p_id: string
+              p_is_purchasable: boolean
+              p_is_sellable: boolean
+              p_manages_stock?: boolean
+              p_name: string
+              p_prices: Json
+              p_primary_org_id: string
+              p_sku: string
+              p_status: string
+              p_subcategory_id: string
+              p_supplier_id: string
+              p_uom_id: string
+            }
+            Returns: string
+          }
       rpc_update_product_attribute: {
         Args: {
           p_active_org_id: string
@@ -20122,6 +20242,27 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "anew_users"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rpc_upsert_inventory_settings: {
+        Args: {
+          p_default_warehouse_id: string
+          p_organization_id: string
+          p_stock_deduction_trigger: string
+        }
+        Returns: {
+          created_at: string
+          created_by: string
+          default_warehouse_id: string | null
+          organization_id: string
+          stock_deduction_trigger: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "organization_inventory_settings"
           isOneToOne: true
           isSetofReturn: false
         }
