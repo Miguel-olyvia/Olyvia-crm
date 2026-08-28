@@ -1,0 +1,21 @@
+-- ===========================================================================
+-- MARCADOR — o SQL desta migration NAO existe neste repositorio.
+--
+-- A versao 20261114040000 esta APLICADA na base remota mas o ficheiro
+-- nunca foi commitado, em ramo nenhum (procurado tambem em
+-- origin/feature/inventario). Foi aplicada fora do fluxo normal de migrations.
+--
+-- Este ficheiro existe apenas para o `supabase db push` deixar de bloquear
+-- todas as migrations seguintes. Esta deliberadamente VAZIO de SQL:
+--   * contra o remoto nao tem efeito — a versao ja consta do historico
+--     aplicado, por isso nunca chega a ser executada;
+--   * NUNCA marcar como "reverted" com `migration repair`: seria falso, o
+--     schema esta mesmo na base.
+--
+-- ATENCAO: enquanto o SQL real nao for recuperado e commitado aqui, uma base
+-- reconstruida do zero (`supabase db reset`) fica SEM os objectos que esta
+-- migration criou. Isto e divida por fechar, nao um estado aceitavel.
+--
+-- Criado a 2026-08-28 para desbloquear a migration
+-- 20261115050000_client_contracts_list_metrics_view_scope.
+-- ===========================================================================
