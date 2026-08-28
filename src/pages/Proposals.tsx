@@ -5,6 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
+import { runProposalStageWorkflow } from "@/lib/proposals/runStageWorkflow";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { applyClientSearchTextFilter, resolveClientSearch } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
@@ -1676,6 +1678,7 @@ const Proposals = () => {
           successCount++;
         } catch (sendError) {
           console.error(`Error sending proposal ${id}:`, sendError);
+          captureFlowError(sendError, "proposal-bulk-send");
           failCount++;
         }
       }
@@ -1709,6 +1712,7 @@ const Proposals = () => {
           successCount++;
         } catch (exportError) {
           console.error(`Error exporting PDF for proposal ${id}:`, exportError);
+          captureFlowError(exportError, "proposal-bulk-pdf-export");
           failCount++;
         }
       }
@@ -2037,22 +2041,13 @@ const Proposals = () => {
 
         let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
-          try {
-            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-              body: {
-                source_entity: 'proposal',
-                entity_id: editingId,
-                new_stage_id: formData.stage_id,
-                old_stage_id: originalStageId,
-                organization_id: activeCompany?.id,
-                triggered_by: user.id,
-              }
-            });
-            if (workflowError) throw workflowError;
-          } catch (workflowError) {
-            console.error("Workflow execution error:", workflowError);
-            workflowFailed = true;
-          }
+          workflowFailed = await runProposalStageWorkflow({
+            entityId: editingId,
+            newStageId: formData.stage_id,
+            oldStageId: originalStageId,
+            organizationId: activeCompany?.id,
+            triggeredBy: user.id,
+          });
         }
         toast({
           title: t('proposals.toast.updateSuccess'),
@@ -2173,15 +2168,13 @@ const Proposals = () => {
         .eq("id", proposal.id);
       if (error) throw error;
       let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: proposal.id,
+        newStageId: sentStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta marcada como enviada",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
@@ -2212,15 +2205,13 @@ const Proposals = () => {
       const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
       if (error) throw error;
       let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: targetProposal.id,
+        newStageId: acceptedStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta aceite com sucesso",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
@@ -2300,18 +2291,19 @@ const Proposals = () => {
     });
     if (recalcError) {
       console.error("Erro ao recalcular valor da proposta após rejeição:", recalcError);
+      // Swallowed on purpose (the rejection itself succeeded), but the stored
+      // proposal value is now stale and nothing on screen says so.
+      captureFlowError(recalcError, "proposal-value-recalculation");
     }
 
     let workflowFailed = false;
-    try {
-      const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-      });
-      if (workflowError) throw workflowError;
-    } catch (workflowError) {
-      console.error("Workflow execution error:", workflowError);
-      workflowFailed = true;
-    }
+    workflowFailed = await runProposalStageWorkflow({
+      entityId: proposal.id,
+      newStageId: rejectedStage.id,
+      oldStageId: oldStageId,
+      organizationId: activeCompany?.id,
+      triggeredBy: user.id,
+    });
     return { workflowFailed };
   };
 
@@ -2365,18 +2357,19 @@ const Proposals = () => {
       });
       if (recalcError) {
         console.error("Erro ao recalcular valor da proposta após reabertura:", recalcError);
+        // Same deal as the rejection path: the reopen went through, the stored
+        // value did not follow it.
+        captureFlowError(recalcError, "proposal-value-recalculation");
       }
 
       let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: proposal.id,
+        newStageId: draftStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta reaberta",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
