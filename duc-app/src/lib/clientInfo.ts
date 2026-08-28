@@ -8,6 +8,60 @@ export interface ScopeLine {
   description: string;
   qty: string;
   unit: string;
+  /** Modelo / Cor combinados a partir dos atributos da linha (lista de materiais). */
+  modeloCor?: string;
+  /** Dimensão / medidas a partir dos atributos da linha (lista de materiais). */
+  dimensao?: string;
+  /** Restantes atributos ("Label: valor"), para Observações quando não há descrição. */
+  otherAttrs?: string;
+}
+
+/**
+ * Extrai Modelo/Cor e Dimensão de `quote_lines.selected_attributes`.
+ * Formato: { [attribute_id]: { label, value, unit? } } (ver src/utils/lineAttributes.ts).
+ * Só considera valores escalares legíveis; ignora estrutura interna (bundle_components…).
+ */
+function attributesFromLine(
+  selected: unknown
+): { modeloCor?: string; dimensao?: string; otherAttrs?: string } {
+  if (!selected || typeof selected !== "object" || Array.isArray(selected)) return {};
+  const modelos: string[] = [];
+  const cores: string[] = [];
+  const dims: string[] = [];
+  const others: string[] = [];
+  for (const raw of Object.values(selected as Record<string, unknown>)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const o = raw as Record<string, unknown>;
+    const val = o.value;
+    const text =
+      typeof val === "string"
+        ? val.trim()
+        : typeof val === "number" && Number.isFinite(val)
+          ? String(val)
+          : typeof val === "boolean"
+            ? val
+              ? "Sim"
+              : "Não"
+            : "";
+    if (!text) continue;
+    const rawLabel = typeof o.label === "string" ? o.label : (o.attribute_code as string) || "";
+    const label = rawLabel.toLowerCase().trim();
+    if (!label) continue;
+    const unit = typeof o.unit === "string" ? o.unit.trim() : "";
+    const withUnit = unit ? `${text} ${unit}` : text;
+    if (label.includes("modelo")) modelos.push(withUnit);
+    else if (label.includes("cor")) cores.push(withUnit);
+    else if (label.includes("dimens") || label.includes("medida") || label.includes("tamanho"))
+      dims.push(withUnit);
+    else others.push(`${rawLabel.trim()}: ${withUnit}`);
+  }
+  const modeloCor = [modelos.join(" / "), cores.join(" / ")].filter(Boolean).join(" · ");
+  const dimensao = dims.join(" × ");
+  return {
+    modeloCor: modeloCor || undefined,
+    dimensao: dimensao || undefined,
+    otherAttrs: others.join(" · ") || undefined,
+  };
 }
 
 export interface ClientOlyviaInfo {
@@ -219,18 +273,22 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     if (quoteIds.length > 0) {
       const { data: lineRows } = await supabase
         .from("quote_lines")
-        .select("descricao_snapshot, item_description, qt, unidade, section_name, ordem")
+        .select("descricao_snapshot, item_description, qt, unidade, section_name, ordem, selected_attributes")
         .in("quote_id", quoteIds)
         .order("ordem", { ascending: true });
       (lineRows ?? []).forEach((l) => {
         const label =
           (l.descricao_snapshot as string) || (l.section_name as string) || "";
         if (!label.trim()) return;
+        const attrs = attributesFromLine(l.selected_attributes);
         scopeLines.push({
           label: label.trim(),
           description: (l.item_description as string) || "",
           qty: l.qt != null ? String(l.qt) : "",
           unit: (l.unidade as string) || "",
+          modeloCor: attrs.modeloCor,
+          dimensao: attrs.dimensao,
+          otherAttrs: attrs.otherAttrs,
         });
       });
     }

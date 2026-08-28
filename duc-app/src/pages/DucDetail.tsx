@@ -199,17 +199,25 @@ export default function DucDetail() {
         const seedFor = (section: DucSection, lines: ScopeLine[]): LocalItem[] => {
           if (!presentSections.has(section)) return [];
           if ((itemRows ?? []).some((r) => r.section === section)) return [];
-          return lines.map((l, idx) => ({
-            key: nextKey(),
-            section,
-            position: idx,
-            label: l.label,
-            description: l.description,
-            qty: l.qty,
-            unit: l.unit,
-            included: true,
-            meta: {} as Record<string, unknown>,
-          }));
+          return lines.map((l, idx) => {
+            // Colunas próprias vão nos campos base; atributos do produto (Modelo/Cor,
+            // Dimensão) são colunas `own:false` → guardadas em `meta`. Observações usa
+            // a descrição da linha ou, em falta, os restantes atributos.
+            const meta: Record<string, unknown> = {};
+            if (l.modeloCor) meta.modelo_cor = l.modeloCor;
+            if (l.dimensao) meta.dimensao = l.dimensao;
+            return {
+              key: nextKey(),
+              section,
+              position: idx,
+              label: l.label,
+              description: l.description || l.otherAttrs || "",
+              qty: l.qty,
+              unit: l.unit,
+              included: true,
+              meta,
+            };
+          });
         };
         const seeded = [
           ...seedFor("scope", prefillScopeItemsFromInfo(info)),
