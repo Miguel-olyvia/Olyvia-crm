@@ -1,0 +1,18 @@
+-- ===========================================================================
+-- MARCADOR — o SQL desta migration NAO existe neste repositorio.
+--
+-- A versao 20261115080000 esta APLICADA na base remota mas o ficheiro nunca
+-- foi commitado, em ramo nenhum. Foi aplicada fora do fluxo normal de
+-- migrations, a 28/08.
+--
+-- Existe apenas para o `supabase db push` deixar de bloquear as migrations
+-- seguintes. Esta deliberadamente VAZIO de SQL:
+--   * contra o remoto nao tem efeito — a versao ja consta do historico
+--     aplicado, por isso nunca chega a ser executada;
+--   * NUNCA marcar como "reverted" com `migration repair`: seria falso, o
+--     schema esta mesmo na base.
+--
+-- ATENCAO: enquanto o SQL real nao for recuperado e commitado aqui, uma base
+-- reconstruida do zero (`supabase db reset`) fica SEM os objectos que esta
+-- migration criou. E divida por fechar, nao um estado aceitavel.
+-- ===========================================================================
