@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
+import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -229,8 +230,11 @@ const handler = async (req: Request): Promise<Response> => {
           .update({
             status: "accepted",
             accepted_at: new Date().toISOString(),
-            acceptance_ip: req.headers.get("x-forwarded-for") || "unknown",
-            acceptance_user_agent: req.headers.get("user-agent") || "unknown",
+            // NUNCA "unknown": um placeholder num campo de prova e
+            // indistinguivel de uma deteccao real. Ausente => NULL.
+            // O header cru e uma cadeia "cliente, proxy1, proxy2" — nao um IP.
+            acceptance_ip: detectClientIp(req),
+            acceptance_user_agent: detectUserAgent(req),
             ...(acceptedStageId ? { stage_id: acceptedStageId } : {}),
           })
           .eq("id", proposal_id);
