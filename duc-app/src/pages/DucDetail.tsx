@@ -2170,7 +2170,7 @@ function PhasesField({
 
 // ---------------------------------------------------------------------------
 
-const EMPTY_ADDRESS: AddressValue = { street: "", number: "", postal: "", city: "" };
+const EMPTY_ADDRESS: AddressValue = { street: "", number: "", postal: "", city: "", district: "" };
 
 function toAddress(v: unknown): AddressValue {
   if (v && typeof v === "object" && !Array.isArray(v)) {
@@ -2214,10 +2214,16 @@ function AddressField({
         placeholder="Cód. postal"
       />
       <input
-        className={cx(inputCls, "col-span-3 sm:col-span-4")}
+        className={cx(inputCls, "col-span-3 sm:col-span-2")}
         value={a.city}
         onChange={(e) => set({ city: e.target.value })}
         placeholder="Localidade"
+      />
+      <input
+        className={cx(inputCls, "col-span-3 sm:col-span-2")}
+        value={a.district ?? ""}
+        onChange={(e) => set({ district: e.target.value })}
+        placeholder="Distrito"
       />
     </div>
   );

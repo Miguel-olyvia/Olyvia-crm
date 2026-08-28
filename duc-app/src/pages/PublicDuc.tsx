@@ -40,7 +40,7 @@ function AddressValueView({ v }: { v: unknown }) {
   const a = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Partial<AddressValue>;
   const line1 = [a.street, a.number].filter(Boolean).join(", ");
   const line2 = [a.postal, a.city].filter(Boolean).join(" ");
-  const all = [line1, line2].filter(Boolean).join(" · ");
+  const all = [line1, line2, a.district].filter(Boolean).join(" · ");
   if (typeof v === "string" && v.trim()) return <span>{v}</span>;
   return <span>{all || "—"}</span>;
 }

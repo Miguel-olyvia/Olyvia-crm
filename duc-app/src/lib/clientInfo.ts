@@ -15,6 +15,10 @@ export interface ClientOlyviaInfo {
   name: string;
   email: string | null;
   phone: string | null;
+  /** 2.º email (secundário), quando existe. */
+  email2?: string | null;
+  /** 2.º telefone (secundário), quando existe. */
+  phone2?: string | null;
   address: string | null;
   /** Rua isolada da morada (quando disponível em anew_addresses). */
   addressStreet?: string | null;
@@ -24,6 +28,8 @@ export interface ClientOlyviaInfo {
   addressPostal?: string | null;
   /** Cidade isolada da morada (quando disponível em anew_addresses). */
   addressCity?: string | null;
+  /** Distrito isolado da morada (quando disponível em anew_addresses). */
+  addressDistrict?: string | null;
   nif: string | null;
   responsavel: string | null;
   dataAdjudicacao: string | null; // yyyy-mm-dd
@@ -61,13 +67,13 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
       .select("email, is_primary")
       .eq("entity_id", entityId)
       .order("is_primary", { ascending: false })
-      .limit(1),
+      .limit(2),
     supabase
       .from("anew_entity_phones")
       .select("phone_number, is_primary")
       .eq("entity_id", entityId)
       .order("is_primary", { ascending: false })
-      .limit(1),
+      .limit(2),
     // A morada real vive em anew_addresses (street/number/postal_code/city);
     // anew_entity_addresses é só a ligação via address_id. Fazemos join.
     supabase
@@ -116,6 +122,9 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
   const nif = /^\d{9}$/.test(rawNif.trim()) ? rawNif.trim() : null;
   const email = (emailRes.data?.[0]?.email as string) ?? null;
   const phone = (phoneRes.data?.[0]?.phone_number as string) ?? null;
+  // 2.º contacto (email/telefone secundário) — alimenta o campo "Contacto de urgência / 2.º".
+  const email2 = (emailRes.data?.[1]?.email as string) ?? null;
+  const phone2 = (phoneRes.data?.[1]?.phone_number as string) ?? null;
   const responsavel = ((userRes.data as { name?: string } | null)?.name as string) ?? null;
 
   // Compõe a morada a partir de anew_addresses (join). Guardamos também as partes
@@ -125,6 +134,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
   let addressNumber: string | null = null;
   let addressPostal: string | null = null;
   let addressCity: string | null = null;
+  let addressDistrict: string | null = null;
   const addrRow = addrRes.data?.[0] as
     | { anew_addresses?: Record<string, unknown> | Record<string, unknown>[] | null }
     | undefined;
@@ -136,10 +146,12 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     const number = (a.number as string) || "";
     const postal = (a.postal_code as string) || "";
     const city = (a.city as string) || "";
+    const district = (a.district as string) || "";
     addressStreet = street.trim() || null;
     addressNumber = number.trim() || null;
     addressPostal = postal.trim() || null;
     addressCity = city.trim() || null;
+    addressDistrict = district.trim() || null;
     const line1 = [street, number].filter(Boolean).join(" ").trim();
     const line2 = [postal, city].filter(Boolean).join(" ").trim();
     address = [line1, line2].filter(Boolean).join(", ") || null;
@@ -199,11 +211,14 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     name,
     email,
     phone,
+    email2,
+    phone2,
     address,
     addressStreet,
     addressNumber,
     addressPostal,
     addressCity,
+    addressDistrict,
     nif,
     responsavel,
     dataAdjudicacao,
@@ -227,8 +242,10 @@ function moradaFromInfo(info: ClientOlyviaInfo): AddressValue | null {
   const number = (info.addressNumber ?? "").trim();
   const postal = (info.addressPostal ?? "").trim();
   const city = (info.addressCity ?? "").trim();
-  if (street || number || postal || city) return { street, number, postal, city };
-  if (info.address) return { street: info.address, number: "", postal: "", city: "" };
+  const district = (info.addressDistrict ?? "").trim();
+  if (street || number || postal || city || district)
+    return { street, number, postal, city, district };
+  if (info.address) return { street: info.address, number: "", postal: "", city: "", district: "" };
   return null;
 }
 
@@ -245,6 +262,9 @@ export function prefillBlocksFromInfo(
   comercial.contacto_nome = info.name;
   if (info.phone) comercial.contacto_tel = info.phone;
   if (info.email) comercial.contacto_email = info.email;
+  // 2.º contacto (telefone e/ou email secundário) → "Contacto de urgência / 2.º".
+  const contacto2 = [info.phone2, info.email2].filter(Boolean).join(" · ");
+  if (contacto2) comercial.contacto_urgencia = contacto2;
   if (morada) comercial.morada_obra = morada;
   if (info.responsavel) comercial.comercial_responsavel = info.responsavel;
   if (info.dataAdjudicacao) comercial.data_adjudicacao = info.dataAdjudicacao;

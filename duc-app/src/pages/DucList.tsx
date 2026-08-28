@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
@@ -15,7 +15,7 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
@@ -43,6 +43,85 @@ function entityName(row: {
 
 function doneCount(tracking: TrackingEntry[] | null | undefined): number {
   return (tracking ?? []).filter((t) => isStageResolved(t.state)).length;
+}
+
+// Base da plataforma Olyvia (o CRM) — para deep-links como "Ver proposta".
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
+
+/**
+ * Menu de ações por DUC (lista): abrir o DUC, ver a proposta ligada na Olyvia
+ * (o id da proposta é obtido on-demand ao abrir), e ver os contratos do cliente.
+ */
+function DucActionsMenu({ duc, onOpen }: { duc: DucRecord; onOpen: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [loadingProposal, setLoadingProposal] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const openProposal = async () => {
+    if (loadingProposal) return;
+    if (!duc.client_id) {
+      window.open(`${OLYVIA_URL}/proposals`, "_blank", "noopener");
+      setOpen(false);
+      return;
+    }
+    setLoadingProposal(true);
+    const info = await fetchClientOlyviaInfo(duc.client_id);
+    setLoadingProposal(false);
+    setOpen(false);
+    const url = info?.proposalId
+      ? `${OLYVIA_URL}/proposals?open=${info.proposalId}`
+      : `${OLYVIA_URL}/proposals`;
+    window.open(url, "_blank", "noopener");
+  };
+
+  const itemCls =
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-600 transition-colors hover:bg-slate-50";
+
+  return (
+    <div ref={ref} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Ações"
+        aria-label="Ações do DUC"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <circle cx="12" cy="5" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="12" cy="19" r="1.6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-elevated animate-in-pop">
+          <button type="button" className={itemCls} onClick={() => { setOpen(false); onOpen(duc.id); }}>
+            <FileText width={16} height={16} className="text-slate-400" /> Abrir DUC
+          </button>
+          <button type="button" className={cx(itemCls, loadingProposal && "opacity-60")} onClick={() => void openProposal()}>
+            <ExternalLink width={16} height={16} className="text-slate-400" />
+            {loadingProposal ? "A abrir proposta…" : "Ver proposta na Olyvia"}
+          </button>
+          <a
+            href={`${OLYVIA_URL}/client-contracts`}
+            target="_blank"
+            rel="noreferrer"
+            className={itemCls}
+            onClick={() => setOpen(false)}
+          >
+            <Building width={16} height={16} className="text-slate-400" /> Ver contratos
+          </a>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -906,18 +985,21 @@ function DucsView({
                         {new Date(d.updated_at).toLocaleDateString("pt-PT")}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      title="Eliminar"
-                      aria-label="Eliminar DUC"
-                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 active:bg-red-50 active:text-red-500"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(d);
-                      }}
-                    >
-                      <Trash width={16} height={16} />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <DucActionsMenu duc={d} onOpen={onOpen} />
+                      <button
+                        type="button"
+                        title="Eliminar"
+                        aria-label="Eliminar DUC"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 active:bg-red-50 active:text-red-500"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(d);
+                        }}
+                      >
+                        <Trash width={16} height={16} />
+                      </button>
+                    </div>
                   </div>
                 </Card>
               );
@@ -1006,17 +1088,20 @@ function DucsView({
                         {new Date(d.updated_at).toLocaleDateString("pt-PT")}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          title="Eliminar"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(d);
-                          }}
-                        >
-                          <Trash width={15} height={15} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <DucActionsMenu duc={d} onOpen={onOpen} />
+                          <button
+                            type="button"
+                            title="Eliminar"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(d);
+                            }}
+                          >
+                            <Trash width={15} height={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

@@ -40,6 +40,8 @@ export interface AddressValue {
   number: string;
   postal: string;
   city: string;
+  /** Distrito (opcional) — retrocompatível com moradas guardadas sem este campo. */
+  district?: string;
 }
 
 /** Destinatário de notificação de uma etapa. */

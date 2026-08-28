@@ -44,7 +44,7 @@ describe("prefillBlocksFromInfo", () => {
       contacto_nome: "Acme Lda",
       contacto_tel: "912345678",
       contacto_email: "geral@acme.pt",
-      morada_obra: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa" },
+      morada_obra: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa", district: "" },
       comercial_responsavel: "Ana Comercial",
       data_adjudicacao: "2026-01-15",
       valor_mensal_anual: "10.000,00 EUR",
@@ -106,7 +106,7 @@ describe("prefillBlocksFromInfo", () => {
     const { entrega } = prefillBlocksFromInfo(makeInfo());
     expect(entrega).toEqual({
       cliente: "Acme Lda",
-      morada: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa" },
+      morada: { street: "Rua A", number: "10", postal: "1000-001", city: "Lisboa", district: "" },
       data_inicio: "2026-01-15", // dataAdjudicacao
       data_entrega: "2026-06-30", // dataFim
       obra_ref: "CT-2026-001", // contractNumber
