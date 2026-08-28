@@ -1051,7 +1051,40 @@ serve(async (req) => {
       if (caller.anewUserId) {
         await supabase.rpc('set_audit_context', { p_user_id: caller.anewUserId, p_source: 'pipeline' });
       }
-      await supabase.from("client_contracts").update({ status: "signed" }).eq("id", contract_id);
+      // Auditoria da aceitacao interna. Este e o caminho que o botao "Marcar
+      // como Assinado" do CRM usa de facto -- nao a rpc_update_client_contract_status,
+      // que so cobre as mudancas de estado do menu. Uma passagem ao vivo a
+      // 28/08 apanhou a diferenca: a RPC gravava a auditoria e o botao nao.
+      //
+      // So se preenche quando o CLIENTE ainda nao assinou. As colunas do
+      // cliente (signature_ip/date, signed_by_name) ficam intactas de
+      // proposito: "aceite internamente por X" nao e "assinado pelo cliente",
+      // e o registo tem de o dizer em vez de o esbater.
+      //
+      // O actor vem do JWT de quem chamou (caller.anewUserId), nunca do corpo
+      // do pedido -- um campo de prova que o cliente escolhe nao prova nada.
+      const contractUpdate: Record<string, unknown> = { status: "signed" };
+      if (caller.anewUserId && !caller.isServiceRole && caller.anewUserId !== "service_role") {
+        const { data: existing } = await supabase
+          .from("client_contracts")
+          .select("signature_ip, signature_date, signed_by_name, company_signed_by_id")
+          .eq("id", contract_id)
+          .maybeSingle();
+        const clienteAssinou = Boolean(
+          existing?.signature_ip || existing?.signature_date || existing?.signed_by_name,
+        );
+        if (!clienteAssinou && !existing?.company_signed_by_id) {
+          const { data: actor } = await supabase
+            .from("anew_users")
+            .select("name")
+            .eq("id", caller.anewUserId)
+            .maybeSingle();
+          contractUpdate.company_signature_date = new Date().toISOString();
+          contractUpdate.company_signed_by_id = caller.anewUserId;
+          contractUpdate.company_signed_by_name = actor?.name ?? "Utilizador do CRM";
+        }
+      }
+      await supabase.from("client_contracts").update(contractUpdate).eq("id", contract_id);
 
       // Trigger execute-workflow to handle full client conversion logic
       // (creates anew_clients, sets entity roles, converts lead, updates pipeline_links)
