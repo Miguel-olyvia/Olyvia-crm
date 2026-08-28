@@ -51,6 +51,10 @@ type PurchaseOrderItem = {
   notes?: string;
 };
 
+// Receção parcial (migration 20261114040000): tipo de conveniência para as
+// linhas de purchase_order_items usadas no fluxo de receção.
+type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"];
+
 type ProductCatalogItem = {
   id: string;
   name: string;
@@ -120,6 +124,12 @@ const PurchaseOrders = () => {
   const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string } | null>(null);
   const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
   const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
+  // Receção parcial (20261114040000): linhas de produto desta encomenda e a
+  // quantidade a receber agora por linha, editável — por omissão pré-preenchida
+  // com o saldo por receber de cada linha (equivalente ao antigo "tudo de uma
+  // vez", mas agora ajustável antes de confirmar).
+  const [receiveLines, setReceiveLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
+  const [receiveLineQuantities, setReceiveLineQuantities] = useState<Record<string, number>>({});
   const [receiving, setReceiving] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
@@ -653,38 +663,105 @@ const PurchaseOrders = () => {
   const openReceiveDialog = async (order: PurchaseOrder) => {
     setReceivingOrder({ id: order.id, order_number: order.order_number });
     setReceiveWarehouseId("");
+    setReceiveLines([]);
+    setReceiveLineQuantities({});
     setReceiveDialogOpen(true);
 
     if (!activeCompany?.id) return;
-    const { data, error } = await supabase
-      .from("warehouses")
-      .select("id, name")
-      .eq("organization_id", activeCompany.id)
-      .is("deleted_at", null)
-      .order("name");
-    if (error) {
-      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+
+    const [warehousesRes, itemsRes] = await Promise.all([
+      supabase
+        .from("warehouses")
+        .select("id, name")
+        .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null)
+        .order("name"),
+      supabase
+        .from("purchase_order_items")
+        .select("*")
+        .eq("purchase_order_id", order.id)
+        .eq("item_type", "product"),
+    ]);
+
+    if (warehousesRes.error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: warehousesRes.error.message, variant: "destructive" });
       return;
     }
-    setReceiveWarehouses(data || []);
+    setReceiveWarehouses(warehousesRes.data || []);
+
+    if (itemsRes.error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: itemsRes.error.message, variant: "destructive" });
+      return;
+    }
+    const items = (itemsRes.data as PurchaseOrderItemWithReceipt[] | null) || [];
+    setReceiveLines(items);
+
+    const initialQuantities: Record<string, number> = {};
+    items.forEach((item) => {
+      const remaining = item.quantity - (item.received_quantity || 0);
+      initialQuantities[item.id] = remaining > 0 ? remaining : 0;
+    });
+    setReceiveLineQuantities(initialQuantities);
+  };
+
+  const getReceiveRemaining = (item: PurchaseOrderItemWithReceipt) =>
+    item.quantity - (item.received_quantity || 0);
+
+  // "Selecionar tudo": repõe cada input ao saldo por receber da respetiva
+  // linha — replica num clique o antigo comportamento por omissão ("recebe
+  // tudo de uma vez").
+  const handleSelectAllReceiveLines = () => {
+    const quantities: Record<string, number> = {};
+    receiveLines.forEach((item) => {
+      const remaining = getReceiveRemaining(item);
+      quantities[item.id] = remaining > 0 ? remaining : 0;
+    });
+    setReceiveLineQuantities(quantities);
   };
 
   const handleReceiveOrder = async () => {
     if (!receivingOrder || !receiveWarehouseId) return;
+
+    const linesToReceive = receiveLines
+      .map((item) => ({
+        purchase_order_item_id: item.id,
+        quantity: receiveLineQuantities[item.id] || 0,
+      }))
+      .filter((line) => line.quantity > 0);
+
+    if (linesToReceive.length === 0) {
+      toast({
+        title: t('purchaseOrders.toast.error'),
+        description: "Indica pelo menos uma quantidade a receber numa linha.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setReceiving(true);
     try {
-      const { error } = await supabase.rpc("rpc_receive_purchase_order", {
+      const { data, error } = await supabase.rpc("rpc_receive_purchase_order_lines", {
         p_purchase_order_id: receivingOrder.id,
         p_warehouse_id: receiveWarehouseId,
+        p_lines: linesToReceive,
       });
       if (error) throw error;
 
+      // O status devolvido pelo RPC é a fonte da verdade — não assumir
+      // 'received' (pode ter ficado 'partially_received').
+      const resultStatus = (data as { status?: string } | null)?.status;
+      const isFullyReceived = resultStatus === 'received';
+
       toast({
-        title: "Encomenda recebida",
-        description: `${receivingOrder.order_number} marcada como recebida — stock atualizado.`,
+        title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
+        description: isFullyReceived
+          ? `${receivingOrder.order_number} foi totalmente recebida — stock atualizado.`
+          : `${receivingOrder.order_number} teve uma receção parcial registada — stock atualizado nas linhas indicadas.`,
       });
       setReceiveDialogOpen(false);
       setReceivingOrder(null);
+      setReceiveLines([]);
+      setReceiveLineQuantities({});
       loadData();
     } catch (error: any) {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
@@ -987,6 +1064,9 @@ const PurchaseOrders = () => {
     const colors: Record<string, string> = {
       pending: "bg-warning/10 text-warning",
       ordered: "bg-info/10 text-info",
+      // Intermédio entre "ordered" (info/azul) e "received" (success/verde) —
+      // teal já usado noutros ecrãs do projeto para estados intermédios.
+      partially_received: "bg-teal-500/10 text-teal-600",
       received: "bg-success/10 text-success",
       cancelled: "bg-destructive/10 text-destructive",
     };
@@ -997,6 +1077,7 @@ const PurchaseOrders = () => {
     const labels: Record<string, string> = {
       pending: t('purchaseOrders.status.pending'),
       ordered: t('purchaseOrders.status.ordered'),
+      partially_received: t('purchaseOrders.status.partiallyReceived'),
       received: t('purchaseOrders.status.received'),
       cancelled: t('purchaseOrders.status.cancelled'),
     };
@@ -1379,6 +1460,17 @@ const PurchaseOrders = () => {
                           {editingId && formData.status === 'received' && (
                             <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
                           )}
+                          {/* "partially_received" nunca é uma escolha manual — é derivado por
+                              rpc_receive_purchase_order_lines a partir das receções parciais
+                              já registadas. Só aparece aqui, desativado, se a encomenda já
+                              estiver neste estado (hoje inatingível a partir deste formulário,
+                              já que o botão de editar fica desativado para encomendas com
+                              receção parcial — mantido por clareza/defesa em profundidade). */}
+                          {editingId && formData.status === 'partially_received' && (
+                            <SelectItem value="partially_received" disabled>
+                              {t('purchaseOrders.status.partiallyReceived')}
+                            </SelectItem>
+                          )}
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
@@ -1390,6 +1482,11 @@ const PurchaseOrders = () => {
                       {formData.status === 'received' && (
                         <p className="text-xs text-muted-foreground">
                           Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
+                        </p>
+                      )}
+                      {formData.status === 'partially_received' && (
+                        <p className="text-xs text-muted-foreground">
+                          Esta encomenda já tem linhas parcialmente recebidas — não é possível editá-la nem cancelá-la. Para devolver mercadoria já recebida, usa a devolução ao fornecedor.
                         </p>
                       )}
                     </div>
@@ -1596,7 +1693,7 @@ const PurchaseOrders = () => {
                             <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
                               <FileDown className="w-4 h-4" />
                             </Button>
-                            {(order.status === 'pending' || order.status === 'ordered') && (
+                            {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
                               <PermissionGate permission="purchase_orders.receive">
                                 <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
                                   <PackageCheck className="w-4 h-4" />
@@ -1604,7 +1701,17 @@ const PurchaseOrders = () => {
                               </PermissionGate>
                             )}
                             <PermissionGate permission="purchase_orders.edit">
-                              <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(order)}
+                                disabled={order.status === 'partially_received' || order.status === 'received'}
+                                title={
+                                  order.status === 'partially_received' || order.status === 'received'
+                                    ? "Não é possível editar uma encomenda já recebida"
+                                    : undefined
+                                }
+                              >
                                 <Pencil className="w-4 h-4" />
                               </Button>
                             </PermissionGate>
@@ -1791,16 +1898,21 @@ const PurchaseOrders = () => {
         />
       )}
 
-      {/* Marcar como recebida (Fase 4C) — pede o armazém de destino e gera a
-          entrada de stock correspondente via rpc_receive_purchase_order. */}
+      {/* Receção de encomenda, total ou parcial (Fase 4) — pede o armazém de
+          destino e, por linha de produto, a quantidade a dar entrada agora;
+          liga a rpc_receive_purchase_order_lines (recebe só as
+          linhas/quantidades indicadas). Receções parciais em armazéns
+          diferentes fazem-se em 2 chamadas separadas (1 armazém por chamada). */}
       <Dialog open={receiveDialogOpen} onOpenChange={setReceiveDialogOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Marcar como recebida{receivingOrder ? ` — ${receivingOrder.order_number}` : ""}</DialogTitle>
+            <DialogTitle>Receção de encomenda{receivingOrder ? ` — ${receivingOrder.order_number}` : ""}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Isto dá entrada em stock, no armazém escolhido, de todas as linhas de produto desta encomenda.
+              Indica, por linha, a quantidade a dar entrada em stock agora. Só as quantidades
+              indicadas são recebidas — o que ficar por preencher continua por receber para uma
+              entrega posterior.
             </p>
             <div className="space-y-2">
               <Label>Armazém de destino</Label>
@@ -1815,6 +1927,65 @@ const PurchaseOrders = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            {receiveLines.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label>Linhas a receber</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={handleSelectAllReceiveLines}>
+                    Selecionar tudo
+                  </Button>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="text-right">Encomendada</TableHead>
+                      <TableHead className="text-right">Já recebida</TableHead>
+                      <TableHead className="text-right">Receber agora</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {receiveLines.map((item) => {
+                      const remaining = getReceiveRemaining(item);
+                      const fullyReceived = remaining <= 0;
+                      return (
+                        <TableRow key={item.id} className={fullyReceived ? "opacity-50" : ""}>
+                          <TableCell className={fullyReceived ? "line-through" : ""}>
+                            <div className="font-medium">{item.description}</div>
+                            {item.sku && (
+                              <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-right">{item.received_quantity || 0}</TableCell>
+                          <TableCell className="text-right">
+                            {fullyReceived ? (
+                              <span className="text-xs text-muted-foreground">já recebida</span>
+                            ) : (
+                              <Input
+                                type="number"
+                                min={0}
+                                max={remaining}
+                                step="1"
+                                className="w-24 ml-auto"
+                                value={receiveLineQuantities[item.id] ?? 0}
+                                onChange={(e) => {
+                                  const raw = parseFloat(e.target.value);
+                                  const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
+                                  setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
+                                }}
+                              />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setReceiveDialogOpen(false)} disabled={receiving}>
                 Cancelar

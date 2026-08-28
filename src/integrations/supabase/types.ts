@@ -625,6 +625,53 @@ export type Database = {
           },
         ]
       }
+      anew_client_duc_collaborators: {
+        Row: {
+          accepted_at: string | null
+          auth_user_id: string | null
+          duc_id: string
+          email: string
+          id: string
+          invited_at: string
+          invited_by: string | null
+          organization_id: string
+          revoked_at: string | null
+          role: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          auth_user_id?: string | null
+          duc_id: string
+          email: string
+          id?: string
+          invited_at?: string
+          invited_by?: string | null
+          organization_id: string
+          revoked_at?: string | null
+          role?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          auth_user_id?: string | null
+          duc_id?: string
+          email?: string
+          id?: string
+          invited_at?: string
+          invited_by?: string | null
+          organization_id?: string
+          revoked_at?: string | null
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anew_client_duc_collaborators_duc_id_fkey"
+            columns: ["duc_id"]
+            isOneToOne: false
+            referencedRelation: "anew_client_ducs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       anew_client_duc_configs: {
         Row: {
           config: Json
@@ -651,6 +698,80 @@ export type Database = {
           updated_by?: string | null
         }
         Relationships: []
+      }
+      anew_client_duc_dismissed: {
+        Row: {
+          client_id: string
+          created_at: string
+          dismissed_by: string | null
+          id: string
+          organization_id: string
+          reason: string | null
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          dismissed_by?: string | null
+          id?: string
+          organization_id: string
+          reason?: string | null
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          dismissed_by?: string | null
+          id?: string
+          organization_id?: string
+          reason?: string | null
+        }
+        Relationships: []
+      }
+      anew_client_duc_events: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          created_at: string
+          detail: string | null
+          duc_id: string
+          event_type: string
+          field_key: string | null
+          id: string
+          organization_id: string
+          stage_no: number | null
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          detail?: string | null
+          duc_id: string
+          event_type: string
+          field_key?: string | null
+          id?: string
+          organization_id: string
+          stage_no?: number | null
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          created_at?: string
+          detail?: string | null
+          duc_id?: string
+          event_type?: string
+          field_key?: string | null
+          id?: string
+          organization_id?: string
+          stage_no?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anew_client_duc_events_duc_id_fkey"
+            columns: ["duc_id"]
+            isOneToOne: false
+            referencedRelation: "anew_client_ducs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       anew_client_duc_items: {
         Row: {
@@ -704,6 +825,88 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "anew_client_duc_items_duc_id_fkey"
+            columns: ["duc_id"]
+            isOneToOne: false
+            referencedRelation: "anew_client_ducs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      anew_client_duc_messages: {
+        Row: {
+          author_id: string | null
+          author_name: string | null
+          body: string
+          created_at: string
+          duc_id: string
+          id: string
+          mentions: Json
+          organization_id: string
+        }
+        Insert: {
+          author_id?: string | null
+          author_name?: string | null
+          body: string
+          created_at?: string
+          duc_id: string
+          id?: string
+          mentions?: Json
+          organization_id: string
+        }
+        Update: {
+          author_id?: string | null
+          author_name?: string | null
+          body?: string
+          created_at?: string
+          duc_id?: string
+          id?: string
+          mentions?: Json
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anew_client_duc_messages_duc_id_fkey"
+            columns: ["duc_id"]
+            isOneToOne: false
+            referencedRelation: "anew_client_ducs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      anew_client_duc_public_shares: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          duc_id: string
+          expires_at: string | null
+          id: string
+          organization_id: string
+          revoked_at: string | null
+          token: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          duc_id: string
+          expires_at?: string | null
+          id?: string
+          organization_id: string
+          revoked_at?: string | null
+          token: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          duc_id?: string
+          expires_at?: string | null
+          id?: string
+          organization_id?: string
+          revoked_at?: string | null
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "anew_client_duc_public_shares_duc_id_fkey"
             columns: ["duc_id"]
             isOneToOne: false
             referencedRelation: "anew_client_ducs"
@@ -804,6 +1007,7 @@ export type Database = {
           origin_source: string | null
           origin_source_id: string | null
           root_organization_id: string
+          search_text: string | null
           source_id: string | null
           source_type: string | null
           status: string | null
@@ -827,6 +1031,7 @@ export type Database = {
           origin_source?: string | null
           origin_source_id?: string | null
           root_organization_id: string
+          search_text?: string | null
           source_id?: string | null
           source_type?: string | null
           status?: string | null
@@ -850,6 +1055,7 @@ export type Database = {
           origin_source?: string | null
           origin_source_id?: string | null
           root_organization_id?: string
+          search_text?: string | null
           source_id?: string | null
           source_type?: string | null
           status?: string | null
@@ -1046,6 +1252,7 @@ export type Database = {
           first_name: string | null
           id: string
           last_name: string | null
+          search_text: string | null
           status: string
           type: string
           updated_at: string
@@ -1057,6 +1264,7 @@ export type Database = {
           first_name?: string | null
           id?: string
           last_name?: string | null
+          search_text?: string | null
           status?: string
           type: string
           updated_at?: string
@@ -1068,6 +1276,7 @@ export type Database = {
           first_name?: string | null
           id?: string
           last_name?: string | null
+          search_text?: string | null
           status?: string
           type?: string
           updated_at?: string
@@ -6648,6 +6857,7 @@ export type Database = {
           next_action_type: string | null
           notes: string | null
           organization_id: string | null
+          proposal_id: string | null
           result: string | null
           root_organization_id: string | null
           sentiment: string | null
@@ -6667,6 +6877,7 @@ export type Database = {
           next_action_type?: string | null
           notes?: string | null
           organization_id?: string | null
+          proposal_id?: string | null
           result?: string | null
           root_organization_id?: string | null
           sentiment?: string | null
@@ -6686,6 +6897,7 @@ export type Database = {
           next_action_type?: string | null
           notes?: string | null
           organization_id?: string | null
+          proposal_id?: string | null
           result?: string | null
           root_organization_id?: string | null
           sentiment?: string | null
@@ -6705,6 +6917,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_interactions_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "proposals"
             referencedColumns: ["id"]
           },
           {
@@ -8188,6 +8407,13 @@ export type Database = {
             columns: ["item_supplier_id"]
             isOneToOne: false
             referencedRelation: "item_suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_supplier_price_history_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers_public"
             referencedColumns: ["id"]
           },
           {
@@ -11906,6 +12132,7 @@ export type Database = {
           rejection_reason_id: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           sent_at: string | null
           signature_image: string | null
           stage_id: string | null
@@ -11962,6 +12189,7 @@ export type Database = {
           rejection_reason_id?: string | null
           request_date?: string | null
           root_organization_id?: string | null
+          search_text?: string | null
           sent_at?: string | null
           signature_image?: string | null
           stage_id?: string | null
@@ -12018,6 +12246,7 @@ export type Database = {
           rejection_reason_id?: string | null
           request_date?: string | null
           root_organization_id?: string | null
+          search_text?: string | null
           sent_at?: string | null
           signature_image?: string | null
           stage_id?: string | null
@@ -12109,6 +12338,7 @@ export type Database = {
           product_id: string | null
           purchase_order_id: string
           quantity: number
+          received_quantity: number
           selected_attributes: Json | null
           service_id: string | null
           sku: string | null
@@ -12127,6 +12357,7 @@ export type Database = {
           product_id?: string | null
           purchase_order_id: string
           quantity?: number
+          received_quantity?: number
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
@@ -12145,6 +12376,7 @@ export type Database = {
           product_id?: string | null
           purchase_order_id?: string
           quantity?: number
+          received_quantity?: number
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
@@ -12407,6 +12639,13 @@ export type Database = {
             columns: ["item_supplier_id"]
             isOneToOne: false
             referencedRelation: "item_suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_lines_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers_public"
             referencedColumns: ["id"]
           },
           {
@@ -12771,6 +13010,7 @@ export type Database = {
           quote_number: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           site_address_id: string | null
           subtotal: number | null
           template_id: string | null
@@ -12808,6 +13048,7 @@ export type Database = {
           quote_number?: string | null
           request_date?: string | null
           root_organization_id?: string | null
+          search_text?: string | null
           site_address_id?: string | null
           subtotal?: number | null
           template_id?: string | null
@@ -12845,6 +13086,7 @@ export type Database = {
           quote_number?: string | null
           request_date?: string | null
           root_organization_id?: string | null
+          search_text?: string | null
           site_address_id?: string | null
           subtotal?: number | null
           template_id?: string | null
@@ -14451,8 +14693,128 @@ export type Database = {
         }
         Relationships: []
       }
+      stock_movements: {
+        Row: {
+          balance_after: number
+          counterparty: string | null
+          created_at: string
+          created_by: string
+          document_number: string
+          document_type: string
+          id: string
+          item_supplier_id: string | null
+          lot_id: string | null
+          movement_type: string
+          notes: string | null
+          organization_id: string
+          product_id: string
+          quantity: number
+          reference_id: string | null
+          reversal_of_movement_id: string | null
+          supplier_sku_at_time: string | null
+          transfer_group_id: string | null
+          unit_cost_at_time: number | null
+          warehouse_id: string
+        }
+        Insert: {
+          balance_after: number
+          counterparty?: string | null
+          created_at?: string
+          created_by: string
+          document_number: string
+          document_type: string
+          id?: string
+          item_supplier_id?: string | null
+          lot_id?: string | null
+          movement_type: string
+          notes?: string | null
+          organization_id: string
+          product_id: string
+          quantity: number
+          reference_id?: string | null
+          reversal_of_movement_id?: string | null
+          supplier_sku_at_time?: string | null
+          transfer_group_id?: string | null
+          unit_cost_at_time?: number | null
+          warehouse_id: string
+        }
+        Update: {
+          balance_after?: number
+          counterparty?: string | null
+          created_at?: string
+          created_by?: string
+          document_number?: string
+          document_type?: string
+          id?: string
+          item_supplier_id?: string | null
+          lot_id?: string | null
+          movement_type?: string
+          notes?: string | null
+          organization_id?: string
+          product_id?: string
+          quantity?: number
+          reference_id?: string | null
+          reversal_of_movement_id?: string | null
+          supplier_sku_at_time?: string | null
+          transfer_group_id?: string | null
+          unit_cost_at_time?: number | null
+          warehouse_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_reversal_of_movement_id_fkey"
+            columns: ["reversal_of_movement_id"]
+            isOneToOne: false
+            referencedRelation: "stock_movements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_warehouse_id_fkey"
+            columns: ["warehouse_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stocks: {
         Row: {
+          average_cost: number | null
           created_at: string
           created_by: string
           deleted_at: string | null
@@ -14470,6 +14832,7 @@ export type Database = {
           warehouse_id: string
         }
         Insert: {
+          average_cost?: number | null
           created_at?: string
           created_by: string
           deleted_at?: string | null
@@ -14487,6 +14850,7 @@ export type Database = {
           warehouse_id: string
         }
         Update: {
+          average_cost?: number | null
           created_at?: string
           created_by?: string
           deleted_at?: string | null
@@ -15371,6 +15735,74 @@ export type Database = {
       }
     }
     Views: {
+      item_suppliers_public: {
+        Row: {
+          id: string | null
+          is_active: boolean | null
+          is_preferred: boolean | null
+          item_type: string | null
+          lead_time_days: number | null
+          moq: number | null
+          organization_id: string | null
+          product_id: string | null
+          service_id: string | null
+          supplier_id: string | null
+        }
+        Insert: {
+          id?: string | null
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          item_type?: string | null
+          lead_time_days?: number | null
+          moq?: number | null
+          organization_id?: string | null
+          product_id?: string | null
+          service_id?: string | null
+          supplier_id?: string | null
+        }
+        Update: {
+          id?: string | null
+          is_active?: boolean | null
+          is_preferred?: boolean | null
+          item_type?: string | null
+          lead_time_days?: number | null
+          moq?: number | null
+          organization_id?: string | null
+          product_id?: string | null
+          service_id?: string | null
+          supplier_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "item_suppliers_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_suppliers_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_suppliers_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "item_suppliers_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads_pending_retention_review: {
         Row: {
           assigned_to: string | null
@@ -15545,6 +15977,28 @@ export type Database = {
         }
         Returns: boolean
       }
+      accept_proposal_atomic: {
+        Args: {
+          p_acceptance_ip: string
+          p_acceptance_user_agent: string
+          p_proposal_id: string
+          p_public_token: string
+        }
+        Returns: Json
+      }
+      anew_clients_compute_search_text: {
+        Args: { p_custom_fields: Json; p_entity_id: string }
+        Returns: string
+      }
+      anew_entities_compute_search_text: {
+        Args: {
+          p_display_name: string
+          p_entity_id: string
+          p_first_name: string
+          p_last_name: string
+        }
+        Returns: string
+      }
       archive_activity: { Args: { _activity_id: string }; Returns: boolean }
       archive_campaign: { Args: { _campaign_id: string }; Returns: boolean }
       archive_deal: { Args: { _deal_id: string }; Returns: boolean }
@@ -15657,6 +16111,36 @@ export type Database = {
       cleanup_duplicate_notifications: { Args: never; Returns: number }
       cleanup_orphan_notifications: { Args: never; Returns: number }
       clear_audit_context: { Args: never; Returns: undefined }
+      client_contracts_list_metrics: {
+        Args: {
+          _comercial: string
+          _comercial_none: boolean
+          _date_from: string
+          _date_to: string
+          _now: string
+          _only_mine: string
+          _organization_ids: string[]
+          _search: string
+          _status_filter: string
+        }
+        Returns: {
+          active_value: number
+          avg_sign_days: number
+          avg_value: number
+          draft_count: number
+          draft_value: number
+          expired_count: number
+          expired_value: number
+          expiring90_count: number
+          sent_count: number
+          sent_value: number
+          sign_rate: number
+          signed_count: number
+          signed_value: number
+          total_count: number
+          total_value: number
+        }[]
+      }
       compute_lead_furthest_progress_stage_v2: {
         Args: { p_lead_id: string }
         Returns: string
@@ -15724,6 +16208,10 @@ export type Database = {
       delete_organization_subtree: {
         Args: { p_root_org_id: string }
         Returns: string[]
+      }
+      difference_in_days_local: {
+        Args: { _left: string; _right: string; _tz: string }
+        Returns: number
       }
       duplicate_proposal: {
         Args: { new_title?: string; source_proposal_id: string }
@@ -15861,6 +16349,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_next_stock_document_number: {
+        Args: { p_document_type: string; p_organization_id: string }
+        Returns: string
+      }
       fn_proposals_persist_relations: {
         Args: {
           p_actor: string
@@ -15985,6 +16477,26 @@ export type Database = {
         }
         Returns: Json
       }
+      get_client_enriched_data: {
+        Args: {
+          _entity_ids: string[]
+          _now: string
+          _organization_id: string
+          _since: string
+          _tz?: string
+        }
+        Returns: {
+          active_contract_count: number
+          contract_total_value: number
+          contract_total_value_sem_iva: number
+          entity_id: string
+          expiring_contracts: Json
+          interaction_count_30d: number
+          last_interaction_at: string
+          last_sentiment: string
+          tags: Json
+        }[]
+      }
       get_commercial_info: { Args: { p_user_id: string }; Returns: Json }
       get_contact_alert_counts: { Args: { p_org_ids: string[] }; Returns: Json }
       get_contact_dashboard_kpis: {
@@ -16000,6 +16512,7 @@ export type Database = {
         }
         Returns: Json
       }
+      get_duc_public: { Args: { p_token: string }; Returns: Json }
       get_effective_price: {
         Args: {
           p_price_type?: Database["public"]["Enums"]["price_type"]
@@ -16021,6 +16534,16 @@ export type Database = {
         Returns: {
           available_quantity: number
           reserved_quantity: number
+        }[]
+      }
+      get_entity_contact_summary: {
+        Args: { _entity_ids: string[] }
+        Returns: {
+          display_name: string
+          email: string
+          entity_id: string
+          last_interaction_at: string
+          phone_number: string
         }[]
       }
       get_flow_user_org_ids: { Args: { _auth_uid: string }; Returns: string[] }
@@ -16175,6 +16698,103 @@ export type Database = {
         Args: { _auth_uid: string; _org_id: string }
         Returns: string
       }
+      get_proposals_alert_feed: {
+        Args: {
+          _created_by_fallback_only: boolean
+          _limit?: number
+          _organization_id: string
+          _scope_created_by_ids: string[]
+          _scope_deal_ids: string[]
+          _scope_mode: string
+          _workflow_stage_ids: string[]
+        }
+        Returns: {
+          contract_id: string
+          created_at: string
+          id: string
+          sent_at: string
+          stage_name: string
+          status: string
+          title: string
+          updated_at: string
+          valid_until: string
+          value: number
+        }[]
+      }
+      get_proposals_list_metrics: {
+        Args: {
+          _comercial: string
+          _comercial_none: boolean
+          _created_by_fallback_only: boolean
+          _date_from: string
+          _date_to: string
+          _expired: boolean
+          _follow_up_days: number
+          _no_response: boolean
+          _no_validity: boolean
+          _now: string
+          _only_mine: string
+          _organization_id: string
+          _scope_created_by_ids: string[]
+          _scope_deal_ids: string[]
+          _scope_mode: string
+          _search: string
+          _search_entity_ids: string[]
+          _stage_filter: string
+          _tz: string
+          _workflow_stage_ids: string[]
+        }
+        Returns: {
+          accepted_count: number
+          avg_close_time: number
+          conversion_rate: number
+          expired_count: number
+          no_response_count: number
+          no_response_value: number
+          no_response_value_ex_vat: number
+          no_validity_count: number
+          sent_or_later_count: number
+          stage_counts: Json
+          stage_values: Json
+          stage_values_ex_vat: Json
+          total: number
+          total_value: number
+          total_value_ex_vat: number
+          won_value: number
+          won_value_ex_vat: number
+        }[]
+      }
+      get_proposals_list_page: {
+        Args: {
+          _comercial: string
+          _comercial_none: boolean
+          _created_by_fallback_only: boolean
+          _date_from: string
+          _date_to: string
+          _expired: boolean
+          _follow_up_days: number
+          _limit: number
+          _no_response: boolean
+          _no_validity: boolean
+          _now: string
+          _offset: number
+          _only_mine: string
+          _organization_id: string
+          _scope_created_by_ids: string[]
+          _scope_deal_ids: string[]
+          _scope_mode: string
+          _search: string
+          _search_entity_ids: string[]
+          _sort_column: string
+          _sort_direction: string
+          _stage_filter: string
+          _tz: string
+          _workflow_stage_ids: string[]
+        }
+        Returns: {
+          proposal_id: string
+        }[]
+      }
       get_quotes_kpi_stats: {
         Args: {
           p_filters?: Json
@@ -16295,6 +16915,11 @@ export type Database = {
         Returns: undefined
       }
       is_admin_user: { Args: { _user_id: string }; Returns: boolean }
+      is_duc_collaborator: { Args: { p_duc_id: string }; Returns: boolean }
+      is_duc_editor_collaborator: {
+        Args: { p_duc_id: string }
+        Returns: boolean
+      }
       is_entity_in_user_scope: {
         Args: { _auth_uid: string; _entity_id: string }
         Returns: boolean
@@ -16336,6 +16961,123 @@ export type Database = {
         Returns: boolean
       }
       preview_entity_erasure: { Args: { p_entity_id: string }; Returns: Json }
+      proposals_compute_search_text: {
+        Args: { p_deal_id: string; p_entity_id: string; p_title: string }
+        Returns: string
+      }
+      proposals_in_scope: {
+        Args: {
+          _created_by_fallback_only: boolean
+          _organization_id: string
+          _scope_created_by_ids: string[]
+          _scope_deal_ids: string[]
+          _scope_mode: string
+        }
+        Returns: {
+          acceptance_ip: string | null
+          acceptance_user_agent: string | null
+          accepted_at: string | null
+          assigned_to: string | null
+          client_contract_id: string | null
+          client_id: string | null
+          created_at: string
+          created_by: string
+          currency: string | null
+          deal_id: string | null
+          decided_published_at: string | null
+          decided_snapshot: Json | null
+          decided_snapshot_hash: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          delivered_at: string | null
+          delivery_time_hours: number | null
+          description: string | null
+          document_url: string | null
+          entity_id: string | null
+          has_unpublished_changes: boolean
+          id: string
+          is_deleted: boolean | null
+          last_viewed_at: string | null
+          notes: string | null
+          organization_id: string | null
+          probability: number | null
+          proposal_number: string | null
+          public_link_enabled: boolean | null
+          public_token: string | null
+          published_at: string | null
+          published_snapshot: Json | null
+          published_snapshot_hash: string | null
+          rejected_at: string | null
+          rejection_notes: string | null
+          rejection_reason: string | null
+          rejection_reason_code: string | null
+          rejection_reason_id: string | null
+          request_date: string | null
+          root_organization_id: string | null
+          search_text: string | null
+          sent_at: string | null
+          signature_image: string | null
+          stage_id: string | null
+          status: string | null
+          template_id: string | null
+          template_snapshot: Json | null
+          title: string
+          tracking_token: string | null
+          updated_at: string
+          valid_until: string | null
+          value: number
+          value_sem_iva: number | null
+          view_count: number | null
+          viewed_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "proposals"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      proposals_list_filtered: {
+        Args: {
+          _comercial: string
+          _comercial_none: boolean
+          _created_by_fallback_only: boolean
+          _date_from: string
+          _date_to: string
+          _expired: boolean
+          _follow_up_days: number
+          _no_response: boolean
+          _no_validity: boolean
+          _now: string
+          _only_mine: string
+          _organization_id: string
+          _scope_created_by_ids: string[]
+          _scope_deal_ids: string[]
+          _scope_mode: string
+          _search: string
+          _search_entity_ids: string[]
+          _stage_filter: string
+          _tz: string
+          _workflow_stage_ids: string[]
+        }
+        Returns: {
+          accepted_at: string
+          created_at: string
+          has_no_validity: boolean
+          id: string
+          is_lost: boolean
+          is_no_response: boolean
+          is_past_validity: boolean
+          is_won: boolean
+          stage_id: string
+          stage_name: string
+          stage_order: number
+          title: string
+          valid_until: string
+          value: number
+          value_sem_iva: number
+        }[]
+      }
       purge_business_entity: {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
@@ -16349,6 +17091,19 @@ export type Database = {
       purge_old_otp_codes: { Args: never; Returns: undefined }
       purge_old_rate_limit_attempts: { Args: never; Returns: undefined }
       purge_old_usage_counters: { Args: never; Returns: undefined }
+      quotes_compute_search_text: {
+        Args: {
+          p_deal_id: string
+          p_entity_id: string
+          p_quote_number: string
+          p_title: string
+        }
+        Returns: string
+      }
+      recalculate_proposal_value: {
+        Args: { p_proposal_id: string }
+        Returns: number
+      }
       recompute_leads_v2_buckets: {
         Args: { p_org: string }
         Returns: {
@@ -16535,6 +17290,17 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      rpc_adjust_stock: {
+        Args: {
+          p_direction: string
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_reason: string
+          p_warehouse_id: string
+        }
+        Returns: number
       }
       rpc_bulk_delete_brand: {
         Args: { p_ids: string[]; p_organization_id: string }
@@ -16739,6 +17505,7 @@ export type Database = {
           origin_source: string | null
           origin_source_id: string | null
           root_organization_id: string
+          search_text: string | null
           source_id: string | null
           source_type: string | null
           status: string | null
@@ -16951,6 +17718,7 @@ export type Database = {
           origin_source: string | null
           origin_source_id: string | null
           root_organization_id: string
+          search_text: string | null
           source_id: string | null
           source_type: string | null
           status: string | null
@@ -17422,6 +18190,7 @@ export type Database = {
           rejection_reason_id: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           sent_at: string | null
           signature_image: string | null
           stage_id: string | null
@@ -17684,6 +18453,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_decrement_stock: {
+        Args: {
+          p_counterparty?: string
+          p_document_number: string
+          p_document_type: string
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_warehouse_id: string
+        }
+        Returns: number
+      }
       rpc_decrypt_vault_secret: {
         Args: { p_secret_id: string }
         Returns: string
@@ -17703,6 +18484,10 @@ export type Database = {
       rpc_delete_bundle_component: {
         Args: { p_bundle_id: string; p_id: string }
         Returns: undefined
+      }
+      rpc_delete_bundle_components: {
+        Args: { p_bundle_id: string; p_ids: string[] }
+        Returns: number
       }
       rpc_delete_item_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_lead_workflow_automation: {
@@ -17856,6 +18641,7 @@ export type Database = {
           quote_number: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           site_address_id: string | null
           subtotal: number | null
           template_id: string | null
@@ -18032,6 +18818,60 @@ export type Database = {
         Args: { p_id: string; p_new_owner_id: string }
         Returns: string
       }
+      rpc_receive_purchase_order: {
+        Args: { p_purchase_order_id: string; p_warehouse_id: string }
+        Returns: Json
+      }
+      rpc_receive_purchase_order_lines: {
+        Args: {
+          p_lines: Json
+          p_purchase_order_id: string
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
+      rpc_register_stock_entry: {
+        Args: {
+          p_counterparty?: string
+          p_item_supplier_id: string
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_unit_cost?: number
+          p_warehouse_id: string
+        }
+        Returns: number
+      }
+      rpc_register_stock_loss: {
+        Args: {
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_reason: string
+          p_warehouse_id: string
+        }
+        Returns: number
+      }
+      rpc_register_stock_transfer: {
+        Args: {
+          p_from_warehouse_id: string
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_to_warehouse_id: string
+        }
+        Returns: Json
+      }
+      rpc_register_supplier_return: {
+        Args: {
+          p_item_supplier_id: string
+          p_notes?: string
+          p_product_id: string
+          p_qty: number
+          p_warehouse_id: string
+        }
+        Returns: number
+      }
       rpc_resolve_form_submission: {
         Args: {
           p_action: string
@@ -18198,6 +19038,7 @@ export type Database = {
           quote_number: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           site_address_id: string | null
           subtotal: number | null
           template_id: string | null
@@ -18237,6 +19078,7 @@ export type Database = {
           next_action_type: string | null
           notes: string | null
           organization_id: string | null
+          proposal_id: string | null
           result: string | null
           root_organization_id: string | null
           sentiment: string | null
@@ -18273,6 +19115,7 @@ export type Database = {
           origin_source: string | null
           origin_source_id: string | null
           root_organization_id: string
+          search_text: string | null
           source_id: string | null
           source_type: string | null
           status: string | null
@@ -18426,6 +19269,7 @@ export type Database = {
           origin_source: string | null
           origin_source_id: string | null
           root_organization_id: string
+          search_text: string | null
           source_id: string | null
           source_type: string | null
           status: string | null
@@ -18944,6 +19788,7 @@ export type Database = {
           rejection_reason_id: string | null
           request_date: string | null
           root_organization_id: string | null
+          search_text: string | null
           sent_at: string | null
           signature_image: string | null
           stage_id: string | null
@@ -19403,6 +20248,12 @@ export type Database = {
         Args: { p_resource_user_id: string }
         Returns: boolean
       }
+      search_entity_ids_by_word: {
+        Args: { p_word: string }
+        Returns: {
+          entity_id: string
+        }[]
+      }
       search_lead_entities: {
         Args: { p_limit?: number; p_org_ids: string[]; p_search: string }
         Returns: {
@@ -19495,6 +20346,21 @@ export type Database = {
           _organization_id: string
         }
         Returns: undefined
+      }
+      sync_entity_primary_address: {
+        Args: {
+          p_city?: string
+          p_created_by?: string
+          p_district?: string
+          p_entity_id: string
+          p_organization_id: string
+          p_postal_code: string
+          p_street: string
+        }
+        Returns: {
+          address_id: string
+          decision: string
+        }[]
       }
       unlink_organization_node: {
         Args: { p_child_org_id: string; p_created_by?: string }
