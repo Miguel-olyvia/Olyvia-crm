@@ -74,6 +74,7 @@ import { ProposalCreateDialog } from "@/components/proposals/ProposalCreateDialo
 import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClientMeetingDialog";
 import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ClientRecord {
   id: string;
@@ -1103,6 +1104,7 @@ const AnewClients = () => {
       toast({ title: !currentVip ? "Cliente marcado como VIP" : "Cliente deixou de ser VIP" });
       setClients([]); setHasMore(true); loadClients(0, true);
     } catch (err: any) {
+      captureFlowError(err, "client-lifecycle");
       toast({ title: t('clients.toast.vipUpdateError'), description: err.message, variant: "destructive" });
     } finally {
       setVipTogglingClientId(null);
@@ -1142,7 +1144,7 @@ const AnewClients = () => {
       await resolveClientNotifications([clientToDelete.id]);
       toast({ title: t('clients.toast.movedToTrash') });
       setDeleteDialogOpen(false); setClientToDelete(null); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: t('clients.toast.deleteError'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('clients.toast.deleteError'), description: error.message, variant: "destructive" }); }
   };
 
   const toggleSelectAll = () => { selectedIds.size === displayClients.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(displayClients.map(c => c.id))); };
@@ -1187,7 +1189,7 @@ const AnewClients = () => {
       }
       toast({ title: t('clients.toast.statusUpdated'), description: t('clients.toast.statusUpdatedDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkStatusDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: t('common.error'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('common.error'), description: error.message, variant: "destructive" }); }
   };
 
   const handleBulkDelete = async () => {
@@ -1207,7 +1209,7 @@ const AnewClients = () => {
       await resolveClientNotifications(ids);
       toast({ title: t('clients.toast.bulkMovedToTrash'), description: t('clients.toast.bulkMovedToTrashDesc', { count: selectedIds.size }) });
       setSelectedIds(new Set()); setBulkDeleteDialogOpen(false); setClients([]); setHasMore(true); loadClients(0, true);
-    } catch (error: any) { toast({ title: t('clients.toast.bulkDeleteError'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('clients.toast.bulkDeleteError'), description: error.message, variant: "destructive" }); }
   };
 
   // Bulk "Atribuir a...": reuses the same audit-context + org-scoped update
@@ -1228,6 +1230,7 @@ const AnewClients = () => {
       toast({ title: t('clients.toast.bulkAssignSuccess'), description: t('clients.toast.bulkAssignSuccessDesc', { count: selectedIds.size, name: assignedUserMap.get(bulkAssignUserId) || "comercial selecionado" }) });
       setSelectedIds(new Set()); setBulkAssignDialogOpen(false); setBulkAssignUserId(""); setClients([]); setHasMore(true); loadClients(0, true);
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: t('clients.toast.bulkAssignError'), description: error.message, variant: "destructive" });
     } finally {
       setBulkActionLoading(false);
@@ -1316,6 +1319,7 @@ const AnewClients = () => {
       }
       setSelectedIds(new Set());
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: t('clients.toast.bulkDealsError'), description: error.message, variant: "destructive" });
     } finally {
       setBulkActionLoading(false);
@@ -1493,7 +1497,7 @@ const AnewClients = () => {
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
-    } catch (error: any) { toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
@@ -1607,6 +1611,7 @@ const AnewClients = () => {
           setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
           setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
         } catch (err: any) {
+          captureFlowError(err, "entity-conversion");
           toast({ title: t('clients.toast.convertError'), description: err.message, variant: "destructive" });
         } finally { setSavingClient(false); }
       }
@@ -1620,6 +1625,7 @@ const AnewClients = () => {
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
+      captureFlowError(err, "client-lifecycle");
       toast({ title: t('clients.toast.updateError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
@@ -1635,6 +1641,7 @@ const AnewClients = () => {
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
+      captureFlowError(err, "client-lifecycle");
       toast({ title: t('clients.toast.shareEntityError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
@@ -1679,6 +1686,7 @@ const AnewClients = () => {
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
+      captureFlowError(err, "client-lifecycle");
       toast({ title: t('clients.toast.createError'), description: err.message, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
@@ -1713,6 +1721,7 @@ const AnewClients = () => {
             : `${result.rowCount} clientes exportados. ${t('clients.toast.exportNoSensitive')}`,
       });
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({ title: t('clients.toast.exportError'), description: error.message, variant: "destructive" });
     } finally {
       setExporting(false);

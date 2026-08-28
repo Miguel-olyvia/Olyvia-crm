@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Button } from "@/components/ui/button";
@@ -531,6 +532,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       }
     } catch (e) {
       console.error("Chat error:", e);
+      captureFlowError(e, "ai-assistant");
       toast({ 
         title: "Erro", 
         description: e instanceof Error ? e.message : "Erro ao comunicar com a assistente", 

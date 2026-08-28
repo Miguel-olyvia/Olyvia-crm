@@ -60,6 +60,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { OrganizationFormSection, type OrganizationSelection } from "@/components/OrganizationFormSection";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Service {
   id: string;
@@ -471,6 +472,7 @@ export default function Services() {
       await exportServicesToCSV(filteredServices, activeCompany?.id);
       toast({ title: t("services.toast.exportSuccess") });
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.exportError"),
         description: error.message,
@@ -483,6 +485,7 @@ export default function Services() {
     try {
       downloadServicesTemplate();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.templateError"),
         description: error.message,
@@ -532,6 +535,7 @@ export default function Services() {
       setImportDialogOpen(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.importError"),
         description: error.message,

@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -670,6 +671,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       setDialogOpen(false);
       loadData();
     } catch (err: any) {
+      captureFlowError(err, "deal-lifecycle");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setSavingNeed(false);
@@ -696,6 +698,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       toast({ title: "Necessidade removida" });
       loadData();
     } catch (err: any) {
+      captureFlowError(err, "deal-lifecycle");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     }
   };
@@ -818,7 +821,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       toast({ title: cfgEditingTemplate ? "Template atualizado" : "Template criado" });
       setCfgTemplateDialogOpen(false);
       loadData();
-    } catch (err: any) { toast({ title: "Erro", description: err.message, variant: "destructive" }); }
+    } catch (err: any) { captureFlowError(err, "deal-lifecycle"); toast({ title: "Erro", description: err.message, variant: "destructive" }); }
   };
 
   const cfgDeleteTemplate = async (id: string) => {

@@ -34,6 +34,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface DealWorkflowStage {
   id: string;
@@ -287,6 +288,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
         .eq("stage_id", deletingStage.id)
         .eq("organization_id", companyId as string);
       if (migrateError) {
+        captureFlowError(migrateError, "deal-lifecycle");
         toast({ title: "Erro ao migrar deals", description: migrateError.message, variant: "destructive" });
         return;
       }
@@ -296,6 +298,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
       .update({ is_active: false })
       .eq("id", deletingStage.id);
     if (error) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Estágio removido" });

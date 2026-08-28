@@ -77,6 +77,7 @@ import type { RuleGroup } from "./workflow/conditionCatalog";
 import { isEmptyRule } from "./workflow/conditionCatalog";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface WorkflowStage {
   id: string;
@@ -546,6 +547,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         .eq("workflow_stage_id", deletingStage.id)
         .eq("organization_id", companyId);
       if (migrateError) {
+        captureFlowError(migrateError, "lead-lifecycle");
         toast({ title: "Erro ao migrar leads", description: migrateError.message, variant: "destructive" });
         return;
       }
@@ -615,6 +617,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
 
     if (error) {
       setRecomputing(false);
+      captureFlowError(error, "lead-lifecycle");
       toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
       return;
     }

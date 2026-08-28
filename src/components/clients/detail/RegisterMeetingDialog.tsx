@@ -9,6 +9,7 @@ import { Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { clientMeetingRegisterSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 
 interface RegisterMeetingDialogProps {
@@ -128,6 +129,7 @@ export function RegisterMeetingDialog({
         openChannel(selectedChannel);
       }
     } catch (e: any) {
+      captureFlowError(e, "entity-interaction-tracking");
       toast({ title: "Erro", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);

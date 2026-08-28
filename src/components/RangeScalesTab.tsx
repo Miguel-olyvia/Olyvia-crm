@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface RangeScalesTabProps {
   attributeId: string;
@@ -331,6 +332,7 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
       setHasOwnScales(contextType !== 'global');
       setInheritedFromName(null);
     } catch (error: any) {
+      captureFlowError(error, "pricing-partial-write");
       toast({ title: "Erro ao guardar escalões", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -355,6 +357,7 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
       toast({ title: "Escalões próprios removidos — a herdar do nível superior" });
       loadRangesWithInheritance();
     } catch (error: any) {
+      captureFlowError(error, "pricing-partial-write");
       toast({ title: "Erro ao reverter", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);

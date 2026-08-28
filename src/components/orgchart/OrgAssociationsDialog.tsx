@@ -19,6 +19,7 @@ import { getOrgTypeLabel, OrgType } from "./OrgChartCard";
 import { z } from "zod";
 import { withAuditContext } from "@/utils/auditContext";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Association selections must reference orgs that are actually associable
 // (loaded per dialog session); built dynamically since valid IDs change.
@@ -191,6 +192,7 @@ export function OrgAssociationsDialog({
       onSuccess();
       onOpenChange(false);
     } catch (error: any) {
+      captureFlowError(error, "org-structure-partial-write");
       toast({ title: t('common.error'), description: error.message, variant: 'destructive' });
     } finally {
       setSaving(false);

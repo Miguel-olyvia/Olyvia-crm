@@ -54,6 +54,7 @@ import { exportBundlesToCSV, parseBundlesCSV, downloadBundlesTemplate } from "@/
 import { PermissionGate } from "@/components/PermissionGate";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const MAX_BUNDLES = 2000;
 
@@ -506,6 +507,7 @@ const Bundles = () => {
         description: t('bundles.toast.exportSuccessDesc') || "Ficheiro CSV descarregado.",
       });
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('bundles.toast.exportError') || "Erro na exportação",
         description: error.message,
@@ -631,6 +633,7 @@ const Bundles = () => {
           description: t('bundles.toast.importCancelledDesc'),
         });
       } else {
+        captureFlowError(error, "record-export-import");
         toast({
           title: t('bundles.toast.importError') || "Erro na importação",
           description: error.message,

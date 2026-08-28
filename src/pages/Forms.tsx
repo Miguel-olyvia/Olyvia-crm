@@ -86,6 +86,7 @@ import {
   type FormI18nConfig,
 } from "@/lib/formI18n";
 import { formMetadataSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Form {
   id: string;
@@ -437,6 +438,7 @@ export default function Forms() {
       toast({ title: "Formulário definido como primário" });
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "form-submission-intake");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -568,6 +570,7 @@ export default function Forms() {
       loadData();
     } catch (error: any) {
       console.error("Error duplicating form:", error);
+      captureFlowError(error, "form-submission-intake");
       toast({ title: "Erro ao duplicar", description: error.message, variant: "destructive" });
     }
   };

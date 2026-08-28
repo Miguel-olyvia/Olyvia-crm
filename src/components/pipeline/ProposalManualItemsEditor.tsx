@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFoo
 import { Plus, Trash2, GripVertical, Package, Save, Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ManualItem { id?: string; proposal_id: string; description: string; quantity: number; unit_price: number; sort_order: number; notes: string | null; _isNew?: boolean; _isDirty?: boolean; }
 
@@ -42,7 +43,7 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
       }
       toast({ title: "Itens guardados com sucesso" });
       await fetchItems();
-    } catch (err: any) { toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" }); } finally { setSaving(false); }
+    } catch (err: any) { captureFlowError(err, "proposal-lifecycle"); toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" }); } finally { setSaving(false); }
   };
 
   const grandTotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);

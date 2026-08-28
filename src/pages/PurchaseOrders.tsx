@@ -29,6 +29,7 @@ import { OrganizationFormSection, OrganizationSelection } from "@/components/Org
 import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument";
 import { purchaseOrderSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -442,6 +443,7 @@ const PurchaseOrders = () => {
       setSuppliers(suppliersRes.data || []);
     } catch (error: any) {
       if (loadRequestRef.current !== requestId) return;
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.loadError'),
         description: error.message,
@@ -578,6 +580,7 @@ const PurchaseOrders = () => {
 
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.deleteError'),
         description: error.message,
@@ -595,6 +598,7 @@ const PurchaseOrders = () => {
 
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.deleteError'),
         description: error.message,
@@ -866,6 +870,7 @@ const PurchaseOrders = () => {
       setOrderItems([]);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: editingId ? t('purchaseOrders.toast.updateError') : t('purchaseOrders.toast.createError'),
         description: error.message,
@@ -980,6 +985,7 @@ const PurchaseOrders = () => {
         title: t('purchaseOrders.toast.pdfSuccess'),
       });
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-document");
       toast({
         title: t('purchaseOrders.toast.pdfError'),
         description: error.message,
@@ -1062,6 +1068,7 @@ const PurchaseOrders = () => {
       setImportDialogOpen(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('purchaseOrders.toast.importError'),
         description: error.message,

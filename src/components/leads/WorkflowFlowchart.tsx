@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import type { WorkflowStage } from "./LeadWorkflowConfig";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Props {
   stages: WorkflowStage[];
@@ -119,6 +120,7 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
       setHasChanges(false);
       resetHistory();
     } catch (e: any) {
+      captureFlowError(e, "lead-lifecycle");
       toast({ title: "Erro ao guardar", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);

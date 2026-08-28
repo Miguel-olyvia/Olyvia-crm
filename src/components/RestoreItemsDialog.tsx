@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface TrashedRow {
   id: string;
@@ -95,6 +96,7 @@ export function RestoreItemsDialog({
       setRows((prev) => prev.filter((r) => r.id !== id));
       onRestored();
     } catch (e: any) {
+      captureFlowError(e, "soft-delete-restore");
       toast({ title: "Erro a restaurar", description: e.message, variant: "destructive" });
     } finally {
       setRestoringId(null);

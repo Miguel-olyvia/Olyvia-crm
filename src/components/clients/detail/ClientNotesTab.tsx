@@ -6,6 +6,7 @@ import { Loader2, StickyNote, Pin, Send, PhoneCall, Mail, Users, MessageCircle, 
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ClientNotesTabProps {
   entityId: string;
@@ -84,6 +85,7 @@ export function ClientNotesTab({ entityId, organizationId }: ClientNotesTabProps
       toast({ title: "Nota adicionada" });
       loadNotes();
     } catch (e: any) {
+      captureFlowError(e, "entity-interaction-tracking");
       toast({ title: "Erro", description: e.message, variant: "destructive" });
     } finally {
       setSaving(false);

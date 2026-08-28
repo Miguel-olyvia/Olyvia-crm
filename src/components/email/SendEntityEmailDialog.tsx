@@ -352,6 +352,7 @@ export function SendEntityEmailDialog({
       onSent?.();
     } catch (err: any) {
       console.error("Error sending email:", err);
+      captureFlowError(err, "entity-email-send");
       toast({ title: "Erro ao enviar email", description: err.message, variant: "destructive" });
     } finally {
       setSending(false);

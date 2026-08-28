@@ -5,6 +5,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import type { Database } from "@/integrations/supabase/types";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 /**
  * Name of a Supabase RPC actually declared in `Database["public"]["Functions"]`.
@@ -131,6 +132,7 @@ export function useBulkActions({
       setBulkStatusDialogOpen(false);
       onSuccess?.();
     } catch (error: unknown) {
+      captureFlowError(error, "bulk-record-action");
       toast({
         title: t('common.error'),
         description: error instanceof Error ? error.message : String(error),
@@ -191,6 +193,7 @@ export function useBulkActions({
       setBulkDeleteDialogOpen(false);
       onSuccess?.();
     } catch (error: unknown) {
+      captureFlowError(error, "bulk-record-action");
       toast({
         title: t('common.error'),
         description: error instanceof Error ? error.message : String(error),
@@ -243,6 +246,7 @@ export function useBulkActions({
       setBulkNewCompanyId("");
       onSuccess?.();
     } catch (error: unknown) {
+      captureFlowError(error, "bulk-record-action");
       toast({
         title: t('common.error'),
         description: error instanceof Error ? error.message : String(error),

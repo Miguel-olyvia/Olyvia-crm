@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
@@ -709,12 +710,14 @@ export function useConfigTemplate(productId: string | null, organizationId: stri
           .delete()
           .eq("slot_id", id);
         if (delErr) {
+          captureFlowError(delErr, "config-partial-write");
           toast({ title: "Erro a limpar valores", description: delErr.message, variant: "destructive" });
           return;
         }
       }
       const { error } = await supabase.from("product_config_slots").update(dbPatch).eq("id", id);
       if (error) {
+        captureFlowError(error, "config-partial-write");
         toast({ title: "Erro a atualizar escolha", description: error.message, variant: "destructive" });
         return;
       }

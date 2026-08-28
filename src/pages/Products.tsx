@@ -88,6 +88,7 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Product {
   id: string;
@@ -1400,6 +1401,7 @@ export default function Products() {
         description: t('products.toast.exportSuccessDesc'),
       });
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('products.toast.exportError'),
         description: error.message,

@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface ProposalRejectionReason {
   code: string;
@@ -160,6 +161,7 @@ export function ProposalRejectReasonDialog({
       setNewLabel("");
       setCreating(false);
     } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
       toast({
         title: "Não foi possível criar o motivo",
         description: err?.message || "Tente novamente.",

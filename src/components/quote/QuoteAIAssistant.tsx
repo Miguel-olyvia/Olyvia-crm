@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface AISuggestion {
   product_id: string;
@@ -125,6 +126,7 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
 
     } catch (error: any) {
       console.error("AI Assistant error:", error);
+      captureFlowError(error, "ai-assistant");
       toast({
         title: "Erro ao consultar assistente",
         description: error.message,

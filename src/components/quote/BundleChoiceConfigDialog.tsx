@@ -18,6 +18,7 @@ import { z } from "zod";
 import { Package, Wrench, Tag, ChevronDown, Layers, AlertCircle } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ChoiceGroup {
   id: string;
@@ -201,6 +202,7 @@ export function BundleChoiceConfigDialog({
         setComponentAttrs({});
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);

@@ -1124,6 +1124,7 @@ const Proposals = () => {
       }
       currentPageRef.current += 1;
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({
         title: t('proposals.toast.loadError'),
         description: error.message,
@@ -1232,6 +1233,7 @@ const Proposals = () => {
       .maybeSingle();
 
     if (error) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.loadError'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1522,6 +1524,7 @@ const Proposals = () => {
       toast({ title: t('proposals.toast.deleteSuccess'), description: t('proposals.toast.movedToTrashDesc') });
       afterProposalMutation([deletingId], { removed: true });
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteDialogOpen(false);
@@ -1578,6 +1581,7 @@ const Proposals = () => {
       setBulkDeleteDialogOpen(false);
       afterProposalMutation(deletedIds, { removed: true });
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkDeleting(false);
@@ -1605,6 +1609,7 @@ const Proposals = () => {
       setBulkNewStatus("");
       afterProposalMutation(changedIds);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkStatusChanging(false);
@@ -1637,6 +1642,7 @@ const Proposals = () => {
       setBulkNewStatus("");
       afterProposalMutation(rejectedIds);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkStatusChanging(false);
@@ -1737,6 +1743,7 @@ const Proposals = () => {
       toast({ title: t('proposals.toast.duplicateSuccess'), description: t('proposals.toast.duplicateSuccessDesc') });
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.duplicateError'), description: error.message, variant: "destructive" });
     } finally {
       setDuplicatingProposalId(null);
@@ -1835,6 +1842,7 @@ const Proposals = () => {
       loadData();
       navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
     } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
       toast({ title: t('proposals.toast.createError'), description: err.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -2094,6 +2102,7 @@ const Proposals = () => {
       resetForm();
       if (editedId) afterProposalMutation([editedId]); else loadData();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -2138,6 +2147,7 @@ const Proposals = () => {
       setRenewDate("");
       afterProposalMutation([renewedId]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro ao renovar validade", description: error.message, variant: "destructive" });
     }
   };
@@ -2181,6 +2191,7 @@ const Proposals = () => {
       });
       afterProposalMutation([proposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -2219,6 +2230,7 @@ const Proposals = () => {
       setDetailsOpen(false);
       afterProposalMutation([targetProposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       acceptProposalLockRef.current = false;
@@ -2320,6 +2332,7 @@ const Proposals = () => {
       setDetailsOpen(false);
       afterProposalMutation([rejectedId]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -2376,6 +2389,7 @@ const Proposals = () => {
       });
       afterProposalMutation([proposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });
     }
   };
@@ -2434,6 +2448,7 @@ const Proposals = () => {
         description: `${result.rowCount} propostas exportadas.`,
       });
     } catch (error: any) {
+      captureFlowError(error, "proposal-document-export");
       toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
     } finally {
       setExportingProposals(false);
@@ -2459,6 +2474,7 @@ const Proposals = () => {
         description: `${result.rowCount} propostas exportadas.`,
       });
     } catch (error: any) {
+      captureFlowError(error, "proposal-document-export");
       toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
     } finally {
       setExportingProposals(false);
@@ -2758,6 +2774,7 @@ const Proposals = () => {
               const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
               downloadBlob(blob, fileName);
             } catch (e: any) {
+              captureFlowError(e, "proposal-document-export");
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
             }
           }}
@@ -3656,6 +3673,7 @@ const Proposals = () => {
             onMoveStage={async (proposalId, newStageId) => {
               const { error } = await supabase.from("proposals").update({ stage_id: newStageId }).eq("id", proposalId);
               if (error) {
+                captureFlowError(error, "proposal-lifecycle");
                 toast({ title: "Erro", description: error.message, variant: "destructive" });
               } else {
                 toast({ title: "Proposta movida" });
@@ -4034,6 +4052,7 @@ const Proposals = () => {
             setKanbanRejectTarget(null);
             afterProposalMutation([movedId]);
           } catch (error: any) {
+            captureFlowError(error, "proposal-lifecycle");
             toast({ title: "Erro", description: error.message, variant: "destructive" });
           }
         }}

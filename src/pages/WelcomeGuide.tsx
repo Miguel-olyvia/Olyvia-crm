@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import olyviaLogo from "@/assets/olyvia-logo-final.png";
 import olyviaIcon from "@/assets/olyvia-icon.png";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ModuleItem {
   icon: React.ReactNode;
@@ -230,6 +231,7 @@ const WelcomeGuide = () => {
       navigate("/dashboard");
     } catch (error: any) {
       console.error("Error completing welcome:", error);
+      captureFlowError(error, "onboarding-completion");
       toast({
         title: t("common.error"),
         description: error.message,
