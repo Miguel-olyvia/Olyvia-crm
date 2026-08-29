@@ -9,7 +9,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
-import { resolveContractsScopeUserIds } from "@/lib/contracts/scope";
+import { resolveContractsScopeUserIds, canActOnContract } from "@/lib/contracts/scope";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
@@ -1200,8 +1200,15 @@ const ClientContracts = () => {
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
   const deleteScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.delete");
-  const canEditContract = (c: { created_by?: string | null }) =>
-    isSystemAdmin || canActOnEntity(editScope, c, scopeAnewUserId, null, teamMemberIds);
+  // Product decision (2026-08-29): edit scope is aligned with the list's view
+  // scope — a contract ASSIGNED to someone (assigned_to), not just one they
+  // CREATED (created_by), is now editable by them. canActOnEntity stays
+  // untouched (shared with leads/proposals/quotes); this uses the
+  // contracts-only canActOnContract (src/lib/contracts/scope.ts) instead.
+  // Delete intentionally keeps the narrower created_by-only rule — this task
+  // only asked to align EDIT with view.
+  const canEditContract = (c: { created_by?: string | null; assigned_to?: string | null }) =>
+    isSystemAdmin || canActOnContract(editScope, c, scopeAnewUserId, teamMemberIds);
   const canDeleteContract = (c: { created_by?: string | null }) =>
     isSystemAdmin || canActOnEntity(deleteScope, c, scopeAnewUserId, null, teamMemberIds);
 

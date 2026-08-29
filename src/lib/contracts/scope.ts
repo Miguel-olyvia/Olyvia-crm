@@ -36,3 +36,50 @@ export function resolveContractsScopeUserIds(
   }
   return [...allowed];
 }
+
+/**
+ * Contracts-only action gate (edit today; any future client_contracts write
+ * gate keyed on `client_contracts.edit` should reuse this), aligned with the
+ * SAME `created_by` OR `assigned_to` union `resolveContractsScopeUserIds`
+ * already applies to the list's `client_contracts.view` scope.
+ *
+ * Product decision (2026-08-29): a contract REASSIGNED to someone (i.e. its
+ * `assigned_to`, not its `created_by`) must be actionable by that person, not
+ * merely visible. Before this, an OWNED-scope user could see a contract
+ * assigned to them in the list but `canActOnEntity` (usePermissionScope.ts,
+ * keyed on `created_by` alone) refused every edit — they could not even sign
+ * it. Measured against the remote: 14/90 contracts (16%) have
+ * `assigned_to <> created_by`, 9 of those still unsigned.
+ *
+ * Deliberately NOT a change to `canActOnEntity` — that helper is shared with
+ * leads, proposals and quotes, none of which have an `assigned_to` union for
+ * their edit scope and none of which this task asked to touch. This is a
+ * separate, contracts-specific function.
+ *
+ * Scope semantics are otherwise identical to `canActOnEntity`:
+ *   NONE  -> reject
+ *   ORG   -> allow
+ *   TEAM  -> allow iff (created_by OR assigned_to) is the caller, OR is one
+ *            of the caller's teamMemberIds
+ *   OWNED -> allow iff (created_by OR assigned_to) is the caller
+ */
+export function canActOnContract(
+  scope: ScopeLevel,
+  contract: { created_by?: string | null; assigned_to?: string | null },
+  anewUserId: string | null,
+  teamMemberIds: readonly string[] = [],
+): boolean {
+  if (scope === "NONE") return false;
+  if (scope === "ORG") return true;
+
+  const owners = [contract.created_by, contract.assigned_to].filter(
+    (id): id is string => Boolean(id),
+  );
+
+  if (scope === "TEAM") {
+    return owners.some((id) => id === anewUserId || teamMemberIds.includes(id));
+  }
+
+  // OWNED
+  return owners.some((id) => id === anewUserId);
+}

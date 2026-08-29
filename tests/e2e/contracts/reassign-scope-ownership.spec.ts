@@ -382,3 +382,30 @@ test('TEAM scope: NAO consegue reatribuir o contrato de alguem fora da equipa', 
   const { data: row } = await adminSb.from('client_contracts').select('created_by').eq('id', contractId).single()
   expect(row!.created_by, 'o dono nao pode ter mudado').toBe(adminBusinessUserId)
 })
+
+// ── O caso que da sentido a decisao do dono do produto (2026-08-29) ──────────
+// Um contrato CRIADO por A e ATRIBUIDO a B: B, com scope OWNED, passa a poder
+// agir sobre ele (aqui: reatribui-lo), tal como ja o conseguia ver na lista.
+test('OWNED scope: consegue reatribuir um contrato CRIADO por outra pessoa mas ATRIBUIDO a si (assigned_to)', async () => {
+  const contractId = await createDraftContract('owned-scope-assigned-to')
+  // created_by continues to be the admin. Assign directly (assigned_to), NOT
+  // via rpc_reassign_client_contract (which moves created_by, not assigned_to).
+  const { error: assignErr } = await adminSb
+    .from('client_contracts')
+    .update({ assigned_to: ownedAnewUserId })
+    .eq('id', contractId)
+    .eq('organization_id', NIKE_ORG_ID)
+  expect(assignErr, 'atribuir assigned_to ao utilizador OWNED (preparacao)').toBeNull()
+
+  const { error } = await ownedSb.rpc('rpc_reassign_client_contract', {
+    p_id: contractId,
+    p_new_owner_id: outsiderAnewUserId,
+  })
+  expect(
+    error,
+    'OWNED scope deve conseguir reatribuir um contrato que lhe esta ATRIBUIDO, mesmo criado por outra pessoa',
+  ).toBeNull()
+
+  const { data: row } = await adminSb.from('client_contracts').select('created_by').eq('id', contractId).single()
+  expect(row!.created_by).toBe(outsiderAnewUserId)
+})
