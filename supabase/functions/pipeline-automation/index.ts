@@ -1051,40 +1051,41 @@ serve(async (req) => {
       if (caller.anewUserId) {
         await supabase.rpc('set_audit_context', { p_user_id: caller.anewUserId, p_source: 'pipeline' });
       }
-      // Auditoria da aceitacao interna. Este e o caminho que o botao "Marcar
-      // como Assinado" do CRM usa de facto -- nao a rpc_update_client_contract_status,
-      // que so cobre as mudancas de estado do menu. Uma passagem ao vivo a
-      // 28/08 apanhou a diferenca: a RPC gravava a auditoria e o botao nao.
+      // A transicao para "signed" e a auditoria da aceitacao interna
+      // ("aceite internamente por X") tem UMA unica implementacao:
+      // rpc_update_client_contract_status (20261115100000). Esta accao
+      // chama-a em vez de repetir a regra -- duas copias da mesma regra
+      // divergem, e foi esse padrao que causou o defeito de visibilidade
+      // dos contratos.
       //
-      // So se preenche quando o CLIENTE ainda nao assinou. As colunas do
-      // cliente (signature_ip/date, signed_by_name) ficam intactas de
-      // proposito: "aceite internamente por X" nao e "assinado pelo cliente",
-      // e o registo tem de o dizer em vez de o esbater.
-      //
-      // O actor vem do JWT de quem chamou (caller.anewUserId), nunca do corpo
-      // do pedido -- um campo de prova que o cliente escolhe nao prova nada.
-      const contractUpdate: Record<string, unknown> = { status: "signed" };
-      if (caller.anewUserId && !caller.isServiceRole && caller.anewUserId !== "service_role") {
-        const { data: existing } = await supabase
-          .from("client_contracts")
-          .select("signature_ip, signature_date, signed_by_name, company_signed_by_id")
-          .eq("id", contract_id)
-          .maybeSingle();
-        const clienteAssinou = Boolean(
-          existing?.signature_ip || existing?.signature_date || existing?.signed_by_name,
+      // A RPC resolve o actor a partir de auth.uid()/current_business_user_id(),
+      // logo tem de ser chamada com o JWT de quem clicou, nao com a service
+      // key: com service_role auth.uid() e nulo e o registo ficaria sem autor.
+      // O JWT vem do cabecalho Authorization do pedido -- o mesmo que o
+      // resolveCallerIdentity acima ja validou.
+      const authHeader = req.headers.get("Authorization") ?? "";
+      if (!caller.isServiceRole && authHeader) {
+        const supabaseAsCaller = createClient(
+          supabaseUrl,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+          { global: { headers: { Authorization: authHeader } } },
         );
-        if (!clienteAssinou && !existing?.company_signed_by_id) {
-          const { data: actor } = await supabase
-            .from("anew_users")
-            .select("name")
-            .eq("id", caller.anewUserId)
-            .maybeSingle();
-          contractUpdate.company_signature_date = new Date().toISOString();
-          contractUpdate.company_signed_by_id = caller.anewUserId;
-          contractUpdate.company_signed_by_name = actor?.name ?? "Utilizador do CRM";
+        const { error: statusErr } = await supabaseAsCaller.rpc(
+          "rpc_update_client_contract_status",
+          { p_id: contract_id, p_status: "signed" },
+        );
+        if (statusErr) {
+          console.error("[pipeline-automation] rpc_update_client_contract_status failed:", statusErr);
+          return new Response(
+            JSON.stringify({ success: false, message: statusErr.message || "Não foi possível assinar o contrato" }),
+            { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+          );
         }
+      } else {
+        // Chamada interna (service_role): nao ha utilizador, logo nao ha
+        // aceitacao interna para registar. So o estado muda.
+        await supabase.from("client_contracts").update({ status: "signed" }).eq("id", contract_id);
       }
-      await supabase.from("client_contracts").update(contractUpdate).eq("id", contract_id);
 
       // Trigger execute-workflow to handle full client conversion logic
       // (creates anew_clients, sets entity roles, converts lead, updates pipeline_links)
