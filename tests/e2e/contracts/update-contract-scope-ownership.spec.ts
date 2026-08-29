@@ -3,36 +3,35 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { readFileSync } from 'fs'
 
 /**
- * Prova permanente: rpc_update_client_contract_status tem de aplicar o MESMO
- * portao OWNED/TEAM/ORG que a interface ja aplica (canEditContract /
- * canActOnEntity em src/hooks/usePermissionScope.ts, chave client_contracts.edit),
+ * Prova permanente: rpc_update_client_contract (o editor generico do
+ * contrato -- template, datas, notas, condicoes de pagamento) tem de aplicar
+ * o MESMO portao OWNED/TEAM/ORG que a interface ja aplica (canEditContract /
+ * canActOnContract, src/lib/contracts/scope.ts, chave client_contracts.edit),
  * e nao apenas "tem a permissao" + "a organizacao e visivel".
  *
- * Falha confirmada ao vivo antes desta migracao: um utilizador com scope
- * OWNED (ve so os proprios contratos na lista) conseguia, chamando a RPC
- * DIRETAMENTE, transitar o estado de um contrato de outra pessoa -- e ficava
- * registado como autor da transicao. E escrita com peso legal (assinatura),
- * nao apenas leitura indevida.
+ * Ao contrario de rpc_update_client_contract_status e
+ * rpc_reassign_client_contract (corrigidas em 20261115110000/20261115120000),
+ * esta RPC nao tinha NENHUM portao de dono ate 20261115130000 -- confirmado
+ * por leitura de 20260814010000 antes da correcao. Este spec tambem prova o
+ * caso "criado por A, atribuido a B": B, com scope OWNED, passa a poder
+ * editar.
  *
- * Este spec cria os seus proprios utilizadores e fixtures, tudo na
- * organizacao nike, e limpa no fim (ban do auth user + rpc_delete_user +
- * remocao das linhas de equipa/scope/contratos/proposta criadas aqui).
- * Prefixo de fixture: "OLYVIA-1f21dcb7-scope-guard".
+ * Espelha tests/e2e/contracts/status-scope-ownership.spec.ts: mesmas
+ * fixtures/roles reutilizadas (YAGNI), tudo na organizacao nike, limpo no
+ * fim. Prefixo de fixture: "OLYVIA-1f21dcb7-update-guard".
  */
 
 const NIKE_ORG_ID = process.env.E2E_ORG_ID || 'b6ffce4f-f630-4933-833a-008649757a33'
-const FIXTURE_TAG = 'OLYVIA-1f21dcb7-scope-guard'
+const FIXTURE_TAG = 'OLYVIA-1f21dcb7-update-guard'
 const RUN = Date.now().toString().slice(-8)
 
-// Existing nike fixtures reused on purpose (YAGNI — do not create new roles
-// when one with the exact permission set already exists):
+// Same fixtures as the sibling specs — do not invent new roles when these
+// already model exactly what is needed:
 //   qa_e2e_contract_signer_owned_scope -> client_contracts.edit + .view,
-//     no scope override -> defaults to OWNED (role_permissions has the code,
-//     it is not a "binary"/supports_scope=false permission).
+//     no scope override -> defaults to OWNED.
 //   gestor_contratos -> client_contracts.create + .edit + .view + clients.view.
-//     Used here for the TEAM-scope actors; a TEAM override is added on top
-//     of the leader's own membership for this test only, and removed in
-//     afterAll.
+//     Used for the TEAM-scope actors, with a TEAM override added on top of
+//     the leader's own membership for this test only, removed in afterAll.
 const OWNED_ROLE_ID = 'ba0beec3-66f7-4d4b-9b06-fb63e7d06b85'
 const TEAM_CAPABLE_ROLE_ID = 'b10c6fb2-ed52-4173-bddb-ac59242f973f'
 
@@ -134,7 +133,7 @@ test.beforeAll(async () => {
   expect(adminAnew?.id, 'administrador tem de ter anew_users associado').toBeTruthy()
   adminBusinessUserId = adminAnew!.id as string
 
-  // ── Fixture entity + proposal (reutilizavel por nome, como no spec irmao) ──
+  // ── Fixture entity + proposal (reutilizavel por nome, como nos specs irmaos) ──
   const fixtureDisplayName = `${FIXTURE_TAG} Entidade`
   const { data: existingEntity } = await adminSb
     .from('anew_entities')
@@ -159,7 +158,7 @@ test.beforeAll(async () => {
   const { data: proposal, error: proposalError } = await adminSb.rpc('rpc_create_proposal', {
     p_proposal_data: {
       title: `${FIXTURE_TAG} proposta ${RUN}`,
-      description: 'Fixture automatica do teste de ambito de estado de contratos.',
+      description: 'Fixture automatica do teste de ambito de edicao generica de contratos.',
       value: 100,
       probability: 50,
       deal_id: null,
@@ -182,7 +181,7 @@ test.beforeAll(async () => {
 
   // ── Utilizador de scope OWNED (client_contracts.edit + .view, sem override) ──
   const owned = await createFixtureUser({
-    emailLocalPart: 'olyvia-scope-guard-owned',
+    emailLocalPart: 'olyvia-update-guard-owned',
     name: 'Owned Scope User',
     roleId: OWNED_ROLE_ID,
   })
@@ -192,7 +191,7 @@ test.beforeAll(async () => {
 
   // ── Lider de equipa (scope override TEAM) + membro da equipa ────────────
   const leader = await createFixtureUser({
-    emailLocalPart: 'olyvia-scope-guard-leader',
+    emailLocalPart: 'olyvia-update-guard-leader',
     name: 'Team Leader',
     roleId: TEAM_CAPABLE_ROLE_ID,
   })
@@ -201,7 +200,7 @@ test.beforeAll(async () => {
   leaderAuthUserId = leader.authUserId
 
   const member = await createFixtureUser({
-    emailLocalPart: 'olyvia-scope-guard-member',
+    emailLocalPart: 'olyvia-update-guard-member',
     name: 'Team Member',
     roleId: TEAM_CAPABLE_ROLE_ID,
   })
@@ -288,93 +287,85 @@ test.afterAll(async () => {
   }
 })
 
-test('ORG scope (administrador): continua a poder transitar o estado de um contrato de outra pessoa', async () => {
+function updatePayload(contractId: string, notesSuffix: string) {
+  return {
+    p_id: contractId,
+    p_contract_template_id: null,
+    p_start_date: null,
+    p_end_date: null,
+    p_notes: `${FIXTURE_TAG} ${RUN} ${notesSuffix} — editado`,
+    p_payment_terms: null,
+    p_prompt_values: null,
+  }
+}
+
+test('ORG scope (administrador): continua a poder editar um contrato de outra pessoa', async () => {
   const contractId = await createDraftContract('org-scope-admin')
   // created_by is the admin itself by default (rpc_create_client_contract).
 
-  const { error } = await adminSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'cancelled',
-  })
-  expect(error, 'ORG scope deve conseguir transitar qualquer contrato da organizacao').toBeNull()
+  const { error } = await adminSb.rpc('rpc_update_client_contract', updatePayload(contractId, 'org-scope-admin'))
+  expect(error, 'ORG scope deve conseguir editar qualquer contrato da organizacao').toBeNull()
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status).toBe('cancelled')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes).toContain('editado')
 })
 
-test('OWNED scope: consegue transitar o proprio contrato', async () => {
+test('OWNED scope: consegue editar o proprio contrato', async () => {
   const contractId = await createDraftContract('owned-scope-self')
   const { error: reassignErr } = await adminSb.rpc('rpc_reassign_client_contract', {
     p_id: contractId,
     p_new_owner_id: ownedAnewUserId,
   })
-  expect(reassignErr, 'atribuir o contrato ao utilizador OWNED').toBeNull()
+  expect(reassignErr, 'atribuir o contrato ao utilizador OWNED (preparacao)').toBeNull()
 
-  const { error } = await ownedSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'signed',
-  })
-  expect(error, 'OWNED scope deve conseguir transitar o proprio contrato').toBeNull()
+  const { error } = await ownedSb.rpc('rpc_update_client_contract', updatePayload(contractId, 'owned-scope-self'))
+  expect(error, 'OWNED scope deve conseguir editar o proprio contrato').toBeNull()
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status).toBe('signed')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes).toContain('editado')
 })
 
-test('OWNED scope: NAO consegue transitar o contrato de outra pessoa via RPC direta', async () => {
+test('OWNED scope: NAO consegue editar o contrato de outra pessoa via RPC direta', async () => {
   const contractId = await createDraftContract('owned-scope-other')
   // created_by continues to be the admin — someone else, from ownedSb's point of view.
 
-  const { error } = await ownedSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'signed',
-  })
-  expect(error, 'OWNED scope NAO deve conseguir transitar o contrato de outra pessoa').not.toBeNull()
+  const { error } = await ownedSb.rpc('rpc_update_client_contract', updatePayload(contractId, 'owned-scope-other'))
+  expect(error, 'OWNED scope NAO deve conseguir editar o contrato de outra pessoa').not.toBeNull()
   expect(error?.message || '').toContain('âmbito')
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status, 'o estado nao pode ter mudado').toBe('draft')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes, 'as notas nao podem ter mudado').not.toContain('editado')
 })
 
-test('TEAM scope: o lider consegue transitar o contrato de um membro da equipa', async () => {
+test('TEAM scope: o lider consegue editar o contrato de um membro da equipa', async () => {
   const contractId = await createDraftContract('team-scope-member')
   const { error: reassignErr } = await adminSb.rpc('rpc_reassign_client_contract', {
     p_id: contractId,
     p_new_owner_id: memberAnewUserId,
   })
-  expect(reassignErr, 'atribuir o contrato ao membro da equipa').toBeNull()
+  expect(reassignErr, 'atribuir o contrato ao membro da equipa (preparacao)').toBeNull()
 
-  const { error } = await leaderSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'cancelled',
-  })
-  expect(error, 'TEAM scope deve conseguir transitar o contrato de um membro da equipa').toBeNull()
+  const { error } = await leaderSb.rpc('rpc_update_client_contract', updatePayload(contractId, 'team-scope-member'))
+  expect(error, 'TEAM scope deve conseguir editar o contrato de um membro da equipa').toBeNull()
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status).toBe('cancelled')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes).toContain('editado')
 })
 
-test('TEAM scope: NAO consegue transitar o contrato de alguem fora da equipa', async () => {
+test('TEAM scope: NAO consegue editar o contrato de alguem fora da equipa', async () => {
   const contractId = await createDraftContract('team-scope-outsider')
   // created_by continues to be the admin — not a member of the leader's team.
 
-  const { error } = await leaderSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'cancelled',
-  })
-  expect(error, 'TEAM scope NAO deve conseguir transitar o contrato de alguem fora da equipa').not.toBeNull()
+  const { error } = await leaderSb.rpc('rpc_update_client_contract', updatePayload(contractId, 'team-scope-outsider'))
+  expect(error, 'TEAM scope NAO deve conseguir editar o contrato de alguem fora da equipa').not.toBeNull()
   expect(error?.message || '').toContain('âmbito')
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status, 'o estado nao pode ter mudado').toBe('draft')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes, 'as notas nao podem ter mudado').not.toContain('editado')
 })
 
 // ── O caso que da sentido a decisao do dono do produto (2026-08-29) ──────────
-// Um contrato CRIADO por A e ATRIBUIDO a B: hoje B ve-o na lista (o filtro de
-// visibilidade ja une created_by OU assigned_to -- resolveContractsScopeUserIds,
-// src/lib/contracts/scope.ts) mas, antes desta migracao, nao o conseguia
-// assinar -- a RPC so aceitava created_by. Esta migracao alinha a edicao com
-// a visibilidade: B, com scope OWNED, passa a poder agir.
-test('OWNED scope: consegue transitar um contrato CRIADO por outra pessoa mas ATRIBUIDO a si (assigned_to)', async () => {
+test('OWNED scope: consegue editar um contrato CRIADO por outra pessoa mas ATRIBUIDO a si (assigned_to)', async () => {
   const contractId = await createDraftContract('owned-scope-assigned-to')
   // created_by continues to be the admin. Assign directly (assigned_to), NOT
   // via rpc_reassign_client_contract (which moves created_by, not assigned_to).
@@ -393,15 +384,15 @@ test('OWNED scope: consegue transitar um contrato CRIADO por outra pessoa mas AT
   expect(before!.created_by, 'created_by permanece o admin').toBe(adminBusinessUserId)
   expect(before!.assigned_to, 'assigned_to e o utilizador OWNED').toBe(ownedAnewUserId)
 
-  const { error } = await ownedSb.rpc('rpc_update_client_contract_status', {
-    p_id: contractId,
-    p_status: 'signed',
-  })
+  const { error } = await ownedSb.rpc(
+    'rpc_update_client_contract',
+    updatePayload(contractId, 'owned-scope-assigned-to'),
+  )
   expect(
     error,
-    'OWNED scope deve conseguir transitar um contrato que lhe esta ATRIBUIDO, mesmo criado por outra pessoa',
+    'OWNED scope deve conseguir editar um contrato que lhe esta ATRIBUIDO, mesmo criado por outra pessoa',
   ).toBeNull()
 
-  const { data: row } = await adminSb.from('client_contracts').select('status').eq('id', contractId).single()
-  expect(row!.status).toBe('signed')
+  const { data: row } = await adminSb.from('client_contracts').select('notes').eq('id', contractId).single()
+  expect(row!.notes).toContain('editado')
 })
