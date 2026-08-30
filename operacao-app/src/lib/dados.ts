@@ -718,6 +718,30 @@ export async function urlsDosAnexos(caminhos: readonly string[]): Promise<Map<st
  * meio. Se o registo falhar, o ficheiro é apagado — senão ficava lá para
  * sempre, a ocupar espaço, sem nada que soubesse o que era.
  */
+/**
+ * Um nome único para o ficheiro no storage.
+ *
+ * NÃO usa `crypto.randomUUID()`. Essa função só existe em "contexto seguro"
+ * — HTTPS ou localhost. Num telemóvel a abrir a app pelo IP da rede local
+ * (`http://192.168.1.104:5274`) não existe, e o envio de fotos rebentava com
+ * um erro que não dizia porquê. Em produção, com HTTPS, funcionaria — mas
+ * depender de uma API de contexto seguro para gerar um nome de ficheiro é
+ * fragilidade a troco de nada.
+ */
+function nomeSorteado(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  }
+  // Sem crypto de todo: a hora mais aleatoriedade chega para não haver
+  // colisões dentro da mesma ordem.
+  const extra = Array.from({ length: 12 }, () =>
+    Math.floor(Math.random() * 16).toString(16)
+  ).join("");
+  return `${Date.now().toString(16)}${extra}`;
+}
+
 export async function anexarFicheiro(args: {
   ordemId: string;
   organizationId: string;
@@ -731,7 +755,7 @@ export async function anexarFicheiro(args: {
     : "";
   // Nome sorteado, não o do telemóvel: dois "IMG_0001.jpg" na mesma ordem
   // chocariam, e o nome original guarda-se na coluna `nome`.
-  const caminho = `${args.organizationId}/${args.ordemId}/${crypto.randomUUID()}${ext}`;
+  const caminho = `${args.organizationId}/${args.ordemId}/${nomeSorteado()}${ext}`;
 
   const { error: erroUpload } = await supabase.storage
     .from(BUCKET)
@@ -741,10 +765,17 @@ export async function anexarFicheiro(args: {
     });
 
   if (erroUpload) {
+    // eslint-disable-next-line no-console
+    console.error("[Operações] falha a enviar o ficheiro:", erroUpload);
+    const m = erroUpload.message ?? "";
     throw new ErroDeEscrita(
-      erroUpload.message.includes("exceeded")
+      m.includes("exceeded") || m.includes("too large")
         ? "O ficheiro é grande demais. O limite é 25 MB."
-        : erroUpload.message || "Não foi possível enviar o ficheiro."
+        : m.includes("Bucket not found")
+          ? "O armazenamento de Operações não está criado. Falta correr db/anexos.sql."
+          : m.includes("row-level security") || m.includes("Unauthorized")
+            ? "Sem permissão para anexar ficheiros a esta ordem."
+            : m || "Não foi possível enviar o ficheiro."
     );
   }
 
