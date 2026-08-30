@@ -136,6 +136,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/anexos.sql` | Fotos e ficheiros | **sim** — cria o bucket `operacoes` em `storage` |
 | `db/planos-crud.sql` | Criar e editar planos, e experimentar uma regra antes de a gravar | **não** |
 | `db/config.sql` | Montar a operação: códigos, checklists versionadas, medições, equipa | **não** |
+| `db/custos.sql` | Lançar material e serviços, do catálogo ou de uma compra | **não** (só lê `catalog_items` e `purchase_order_items`) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -218,6 +219,7 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_gravar_checklist` | uma checklist e as suas tarefas | publicada é imutável; editar versiona |
 | `rpc_ops_gravar_medicao` | uma medição e as suas opções | uma gama sem limites é recusada |
 | `rpc_ops_gravar_perfil` | quem é da equipa, e o custo/hora | ninguém se despromove a si próprio |
+| `rpc_ops_lancar_custo` | material e serviços gastos | o mesmo material não entra em duas obras |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
@@ -254,7 +256,8 @@ npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
 npm run supabase:planos-crud    # db/planos-crud.sql
-npm run supabase:config         # db/config.sql (por último)
+npm run supabase:config         # db/config.sql
+npm run supabase:custos         # db/custos.sql (por último)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

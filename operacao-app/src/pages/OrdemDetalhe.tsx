@@ -61,6 +61,8 @@ import PainelTarefas from "../components/PainelTarefas";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
+import PainelCustos from "../components/PainelCustos";
+import { comparacaoPorItem, custosDaOrdem, type ComparacaoPorItem, type LinhaDeCusto } from "../lib/custos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
 
 /**
@@ -87,6 +89,8 @@ export default function OrdemDetalhe() {
   const [custo, setCusto] = useState<CustoDaOrdem | null>(null);
   const [previsto, setPrevisto] = useState<LinhaPrevista[]>([]);
   const [anexos, setAnexos] = useState<Anexo[]>([]);
+  const [custos, setCustos] = useState<LinhaDeCusto[]>([]);
+  const [porItem, setPorItem] = useState<ComparacaoPorItem[]>([]);
   const [equipa, setEquipa] = useState<Map<string, MembroEquipa>>(new Map());
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -127,10 +131,12 @@ export default function OrdemDetalhe() {
 
       // Os custos vêm vazios para quem não os pode ver, e isso não é um erro:
       // é a resposta certa. Por isso não passam por `rebentar()`.
-      const [cst, prv, anx] = await Promise.all([
+      const [cst, prv, anx, lin, cmp] = await Promise.all([
         custoDaOrdem(o.id),
         previstoDaOrdem(o.id),
         anexosDaOrdem(o.id),
+        custosDaOrdem(o.id),
+        comparacaoPorItem(o.id),
       ]);
 
       setOrdem(o);
@@ -144,6 +150,8 @@ export default function OrdemDetalhe() {
       setCusto(cst);
       setPrevisto(prv);
       setAnexos(anx);
+      setCustos(lin);
+      setPorItem(cmp);
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
@@ -395,7 +403,16 @@ export default function OrdemDetalhe() {
       </Card>
 
       {/* Orçamentado contra gasto — só aparece se houve orçamento */}
-      <PainelCusto custo={custo} previsto={previsto} />
+      <PainelCusto custo={custo} previsto={previsto} porItem={porItem} />
+
+      {/* O que se gastou, e de onde veio */}
+      <PainelCustos
+        ordemId={ordem.id}
+        estado={ordem.estado}
+        custos={custos}
+        podeVer={custo !== null || custos.length > 0}
+        aoMudar={() => setRecarga((r) => r + 1)}
+      />
 
       {/* Quem vai, e quando */}
       <PainelDespacho

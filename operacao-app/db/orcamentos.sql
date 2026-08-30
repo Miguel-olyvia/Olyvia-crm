@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS public.ops_ordem_previsto (
   ordem_id       uuid NOT NULL REFERENCES public.ops_ordem(id) ON DELETE CASCADE,
   -- → quote_lines.id, sem FK. Serve para rastrear, não para integridade.
   quote_line_id  uuid,
+  -- → catalog_items.id, sem FK. É o que permite comparar o previsto com o
+  -- gasto ITEM A ITEM, e não só em totais.
+  catalog_item_id uuid,
   posicao        integer NOT NULL DEFAULT 0,
   categoria      text,
   descricao      text NOT NULL,
@@ -65,6 +68,10 @@ CREATE TABLE IF NOT EXISTS public.ops_ordem_previsto (
   total_sem_iva  numeric(12,2) NOT NULL DEFAULT 0,
   congelado_em   timestamptz NOT NULL DEFAULT now()
 );
+
+-- Para quem já tinha a tabela antes de a coluna existir.
+ALTER TABLE public.ops_ordem_previsto
+  ADD COLUMN IF NOT EXISTS catalog_item_id uuid;
 
 CREATE INDEX IF NOT EXISTS ops_previsto_ordem_idx
   ON public.ops_ordem_previsto (ordem_id, posicao);
@@ -249,11 +256,14 @@ BEGIN
   -- estão no CRM; o total recalcula-se aqui em vez de se copiar, porque
   -- `total_sem_iva` lá inclui margem e desconto, e o que se quer comparar
   -- com o gasto real é o CUSTO, não o preço de venda.
+  -- `catalog_item_id` viaja com a linha: é o que permite comparar o previsto
+  -- com o gasto ITEM A ITEM, e não só em totais. Sem ele, um total igual
+  -- esconderia um material que ficou barato e outro que disparou.
   INSERT INTO public.ops_ordem_previsto (
-    ordem_id, quote_line_id, posicao, categoria, descricao, unidade,
-    quantidade, custo_material, custo_mao_obra, total_sem_iva)
+    ordem_id, quote_line_id, catalog_item_id, posicao, categoria, descricao,
+    unidade, quantidade, custo_material, custo_mao_obra, total_sem_iva)
   SELECT
-    v_id, l.id, COALESCE(l.ordem, 0), l.categoria,
+    v_id, l.id, l.catalog_item_id, COALESCE(l.ordem, 0), l.categoria,
     COALESCE(nullif(btrim(l.item_description), ''),
              nullif(btrim(l.descricao_snapshot), ''),
              'Linha sem descrição'),

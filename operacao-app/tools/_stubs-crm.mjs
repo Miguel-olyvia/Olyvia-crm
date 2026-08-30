@@ -113,6 +113,7 @@ CREATE TABLE public.quotes (
 CREATE TABLE public.quote_lines (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   quote_id uuid REFERENCES public.quotes(id) ON DELETE CASCADE,
+  catalog_item_id uuid,
   ordem integer DEFAULT 0,
   categoria text,
   descricao_snapshot text,
@@ -122,6 +123,36 @@ CREATE TABLE public.quote_lines (
   custo_material_unit numeric(12,2) DEFAULT 0,
   custo_mao_obra_unit numeric(12,2) DEFAULT 0,
   total_sem_iva numeric(12,2) DEFAULT 0);
+
+-- O catalogo, e as compras. So as colunas que db/custos.sql le.
+CREATE TABLE public.catalog_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid,
+  item_code text,
+  descricao text,
+  categoria text,
+  subcategoria text,
+  tipo text,
+  custo_material numeric(12,2) DEFAULT 0,
+  custo_mao_obra numeric(12,2) DEFAULT 0,
+  ativo boolean DEFAULT true);
+
+CREATE TABLE public.purchase_orders (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid,
+  order_number text,
+  order_date date,
+  status text);
+
+CREATE TABLE public.purchase_order_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purchase_order_id uuid REFERENCES public.purchase_orders(id) ON DELETE CASCADE,
+  description text,
+  sku text,
+  item_type text DEFAULT 'product',
+  quantity numeric(10,2) DEFAULT 1,
+  unit_price numeric(10,2) DEFAULT 0,
+  total_price numeric(10,2) DEFAULT 0);
 
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());

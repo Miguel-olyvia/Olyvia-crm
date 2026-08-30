@@ -1,6 +1,7 @@
 import { Card, Badge, Barra, cx } from "./ui";
 import { Euro } from "./icons";
 import type { CustoDaOrdem, LinhaPrevista } from "../lib/dados";
+import type { ComparacaoPorItem } from "../lib/custos";
 import { euros, eurosComSinal, percentagemComSinal } from "../lib/formatar";
 
 /**
@@ -26,9 +27,12 @@ import { euros, eurosComSinal, percentagemComSinal } from "../lib/formatar";
 export default function PainelCusto({
   custo,
   previsto,
+  porItem,
 }: {
   custo: CustoDaOrdem | null;
   previsto: readonly LinhaPrevista[];
+  /** Previsto e gasto emparelhados por item de catálogo, já ordenados. */
+  porItem: readonly ComparacaoPorItem[];
 }) {
   if (!custo || custo.previsto == null) return null;
 
@@ -74,6 +78,64 @@ export default function PainelCusto({
             ? "Está exatamente no previsto."
             : `Ainda há ${euros(p - r)} de folga.`}
       </p>
+
+      {/* Onde derrapou. Um total só diz que derrapou; isto diz onde. */}
+      {porItem.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Linha a linha
+          </h3>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[30rem] text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="pb-1.5 font-medium">Item</th>
+                  <th className="pb-1.5 text-right font-medium">Orçamentado</th>
+                  <th className="pb-1.5 text-right font-medium">Gasto</th>
+                  <th className="pb-1.5 text-right font-medium">Desvio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {porItem.map((l) => (
+                  <tr key={l.catalog_item_id ?? l.descricao} className="align-top">
+                    <td className="py-1.5 pr-3 text-slate-700">
+                      {l.descricao}
+                      {l.situacao === "nao_orcamentado" && (
+                        <Badge className="ml-2 bg-amber-50 text-amber-800 ring-amber-200">
+                          fora do orçamento
+                        </Badge>
+                      )}
+                      {l.situacao === "nao_gasto" && (
+                        <Badge className="ml-2 bg-slate-100 text-slate-500 ring-slate-200">
+                          por gastar
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular text-slate-500">
+                      {euros(l.previsto)}
+                    </td>
+                    <td className="py-1.5 text-right font-mono tabular text-slate-500">
+                      {euros(l.real)}
+                    </td>
+                    <td
+                      className={cx(
+                        "py-1.5 text-right font-mono tabular font-medium",
+                        Number(l.desvio) > 0 ? "text-red-700" : "text-emerald-700"
+                      )}
+                    >
+                      {eurosComSinal(l.desvio)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            Só os itens que vieram do catálogo. Um custo escrito à mão entra no total, mas não
+            emparelha com nenhuma linha do orçamento.
+          </p>
+        </div>
+      )}
 
       {previsto.length > 0 && (
         <details className="mt-3 border-t border-slate-100 pt-3">
