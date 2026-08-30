@@ -590,6 +590,7 @@ export const translations = {
 
     // Sidebar Menu
     'sidebar.dashboard': 'Dashboard',
+    'sidebar.operations': 'Operations',
     'sidebar.crm': 'CRM',
     'sidebar.clients': 'Clients',
     'sidebar.clientsLegacy': 'Clients (Legacy)',
@@ -7829,6 +7830,7 @@ export const translations = {
     
     // Sidebar Menu
     'sidebar.dashboard': 'Painel',
+    'sidebar.operations': 'Operações',
     'sidebar.crm': 'CRM',
     'sidebar.clients': 'Clientes',
     'sidebar.clientsLegacy': 'Clientes (Legado)',
@@ -15077,6 +15079,7 @@ export const translations = {
     
     // Sidebar Menu
     'sidebar.dashboard': 'Panel',
+    'sidebar.operations': 'Operaciones',
     'sidebar.crm': 'CRM',
     'sidebar.clients': 'Clientes',
     'sidebar.contacts': 'Contactos',
@@ -21833,6 +21836,7 @@ export const translations = {
     
     // Sidebar Menu
     'sidebar.dashboard': 'Tableau de Bord',
+    'sidebar.operations': 'Opérations',
     'sidebar.crm': 'CRM',
     'sidebar.clients': 'Clients',
     'sidebar.contacts': 'Contacts',
@@ -28596,6 +28600,7 @@ export const translations = {
     
     // Sidebar Menu
     'sidebar.dashboard': 'Dashboard',
+    'sidebar.operations': 'Betrieb',
     'sidebar.crm': 'CRM',
     'sidebar.clients': 'Kunden',
     'sidebar.contacts': 'Kontakte',
