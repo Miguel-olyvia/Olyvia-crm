@@ -133,6 +133,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/medicoes.sql` | Responder a medições: o veredicto sai dos limites, e a tarefa acerta-se sozinha | **não** |
 | `db/despacho.sql` | Criar, atribuir e agendar — o caso do telefone a tocar | **não** |
 | `db/orcamentos.sql` | Do orçamento aceite à obra, e o previsto contra o gasto | **não** (só lê `quotes`) |
+| `db/anexos.sql` | Fotos e ficheiros | **sim** — cria o bucket `operacoes` em `storage` |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -241,7 +242,8 @@ npm run supabase:planos         # db/planos.sql
 npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
 npm run supabase:despacho       # db/despacho.sql
-npm run supabase:orcamentos     # db/orcamentos.sql (por último)
+npm run supabase:orcamentos     # db/orcamentos.sql
+npm run supabase:anexos         # db/anexos.sql (por último)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

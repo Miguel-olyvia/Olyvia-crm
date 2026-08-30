@@ -652,3 +652,142 @@ export async function previstoDaOrdem(ordemId: string): Promise<LinhaPrevista[]>
   if (error) return [];
   return (data ?? []) as unknown as LinhaPrevista[];
 }
+
+/* ─────────────────────────────── Anexos ────────────────────────────── */
+
+export interface Anexo {
+  id: string;
+  ordem_id: string;
+  ordem_tarefa_id: string | null;
+  caminho: string;
+  nome: string;
+  mime: string | null;
+  tamanho: number | null;
+  legenda: string | null;
+  privado: boolean;
+  carregado_por: string | null;
+  carregado_em: string;
+}
+
+const BUCKET = "operacoes";
+
+export async function anexosDaOrdem(ordemId: string): Promise<Anexo[]> {
+  const { data, error } = await supabase
+    .from("ops_anexo")
+    .select(
+      "id, ordem_id, ordem_tarefa_id, caminho, nome, mime, tamanho, legenda, " +
+        "privado, carregado_por, carregado_em"
+    )
+    .eq("ordem_id", ordemId)
+    .not("caminho", "is", null)
+    .order("carregado_em", { ascending: false });
+  rebentar("carregar os anexos", error);
+  return (data ?? []) as unknown as Anexo[];
+}
+
+/**
+ * URLs temporários para ver os ficheiros.
+ *
+ * O bucket é privado, por isso não há URL fixo: pede-se um assinado, válido
+ * por uma hora. Um ficheiro de obra pode ter a matrícula de um carro ou a
+ * cara de alguém, e um link permanente a circular por email é a maneira mais
+ * fácil de isso sair da empresa sem ninguém decidir.
+ */
+export async function urlsDosAnexos(caminhos: readonly string[]): Promise<Map<string, string>> {
+  if (caminhos.length === 0) return new Map();
+  const { data, error } = await supabase.storage
+    .from(BUCKET)
+    .createSignedUrls([...caminhos], 3600);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error("[Operações] falha a assinar os URLs dos anexos:", error);
+    return new Map();
+  }
+  const m = new Map<string, string>();
+  for (const x of data ?? []) {
+    if (x.signedUrl && x.path) m.set(x.path, x.signedUrl);
+  }
+  return m;
+}
+
+/**
+ * Sobe um ficheiro e regista-o.
+ *
+ * Duas escritas em sítios diferentes, e por isso duas maneiras de ficar a
+ * meio. Se o registo falhar, o ficheiro é apagado — senão ficava lá para
+ * sempre, a ocupar espaço, sem nada que soubesse o que era.
+ */
+export async function anexarFicheiro(args: {
+  ordemId: string;
+  organizationId: string;
+  ficheiro: File;
+  tarefaId?: string | null;
+  legenda?: string | null;
+  privado?: boolean;
+}): Promise<Anexo> {
+  const ext = args.ficheiro.name.includes(".")
+    ? args.ficheiro.name.slice(args.ficheiro.name.lastIndexOf(".")).toLowerCase()
+    : "";
+  // Nome sorteado, não o do telemóvel: dois "IMG_0001.jpg" na mesma ordem
+  // chocariam, e o nome original guarda-se na coluna `nome`.
+  const caminho = `${args.organizationId}/${args.ordemId}/${crypto.randomUUID()}${ext}`;
+
+  const { error: erroUpload } = await supabase.storage
+    .from(BUCKET)
+    .upload(caminho, args.ficheiro, {
+      contentType: args.ficheiro.type || undefined,
+      upsert: false,
+    });
+
+  if (erroUpload) {
+    throw new ErroDeEscrita(
+      erroUpload.message.includes("exceeded")
+        ? "O ficheiro é grande demais. O limite é 25 MB."
+        : erroUpload.message || "Não foi possível enviar o ficheiro."
+    );
+  }
+
+  const { data, error } = await supabase.rpc("rpc_ops_registar_anexo", {
+    p_ordem_id: args.ordemId,
+    p_caminho: caminho,
+    p_nome: args.ficheiro.name,
+    p_tarefa_id: args.tarefaId ?? null,
+    p_mime: args.ficheiro.type || null,
+    p_tamanho: args.ficheiro.size,
+    p_legenda: args.legenda ?? null,
+    p_privado: args.privado ?? false,
+  });
+
+  if (error) {
+    // O registo falhou: o ficheiro não pode ficar órfão no storage.
+    await supabase.storage.from(BUCKET).remove([caminho]);
+    throw new ErroDeEscrita(error.message || "Não foi possível registar o ficheiro.");
+  }
+
+  const r = data as unknown as { id: string };
+  return {
+    id: r.id,
+    ordem_id: args.ordemId,
+    ordem_tarefa_id: args.tarefaId ?? null,
+    caminho,
+    nome: args.ficheiro.name,
+    mime: args.ficheiro.type || null,
+    tamanho: args.ficheiro.size,
+    legenda: args.legenda ?? null,
+    privado: args.privado ?? false,
+    carregado_por: null,
+    carregado_em: new Date().toISOString(),
+  };
+}
+
+export async function removerAnexo(anexoId: string): Promise<void> {
+  const { data, error } = await supabase.rpc("rpc_ops_remover_anexo", {
+    p_anexo_id: anexoId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível apagar o ficheiro.");
+
+  const r = data as unknown as { caminho?: string };
+  // O registo já saiu. Se o ficheiro não sair, fica lixo — chato, mas não
+  // perigoso: sem registo, ninguém lhe chega pela app.
+  if (r?.caminho) await supabase.storage.from(BUCKET).remove([r.caminho]);
+}

@@ -3,7 +3,7 @@
  *
  *     schema.sql → permissoes.sql → rpcs.sql → rpcs-tarefas.sql
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
- *                 → despacho.sql → orcamentos.sql
+ *                 → despacho.sql → orcamentos.sql → anexos.sql
  *                 → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
@@ -109,6 +109,8 @@ await passo("db/despacho.sql", ler("despacho.sql"));
 await passo("db/despacho.sql outra vez (idempotência)", ler("despacho.sql"));
 await passo("db/orcamentos.sql", ler("orcamentos.sql"));
 await passo("db/orcamentos.sql outra vez (idempotência)", ler("orcamentos.sql"));
+await passo("db/anexos.sql", ler("anexos.sql"));
+await passo("db/anexos.sql outra vez (idempotência)", ler("anexos.sql"));
 
 // ── 3. Criar o perfil de CRM de uma conta que so existe na autenticacao ──
 await passo("db/criar-utilizador.sql", ler("criar-utilizador.sql"));

@@ -10,6 +10,7 @@ import {
   medicoesDaOrdem,
   obterOrdem,
   opcoesDeMedicoes,
+  anexosDaOrdem,
   custoDaOrdem,
   pessoasDaOrdem,
   previstoDaOrdem,
@@ -18,6 +19,7 @@ import {
   type AlvoDaOrdem,
   type MedicaoDaTarefa,
   type MembroEquipa,
+  type Anexo,
   type CustoDaOrdem,
   type LinhaPrevista,
   type OpcaoDeMedicao,
@@ -58,6 +60,7 @@ import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
+import PainelAnexos from "../components/PainelAnexos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
 
 /**
@@ -83,6 +86,7 @@ export default function OrdemDetalhe() {
   const [naOrdem, setNaOrdem] = useState<string[]>([]);
   const [custo, setCusto] = useState<CustoDaOrdem | null>(null);
   const [previsto, setPrevisto] = useState<LinhaPrevista[]>([]);
+  const [anexos, setAnexos] = useState<Anexo[]>([]);
   const [equipa, setEquipa] = useState<Map<string, MembroEquipa>>(new Map());
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -123,7 +127,11 @@ export default function OrdemDetalhe() {
 
       // Os custos vêm vazios para quem não os pode ver, e isso não é um erro:
       // é a resposta certa. Por isso não passam por `rebentar()`.
-      const [cst, prv] = await Promise.all([custoDaOrdem(o.id), previstoDaOrdem(o.id)]);
+      const [cst, prv, anx] = await Promise.all([
+        custoDaOrdem(o.id),
+        previstoDaOrdem(o.id),
+        anexosDaOrdem(o.id),
+      ]);
 
       setOrdem(o);
       setAlvos(als);
@@ -135,6 +143,7 @@ export default function OrdemDetalhe() {
       setNaOrdem(pes.map((p) => p.utilizador_id));
       setCusto(cst);
       setPrevisto(prv);
+      setAnexos(anx);
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
@@ -396,6 +405,17 @@ export default function OrdemDetalhe() {
         opcoes={opcoes}
         permissao={permissaoResponder}
         aoGravar={() => setRecarga((r) => r + 1)}
+      />
+
+      {/* Fotos e ficheiros */}
+      <PainelAnexos
+        ordemId={ordem.id}
+        organizationId={activeOrgId ?? ""}
+        estado={ordem.estado}
+        anexos={anexos}
+        equipa={equipa}
+        podeAnexar={!!businessUserId}
+        aoMudar={() => setRecarga((r) => r + 1)}
       />
 
       {/* Sessões — o que faz o custo de mão de obra existir */}
