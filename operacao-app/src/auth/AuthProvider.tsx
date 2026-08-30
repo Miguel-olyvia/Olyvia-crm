@@ -25,8 +25,10 @@ interface AuthState {
   userEmail: string | null;
   orgs: OrgOption[];
   activeOrgId: string | null;
-  /** Função dentro de Operações. `null` = sem perfil no módulo. */
+  /** Função dentro de Operações, na organização ativa. `null` = sem perfil lá. */
   funcao: Funcao | null;
+  /** Falso enquanto a função ainda não foi lida — evita piscar o bloqueio. */
+  perfilCarregado: boolean;
   setActiveOrgId: (id: string) => void;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -42,6 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [businessUserId, setBusinessUserId] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [funcao, setFuncao] = useState<Funcao | null>(null);
+  const [perfilCarregado, setPerfilCarregado] = useState(false);
   const [orgs, setOrgs] = useState<OrgOption[]>([]);
   const [activeOrgId, setActiveOrgIdState] = useState<string | null>(() => {
     try {
@@ -145,17 +148,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return primeira;
     });
 
-    // Função dentro de Operações. Lida da vista, que não expõe custo_hora.
-    // Sem perfil, o utilizador entra mas não faz nada — e o ecrã diz-lho.
-    const { data: perfil } = await supabase
-      .from("ops_v_equipa")
-      .select("funcao")
-      .eq("utilizador_id", uid)
-      .eq("ativo", true)
-      .maybeSingle();
-    setFuncao((perfil?.funcao as Funcao | undefined) ?? null);
     void orgAtiva;
   }, []);
+
+  // Função dentro de Operações, para a organização ATIVA.
+  //
+  // Uma pessoa tem um perfil POR ORGANIZAÇÃO — `ops_utilizador_perfil` tem
+  // UNIQUE (organization_id, utilizador_id) exatamente para isso: pode ser
+  // gestor numa empresa e técnico noutra. Ler sem filtrar por organização
+  // devolvia N linhas e não uma, e é por isso que este pedido tem de
+  // acompanhar o seletor de organização em vez de correr uma vez no arranque.
+  //
+  // Lê-se da vista, que não expõe custo_hora.
+  useEffect(() => {
+    if (!businessUserId || !activeOrgId) {
+      setFuncao(null);
+      // Sem utilizador de negócio não há nada a esperar; sem organização
+      // ativa ainda há, e o ecrã deve continuar a carregar.
+      setPerfilCarregado(!businessUserId);
+      return;
+    }
+    let vivo = true;
+    setPerfilCarregado(false);
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("ops_v_equipa")
+        .select("funcao")
+        .eq("utilizador_id", businessUserId)
+        .eq("organization_id", activeOrgId)
+        .eq("ativo", true)
+        .limit(1);
+
+      if (!vivo) return;
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("[Operações] erro a ler o perfil do módulo:", error);
+        setFuncao(null);
+      } else {
+        setFuncao((data?.[0]?.funcao as Funcao | undefined) ?? null);
+      }
+      setPerfilCarregado(true);
+    })();
+
+    return () => {
+      vivo = false;
+    };
+  }, [businessUserId, activeOrgId]);
 
   const refresh = useCallback(async () => {
     const { data } = await supabase.auth.getSession();
@@ -202,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       orgs,
       activeOrgId,
       funcao,
+      perfilCarregado,
       setActiveOrgId,
       refresh,
       signOut,
@@ -214,6 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       orgs,
       activeOrgId,
       funcao,
+      perfilCarregado,
       setActiveOrgId,
       refresh,
       signOut,

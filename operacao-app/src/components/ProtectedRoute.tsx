@@ -13,7 +13,8 @@ import { OperacaoMark } from "./icons";
  *   utilizador sem função no módulo→ ninguém lhe deu acesso a Operações
  */
 export function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { loading, session, businessUserId, funcao, userEmail } = useAuth();
+  const { loading, session, businessUserId, funcao, perfilCarregado, orgs, activeOrgId } =
+    useAuth();
 
   if (loading) {
     return (
@@ -34,13 +35,30 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
 
+  // Enquanto a função não foi lida, ainda não se sabe se há acesso. Mostrar o
+  // bloqueio aqui fá-lo-ia piscar antes do ecrã aparecer.
+  if (!perfilCarregado) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Spinner label="A carregar…" />
+      </div>
+    );
+  }
+
   if (!funcao) {
+    // A função é POR ORGANIZAÇÃO. Quem tem várias pode ter perfil numas e não
+    // noutras, e aí o problema resolve-se trocando de organização em vez de
+    // pedir acesso a alguém — vale a pena dizê-lo.
+    const orgAtiva = orgs.find((o) => o.id === activeOrgId);
     return (
       <Bloqueio
         titulo="Sem acesso a Operações"
         texto={
-          `A conta ${userEmail ?? ""} existe na Olyvia, mas ainda não tem função atribuída ` +
-          "em Operações. Um administrador precisa de te adicionar à equipa do módulo."
+          orgs.length > 1
+            ? `Não tens função atribuída em Operações${
+                orgAtiva ? ` na organização "${orgAtiva.name}"` : ""
+              }. Experimenta trocar de organização no menu do topo — podes ter acesso noutra. Se não tiveres em nenhuma, um administrador precisa de te adicionar à equipa do módulo.`
+            : "A tua conta existe na Olyvia, mas ainda não tem função atribuída em Operações. Um administrador precisa de te adicionar à equipa do módulo."
         }
       />
     );

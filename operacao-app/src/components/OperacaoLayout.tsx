@@ -5,6 +5,7 @@ import { Combobox, ConfirmDialog, cx } from "./ui";
 import { ROTULO_FUNCAO } from "../domain/tipos";
 import {
   Building,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   Home,
@@ -85,6 +86,20 @@ export function OperacaoLayout() {
           </nav>
 
           <div className="flex flex-1 items-center justify-end gap-2 md:flex-none">
+            {/* Voltar ao CRM.
+                É uma saída da aplicação, não navegação dentro dela — por isso
+                é um <a> com carregamento de página a sério, e não um <Link>.
+                Fica visível no cabeçalho, e não dentro do menu do utilizador:
+                uma porta escondida num dropdown é o mesmo que não existir. */}
+            <a
+              href={OLYVIA_URL}
+              title="Voltar ao CRM Olyvia"
+              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+            >
+              <ChevronLeft width={15} height={15} className="text-slate-400" />
+              <span className="hidden sm:inline">CRM</span>
+            </a>
+
             {/* Organização — só aparece se houver mais do que uma */}
             {orgs.length > 1 && (
               <Combobox
