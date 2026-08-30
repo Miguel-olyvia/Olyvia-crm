@@ -359,6 +359,7 @@ salta, em vez de escorregar para o mês seguinte.
 
 | | |
 |---|---|
+| [`docs/onde-estamos.md`](docs/onde-estamos.md) | **Começa por aqui.** O estado, o que ficou por confirmar, por onde continuar, e as coisas que custaram a descobrir. |
 | [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
 | [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |
 
