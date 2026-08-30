@@ -168,8 +168,9 @@ export default function PainelTarefas({
 
       {permissao.pode && prog.obrigatoriasPorResponder > 0 && (
         <p className="mt-3 text-xs text-slate-500">
-          Faltam {prog.obrigatoriasPorResponder}{" "}
-          {prog.obrigatoriasPorResponder === 1 ? "resposta obrigatória" : "respostas obrigatórias"}{" "}
+          {prog.obrigatoriasPorResponder === 1
+            ? "Falta 1 resposta obrigatória"
+            : `Faltam ${prog.obrigatoriasPorResponder} respostas obrigatórias`}{" "}
           para poderes fechar a ordem.
         </p>
       )}
