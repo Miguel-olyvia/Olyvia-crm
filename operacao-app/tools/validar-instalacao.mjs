@@ -1,7 +1,8 @@
 /**
  * Corre a SEQUÊNCIA DE INSTALAÇÃO inteira contra um Postgres limpo:
  *
- *     schema.sql → permissoes.sql → pos-instalacao.sql → demo.sql → demo-remover.sql
+ *     schema.sql → permissoes.sql → criar-utilizador.sql
+ *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
  * Serve para que ninguém descubra em produção que o terceiro ficheiro não
  * corre depois do segundo. Corre em segundos, sem Docker e sem tocar no
@@ -43,6 +44,30 @@ async function passo(nome, sql) {
   }
 }
 
+/**
+ * Um passo que TEM de ser recusado, e com a mensagem certa.
+ *
+ * Uma guarda que dispara a mensagem errada é quase tão má como não existir:
+ * pára a operação e deixa quem a corre sem saber o que fazer a seguir.
+ */
+async function passoRecusado(nome, sql, trechoEsperado) {
+  process.stdout.write(`→ ${nome}… `);
+  try {
+    await db.exec(sql);
+    console.log("PASSOU — devia ter sido recusado");
+    falhas.push(nome);
+  } catch (e) {
+    // Uma exceção dentro de BEGIN deixa a sessão em transação abortada.
+    await db.exec("ROLLBACK").catch(() => {});
+    if (e.message.includes(trechoEsperado)) {
+      console.log("recusado, como devia");
+    } else {
+      console.log(`recusado, mas com a mensagem errada: ${e.message}`);
+      falhas.push(nome);
+    }
+  }
+}
+
 // ── 1. Um CRM como o real ────────────────────────────────────────────────
 await passo("stubs do CRM", STUBS_CRM);
 await passo("dados do CRM (1 org, 1 cliente, 1 utilizador)", DADOS_CRM);
@@ -68,7 +93,30 @@ await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
 await passo("db/permissoes.sql", ler("permissoes.sql"));
 await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
 
-// ── 3. Pós-instalação ────────────────────────────────────────────────────
+// ── 3. Criar o perfil de CRM de uma conta que so existe na autenticacao ──
+await passo("db/criar-utilizador.sql", ler("criar-utilizador.sql"));
+await passoRecusado(
+  "db/criar-utilizador.sql outra vez recusa duplicar",
+  ler("criar-utilizador.sql"),
+  "já tem perfil de CRM"
+);
+
+console.log("\n─── depois de criar o utilizador ────────");
+{
+  const u = await um(`
+    SELECT u.email, e.display_name AS nome, o.name AS org, r.name AS papel
+      FROM public.anew_users u
+      JOIN public.anew_entities e     ON e.id = u.entity_id
+      JOIN public.anew_memberships m  ON m.user_id = u.id AND m.status = 'active'
+      JOIN public.anew_organizations o ON o.id = m.organization_id
+      JOIN public.anew_roles r        ON r.id = m.role_id
+     WHERE u.email = 'olyvia-live-ui-check+11544965@example.invalid'`);
+  u
+    ? ok(`perfil criado: ${u.nome} — ${u.papel} em ${u.org}`)
+    : mau("o perfil de CRM não ficou completo (entidade, utilizador e membership)");
+}
+
+// ── 4. Pós-instalação ────────────────────────────────────────────────────
 // Corrido VERBATIM. Os stubs foram feitos para casar com a CONFIGURAÇÃO do
 // ficheiro, em vez de o ficheiro ser adulterado para casar com o teste.
 await passo("db/pos-instalacao.sql", ler("pos-instalacao.sql"));
@@ -95,7 +143,7 @@ console.log("\n─── depois da pós-instalação ─────────
     : mau("custo_hora devia ficar NULL");
 }
 
-// ── 4. Demo ──────────────────────────────────────────────────────────────
+// ── 5. Demo ──────────────────────────────────────────────────────────────
 await passo("db/demo.sql", ler("demo.sql"));
 await passo("db/demo.sql outra vez (idempotência)", ler("demo.sql"));
 
@@ -163,7 +211,18 @@ console.log("\n─── depois da demo ─────────────�
     : ok("ops_v_equipa não tem custo_hora");
 }
 
-// ── 5. Remoção ───────────────────────────────────────────────────────────
+// ── 6. Remoção ───────────────────────────────────────────────────────────
+// O lado do CRM é fotografado ANTES de remover e comparado depois. Contagens
+// fixas quebram-se de cada vez que o teste ganha um passo novo, e uma
+// verificação que se quebra sozinha acaba por ser desligada.
+const crmAntesDaRemocao = await um(`
+  SELECT
+    (SELECT count(*)::int FROM public.anew_clients)          AS clientes,
+    (SELECT count(*)::int FROM public.anew_users)            AS utilizadores,
+    (SELECT count(*)::int FROM public.anew_entities)         AS entidades,
+    (SELECT count(*)::int FROM public.anew_memberships)      AS memberships
+`);
+
 await passo("db/demo-remover.sql", ler("demo-remover.sql"));
 
 console.log("\n─── depois de remover a demo ────────────");
@@ -175,7 +234,9 @@ console.log("\n─── depois de remover a demo ──────────
       (SELECT count(*)::int FROM public.ops_ordem_tarefa)      AS tarefas,
       (SELECT count(*)::int FROM public.ops_sessao_trabalho)   AS sessoes,
       (SELECT count(*)::int FROM public.anew_clients)          AS clientes,
-      (SELECT count(*)::int FROM public.anew_users)            AS utilizadores
+      (SELECT count(*)::int FROM public.anew_users)            AS utilizadores,
+      (SELECT count(*)::int FROM public.anew_entities)         AS entidades,
+      (SELECT count(*)::int FROM public.anew_memberships)      AS memberships
   `);
   c.ordens === 0 && c.locais === 0
     ? ok("a demo saiu toda")
@@ -183,9 +244,18 @@ console.log("\n─── depois de remover a demo ──────────
   c.tarefas === 0 && c.sessoes === 0
     ? ok("tarefas e sessões saíram por CASCADE")
     : mau(`sobraram ${c.tarefas} tarefas e ${c.sessoes} sessões`);
-  c.clientes === 1 && c.utilizadores === 1
-    ? ok("o cliente e o utilizador do CRM ficaram intactos")
-    : mau("a remoção da demo mexeu em dados do CRM");
+
+  const crmDepois = {
+    clientes: c.clientes,
+    utilizadores: c.utilizadores,
+    entidades: c.entidades,
+    memberships: c.memberships,
+  };
+  JSON.stringify(crmAntesDaRemocao) === JSON.stringify(crmDepois)
+    ? ok("os dados do CRM ficaram intactos")
+    : mau(
+        `a remoção da demo mexeu no CRM: ${JSON.stringify(crmAntesDaRemocao)} → ${JSON.stringify(crmDepois)}`
+      );
 }
 
 // ── Veredicto ────────────────────────────────────────────────────────────

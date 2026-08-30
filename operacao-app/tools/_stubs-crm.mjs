@@ -16,7 +16,10 @@
 
 export const STUBS_CRM = `
 CREATE SCHEMA IF NOT EXISTS auth;
-CREATE TABLE auth.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
+CREATE TABLE auth.users (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  email text,
+  email_confirmed_at timestamptz);
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
   $$ SELECT current_setting('request.jwt.claim.sub', true)::uuid $$;
 
@@ -31,6 +34,7 @@ CREATE TABLE public.anew_organizations (
 CREATE TABLE public.anew_users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   auth_user_id uuid,
+  entity_id uuid,
   name text NOT NULL DEFAULT 'Utilizador',
   email text NOT NULL,
   phone text,
@@ -61,9 +65,10 @@ CREATE TABLE public.anew_roles (
 
 CREATE TABLE public.anew_memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid,
-  organization_id uuid,
-  role_id uuid,
+  user_id uuid NOT NULL,
+  organization_id uuid NOT NULL,
+  role_id uuid NOT NULL,
+  relationship_type text NOT NULL DEFAULT 'BELONGS_TO',
   status text NOT NULL DEFAULT 'active');
 
 CREATE TABLE public.anew_role_permissions (
@@ -137,4 +142,16 @@ INSERT INTO public.anew_memberships (user_id, organization_id, role_id, status)
   VALUES ('55555555-5555-5555-5555-555555555555',
           '11111111-1111-1111-1111-111111111111',
           '88888888-8888-8888-8888-888888888888', 'active');
+
+-- O utilizador com perfil, tambem do lado da autenticacao.
+INSERT INTO auth.users (id, email, email_confirmed_at)
+  VALUES ('66666666-6666-6666-6666-666666666666',
+          '1999rubencmail@gmail.com', now());
+
+-- Uma conta de autenticacao SEM perfil de CRM. E o ponto de partida do
+-- db/criar-utilizador.sql: alguem criou a conta no Studio e falta ligar-lhe
+-- o perfil de negocio.
+INSERT INTO auth.users (id, email, email_confirmed_at)
+  VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+          'olyvia-live-ui-check+11544965@example.invalid', now());
 `;
