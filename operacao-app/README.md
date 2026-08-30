@@ -63,9 +63,15 @@ nada.
 ### 3. Aplicar
 
 ```bash
-npm run supabase:aplicar     # cria as 19 tabelas ops_*, RLS e vistas
-npm run supabase:permissoes  # as 15 permissões no catálogo do CRM
+npm run supabase:aplicar        # 19 tabelas ops_*, RLS e as duas vistas
+npm run supabase:rpcs           # a máquina de estados, e a fechadura
+npm run supabase:rpcs-tarefas   # responder a tarefas + a corretiva automática
+npm run supabase:planos         # RRULE e a janela de 120 dias
+npm run supabase:permissoes     # as 15 permissões no catálogo do CRM
 ```
+
+Por esta ordem: cada ficheiro verifica se o anterior correu, e pára com uma mensagem
+legível se não.
 
 Tudo dentro de uma transação: ou entra o ficheiro inteiro, ou não entra nada.
 
@@ -117,13 +123,23 @@ já ultrapassada, e a corretiva que nasceu de uma tarefa não conforme.
 O esquema está em [`db/schema.sql`](./db/schema.sql) — 19 tabelas `ops_*`, aditivo e
 idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 
-| Ficheiro | O que faz |
-|---|---|
-| `db/schema.sql` | tabelas, RLS, as duas vistas — **nada fora de `ops_*`** |
-| `db/permissoes.sql` | as 15 permissões no catálogo do CRM |
-| `db/pos-instalacao.sql` | permissões do papel + perfil do utilizador |
-| `db/demo.sql` | dados de demonstração, só em `ops_*` |
-| `db/demo-remover.sql` | desfaz a demo |
+| Ficheiro | O que faz | Escreve fora de `ops_*`? |
+|---|---|---|
+| `db/schema.sql` | 19 tabelas, RLS, as duas vistas | **não** |
+| `db/rpcs.sql` | a máquina de estados, e o trigger que a torna obrigatória | **não** |
+| `db/rpcs-tarefas.sql` | responder a tarefas, e a corretiva que daí nasce | **não** |
+| `db/planos.sql` | RRULE e a janela de 120 dias | **não** |
+| `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
+| `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
+| `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
+| `db/copiar-acessos.sql` | replica as organizações de outra pessoa | sim — `anew_memberships` |
+| `db/restringir-permissoes.sql` | estreita um alargamento acidental | sim — `anew_role_permissions` |
+| `db/demo.sql` · `demo-remover.sql` | dados de demonstração | não |
+| `db/diagnostico-*.sql` · `verificar-acesso.sql` | só leem | não |
+
+A coluna da direita é a que interessa quando alguém pergunta se isto mexe no CRM. Os
+**quatro ficheiros que constroem o módulo** não escrevem uma linha fora de `ops_*`, e há
+um teste que falha se isso mudar.
 
 ### A garantia que este esquema dá
 
@@ -185,11 +201,18 @@ npm run build                   # typecheck + build de produção
 
 npm run validar-schema          # o esquema contra um Postgres limpo
 npm run validar-instalacao      # a sequência de instalação toda, ponta a ponta
+npm run validar-rpcs            # a máquina de estados é MESMO imposta na base?
+npm run validar-planos          # a RRULE e a janela de 120 dias
+npm run validar-restricao       # restringir permissões não corta quem o corre
 
 npm run supabase:verificar      # o esquema contra a tua base, com ROLLBACK
-npm run supabase:aplicar        # aplica db/schema.sql
-npm run supabase:permissoes     # aplica db/permissoes.sql
-npm run supabase:pos-instalacao # permissões e perfil
+npm run supabase:aplicar        # db/schema.sql
+npm run supabase:rpcs           # db/rpcs.sql
+npm run supabase:rpcs-tarefas   # db/rpcs-tarefas.sql
+npm run supabase:planos         # db/planos.sql
+npm run supabase:permissoes     # db/permissoes.sql
+npm run supabase:pos-instalacao # permissões do papel e perfil
+npm run supabase:restringir     # estreita permissões alargadas por engano
 npm run supabase:demo           # dados de demonstração
 npm run supabase:demo-remover   # remove-os
 ```
@@ -207,22 +230,65 @@ ferramenta de build no repositório.
 
 ---
 
-## O que falta antes de abrir isto a alguém
+## Como a autorização está montada
 
-**As transições de estado ainda são escritas pelo cliente.** O domínio valida-as e a RLS
-garante que só quem tem `operations.orders.*` e está no âmbito lá chega — mas nada
-garante, na base de dados, que a transição respeitou a máquina de estados. Quem tiver o
-token consegue pôr uma ordem em qualquer estado.
+Três camadas, cada uma a responder a uma pergunta diferente:
 
-Isso resolve-se com RPCs `SECURITY DEFINER` que imponham `avaliar()` do lado do servidor,
-e é o passo seguinte. Até lá, **o módulo não deve ser aberto a utilizadores finais**.
+| Camada | Responde a | Onde |
+|---|---|---|
+| **Permissões** | tens direito a isto? | `has_anew_permission()`, do CRM |
+| **RLS** | podes ver esta linha? | policies em cada tabela `ops_*` |
+| **RPCs + triggers** | podes fazer-lhe **isto**? | `rpc_ops_*` e as guardas |
 
-### Fora do v1, por decisão
+A terceira é a que costuma faltar, e é a que mais importa: a RLS limita QUEM chega à
+linha, nunca O QUE lhe pode fazer. Sem ela, um `UPDATE` direto punha uma ordem em
+qualquer estado, saltando as guardas, as sessões de trabalho e o histórico.
+
+- o estado de uma **ordem** só muda por `rpc_ops_transitar_ordem()`
+- o estado de uma **tarefa** só muda por `rpc_ops_responder_tarefa()`
+- editar título, descrição ou responsável por `UPDATE` direto continua a funcionar —
+  não é o estado, não precisa de cerimónia
+
+As guardas existem em dois sítios de propósito: em TypeScript, para desenhar os botões
+certos e responder de imediato; em `plpgsql`, porque é essa que manda. Se divergirem,
+vale a da base.
+
+### O ciclo que se fecha sozinho
+
+Marcar uma tarefa como não conforme cria a ordem corretiva, herda o cliente, o local, o
+ativo e o que o técnico escreveu, e deixa as duas ligadas por `gerada_por_tarefa_id`.
+
+No Infraspeak isso não acontece: o histórico dos ativos está cheio de relatos de portões
+avariados e geradores que não arrancam, escritos pelos técnicos, que nunca viraram ordem
+nenhuma. A informação existia; faltava o mecanismo.
+
+Uma medição fora dos limites é não conformidade **sem ninguém decidir**, e a descrição da
+ordem nova diz o valor lido e o limite violado — porque "não conforme" sozinho não chega
+para alguém agir.
+
+### Os planos guardam a regra, não as ocorrências
+
+O Infraspeak materializa ocorrências até 2033: milhares de linhas futuras a afogar o que
+é para esta semana. Aqui guarda-se a RRULE e materializa-se uma janela de 120 dias.
+
+`rpc_ops_materializar_planos()` é idempotente — correr dez vezes gera o mesmo que correr
+uma. Deve correr **uma vez por dia**. Um plano com regra inválida é ignorado com aviso na
+resposta, e não impede os outros de gerar.
+
+O expansor cobre `DAILY`, `WEEKLY`, `MONTHLY` e `YEARLY` com `INTERVAL`, `BYDAY`,
+`BYMONTHDAY`, `COUNT` e `UNTIL`. Uma regra fora disso é **recusada em voz alta** em vez de
+interpretada mal — que é o modo de falhar que mais custa a detetar. Dia 31 num mês de 30
+salta, em vez de escorregar para o mês seguinte.
+
+---
+
+## Fora do v1, por decisão
 
 Identificados no levantamento, nenhum necessário para fechar o ciclo:
 
+- os ecrãs de Planos, Agenda, Análises e Definições — o modelo suporta-os, falta a
+  interface
 - agendamentos múltiplos por ordem (`RETIFICAÇÃO MEDIDAS`, `INÍCIO OBRA`)
-- planos preventivos a gerar ordens (a tabela e a RRULE existem; falta o job)
 - SLA por cliente × área × prioridade
 - áreas, tipos e prioridades como tabelas de configuração — hoje são colunas
 - medições com histórico e gráfico na ficha de ativo
