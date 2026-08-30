@@ -170,65 +170,28 @@ export default function OrdemDetalhe() {
 
     setAGravar(true);
     setErroAcao(null);
-    const agora = new Date().toISOString();
-    const patch: Record<string, unknown> = {
-      estado: decisao.para,
-      atualizada_em: agora,
-    };
 
-    if (t === "aprovar") {
-      patch.aprovada_em = agora;
-      patch.aprovada_por = businessUserId;
-    }
-    if (t === "iniciar") patch.iniciada_em = ordem.iniciada_em ?? agora;
-    if (t === "fechar") patch.fechada_em = agora;
-    if (t === "confirmar") patch.confirmada_em = agora;
-    if (t === "reabrir") patch.fechada_em = null;
-    if (t === "pausar") {
-      patch.pausa_motivo = ctx.motivo;
-      patch.pausa_retoma_prevista = ctx.retomaPrevista?.toISOString() ?? null;
-    }
-    if (t === "retomar") {
-      patch.pausa_motivo = null;
-      patch.pausa_retoma_prevista = null;
-    }
-    if (t === "cancelar" || t === "rejeitar") {
-      patch.cancelada_em = agora;
-      patch.motivo_cancelamento = ctx.motivo;
-    }
-
+    // UMA chamada. A base valida outra vez, muda o estado, abre ou encerra a
+    // sessão de trabalho, recalcula o custo de mão de obra e escreve o
+    // histórico — tudo na mesma transação.
+    //
+    // O `avaliar()` acima continua a existir para responder de imediato e
+    // desenhar os botões certos, mas quem manda é a RPC: um UPDATE direto ao
+    // estado é recusado por trigger.
     try {
-      const { error } = await supabase.from("ops_ordem").update(patch).eq("id", ordem.id);
-      if (error) throw error;
-
-      // Sessão de trabalho: iniciar/retomar abre, pausar/fechar encerra.
-      // É isto que faz o tempo ser real e não um cronómetro de calendário.
-      if (t === "iniciar" || t === "retomar") {
-        await supabase.from("ops_sessao_trabalho").insert({
-          ordem_id: ordem.id,
-          utilizador_id: businessUserId,
-          inicio: agora,
-          origem: "web",
-        });
-      }
-      if (t === "pausar" || t === "fechar") {
-        await supabase
-          .from("ops_sessao_trabalho")
-          .update({ fim: agora })
-          .eq("ordem_id", ordem.id)
-          .is("fim", null);
-      }
-
-      await supabase.from("ops_evento").insert({
-        organization_id: ordem.organization_id,
-        entidade: "ordem",
-        entidade_id: ordem.id,
-        tipo: t,
-        descricao: ctx.motivo,
-        autor_id: businessUserId,
-        antes: { estado: ordem.estado },
-        depois: { estado: decisao.para },
+      const { error } = await supabase.rpc("rpc_ops_transitar_ordem", {
+        p_ordem_id: ordem.id,
+        p_transicao: t,
+        p_motivo: ctx.motivo,
+        p_retoma_prevista: ctx.retomaPrevista?.toISOString() ?? null,
       });
+
+      if (error) {
+        // A RPC devolve mensagens escritas para quem as vai ler ("Pausar exige
+        // um motivo."). Mostrar a do servidor é melhor do que a genérica.
+        setErroAcao(error.message || "Não foi possível concluir a operação.");
+        return;
+      }
 
       setDialogo(null);
       setMotivo("");
@@ -237,7 +200,7 @@ export default function OrdemDetalhe() {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[Operações] falha na transição:", e);
-      setErroAcao("Não foi possível gravar a alteração. Tenta outra vez.");
+      setErroAcao("Não foi possível falar com o servidor. Tenta outra vez.");
     } finally {
       setAGravar(false);
     }
