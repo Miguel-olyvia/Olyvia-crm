@@ -78,6 +78,7 @@ await db.exec(`
 await db.exec(ler("schema.sql"));
 await db.exec(ler("permissoes.sql"));
 await db.exec(ler("rpcs.sql"));
+await db.exec(ler("rpcs-tarefas.sql"));
 
 // Um papel com TODAS as permissões de Operações, e os três utilizadores lá
 // dentro. É o cenário mais exigente para a fechadura: quem tenta o UPDATE
@@ -209,11 +210,19 @@ console.log("\n─── fechar com tarefas por responder ────");
   await deveSerRecusado("não fecha com 2 obrigatórias pendentes", AUTH.tecnico,
     rpc(id, "fechar"), "Faltam responder a 2 tarefas obrigatórias");
 
-  await db.exec(`UPDATE public.ops_ordem_tarefa SET estado='feita' WHERE ordem_id='${id}' AND nome='Verificar pressao';`);
+  // Pela RPC, como uma pessoa faria. O UPDATE direto que estava aqui deixou
+  // de passar — e é isso que se pretende.
+  await deveCorrer("responder 'feita' a uma obrigatoria", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa(
+       (SELECT id FROM public.ops_ordem_tarefa WHERE ordem_id='${id}' AND nome='Verificar pressao'),
+       'feita', NULL, NULL, NULL);`);
   await deveSerRecusado("nem com 1", AUTH.tecnico, rpc(id, "fechar"),
     "Falta responder a 1 tarefa obrigatória");
 
-  await db.exec(`UPDATE public.ops_ordem_tarefa SET estado='nao_aplicavel' WHERE ordem_id='${id}' AND nome='Verificar selo';`);
+  await deveCorrer("responder 'nao aplicavel' a outra", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa(
+       (SELECT id FROM public.ops_ordem_tarefa WHERE ordem_id='${id}' AND nome='Verificar selo'),
+       'nao_aplicavel', NULL, NULL, NULL);`);
   await deveCorrer("fecha quando as obrigatórias têm resposta (a opcional pode ficar)",
     AUTH.tecnico, rpc(id, "fechar"));
 }
@@ -258,6 +267,76 @@ console.log("\n─── histórico ──────────────�
   rejeitadas.n === 1
     ? ok("a segunda tentativa de aprovar não deixou evento — a transação reverteu")
     : mau(`esperava 1 evento de aprovação, há ${rejeitadas.n}`);
+}
+
+// ── Tarefas e a corretiva ────────────────────────────────────────────────
+console.log("\n─── responder a tarefas ─────────────────");
+{
+  const id = await novaOrdem("OT-6", "agendada", TECNICO);
+  await db.exec(`
+    INSERT INTO public.ops_local (id, organization_id, cliente_id, codigo, nome, tipo)
+      VALUES ('eeee0000-0000-0000-0000-00000000000e','${ORG}','${CLI}','L1','Piso -2 Garagem','espaco');
+    INSERT INTO public.ops_ativo (id, organization_id, local_id, codigo, nome)
+      VALUES ('ffff0000-0000-0000-0000-00000000000f','${ORG}','eeee0000-0000-0000-0000-00000000000e','A1','Extintor da entrada sul');
+    INSERT INTO public.ops_ordem_alvo (id, ordem_id, ativo_id, local_id)
+      VALUES ('1111aaaa-0000-0000-0000-00000000aaaa','${id}','ffff0000-0000-0000-0000-00000000000f','eeee0000-0000-0000-0000-00000000000e');
+    INSERT INTO public.ops_ordem_tarefa (id, ordem_id, ordem_alvo_id, nome, tipo, unidade, limite_min, limite_max, obrigatoria)
+      VALUES ('2222bbbb-0000-0000-0000-00000000bbbb','${id}','1111aaaa-0000-0000-0000-00000000aaaa','Verificacao de pressao','medicao','bar',10,15,true);
+    INSERT INTO public.ops_ordem_tarefa (id, ordem_id, ordem_alvo_id, nome, tipo, obrigatoria)
+      VALUES ('3333cccc-0000-0000-0000-00000000cccc','${id}','1111aaaa-0000-0000-0000-00000000aaaa','Estado do suporte','inspecao',true);
+  `);
+  await deveCorrer("iniciar", AUTH.tecnico, rpc(id, "iniciar"));
+
+  await deveSerRecusado("um UPDATE direto ao estado de uma tarefa e recusado", AUTH.tecnico,
+    `UPDATE public.ops_ordem_tarefa SET estado='feita' WHERE id='2222bbbb-0000-0000-0000-00000000bbbb';`,
+    "rpc_ops_responder_tarefa()");
+
+  // 12,4 bar entre 10 e 15 -> conforme, sem ninguem decidir
+  await deveCorrer("responder a medicao dentro dos limites", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa('2222bbbb-0000-0000-0000-00000000bbbb', NULL, 12.4, NULL, NULL);`);
+  {
+    const t = await um(`SELECT estado FROM public.ops_ordem_tarefa WHERE id='2222bbbb-0000-0000-0000-00000000bbbb'`);
+    t.estado === "feita" ? ok("12,4 bar entre 10 e 15 ficou conforme, automaticamente")
+                         : mau(`esperava feita, deu ${t.estado}`);
+  }
+
+  // 31 bar fora dos limites -> nao conforme + corretiva
+  await deveCorrer("responder a inspecao como nao conforme", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa('3333cccc-0000-0000-0000-00000000cccc','nao_conforme',NULL,NULL,'Suporte solto, com corrosao na base.');`);
+
+  const nova = await um(`
+    SELECT o.codigo, o.origem, o.estado, o.prioridade, o.titulo, o.descricao, o.local_id
+      FROM public.ops_ordem o
+     WHERE o.gerada_por_tarefa_id = '3333cccc-0000-0000-0000-00000000cccc'`);
+  nova ? ok(`a corretiva nasceu: ${nova.codigo}`) : mau("nao foi gerada nenhuma corretiva");
+  if (nova) {
+    nova.origem === "corretiva" && nova.estado === "por_aprovar" && nova.prioridade === "alta"
+      ? ok("corretiva, por aprovar, prioridade alta")
+      : mau(`estado errado: ${JSON.stringify(nova)}`);
+    nova.titulo.includes("Extintor da entrada sul") && nova.titulo.includes("Piso -2 Garagem")
+      ? ok("o titulo herda o ativo e o local")
+      : mau(`titulo sem contexto: ${nova.titulo}`);
+    nova.descricao.includes("Suporte solto")
+      ? ok("a descricao leva as observacoes do tecnico — e o que hoje se perde")
+      : mau("a descricao perdeu as observacoes");
+    nova.local_id === "eeee0000-0000-0000-0000-00000000000e"
+      ? ok("a corretiva aponta para o local certo")
+      : mau("local errado na corretiva");
+  }
+
+  // responder duas vezes nao gera duas ordens
+  await deveCorrer("responder outra vez a mesma tarefa", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa('3333cccc-0000-0000-0000-00000000cccc','nao_conforme',NULL,NULL,'ainda solto');`);
+  {
+    const n = await um(`SELECT count(*)::int n FROM public.ops_ordem WHERE gerada_por_tarefa_id='3333cccc-0000-0000-0000-00000000cccc'`);
+    n.n === 1 ? ok("responder duas vezes NAO gera duas corretivas") : mau(`ficaram ${n.n} corretivas`);
+  }
+
+  // fechar: as duas obrigatorias tem resposta
+  await deveCorrer("fecha, porque as obrigatorias tem resposta", AUTH.tecnico, rpc(id, "fechar"));
+  await deveSerRecusado("nao se responde a tarefas de uma ordem fechada", AUTH.tecnico,
+    `SELECT public.rpc_ops_responder_tarefa('2222bbbb-0000-0000-0000-00000000bbbb','feita',NULL,NULL,NULL);`,
+    "ordem em curso");
 }
 
 console.log("");
