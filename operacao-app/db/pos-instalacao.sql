@@ -20,27 +20,32 @@
 BEGIN;
 
 -- ┌──────────────────────────────────────────────────────────────────────┐
--- │  CONFIGURAÇÃO — preenche estes dois valores                          │
+-- │  CONFIGURAÇÃO                                                        │
 -- └──────────────────────────────────────────────────────────────────────┘
 CREATE TEMP TABLE _cfg AS SELECT
   -- Email do utilizador que fica com acesso total a Operações.
   -- Tem de existir em `anew_users`.
-  'muda-me@exemplo.pt'::text  AS email,
+  '1999rubencmail@gmail.com'::text  AS email,
 
   -- Nome EXATO do papel que recebe as permissões (ver Papéis, no CRM).
   -- Fica NULL para saltar a Parte 1 e atribuir as permissões pela UI.
-  'Administrador'::text       AS papel;
+  'Admin'::text                     AS papel;
 
 
 -- ============================================================
 -- Parte 0 — Verificações, antes de escrever seja o que for
 -- ============================================================
+-- Falhar aqui com uma mensagem legível é melhor do que falhar a meio com o
+-- erro cru de um trigger.
 
 DO $verificar$
 DECLARE
-  v_email text;
-  v_papel text;
-  v_user  uuid;
+  v_email  text;
+  v_papel  text;
+  v_user   uuid;
+  v_papeis integer;
+  v_sistema integer;
+  v_catalogo integer;
 BEGIN
   SELECT email, papel INTO v_email, v_papel FROM _cfg;
 
@@ -48,18 +53,50 @@ BEGIN
     RAISE EXCEPTION 'Preenche o email no bloco CONFIGURAÇÃO antes de correr isto.';
   END IF;
 
-  SELECT id INTO v_user FROM public.anew_users WHERE email = v_email;
-  IF v_user IS NULL THEN
-    RAISE EXCEPTION 'Não existe nenhum utilizador com o email %. Confirma em anew_users.', v_email;
-  END IF;
-
   IF to_regclass('public.ops_utilizador_perfil') IS NULL THEN
     RAISE EXCEPTION 'As tabelas de Operações não existem. Corre db/schema.sql primeiro.';
   END IF;
 
-  IF v_papel IS NOT NULL
-     AND NOT EXISTS (SELECT 1 FROM public.anew_roles WHERE name = v_papel) THEN
-    RAISE EXCEPTION 'Não existe nenhum papel chamado "%". Confirma em anew_roles.', v_papel;
+  SELECT id INTO v_user FROM public.anew_users
+   WHERE email = v_email AND deleted_at IS NULL;
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Não existe nenhum utilizador ativo com o email %. Confirma em anew_users.', v_email;
+  END IF;
+
+  IF v_papel IS NOT NULL THEN
+    SELECT count(*) INTO v_papeis
+      FROM public.anew_roles WHERE name = v_papel AND deleted_at IS NULL;
+
+    IF v_papeis = 0 THEN
+      RAISE EXCEPTION
+        'Não existe nenhum papel chamado "%". Vê os nomes com:  SELECT name, is_system FROM public.anew_roles WHERE deleted_at IS NULL ORDER BY name;',
+        v_papel;
+    END IF;
+
+    -- `trg_protect_system_role_perms` bloqueia INSERT em anew_role_permissions
+    -- para papéis de sistema. Melhor dizê-lo agora do que deixar o trigger
+    -- rebentar a meio com uma mensagem que não ajuda ninguém.
+    SELECT count(*) INTO v_sistema
+      FROM public.anew_roles
+     WHERE name = v_papel AND deleted_at IS NULL AND is_system IS TRUE;
+
+    IF v_sistema > 0 THEN
+      RAISE EXCEPTION
+        'O papel "%" é um papel de SISTEMA e está protegido por trigger contra alterações de permissões. Escolhe um papel normal, ou atribui as permissões operations.* pela UI de Papéis.',
+        v_papel;
+    END IF;
+
+    IF v_papeis > 1 THEN
+      RAISE NOTICE 'Atenção: há % papéis chamados "%" (organizações diferentes). Todos vão receber as permissões.', v_papeis, v_papel;
+    END IF;
+
+    -- A Parte 1 lê os códigos de anew_permissions. Sem o catálogo, não
+    -- atribui nada e o módulo ficava vazio sem ninguém perceber porquê.
+    SELECT count(*) INTO v_catalogo
+      FROM public.anew_permissions WHERE category = 'operations';
+    IF v_catalogo = 0 THEN
+      RAISE EXCEPTION 'As permissões de Operações não estão no catálogo. Corre db/permissoes.sql primeiro.';
+    END IF;
   END IF;
 END
 $verificar$;
@@ -77,6 +114,8 @@ SELECT r.id, p.code
   CROSS JOIN public.anew_permissions p
   JOIN _cfg c ON c.papel IS NOT NULL
  WHERE r.name = (SELECT papel FROM _cfg)
+   AND r.deleted_at IS NULL
+   AND r.is_system IS NOT TRUE
    AND p.category = 'operations'
 ON CONFLICT DO NOTHING;
 
@@ -114,7 +153,8 @@ BEGIN
   SELECT count(*) INTO v_perms
     FROM public.anew_role_permissions rp
     JOIN public.anew_roles r ON r.id = rp.role_id
-   WHERE r.name = v_papel AND rp.permission_code LIKE 'operations.%';
+   WHERE r.name = v_papel AND r.deleted_at IS NULL
+     AND rp.permission_code LIKE 'operations.%';
 
   SELECT count(*) INTO v_perfis
     FROM public.ops_utilizador_perfil p

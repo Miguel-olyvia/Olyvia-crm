@@ -55,7 +55,9 @@ CREATE TABLE public.anew_clients (
 CREATE TABLE public.anew_roles (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id uuid,
-  name text NOT NULL);
+  name text NOT NULL,
+  is_system boolean DEFAULT false,
+  deleted_at timestamptz);
 
 CREATE TABLE public.anew_memberships (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -102,7 +104,14 @@ CREATE FUNCTION public.current_business_user_id()
   $$ SELECT id FROM public.anew_users LIMIT 1 $$;
 `;
 
-/** Uma organização, um cliente e um utilizador, como existiriam no CRM. */
+/**
+ * Uma organização, um cliente e um utilizador, como existiriam no CRM.
+ *
+ * O email e o nome do papel são os mesmos que estão no bloco CONFIGURAÇÃO do
+ * `db/pos-instalacao.sql`, de propósito: assim o validador corre esse ficheiro
+ * tal e qual, sem substituições. O que é testado aqui é exatamente o que vai
+ * correr em produção.
+ */
 export const DADOS_CRM = `
 INSERT INTO public.anew_organizations (id, name)
   VALUES ('11111111-1111-1111-1111-111111111111', 'Grupo de teste');
@@ -118,11 +127,11 @@ INSERT INTO public.anew_clients (id, organization_id, entity_id)
 INSERT INTO public.anew_users (id, auth_user_id, name, email)
   VALUES ('55555555-5555-5555-5555-555555555555',
           '66666666-6666-6666-6666-666666666666',
-          'Ana Pereira', 'ana@exemplo.pt');
+          'Ruben Carvalho', '1999rubencmail@gmail.com');
 
 INSERT INTO public.anew_roles (id, organization_id, name)
   VALUES ('88888888-8888-8888-8888-888888888888',
-          '11111111-1111-1111-1111-111111111111', 'Administrador');
+          '11111111-1111-1111-1111-111111111111', 'Admin');
 
 INSERT INTO public.anew_memberships (user_id, organization_id, role_id, status)
   VALUES ('55555555-5555-5555-5555-555555555555',

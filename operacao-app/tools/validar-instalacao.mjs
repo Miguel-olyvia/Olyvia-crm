@@ -68,13 +68,11 @@ await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
 await passo("db/permissoes.sql", ler("permissoes.sql"));
 await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
 
-// ── 3. Pós-instalação, com o email do utilizador de teste ────────────────
-const posInstalacao = ler("pos-instalacao.sql").replace(
-  "'muda-me@exemplo.pt'::text",
-  "'ana@exemplo.pt'::text"
-);
-await passo("db/pos-instalacao.sql", posInstalacao);
-await passo("db/pos-instalacao.sql outra vez (idempotência)", posInstalacao);
+// ── 3. Pós-instalação ────────────────────────────────────────────────────
+// Corrido VERBATIM. Os stubs foram feitos para casar com a CONFIGURAÇÃO do
+// ficheiro, em vez de o ficheiro ser adulterado para casar com o teste.
+await passo("db/pos-instalacao.sql", ler("pos-instalacao.sql"));
+await passo("db/pos-instalacao.sql outra vez (idempotência)", ler("pos-instalacao.sql"));
 
 console.log("\n─── depois da pós-instalação ────────────");
 {
