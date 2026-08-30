@@ -7,23 +7,25 @@ import {
   alvosDaOrdem,
   listarClientes,
   listarEquipa,
+  medicoesDaOrdem,
   obterOrdem,
+  opcoesDeMedicoes,
   sessoesDaOrdem,
   tarefasDaOrdem,
   type AlvoDaOrdem,
+  type MedicaoDaTarefa,
   type MembroEquipa,
+  type OpcaoDeMedicao,
   type OrdemCompleta,
   type SessaoDaOrdem,
   type TarefaDaOrdem,
 } from "../lib/dados";
 import {
   Badge,
-  Barra,
   Button,
   Card,
   ErrorState,
   EstadoOrdem,
-  EstadoTarefaBadge,
   Modal,
   OrigemOrdem,
   PrioridadeOrdem,
@@ -45,20 +47,20 @@ import {
   User,
 } from "../components/icons";
 import { avaliar, transicoesPossiveis, type Transicao } from "../domain/estados";
-import { progresso, type Tarefa } from "../domain/conformidade";
 import { formatarDuracao, tempoTotalSegundos, type Sessao } from "../domain/tempo";
 import { alertasDaOrdem } from "../domain/alertas";
+import { podeResponder } from "../domain/respostas";
+import PainelTarefas from "../components/PainelTarefas";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
 
 /**
  * Ficha de ordem — uma só, para as três origens.
  *
- * ⚠ NOTA DE SEGURANÇA, deliberada e temporária.
- * As transições abaixo são validadas pelo domínio no cliente e escritas
- * diretamente na tabela. A RLS garante que só quem tem `operations.orders.*`
- * e está no âmbito lá chega — mas NÃO garante que a transição respeitou a
- * máquina de estados. Isso exige RPCs `SECURITY DEFINER`, que são o passo
- * seguinte. Até lá o módulo não deve ser aberto a utilizadores finais.
+ * Esta página não escreve em tabela nenhuma. Tudo o que muda estado passa por
+ * uma RPC `SECURITY DEFINER` — transitar a ordem, responder a uma tarefa,
+ * registar uma leitura — e cada uma dessas tabelas tem um trigger que recusa
+ * um UPDATE direto. O que o browser calcula (que botões mostrar, que veredicto
+ * um valor vai ter) serve para responder de imediato; quem decide é a base.
  */
 
 export default function OrdemDetalhe() {
@@ -69,6 +71,8 @@ export default function OrdemDetalhe() {
   const [alvos, setAlvos] = useState<AlvoDaOrdem[]>([]);
   const [tarefas, setTarefas] = useState<TarefaDaOrdem[]>([]);
   const [sessoes, setSessoes] = useState<SessaoDaOrdem[]>([]);
+  const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
+  const [opcoes, setOpcoes] = useState<OpcaoDeMedicao[]>([]);
   const [equipa, setEquipa] = useState<Map<string, MembroEquipa>>(new Map());
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -99,10 +103,19 @@ export default function OrdemDetalhe() {
         listarEquipa(activeOrgId),
         listarClientes(activeOrgId),
       ]);
+      // As leituras e as suas opções vêm num segundo passo porque dependem
+      // das tarefas. Duas consultas, não uma por tarefa.
+      const meds = await medicoesDaOrdem(tfs.map((t) => t.id));
+      const ops = await opcoesDeMedicoes([
+        ...new Set(meds.filter((m) => m.tipo === "escolha").map((m) => m.medicao_def_id)),
+      ]);
+
       setOrdem(o);
       setAlvos(als);
       setTarefas(tfs);
       setSessoes(sss);
+      setMedicoes(meds);
+      setOpcoes(ops);
       setEquipa(new Map(eq.map((m) => [m.utilizador_id, m])));
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
     } catch (e) {
@@ -133,19 +146,14 @@ export default function OrdemDetalhe() {
 
   const possiveis = ordem ? transicoesPossiveis(ordem.estado, contexto) : [];
 
-  const tarefasDominio: Tarefa[] = tarefas.map((t) => ({
-    id: t.id,
-    nome: t.nome,
-    tipo: t.tipo as Tarefa["tipo"],
-    estado: t.estado as EstadoTarefa,
-    obrigatoria: t.obrigatoria,
-    valorNum: t.valor_num,
-    unidade: t.unidade,
-    limiteMin: t.limite_min,
-    limiteMax: t.limite_max,
-    observacoes: t.observacoes,
-  }));
-  const prog = progresso(tarefasDominio);
+  // A mesma pergunta que a base vai fazer. Aqui serve para explicar porquê,
+  // com o passo em falta — "Inicia a ordem para começares a responder" diz
+  // mais do que um botão apagado.
+  const permissaoResponder = podeResponder({
+    estadoOrdem: ordem?.estado ?? "",
+    funcao: contexto.funcao,
+    atribuido: contexto.atribuido,
+  });
 
   const sessoesDominio: Sessao[] = sessoes.map((s) => ({
     utilizadorId: s.utilizador_id,
@@ -346,50 +354,14 @@ export default function OrdemDetalhe() {
         )}
       </Card>
 
-      {/* Tarefas */}
-      {tarefas.length > 0 && (
-        <Card className="p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-slate-800">Tarefas</h2>
-            <span className="font-mono text-xs tabular text-slate-500">
-              {prog.feitas}/{prog.total}
-              {prog.naoConformes > 0 && (
-                <span className="ml-2 text-red-600">{prog.naoConformes} não conforme</span>
-              )}
-            </span>
-          </div>
-          <Barra percentagem={prog.percentagem} className="mt-2" />
-
-          <ul className="mt-3 divide-y divide-slate-100">
-            {tarefas.map((t) => (
-              <li key={t.id} className="flex items-start gap-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-slate-700">
-                    {t.nome}
-                    {t.obrigatoria && <span className="ml-1 text-red-400">*</span>}
-                  </p>
-                  {t.valor_num != null && (
-                    <p className="mt-0.5 font-mono text-xs tabular text-slate-500">
-                      {t.valor_num}
-                      {t.unidade ? ` ${t.unidade}` : ""}
-                      {(t.limite_min != null || t.limite_max != null) && (
-                        <span className="text-slate-400">
-                          {" "}
-                          ({t.limite_min ?? "—"}–{t.limite_max ?? "—"})
-                        </span>
-                      )}
-                    </p>
-                  )}
-                  {t.observacoes && (
-                    <p className="mt-0.5 text-xs italic text-slate-500">{t.observacoes}</p>
-                  )}
-                </div>
-                <EstadoTarefaBadge estado={t.estado as EstadoTarefa} />
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      {/* Onde o trabalho acontece */}
+      <PainelTarefas
+        tarefas={tarefas}
+        medicoes={medicoes}
+        opcoes={opcoes}
+        permissao={permissaoResponder}
+        aoGravar={() => setRecarga((r) => r + 1)}
+      />
 
       {/* Sessões — o que faz o custo de mão de obra existir */}
       <Card className="p-4 sm:p-5">

@@ -103,7 +103,7 @@ describe("conformidade", () => {
   const base: Omit<Tarefa, "estado"> = {
     id: "t1",
     nome: "Verificação de pressão",
-    tipo: "medicao",
+    tipo: "inspecao",
     obrigatoria: true,
     unidade: "bar",
     limiteMin: 10,

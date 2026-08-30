@@ -137,6 +137,8 @@ export interface TarefaDaOrdem {
   limite_max: number | null;
   obrigatoria: boolean;
   observacoes: string | null;
+  /** Uma tarefa privada não sai no relatório do cliente. */
+  privada: boolean;
 }
 
 export async function alvosDaOrdem(ordemId: string): Promise<AlvoDaOrdem[]> {
@@ -154,7 +156,7 @@ export async function tarefasDaOrdem(ordemId: string): Promise<TarefaDaOrdem[]> 
     .from("ops_ordem_tarefa")
     .select(
       "id, ordem_alvo_id, posicao, nome, tipo, estado, valor_num, valor_texto, " +
-        "unidade, limite_min, limite_max, obrigatoria, observacoes"
+        "unidade, limite_min, limite_max, obrigatoria, observacoes, privada"
     )
     .eq("ordem_id", ordemId)
     .order("posicao");
@@ -302,4 +304,131 @@ export function montarArvore(locais: readonly LocalRow[]): NoLocal[] {
   };
   ordenar(raizes);
   return raizes;
+}
+
+/* ────────────────────────────── Medições ───────────────────────────── */
+
+/**
+ * Uma leitura de medição de uma tarefa.
+ *
+ * `lida_em` nulo quer dizer "por responder". Os limites e a unidade vêm
+ * congelados na própria linha — não se vai buscá-los ao catálogo, porque o
+ * catálogo pode ter mudado depois de a ordem nascer.
+ */
+export interface MedicaoDaTarefa {
+  id: string;
+  ordem_tarefa_id: string;
+  medicao_def_id: string;
+  nome: string;
+  tipo: "gama" | "acumulado" | "escolha" | "texto";
+  unidade: string | null;
+  limite_min: number | null;
+  limite_max: number | null;
+  valor_num: number | null;
+  valor_texto: string | null;
+  opcao_id: string | null;
+  conforme: boolean | null;
+  lida_em: string | null;
+  corretiva_ordem_id: string | null;
+}
+
+export interface OpcaoDeMedicao {
+  id: string;
+  medicao_def_id: string;
+  nome: string;
+  posicao: number;
+  e_nao_conforme: boolean;
+  cria_corretiva: boolean;
+}
+
+/** Todas as leituras da ordem, de uma vez. Uma consulta, não uma por tarefa. */
+export async function medicoesDaOrdem(tarefaIds: readonly string[]): Promise<MedicaoDaTarefa[]> {
+  if (tarefaIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ordem_tarefa_medicao")
+    .select(
+      "id, ordem_tarefa_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max, " +
+        "valor_num, valor_texto, opcao_id, conforme, lida_em, corretiva_ordem_id"
+    )
+    .in("ordem_tarefa_id", tarefaIds as string[])
+    .order("nome");
+  rebentar("carregar as medições", error);
+  return (data ?? []) as unknown as MedicaoDaTarefa[];
+}
+
+/** As opções das medições de escolha que aparecem nesta ordem. */
+export async function opcoesDeMedicoes(defIds: readonly string[]): Promise<OpcaoDeMedicao[]> {
+  if (defIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_medicao_opcao")
+    .select("id, medicao_def_id, nome, posicao, e_nao_conforme, cria_corretiva")
+    .in("medicao_def_id", defIds as string[])
+    .order("posicao");
+  rebentar("carregar as opções de resposta", error);
+  return (data ?? []) as unknown as OpcaoDeMedicao[];
+}
+
+/* ─────────────────────────────── Escritas ──────────────────────────── */
+
+/**
+ * O que a base devolve depois de uma resposta.
+ *
+ * `corretiva_gerada` é o código da ordem que nasceu da não conformidade — a
+ * app não a cria nem a pede; limita-se a mostrá-la a quem acabou de a causar,
+ * porque é nesse instante que a informação vale alguma coisa.
+ */
+export interface Resposta {
+  ok: boolean;
+  estado?: string;
+  estado_tarefa?: string;
+  conforme?: boolean | null;
+  por_ler?: number;
+  avaliada_automaticamente?: boolean;
+  corretiva_gerada: string | null;
+}
+
+/**
+ * Erro vindo de uma RPC.
+ *
+ * As RPCs escrevem mensagens para quem as vai ler ("Um contador não desce.
+ * 'Horas' estava em 45812, e leu-se 40000."). Mostrar a do servidor é sempre
+ * melhor do que uma genérica — por isso esta classe existe: para a distinguir
+ * de uma falha de rede, que não tem nada de útil para dizer.
+ */
+export class ErroDeEscrita extends Error {}
+
+export async function responderTarefa(args: {
+  tarefaId: string;
+  estado?: string | null;
+  valorNum?: number | null;
+  valorTexto?: string | null;
+  observacoes?: string | null;
+}): Promise<Resposta> {
+  const { data, error } = await supabase.rpc("rpc_ops_responder_tarefa", {
+    p_tarefa_id: args.tarefaId,
+    p_estado: args.estado ?? null,
+    p_valor_num: args.valorNum ?? null,
+    p_valor_texto: args.valorTexto ?? null,
+    p_observacoes: args.observacoes ?? null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a resposta.");
+  return data as unknown as Resposta;
+}
+
+export async function responderMedicao(args: {
+  tarefaId: string;
+  medicaoDefId: string;
+  valorNum?: number | null;
+  valorTexto?: string | null;
+  opcaoId?: string | null;
+}): Promise<Resposta> {
+  const { data, error } = await supabase.rpc("rpc_ops_responder_medicao", {
+    p_tarefa_id: args.tarefaId,
+    p_medicao_def_id: args.medicaoDefId,
+    p_valor_num: args.valorNum ?? null,
+    p_valor_texto: args.valorTexto ?? null,
+    p_opcao_id: args.opcaoId ?? null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a leitura.");
+  return data as unknown as Resposta;
 }

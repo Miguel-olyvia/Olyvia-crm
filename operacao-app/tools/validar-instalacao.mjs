@@ -172,7 +172,25 @@ console.log("\n─── depois da demo ─────────────�
   c.locais === 5 ? ok("5 locais") : mau(`esperava 5 locais, encontrei ${c.locais}`);
   c.ativos === 2 ? ok("2 ativos") : mau(`esperava 2 ativos, encontrei ${c.ativos}`);
   c.ordens === 5 ? ok("5 ordens") : mau(`esperava 5 ordens, encontrei ${c.ordens}`);
-  c.tarefas === 6 ? ok("6 tarefas") : mau(`esperava 6 tarefas, encontrei ${c.tarefas}`);
+  c.tarefas === 7 ? ok("7 tarefas") : mau(`esperava 7 tarefas, encontrei ${c.tarefas}`);
+
+  // A demo tem de deixar as medições prontas a responder, senão o ecrã do
+  // técnico não tem nada para mostrar a quem a instala para experimentar.
+  const m = await um(`
+    SELECT count(*)::int AS n FROM public.ops_ordem_tarefa_medicao m
+      JOIN public.ops_ordem_tarefa t ON t.id = m.ordem_tarefa_id
+      JOIN public.ops_ordem o ON o.id = t.ordem_id
+     WHERE o.codigo = 'OT-DEMO-001' AND m.lida_em IS NULL`);
+  m.n === 3
+    ? ok("3 medições por responder, uma de cada feitio")
+    : mau(`esperava 3 medições por responder, encontrei ${m.n}`);
+
+  const op = await um(`
+    SELECT count(*)::int AS n FROM public.ops_medicao_opcao
+     WHERE cria_corretiva`);
+  op.n === 1
+    ? ok("a opção que abre corretiva está ligada — é a que o Infraspeak tem desligada")
+    : mau(`esperava 1 opção a abrir corretiva, encontrei ${op.n}`);
   c.sessoes === 2
     ? ok("2 sessões de trabalho — a demo não duplicou ao correr duas vezes")
     : mau(`esperava 2 sessões, encontrei ${c.sessoes}`);

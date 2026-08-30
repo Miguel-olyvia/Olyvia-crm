@@ -31,15 +31,26 @@ export type Funcao = (typeof FUNCOES)[number];
 export const PRIORIDADES = ["baixa", "normal", "alta", "urgente"] as const;
 export type Prioridade = (typeof PRIORIDADES)[number];
 
+/**
+ * A NATUREZA do trabalho, não o formato da resposta.
+ *
+ * O modelo antigo misturava as duas coisas: "medicao", "foto" e "assinatura"
+ * descrevem como se responde, não o que se está a fazer. O formato passou
+ * para as medições, e aqui ficou só o trabalho — que é o que interessa para
+ * saber quem o pode fazer e quanto tempo demora.
+ */
 export const TIPOS_TAREFA = [
   "inspecao",
-  "medicao",
-  "numero",
-  "texto",
-  "foto",
-  "assinatura",
+  "correcao",
+  "limpeza",
+  "proacao",
+  "substituicao",
 ] as const;
 export type TipoTarefa = (typeof TIPOS_TAREFA)[number];
+
+/** O formato da resposta de uma medição. */
+export const TIPOS_MEDICAO = ["gama", "acumulado", "escolha", "texto"] as const;
+export type TipoMedicao = (typeof TIPOS_MEDICAO)[number];
 
 export const ESTADOS_TAREFA = [
   "pendente",
@@ -81,6 +92,14 @@ export const ROTULO_ESTADO_TAREFA: Record<EstadoTarefa, string> = {
   feita: "Conforme",
   nao_conforme: "Não conforme",
   nao_aplicavel: "Não aplicável",
+};
+
+export const ROTULO_TIPO_TAREFA: Record<TipoTarefa, string> = {
+  inspecao: "Inspeção",
+  correcao: "Correção",
+  limpeza: "Limpeza",
+  proacao: "Proação",
+  substituicao: "Substituição",
 };
 
 export const ROTULO_FUNCAO: Record<Funcao, string> = {

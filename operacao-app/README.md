@@ -178,18 +178,34 @@ privilégios de quem a criou e ignoraria a RLS que o CRM já tem em `anew_client
 
 ```
 db/schema.sql          19 tabelas ops_*, RLS, permissões, as duas vistas
-tools/validar-schema   corre o esquema contra Postgres, sem Docker
-src/domain/            regras puras — 62 testes, sem infraestrutura
+db/correcoes-modelo    +7 tabelas: especialidades, horários, medições
+db/medicoes.sql        responder a leituras, com o veredicto na base
+tools/validar-*        6 validadores contra Postgres real, sem Docker
+src/domain/            regras puras — 93 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
-src/lib/dados.ts       leituras; nunca engole um erro
+src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
-src/components/        layout, primitivos de UI, ícones
+src/components/        layout, primitivos de UI, ícones, PainelTarefas
 src/pages/             Hoje · Ordens · Ficha de ordem · Locais e ativos
 ```
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 62 testes a correr em pouco mais de um segundo.
+haver 93 testes a correr em pouco mais de um segundo.
+
+### As três escritas, e só três
+
+A app não faz `INSERT` nem `UPDATE` em tabela nenhuma. Tudo o que muda estado passa por
+uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho direto:
+
+| RPC | O que muda | Fechadura |
+|---|---|---|
+| `rpc_ops_transitar_ordem` | o estado da ordem, a sessão de trabalho, o custo | `ops_ordem_guarda_estado` |
+| `rpc_ops_responder_tarefa` | o estado de uma tarefa, e a corretiva que daí nasce | `ops_tarefa_guarda_estado` |
+| `rpc_ops_responder_medicao` | uma leitura, o seu veredicto, e a tarefa que se acerta | `ops_medicao_guarda` |
+
+O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
+mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
 
 ---
 
@@ -270,6 +286,29 @@ Uma medição fora dos limites é não conformidade **sem ninguém decidir**, e 
 ordem nova diz o valor lido e o limite violado — porque "não conforme" sozinho não chega
 para alguém agir.
 
+Uma leitura gera trabalho **uma vez**. A pergunta que a base faz não é "já estava mal?",
+é "já saiu uma ordem daqui?" — guardada em `corretiva_ordem_id`. Sem isso, corrigir um
+engano de dedo abria uma segunda ordem, e piorar de "ilegível" para "não conforme" não
+abria nenhuma.
+
+### O ecrã onde o trabalho acontece
+
+`PainelTarefas` é onde o técnico passa 90% do tempo, com o telemóvel numa mão e o
+equipamento na outra. Três decisões que vêm daí:
+
+- **Uma resposta, um toque.** Escolher "Conforme" grava. Não há escolher-e-depois-gravar,
+  que é um passo que ninguém dá em pé.
+- **O veredicto aparece antes de gravar.** Escrever 8 numa gama de 10–15 mostra logo "vai
+  ficar não conforme". No Infraspeak só se sabe depois, e quem se enganou já gerou uma
+  ordem que ninguém pediu. Uma opção que abre corretiva diz isso no próprio botão.
+- **A corretiva aparece com link, ali.** É o instante em que essa informação vale alguma
+  coisa; no relatório de amanhã já não vale.
+
+Uma tarefa com medições responde-se pelas medições e acerta-se sozinha quando a última
+entra — ninguém diz duas vezes a mesma coisa. Uma tarefa sem medições responde-se à mão.
+Quando não se pode responder, o ecrã diz **o passo em falta** ("Inicia a ordem para
+começares a responder"), não só que não se pode.
+
 ### Os planos guardam a regra, não as ocorrências
 
 O Infraspeak materializa ocorrências até 2033: milhares de linhas futuras a afogar o que
@@ -295,6 +334,6 @@ Identificados no levantamento, nenhum necessário para fechar o ciclo:
 - agendamentos múltiplos por ordem (`RETIFICAÇÃO MEDIDAS`, `INÍCIO OBRA`)
 - SLA por cliente × área × prioridade
 - áreas, tipos e prioridades como tabelas de configuração — hoje são colunas
-- medições com histórico e gráfico na ficha de ativo
+- histórico e gráfico das medições na ficha de ativo (as leituras já ficam gravadas)
 - regras de notificação, portal do cliente, relatório em PDF
 - ponte com a agenda do CRM (`schedule_items`) e com o Inventário

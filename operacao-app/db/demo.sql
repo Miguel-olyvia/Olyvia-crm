@@ -227,6 +227,93 @@ SELECT o.id, p.utilizador_id,
  LIMIT 1;
 
 
+-- ── Medições da OT-DEMO-001 ───────────────────────────────────────────
+--
+-- Três medições, uma de cada feitio, para se ver o ecrã do técnico a
+-- funcionar sem ter de inventar dados: uma gama que se decide sozinha, uma
+-- escolha com uma opção que abre corretiva, e um contador.
+--
+-- Este bloco depende de db/correcoes-modelo.sql e db/medicoes.sql. Se ainda
+-- não tiverem sido corridos, salta em silêncio em vez de rebentar a demo.
+
+DO $medicoes$
+DECLARE
+  v_org     uuid;
+  v_cat     uuid;
+  v_tarefa  uuid;
+  v_gama    uuid;
+  v_escolha uuid;
+  v_conta   uuid;
+BEGIN
+  IF to_regclass('public.ops_medicao_def') IS NULL THEN
+    RAISE NOTICE 'Sem medições na demo: corre db/correcoes-modelo.sql e db/medicoes.sql primeiro.';
+    RETURN;
+  END IF;
+
+  SELECT org_id INTO v_org FROM _ctx;
+  SELECT id INTO v_cat FROM public.ops_categoria_ativo WHERE codigo = 'DEMO-107';
+
+  INSERT INTO public.ops_medicao_def
+    (organization_id, categoria_ativo_id, nome, tipo, unidade, limite_min, limite_max)
+  SELECT v_org, v_cat, d.nome, d.tipo, d.unidade, d.lmin, d.lmax
+    FROM (VALUES
+      ('Pressão do manómetro', 'gama',      'bar', 10.0, 15.0),
+      ('Estado do selo',       'escolha',   NULL,  NULL, NULL),
+      ('Horas de serviço',     'acumulado', 'h',   NULL, NULL)
+    ) AS d(nome, tipo, unidade, lmin, lmax)
+   WHERE NOT EXISTS (
+     SELECT 1 FROM public.ops_medicao_def x
+      WHERE x.organization_id = v_org AND x.nome = d.nome);
+
+  SELECT id INTO v_gama    FROM public.ops_medicao_def
+   WHERE organization_id = v_org AND nome = 'Pressão do manómetro';
+  SELECT id INTO v_escolha FROM public.ops_medicao_def
+   WHERE organization_id = v_org AND nome = 'Estado do selo';
+  SELECT id INTO v_conta   FROM public.ops_medicao_def
+   WHERE organization_id = v_org AND nome = 'Horas de serviço';
+
+  -- A opção "Não conforme" abre corretiva. É exatamente a caixa que no
+  -- Infraspeak está desligada, e por isso o ciclo lá não fecha.
+  INSERT INTO public.ops_medicao_opcao (medicao_def_id, nome, posicao, e_nao_conforme, cria_corretiva)
+  SELECT v_escolha, o.nome, o.pos, o.mau, o.abre
+    FROM (VALUES
+      ('Conforme',     0, false, false),
+      ('Não conforme', 1, true,  true),
+      ('Ilegível',     2, true,  false)
+    ) AS o(nome, pos, mau, abre)
+   ON CONFLICT (medicao_def_id, nome) DO NOTHING;
+
+  -- Uma tarefa nova na ordem que já está em curso, com as três medições por
+  -- responder. É o que o técnico vai encontrar quando abrir a ordem.
+  INSERT INTO public.ops_ordem_tarefa
+    (ordem_id, ordem_alvo_id, posicao, nome, tipo, estado, obrigatoria)
+  SELECT o.id, al.id, 6, 'Leituras do extintor', 'inspecao', 'pendente', true
+    FROM public.ops_ordem o
+    JOIN public.ops_ordem_alvo al ON al.ordem_id = o.id
+   WHERE o.codigo = 'OT-DEMO-001'
+     AND NOT EXISTS (
+       SELECT 1 FROM public.ops_ordem_tarefa x
+        WHERE x.ordem_id = o.id AND x.nome = 'Leituras do extintor');
+
+  SELECT t.id INTO v_tarefa
+    FROM public.ops_ordem_tarefa t
+    JOIN public.ops_ordem o ON o.id = t.ordem_id
+   WHERE o.codigo = 'OT-DEMO-001' AND t.nome = 'Leituras do extintor';
+
+  -- Semeadas vazias, com os limites congelados. A fechadura deixa passar
+  -- porque uma linha em branco não é um veredicto.
+  INSERT INTO public.ops_ordem_tarefa_medicao
+    (ordem_tarefa_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max)
+  SELECT v_tarefa, d.id, d.nome, d.tipo, d.unidade, d.limite_min, d.limite_max
+    FROM public.ops_medicao_def d
+   WHERE d.id IN (v_gama, v_escolha, v_conta)
+  ON CONFLICT (ordem_tarefa_id, medicao_def_id) DO NOTHING;
+
+  RAISE NOTICE 'Demo: 3 medições por responder na tarefa "Leituras do extintor" da OT-DEMO-001.';
+END
+$medicoes$;
+
+
 -- ── Relatório ─────────────────────────────────────────────────────────
 
 DO $relatorio$
