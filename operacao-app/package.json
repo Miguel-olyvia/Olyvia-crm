@@ -22,6 +22,7 @@
     "supabase:despacho": "node tools/correr-sql.mjs db/despacho.sql",
     "supabase:orcamentos": "node tools/correr-sql.mjs db/orcamentos.sql",
     "supabase:anexos": "node tools/correr-sql.mjs db/anexos.sql",
+    "supabase:planos-crud": "node tools/correr-sql.mjs db/planos-crud.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",

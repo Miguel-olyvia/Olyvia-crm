@@ -13,6 +13,8 @@ const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
 const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 const Orcamentos = lazy(() => import("./pages/Orcamentos"));
+const Relatorio = lazy(() => import("./pages/Relatorio"));
+const Planos = lazy(() => import("./pages/Planos"));
 
 export default function App() {
   return (
@@ -37,10 +39,26 @@ export default function App() {
           }
         />
         <Route
+          path="/ordens/:codigo/relatorio"
+          element={
+            <Suspense fallback={<Spinner label="A montar o relatório…" />}>
+              <Relatorio />
+            </Suspense>
+          }
+        />
+        <Route
           path="/ordens/:codigo"
           element={
             <Suspense fallback={<Spinner label="A carregar a ordem…" />}>
               <OrdemDetalhe />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/planos"
+          element={
+            <Suspense fallback={<Spinner label="A carregar os planos…" />}>
+              <Planos />
             </Suspense>
           }
         />

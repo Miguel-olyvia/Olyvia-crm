@@ -33,7 +33,19 @@ await db.exec(STUBS_CRM);
 await db.exec(`
   CREATE TABLE public.auth_to_business_user_map (auth_user_id uuid, business_user_id uuid);
   CREATE OR REPLACE FUNCTION public.current_business_user_id() RETURNS uuid
-    LANGUAGE sql STABLE SECURITY DEFINER AS $fn$ SELECT NULL::uuid $fn$;
+    LANGUAGE sql STABLE SECURITY DEFINER AS $fn$
+    SELECT m.business_user_id FROM public.auth_to_business_user_map m
+     WHERE m.auth_user_id = auth.uid() LIMIT 1 $fn$;
+  -- Os nomes dos parametros tem de ser os mesmos do stub, senao o Postgres
+  -- recusa o CREATE OR REPLACE.
+  CREATE OR REPLACE FUNCTION public.has_anew_permission(_auth_uid uuid, _permission_code text)
+    RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS $fn$ SELECT true $fn$;
+  INSERT INTO public.anew_users (id, auth_user_id, name, email)
+    VALUES ('aaaa0000-0000-0000-0000-00000000000a','aaaa1111-0000-0000-0000-00000000000a','Gestora','g@x.pt');
+  INSERT INTO auth.users (id, email, email_confirmed_at)
+    VALUES ('aaaa1111-0000-0000-0000-00000000000a','g@x.pt',now());
+  INSERT INTO public.auth_to_business_user_map (auth_user_id, business_user_id)
+    VALUES ('aaaa1111-0000-0000-0000-00000000000a','aaaa0000-0000-0000-0000-00000000000a');
   INSERT INTO public.anew_organizations (id, name) VALUES ('${ORG}','Org');
   INSERT INTO public.anew_entities (id, display_name) VALUES ('77777777-7777-7777-7777-777777777777','C');
   INSERT INTO public.anew_clients (id, organization_id, entity_id)
@@ -45,6 +57,9 @@ await db.exec(ler("rpcs.sql"));
 await db.exec(ler("rpcs-tarefas.sql"));
 await db.exec(ler("planos.sql"));
 await db.exec(ler("correcoes-modelo.sql"));
+await db.exec(ler("medicoes.sql"));
+await db.exec(ler("despacho.sql"));
+await db.exec(ler("planos-crud.sql"));
 
 // ── O expansor, isolado ──────────────────────────────────────────────────
 console.log("\n─── expandir RRULE ──────────────────────");
@@ -255,6 +270,126 @@ console.log("\n─── recorrencia dinamica ───────────�
       ? ok("agendada 72h depois do fecho, como o plano manda")
       : mau(`esperava +72h, deu +${Number(h).toFixed(1)}h`);
   }
+}
+
+
+// ── Criar e editar um plano sem escrever SQL ─────────────────────────────
+console.log("\n─── gravar um plano ─────────────────────");
+
+const GESTOR_AUTH = "aaaa1111-0000-0000-0000-00000000000a";
+
+await db.exec(`
+  INSERT INTO public.ops_utilizador_perfil (organization_id, utilizador_id, funcao)
+    VALUES ('${ORG}','aaaa0000-0000-0000-0000-00000000000a','gestor');
+`);
+
+async function gravar(args) {
+  const p = {
+    p_plano_id: "NULL",
+    p_cliente_id: `'${CLI}'`,
+    ...args,
+  };
+  const r = await db.exec(`
+    BEGIN;
+    SET LOCAL request.jwt.claim.sub = '${GESTOR_AUTH}';
+    SELECT public.rpc_ops_gravar_plano(${Object.entries(p).map(([k, v]) => `${k} => ${v}`).join(", ")});
+    COMMIT;
+  `);
+  const linhas = r.flatMap((x) => x.rows ?? []);
+  const bruto = Object.values(linhas.at(-1) ?? {})[0];
+  return typeof bruto === "string" ? JSON.parse(bruto) : bruto;
+}
+
+async function gravarDeveFalhar(nome, args, trecho) {
+  try {
+    await gravar(args);
+    mau(`${nome} — PASSOU, e devia ter sido recusado`);
+  } catch (e) {
+    await db.exec("ROLLBACK").catch(() => {});
+    if (!trecho || e.message.includes(trecho)) ok(nome);
+    else mau(`${nome} — mensagem errada: ${e.message.split("\n")[0]}`);
+  }
+}
+
+{
+  const r = await gravar({
+    p_nome: "'PMP trimestral extintores'",
+    p_regra: "'FREQ=MONTHLY;BYDAY=1MO'",
+  });
+  r?.ok && r.criado ? ok(`criou o plano ${r.codigo}`) : mau(`não criou: ${JSON.stringify(r)}`);
+
+  const p = await um(`SELECT nome, tipo_recorrencia, regra_recorrencia, estado
+                        FROM public.ops_plano WHERE id='${r.id}'`);
+  p.regra_recorrencia === "FREQ=MONTHLY;BYDAY=1MO"
+    ? ok("com a regra ordinal guardada tal e qual")
+    : mau(`regra: ${p.regra_recorrencia}`);
+
+  // Editar substitui, e obriga o job a reconsiderar a janela.
+  await db.exec(`UPDATE public.ops_plano SET materializado_ate = current_date + 120 WHERE id='${r.id}';`);
+  const e = await gravar({
+    p_plano_id: `'${r.id}'`,
+    p_nome: "'PMP trimestral extintores (revisto)'",
+    p_regra: "'FREQ=MONTHLY;BYMONTHDAY=15'",
+  });
+  e?.criado === false ? ok("editar não cria um segundo plano") : mau("editar criou outro");
+
+  const p2 = await um(`SELECT nome, regra_recorrencia, materializado_ate
+                         FROM public.ops_plano WHERE id='${r.id}'`);
+  p2.regra_recorrencia === "FREQ=MONTHLY;BYMONTHDAY=15"
+    ? ok("a regra mudou") : mau(`regra ficou ${p2.regra_recorrencia}`);
+  p2.materializado_ate === null
+    ? ok("e a janela já gerada foi invalidada — mudar a regra obriga a recontar")
+    : mau(`materializado_ate ficou ${p2.materializado_ate}`);
+}
+
+await gravarDeveFalhar(
+  "um plano sem nome é recusado",
+  { p_nome: "'  '", p_regra: "'FREQ=DAILY'" },
+  "precisa de um nome"
+);
+
+await gravarDeveFalhar(
+  "uma regra que o expansor não sabe ler é recusada AO GRAVAR",
+  { p_nome: "'Regra impossivel'", p_regra: "'FREQ=WEEKLY;BYSETPOS=1'" },
+  "não é suportada"
+);
+
+await gravarDeveFalhar(
+  "um plano dinâmico sem intervalo é recusado",
+  { p_nome: "'Dinamico'", p_tipo_recorrencia: "'dinamica'" },
+  "intervalo em horas"
+);
+
+await gravarDeveFalhar(
+  "um plano que acaba antes de começar é recusado",
+  { p_nome: "'Ao contrario'", p_regra: "'FREQ=DAILY'",
+    p_inicio_em: "'2026-06-01'", p_fim_em: "'2026-05-01'" },
+  "acaba antes de começar"
+);
+
+{
+  // Uma regra sintaticamente válida que nunca gera nada é pior do que uma
+  // inválida: fica em silêncio para sempre.
+  await gravarDeveFalhar(
+    "uma regra que não gera data nenhuma no próximo ano é recusada",
+    { p_nome: "'Nunca acontece'", p_regra: "'FREQ=DAILY;COUNT=0'" },
+    "não gera nenhuma data"
+  );
+}
+
+console.log("\n─── experimentar antes de gravar ────────");
+{
+  const r = await um(`SELECT public.rpc_ops_experimentar_regra('FREQ=MONTHLY;BYDAY=1MO','2026-09-01',3) AS r`);
+  const res = typeof r.r === "string" ? JSON.parse(r.r) : r.r;
+  res.ok && res.datas.length === 3
+    ? ok(`experimentar devolveu 3 datas: ${res.datas.join(", ")}`)
+    : mau(`experimentar deu ${JSON.stringify(res)}`);
+
+  const mauR = await um(`SELECT public.rpc_ops_experimentar_regra('FREQ=WEEKLY;BYSETPOS=1') AS r`);
+  const resMau = typeof mauR.r === "string" ? JSON.parse(mauR.r) : mauR.r;
+  resMau.ok === false && resMau.erro
+    ? ok("e uma regra má devolve o erro em vez de rebentar o ecrã")
+    : mau(`devia ter devolvido erro: ${JSON.stringify(resMau)}`);
 }
 
 console.log("");

@@ -335,6 +335,19 @@ export default function OrdemDetalhe() {
           </div>
         )}
 
+        {/* O relatório só faz sentido quando há trabalho feito para mostrar.
+            Antes disso o botão seria uma promessa vazia. */}
+        {["fechada", "confirmada"].includes(ordem.estado) && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <Link
+              to={`/ordens/${ordem.codigo}/relatorio`}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:border-slate-300"
+            >
+              Relatório para o cliente
+            </Link>
+          </div>
+        )}
+
         {erroAcao && !dialogo && (
           <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erroAcao}</p>
         )}

@@ -134,6 +134,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/despacho.sql` | Criar, atribuir e agendar — o caso do telefone a tocar | **não** |
 | `db/orcamentos.sql` | Do orçamento aceite à obra, e o previsto contra o gasto | **não** (só lê `quotes`) |
 | `db/anexos.sql` | Fotos e ficheiros | **sim** — cria o bucket `operacoes` em `storage` |
+| `db/planos-crud.sql` | Criar e editar planos, e experimentar uma regra antes de a gravar | **não** |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -189,7 +190,8 @@ src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
 src/components/        layout, primitivos de UI, ícones, PainelTarefas
-src/pages/             Hoje · Ordens · Ficha de ordem · Locais e ativos
+src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
+                       Planos · Orçamentos · Relatório do cliente
 ```
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
@@ -209,6 +211,9 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_criar_ordem` | uma ordem nova, com alvo, tarefas e medições | o código sai de uma função só |
 | `rpc_ops_atribuir_ordem` | quem é responsável e quem mais vai | — |
 | `rpc_ops_agendar_ordem` | data, janela, e o aviso de choque | — |
+| `rpc_ops_obra_de_orcamento` | a obra, com o custo previsto congelado | um orçamento, uma obra |
+| `rpc_ops_registar_anexo` | um ficheiro, depois de subir ao storage | o caminho tem de bater certo |
+| `rpc_ops_gravar_plano` | um plano preventivo | a regra é expandida antes de gravar |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
@@ -243,7 +248,8 @@ npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
-npm run supabase:anexos         # db/anexos.sql (por último)
+npm run supabase:anexos         # db/anexos.sql
+npm run supabase:planos-crud    # db/planos-crud.sql (por último)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

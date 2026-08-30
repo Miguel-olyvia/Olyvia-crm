@@ -7,6 +7,7 @@ import {
   Building,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Euro,
   ExternalLink,
   Home,
@@ -29,6 +30,7 @@ const NAVEGACAO = [
   { to: "/", rotulo: "Hoje", Icone: Home },
   { to: "/ordens", rotulo: "Ordens", Icone: List },
   { to: "/locais", rotulo: "Locais", Icone: Layers },
+  { to: "/planos", rotulo: "Planos", Icone: Clock },
   { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
 ];
 

@@ -791,3 +791,132 @@ export async function removerAnexo(anexoId: string): Promise<void> {
   // perigoso: sem registo, ninguém lhe chega pela app.
   if (r?.caminho) await supabase.storage.from(BUCKET).remove([r.caminho]);
 }
+
+/* ──────────────────────── Planos preventivos ───────────────────────── */
+
+export interface PlanoRow {
+  id: string;
+  codigo: string;
+  nome: string;
+  cliente_id: string;
+  estado: string;
+  tipo_recorrencia: string;
+  regra_recorrencia: string | null;
+  intervalo_horas: number | null;
+  hora_prevista: string;
+  responsavel_id: string | null;
+  inicio_em: string;
+  fim_em: string | null;
+  materializado_ate: string | null;
+}
+
+export interface AlvoDoPlano {
+  id: string;
+  plano_id: string;
+  ativo_id: string | null;
+  local_id: string | null;
+  checklist_id: string | null;
+}
+
+export async function listarPlanos(orgId: string): Promise<PlanoRow[]> {
+  const { data, error } = await supabase
+    .from("ops_plano")
+    .select(
+      "id, codigo, nome, cliente_id, estado, tipo_recorrencia, regra_recorrencia, " +
+        "intervalo_horas, hora_prevista, responsavel_id, inicio_em, fim_em, materializado_ate"
+    )
+    .eq("organization_id", orgId)
+    .order("estado")
+    .order("nome");
+  rebentar("carregar os planos", error);
+  return (data ?? []) as unknown as PlanoRow[];
+}
+
+export async function alvosDosPlanos(planoIds: readonly string[]): Promise<AlvoDoPlano[]> {
+  if (planoIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_plano_alvo")
+    .select("id, plano_id, ativo_id, local_id, checklist_id")
+    .in("plano_id", planoIds as string[]);
+  rebentar("carregar os alvos dos planos", error);
+  return (data ?? []) as unknown as AlvoDoPlano[];
+}
+
+export interface PlanoParaGravar {
+  id?: string | null;
+  nome: string;
+  clienteId: string;
+  tipoRecorrencia: "calendario" | "dinamica";
+  regra?: string | null;
+  intervaloHoras?: number | null;
+  horaPrevista?: string;
+  inicioEm?: string | null;
+  fimEm?: string | null;
+  responsavelId?: string | null;
+  estado?: string;
+  alvos: { local_id?: string | null; ativo_id?: string | null; checklist_id?: string | null }[];
+}
+
+export async function gravarPlano(
+  p: PlanoParaGravar
+): Promise<{ ok: boolean; id: string; codigo: string; criado: boolean; alvos: number }> {
+  const { data, error } = await supabase.rpc("rpc_ops_gravar_plano", {
+    p_plano_id: p.id ?? null,
+    p_nome: p.nome,
+    p_cliente_id: p.clienteId,
+    p_tipo_recorrencia: p.tipoRecorrencia,
+    p_regra: p.regra ?? null,
+    p_intervalo_horas: p.intervaloHoras ?? null,
+    p_hora_prevista: p.horaPrevista ?? "09:00",
+    p_inicio_em: p.inicioEm ?? null,
+    p_fim_em: p.fimEm ?? null,
+    p_responsavel_id: p.responsavelId ?? null,
+    p_estado: p.estado ?? "ativo",
+    p_duracao: 0,
+    p_alvos: p.alvos,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar o plano.");
+  return data as unknown as {
+    ok: boolean;
+    id: string;
+    codigo: string;
+    criado: boolean;
+    alvos: number;
+  };
+}
+
+/**
+ * As próximas datas que uma regra vai gerar, sem gravar nada.
+ *
+ * É a diferença entre confiar numa regra e verificá-la. Devolve `{ok:false}`
+ * com o erro em vez de rebentar — uma regra a meio de ser escrita é inválida
+ * quase sempre, e não é um acidente.
+ */
+export async function experimentarRegra(
+  regra: string,
+  de?: string
+): Promise<{ ok: boolean; datas?: string[]; erro?: string }> {
+  const { data, error } = await supabase.rpc("rpc_ops_experimentar_regra", {
+    p_regra: regra,
+    p_de: de ?? null,
+    p_quantas: 6,
+  });
+  if (error) return { ok: false, erro: error.message };
+  return data as unknown as { ok: boolean; datas?: string[]; erro?: string };
+}
+
+/** Corre a materialização à mão, para quem não quer esperar pelo job diário. */
+export async function materializarPlanos(
+  planoId?: string | null
+): Promise<{ ordens_criadas: number; planos_vistos: number; ignorados: unknown[] }> {
+  const { data, error } = await supabase.rpc("rpc_ops_materializar_planos", {
+    p_plano_id: planoId ?? null,
+    p_dias: 120,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gerar as ordens.");
+  return data as unknown as {
+    ordens_criadas: number;
+    planos_vistos: number;
+    ignorados: unknown[];
+  };
+}
