@@ -12,6 +12,7 @@ import Ordens from "./pages/Ordens";
 const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
 const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
+const Orcamentos = lazy(() => import("./pages/Orcamentos"));
 
 export default function App() {
   return (
@@ -40,6 +41,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar a ordem…" />}>
               <OrdemDetalhe />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/orcamentos"
+          element={
+            <Suspense fallback={<Spinner label="A carregar os orçamentos…" />}>
+              <Orcamentos />
             </Suspense>
           }
         />

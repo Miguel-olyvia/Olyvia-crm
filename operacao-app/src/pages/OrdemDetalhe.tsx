@@ -10,12 +10,16 @@ import {
   medicoesDaOrdem,
   obterOrdem,
   opcoesDeMedicoes,
+  custoDaOrdem,
   pessoasDaOrdem,
+  previstoDaOrdem,
   sessoesDaOrdem,
   tarefasDaOrdem,
   type AlvoDaOrdem,
   type MedicaoDaTarefa,
   type MembroEquipa,
+  type CustoDaOrdem,
+  type LinhaPrevista,
   type OpcaoDeMedicao,
   type OrdemCompleta,
   type SessaoDaOrdem,
@@ -53,6 +57,7 @@ import { alertasDaOrdem } from "../domain/alertas";
 import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
 import PainelDespacho from "../components/PainelDespacho";
+import PainelCusto from "../components/PainelCusto";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
 
 /**
@@ -76,6 +81,8 @@ export default function OrdemDetalhe() {
   const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
   const [opcoes, setOpcoes] = useState<OpcaoDeMedicao[]>([]);
   const [naOrdem, setNaOrdem] = useState<string[]>([]);
+  const [custo, setCusto] = useState<CustoDaOrdem | null>(null);
+  const [previsto, setPrevisto] = useState<LinhaPrevista[]>([]);
   const [equipa, setEquipa] = useState<Map<string, MembroEquipa>>(new Map());
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -114,6 +121,10 @@ export default function OrdemDetalhe() {
         ...new Set(meds.filter((m) => m.tipo === "escolha").map((m) => m.medicao_def_id)),
       ]);
 
+      // Os custos vêm vazios para quem não os pode ver, e isso não é um erro:
+      // é a resposta certa. Por isso não passam por `rebentar()`.
+      const [cst, prv] = await Promise.all([custoDaOrdem(o.id), previstoDaOrdem(o.id)]);
+
       setOrdem(o);
       setAlvos(als);
       setTarefas(tfs);
@@ -122,6 +133,8 @@ export default function OrdemDetalhe() {
       setOpcoes(ops);
       setEquipa(new Map(eq.map((m) => [m.utilizador_id, m])));
       setNaOrdem(pes.map((p) => p.utilizador_id));
+      setCusto(cst);
+      setPrevisto(prv);
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
@@ -358,6 +371,9 @@ export default function OrdemDetalhe() {
           <Linha rotulo="Motivo do cancelamento" valor={ordem.motivo_cancelamento} />
         )}
       </Card>
+
+      {/* Orçamentado contra gasto — só aparece se houve orçamento */}
+      <PainelCusto custo={custo} previsto={previsto} />
 
       {/* Quem vai, e quando */}
       <PainelDespacho

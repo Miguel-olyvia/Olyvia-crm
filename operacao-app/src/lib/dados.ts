@@ -543,3 +543,112 @@ export async function listarChecklists(
   rebentar("carregar as checklists", error);
   return (data ?? []) as unknown as { id: string; codigo: string; nome: string }[];
 }
+
+/* ────────────────────────── Orçamentos e custo ─────────────────────── */
+
+/** Um orçamento aceite no CRM, visto do lado de Operações. */
+export interface OrcamentoAceite {
+  id: string;
+  cliente_id: string | null;
+  numero: string;
+  titulo: string;
+  obra_endereco: string | null;
+  estado: string;
+  accepted_at: string | null;
+  total: number | null;
+  moeda: string | null;
+  /** O CUSTO somado das linhas — não o preço de venda. */
+  custo_previsto: number;
+  linhas: number;
+  tem_obra: boolean;
+}
+
+export async function listarOrcamentos(orgId: string): Promise<OrcamentoAceite[]> {
+  const { data, error } = await supabase
+    .from("ops_v_orcamento")
+    .select(
+      "id, cliente_id, numero, titulo, obra_endereco, estado, accepted_at, " +
+        "total, moeda, custo_previsto, linhas, tem_obra"
+    )
+    .eq("organization_id", orgId)
+    .order("accepted_at", { ascending: false, nullsFirst: false })
+    .limit(200);
+  rebentar("carregar os orçamentos aceites", error);
+  return (data ?? []) as unknown as OrcamentoAceite[];
+}
+
+export async function obraDeOrcamento(args: {
+  orcamentoId: string;
+  localId?: string | null;
+  checklistId?: string | null;
+  agendadaPara?: string | null;
+  responsavelId?: string | null;
+}): Promise<{ ok: boolean; id: string; codigo: string; linhas: number; custo_previsto: number }> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_de_orcamento", {
+    p_orcamento_id: args.orcamentoId,
+    p_local_id: args.localId ?? null,
+    p_checklist_id: args.checklistId ?? null,
+    p_agendada_para: args.agendadaPara ?? null,
+    p_responsavel_id: args.responsavelId ?? null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível abrir a obra.");
+  return data as unknown as {
+    ok: boolean;
+    id: string;
+    codigo: string;
+    linhas: number;
+    custo_previsto: number;
+  };
+}
+
+/** Previsto e real lado a lado. Nulo em `previsto` = não houve orçamento. */
+export interface CustoDaOrdem {
+  ordem_id: string;
+  previsto: number | null;
+  real_material: number | null;
+  real_mao_obra: number | null;
+  real_outros: number | null;
+  real_total: number;
+  desvio: number | null;
+  desvio_percent: number | null;
+}
+
+export async function custoDaOrdem(ordemId: string): Promise<CustoDaOrdem | null> {
+  const { data, error } = await supabase
+    .from("ops_v_ordem_custo")
+    .select(
+      "ordem_id, previsto, real_material, real_mao_obra, real_outros, " +
+        "real_total, desvio, desvio_percent"
+    )
+    .eq("ordem_id", ordemId)
+    .limit(1);
+  // Sem permissão de custos a vista devolve vazio, e isso não é um erro:
+  // é a resposta certa para quem não pode ver números.
+  if (error) return null;
+  return (data?.[0] ?? null) as unknown as CustoDaOrdem | null;
+}
+
+export interface LinhaPrevista {
+  id: string;
+  posicao: number;
+  categoria: string | null;
+  descricao: string;
+  unidade: string | null;
+  quantidade: number;
+  custo_material: number;
+  custo_mao_obra: number;
+  total_sem_iva: number;
+}
+
+export async function previstoDaOrdem(ordemId: string): Promise<LinhaPrevista[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_previsto")
+    .select(
+      "id, posicao, categoria, descricao, unidade, quantidade, " +
+        "custo_material, custo_mao_obra, total_sem_iva"
+    )
+    .eq("ordem_id", ordemId)
+    .order("posicao");
+  if (error) return [];
+  return (data ?? []) as unknown as LinhaPrevista[];
+}

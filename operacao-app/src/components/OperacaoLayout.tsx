@@ -7,6 +7,7 @@ import {
   Building,
   ChevronLeft,
   ChevronRight,
+  Euro,
   ExternalLink,
   Home,
   Layers,
@@ -28,6 +29,7 @@ const NAVEGACAO = [
   { to: "/", rotulo: "Hoje", Icone: Home },
   { to: "/ordens", rotulo: "Ordens", Icone: List },
   { to: "/locais", rotulo: "Locais", Icone: Layers },
+  { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
 ];
 
 export function OperacaoLayout() {

@@ -94,6 +94,35 @@ CREATE TABLE public.anew_permissions (
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now());
 
+-- Orcamentos. So as colunas que db/orcamentos.sql le — se ele passar a ler
+-- outra, o teste rebenta aqui e nao em producao, que e o ponto de ter stubs.
+CREATE TABLE public.quotes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id uuid,
+  cliente_id uuid,
+  quote_number text,
+  title text,
+  obra_endereco text,
+  obra_notas text,
+  estado text DEFAULT 'rascunho',
+  accepted_at timestamptz,
+  total numeric(12,2) DEFAULT 0,
+  moeda text DEFAULT 'EUR',
+  deleted_at timestamptz);
+
+CREATE TABLE public.quote_lines (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_id uuid REFERENCES public.quotes(id) ON DELETE CASCADE,
+  ordem integer DEFAULT 0,
+  categoria text,
+  descricao_snapshot text,
+  item_description text,
+  unidade text,
+  qt numeric(12,3) DEFAULT 1,
+  custo_material_unit numeric(12,2) DEFAULT 0,
+  custo_mao_obra_unit numeric(12,2) DEFAULT 0,
+  total_sem_iva numeric(12,2) DEFAULT 0);
+
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.products (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
