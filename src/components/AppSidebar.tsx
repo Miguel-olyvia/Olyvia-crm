@@ -129,13 +129,6 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const handleTopLevelClick = (item: TopLevelItem) => {
     isManuallyClosedRef.current = false;
     setOpenSectionId(null);
-    // Destinos externos (outra app no mesmo domínio, como /operacao) não estão
-    // nas rotas deste SPA: navigate() cairia no NotFound. Tem de ser um
-    // carregamento de página a sério.
-    if (item.external) {
-      window.location.assign(item.to);
-      return;
-    }
     navigate(item.to);
   };
 
