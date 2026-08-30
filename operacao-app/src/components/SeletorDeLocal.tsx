@@ -46,6 +46,9 @@ export default function SeletorDeLocal({
   desativado?: boolean;
 }) {
   const [moradas, setMoradas] = useState<MoradaDoCliente[]>([]);
+  // Enquanto não se souber, não se diz nada. Dizer "não tem morada" e depois
+  // aparecerem duas é pior do que esperar meio segundo.
+  const [aProcurar, setAProcurar] = useState(false);
   const [aCriar, setACriar] = useState<MoradaDoCliente | "novo" | null>(null);
   const [aGravar, setAGravar] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -61,9 +64,14 @@ export default function SeletorDeLocal({
       return;
     }
     let vivo = true;
-    void moradasDoCliente(clienteId).then((ms) => {
-      if (vivo) setMoradas(ms);
-    });
+    setAProcurar(true);
+    void moradasDoCliente(clienteId)
+      .then((ms) => {
+        if (vivo) setMoradas(ms);
+      })
+      .finally(() => {
+        if (vivo) setAProcurar(false);
+      });
     return () => {
       vivo = false;
     };
@@ -107,7 +115,7 @@ export default function SeletorDeLocal({
           <Combobox
             value={valor}
             onChange={aoEscolher}
-            options={doCliente.map((l) => ({ value: l.id, label: `${l.nome} · ${l.codigo}` }))}
+            options={doCliente.map((l) => ({ value: l.id, label: l.nome }))}
             placeholder={doCliente.length === 0 ? "Nenhum ainda" : "Escolher"}
             className="min-w-0 flex-1"
             disabled={desativado || doCliente.length === 0}
@@ -124,6 +132,25 @@ export default function SeletorDeLocal({
           </Button>
         </div>
       </Field>
+
+      {/*
+        Vazio sem explicação é pior do que um erro: quem não vê a caixa fica
+        sem saber se está avariado ou se não há dados. Por isso os três casos
+        dizem-se por escrito.
+      */}
+      {!aProcurar && moradas.length === 0 && (
+        <p className="text-xs text-slate-400">
+          Este cliente não tem morada na ficha do CRM. Cria o sítio no botão acima.
+        </p>
+      )}
+
+      {!aProcurar && moradas.length > 0 && porUsar.length === 0 && (
+        <p className="text-xs text-slate-400">
+          {moradas.length === 1
+            ? "A morada que o cliente tem no CRM já é um local."
+            : `As ${moradas.length} moradas que o cliente tem no CRM já são locais.`}
+        </p>
+      )}
 
       {/* As moradas que o CRM já tem. Um toque, e o sítio existe. */}
       {porUsar.length > 0 && (
@@ -147,14 +174,20 @@ export default function SeletorDeLocal({
                   )}
                 >
                   <MapPin width={14} height={14} className="mt-0.5 shrink-0 text-brand" />
+                  {/*
+                    `break-words` e `min-w-0`: uma morada é texto longo sem
+                    sítios óbvios para partir, e num ecrã de telemóvel saía
+                    para fora da caixa. A acção passa para baixo em vez de
+                    disputar a mesma linha.
+                  */}
                   <span className="min-w-0 flex-1">
-                    {m.morada}
-                    {m.principal && (
-                      <span className="ml-1.5 text-xs text-slate-400">principal</span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-xs font-medium text-brand">
-                    {aGravar === m.address_id ? "a criar…" : "usar"}
+                    <span className="block break-words">{m.morada}</span>
+                    <span className="mt-0.5 block text-xs">
+                      {m.principal && <span className="text-slate-400">principal · </span>}
+                      <span className="font-medium text-brand">
+                        {aGravar === m.address_id ? "a criar…" : "tocar para usar"}
+                      </span>
+                    </span>
                   </span>
                 </button>
               </li>

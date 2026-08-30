@@ -82,7 +82,11 @@ export default function NovaOrdem() {
   useEffect(() => {
     if (!activeOrgId) return;
     let vivo = true;
-    setACarregar(true);
+    // Só a primeira carga mostra esqueleto. Uma recarga (por se ter criado um
+    // local aqui mesmo) tem de ser invisível: pôr o ecrã em esqueleto
+    // desmontava o formulário e atirava a página para o topo — no telemóvel
+    // parecia que a app tinha recarregado sozinha.
+    if (recargaLocais === 0) setACarregar(true);
     setErro(null);
     (async () => {
       try {

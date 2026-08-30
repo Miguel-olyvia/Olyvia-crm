@@ -362,6 +362,16 @@ function FormCusto({
                 ? "Traz o preço de tabela, e permite comparar linha a linha com o orçamento."
                 : "Sem catálogo, este custo não emparelha com nenhuma linha do orçamento — só entra no total."}
           </p>
+
+          {!aCarregar && (catalogo.length === 0 || compras.length === 0) && (
+            <p className="mt-1.5 text-xs text-slate-400">
+              {catalogo.length === 0 && compras.length === 0
+                ? "Esta empresa não tem catálogo nem compras no CRM — por isso só dá para lançar à mão."
+                : catalogo.length === 0
+                  ? "Esta empresa não tem catálogo no CRM."
+                  : "Não há compras com quantidade por atribuir."}
+            </p>
+          )}
         </div>
 
         {aCarregar ? (
