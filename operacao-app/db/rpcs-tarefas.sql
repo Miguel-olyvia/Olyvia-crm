@@ -85,6 +85,92 @@ $$;
 
 
 -- ============================================================
+-- 2b. A corretiva
+-- ============================================================
+-- Uma não conformidade gera trabalho. Antes isto vivia dentro de
+-- `ops_responder_tarefa_impl`; agora vive aqui porque as medições também
+-- precisam de gerar corretivas, e duas cópias da mesma regra divergem sempre.
+--
+-- `_detalhe` é o que muda de caso para caso — o valor lido, a opção escolhida,
+-- as observações. O resto (onde, título, alvo, evento) é igual em todos.
+CREATE OR REPLACE FUNCTION public.ops_criar_corretiva(
+  _tarefa_id uuid,
+  _detalhe   text DEFAULT NULL,
+  _autor_id  uuid DEFAULT NULL
+)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_t          record;
+  v_o          record;
+  v_ativo_id   uuid;
+  v_local_id   uuid;
+  v_ativo_nome text;
+  v_local_nome text;
+  v_onde       text;
+  v_descricao  text;
+  v_nova_id    uuid;
+  v_nova_cod   text;
+BEGIN
+  SELECT * INTO v_t FROM public.ops_ordem_tarefa WHERE id = _tarefa_id;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  SELECT * INTO v_o FROM public.ops_ordem WHERE id = v_t.ordem_id;
+
+  SELECT a.ativo_id, COALESCE(a.local_id, v_o.local_id)
+    INTO v_ativo_id, v_local_id
+    FROM public.ops_ordem_alvo a WHERE a.id = v_t.ordem_alvo_id;
+  v_local_id := COALESCE(v_local_id, v_o.local_id);
+
+  SELECT nome INTO v_ativo_nome FROM public.ops_ativo WHERE id = v_ativo_id;
+  SELECT nome INTO v_local_nome FROM public.ops_local WHERE id = v_local_id;
+  v_onde := nullif(concat_ws(' — ', v_ativo_nome, v_local_nome), '');
+
+  v_descricao := 'Não conformidade detetada em "' || v_t.nome || '".';
+  IF nullif(btrim(coalesce(_detalhe, '')), '') IS NOT NULL THEN
+    v_descricao := v_descricao || E'
+' || _detalhe;
+  END IF;
+  v_descricao := v_descricao || E'
+' || 'Gerada a partir de ' || v_o.codigo || '.';
+
+  v_nova_cod := public.ops_proximo_codigo_interno(v_o.organization_id, 'OT');
+
+  INSERT INTO public.ops_ordem (
+    organization_id, codigo, origem, estado, prioridade,
+    area, tipo, cliente_id, local_id, titulo, descricao,
+    gerada_por_tarefa_id, criada_por
+  ) VALUES (
+    v_o.organization_id, v_nova_cod, 'corretiva', 'por_aprovar', 'alta',
+    v_o.area, v_o.tipo, v_o.cliente_id, v_local_id,
+    COALESCE(v_t.nome || CASE WHEN v_onde IS NOT NULL THEN ' — ' || v_onde ELSE '' END, v_t.nome),
+    v_descricao, _tarefa_id, _autor_id
+  ) RETURNING id INTO v_nova_id;
+
+  -- O ativo em causa fica como alvo da ordem nova, para quem a receber saber
+  -- exatamente o que ir ver.
+  IF v_ativo_id IS NOT NULL OR v_local_id IS NOT NULL THEN
+    INSERT INTO public.ops_ordem_alvo (ordem_id, ativo_id, local_id)
+    VALUES (v_nova_id, v_ativo_id, v_local_id);
+  END IF;
+
+  INSERT INTO public.ops_evento
+    (organization_id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois)
+  VALUES
+    (v_o.organization_id, 'ordem', v_nova_id, 'gerada_por_nao_conformidade',
+     'Gerada a partir da tarefa "' || v_t.nome || '" da ordem ' || v_o.codigo,
+     _autor_id, NULL, jsonb_build_object('codigo', v_nova_cod));
+
+  RETURN v_nova_cod;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_criar_corretiva(uuid, text, uuid)
+  FROM PUBLIC, anon, authenticated;
+
+
+-- ============================================================
 -- 3. Responder a uma tarefa
 -- ============================================================
 
@@ -112,13 +198,7 @@ DECLARE
   v_estado     text;
   v_agora      timestamptz := now();
   v_obs        text := nullif(btrim(coalesce(p_observacoes, '')), '');
-  v_nova_id    uuid;
   v_nova_cod   text;
-  v_ativo_id   uuid;
-  v_local_id   uuid;
-  v_ativo_nome text;
-  v_local_nome text;
-  v_onde       text;
   v_descricao  text;
   v_unidade    text;
 BEGIN
@@ -198,22 +278,11 @@ BEGIN
   -- Só quando a tarefa PASSA a não conforme. Responder duas vezes à mesma
   -- tarefa não gera duas ordens.
   IF v_estado = 'nao_conforme' AND v_t.estado <> 'nao_conforme' THEN
-
-    SELECT a.ativo_id, COALESCE(a.local_id, v_o.local_id)
-      INTO v_ativo_id, v_local_id
-      FROM public.ops_ordem_alvo a WHERE a.id = v_t.ordem_alvo_id;
-    v_local_id := COALESCE(v_local_id, v_o.local_id);
-
-    SELECT nome INTO v_ativo_nome FROM public.ops_ativo WHERE id = v_ativo_id;
-    SELECT nome INTO v_local_nome FROM public.ops_local WHERE id = v_local_id;
-
-    v_onde := nullif(concat_ws(' — ', v_ativo_nome, v_local_nome), '');
     v_unidade := CASE WHEN v_t.unidade IS NOT NULL THEN ' ' || v_t.unidade ELSE '' END;
-
-    v_descricao := 'Não conformidade detetada em "' || v_t.nome || '".';
+    v_descricao := NULL;
 
     IF p_valor_num IS NOT NULL THEN
-      v_descricao := v_descricao || E'\n' || 'Valor lido: ' || p_valor_num || v_unidade;
+      v_descricao := 'Valor lido: ' || p_valor_num || v_unidade;
       IF v_t.limite_min IS NOT NULL OR v_t.limite_max IS NOT NULL THEN
         v_descricao := v_descricao || ' ('
           || concat_ws(', ',
@@ -225,37 +294,11 @@ BEGIN
     END IF;
 
     IF v_obs IS NOT NULL THEN
-      v_descricao := v_descricao || E'\n' || 'Observações do técnico: ' || v_obs;
+      v_descricao := concat_ws(E'
+', v_descricao, 'Observações do técnico: ' || v_obs);
     END IF;
 
-    v_descricao := v_descricao || E'\n' || 'Gerada a partir de ' || v_o.codigo || '.';
-
-    v_nova_cod := public.ops_proximo_codigo_interno(v_o.organization_id, 'OT');
-
-    INSERT INTO public.ops_ordem (
-      organization_id, codigo, origem, estado, prioridade,
-      area, tipo, cliente_id, local_id, titulo, descricao,
-      gerada_por_tarefa_id, criada_por
-    ) VALUES (
-      v_o.organization_id, v_nova_cod, 'corretiva', 'por_aprovar', 'alta',
-      v_o.area, v_o.tipo, v_o.cliente_id, v_local_id,
-      COALESCE(v_t.nome || CASE WHEN v_onde IS NOT NULL THEN ' — ' || v_onde ELSE '' END, v_t.nome),
-      v_descricao, p_tarefa_id, v_user
-    ) RETURNING id INTO v_nova_id;
-
-    -- O ativo em causa fica como alvo da ordem nova, para quem a receber saber
-    -- exatamente o que ir ver.
-    IF v_ativo_id IS NOT NULL OR v_local_id IS NOT NULL THEN
-      INSERT INTO public.ops_ordem_alvo (ordem_id, ativo_id, local_id)
-      VALUES (v_nova_id, v_ativo_id, v_local_id);
-    END IF;
-
-    INSERT INTO public.ops_evento
-      (organization_id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois)
-    VALUES
-      (v_o.organization_id, 'ordem', v_nova_id, 'gerada_por_nao_conformidade',
-       'Gerada a partir da tarefa "' || v_t.nome || '" da ordem ' || v_o.codigo,
-       v_user, NULL, jsonb_build_object('codigo', v_nova_cod));
+    v_nova_cod := public.ops_criar_corretiva(p_tarefa_id, v_descricao, v_user);
   END IF;
 
   INSERT INTO public.ops_evento

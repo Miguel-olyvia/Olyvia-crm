@@ -18,6 +18,7 @@
     "supabase:rpcs-tarefas": "node tools/correr-sql.mjs db/rpcs-tarefas.sql",
     "supabase:planos": "node tools/correr-sql.mjs db/planos.sql",
     "supabase:correcoes": "node tools/correr-sql.mjs db/correcoes-modelo.sql",
+    "supabase:medicoes": "node tools/correr-sql.mjs db/medicoes.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",
@@ -25,6 +26,7 @@
     "validar-instalacao": "node tools/validar-instalacao.mjs",
     "validar-rpcs": "node tools/validar-rpcs.mjs",
     "validar-planos": "node tools/validar-planos.mjs",
+    "validar-medicoes": "node tools/validar-medicoes.mjs",
     "validar-restricao": "node tools/validar-restricao.mjs"
   },
   "dependencies": {

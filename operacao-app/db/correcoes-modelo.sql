@@ -174,7 +174,11 @@ ALTER TABLE public.ops_checklist_tarefa
 
 ALTER TABLE public.ops_ordem_tarefa
   ADD COLUMN IF NOT EXISTS skill_id uuid REFERENCES public.ops_skill(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS privada boolean NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS privada boolean NOT NULL DEFAULT false,
+  -- De que tarefa de checklist veio. Sem isto não há como saber que medições
+  -- a tarefa recolhe. SET NULL: apagar a checklist não apaga o trabalho feito.
+  ADD COLUMN IF NOT EXISTS checklist_tarefa_id uuid
+    REFERENCES public.ops_checklist_tarefa(id) ON DELETE SET NULL;
 
 
 -- ============================================================
@@ -206,7 +210,9 @@ CREATE TABLE IF NOT EXISTS public.ops_ordem_tarefa_medicao (
   opcao_id         uuid REFERENCES public.ops_medicao_opcao(id) ON DELETE SET NULL,
 
   conforme         boolean,
-  lida_em          timestamptz NOT NULL DEFAULT now(),
+  -- Nulo enquanto a leitura estiver por fazer. É o sinal de "por responder":
+  -- a linha nasce com a ordem, vazia, e só ganha data quando alguém a lê.
+  lida_em          timestamptz,
   lida_por         uuid,                          -- → anew_users.id
   UNIQUE (ordem_tarefa_id, medicao_def_id)
 );
@@ -444,14 +450,26 @@ BEGIN
    WHERE pa.plano_id = v_p.id;
 
   INSERT INTO public.ops_ordem_tarefa (
-    ordem_id, ordem_alvo_id, posicao, codigo, nome, tipo, skill_id, privada,
-    obrigatoria, tempo_estimado
+    ordem_id, ordem_alvo_id, checklist_tarefa_id, posicao, codigo, nome, tipo,
+    skill_id, privada, obrigatoria, tempo_estimado
   )
-  SELECT v_nova, oa.id, ct.posicao, ct.codigo, ct.nome, ct.tipo, ct.skill_id,
-         ct.privada, ct.obrigatoria, ct.tempo_estimado
+  SELECT v_nova, oa.id, ct.id, ct.posicao, ct.codigo, ct.nome, ct.tipo,
+         ct.skill_id, ct.privada, ct.obrigatoria, ct.tempo_estimado
     FROM public.ops_ordem_alvo oa
     JOIN public.ops_checklist_tarefa ct ON ct.checklist_id = oa.checklist_id
    WHERE oa.ordem_id = v_nova;
+
+  -- As medições nascem com a ordem, vazias. Congeladas aqui, como a versão da
+  -- checklist: mudar os limites amanhã não reescreve o veredicto de ontem.
+  INSERT INTO public.ops_ordem_tarefa_medicao (
+    ordem_tarefa_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max)
+  SELECT ot.id, md.id, md.nome, md.tipo, md.unidade, md.limite_min, md.limite_max
+    FROM public.ops_ordem_tarefa ot
+    JOIN public.ops_checklist_tarefa_medicao ctm
+      ON ctm.checklist_tarefa_id = ot.checklist_tarefa_id
+    JOIN public.ops_medicao_def md ON md.id = ctm.medicao_def_id
+   WHERE ot.ordem_id = v_nova
+  ON CONFLICT (ordem_tarefa_id, medicao_def_id) DO NOTHING;
 
   INSERT INTO public.ops_evento
     (organization_id, entidade, entidade_id, tipo, descricao, antes, depois)
@@ -527,14 +545,26 @@ BEGIN
          WHERE pa.plano_id = v_plano.id;
 
         INSERT INTO public.ops_ordem_tarefa (
-          ordem_id, ordem_alvo_id, posicao, codigo, nome, tipo, skill_id,
-          privada, obrigatoria, tempo_estimado
+          ordem_id, ordem_alvo_id, checklist_tarefa_id, posicao, codigo, nome,
+          tipo, skill_id, privada, obrigatoria, tempo_estimado
         )
-        SELECT v_ordem_id, oa.id, ct.posicao, ct.codigo, ct.nome, ct.tipo,
-               ct.skill_id, ct.privada, ct.obrigatoria, ct.tempo_estimado
+        SELECT v_ordem_id, oa.id, ct.id, ct.posicao, ct.codigo, ct.nome,
+               ct.tipo, ct.skill_id, ct.privada, ct.obrigatoria, ct.tempo_estimado
           FROM public.ops_ordem_alvo oa
           JOIN public.ops_checklist_tarefa ct ON ct.checklist_id = oa.checklist_id
          WHERE oa.ordem_id = v_ordem_id;
+
+        -- As medições nascem com a ordem, vazias. Congeladas aqui, como a versão da
+        -- checklist: mudar os limites amanhã não reescreve o veredicto de ontem.
+        INSERT INTO public.ops_ordem_tarefa_medicao (
+          ordem_tarefa_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max)
+        SELECT ot.id, md.id, md.nome, md.tipo, md.unidade, md.limite_min, md.limite_max
+          FROM public.ops_ordem_tarefa ot
+          JOIN public.ops_checklist_tarefa_medicao ctm
+            ON ctm.checklist_tarefa_id = ot.checklist_tarefa_id
+          JOIN public.ops_medicao_def md ON md.id = ctm.medicao_def_id
+         WHERE ot.ordem_id = v_ordem_id
+        ON CONFLICT (ordem_tarefa_id, medicao_def_id) DO NOTHING;
 
         v_criadas := v_criadas + 1;
       END LOOP;
