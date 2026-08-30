@@ -11,5 +11,8 @@ export default defineConfig(({ command }) => ({
   server: {
     port: 5274,
     strictPort: false,
+    // Aceita ligações da rede local, para se poder abrir no telemóvel sem
+    // publicar nada. Só o Wi-Fi de casa/escritório lá chega — não é público.
+    host: true,
   },
 }));

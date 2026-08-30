@@ -344,3 +344,78 @@ export async function custosHora(orgId: string): Promise<Map<string, number | nu
     ])
   );
 }
+
+/* ─────────────────── O que o CRM já sabe do cliente ────────────────── */
+
+export interface MoradaDoCliente {
+  address_id: string;
+  cliente_id: string;
+  tipo: string | null;
+  principal: boolean;
+  morada: string;
+  city: string | null;
+  ja_e_local: boolean;
+}
+
+export async function moradasDoCliente(clienteId: string): Promise<MoradaDoCliente[]> {
+  const { data, error } = await supabase
+    .from("ops_v_morada_cliente")
+    .select("address_id, cliente_id, tipo, principal, morada, city, ja_e_local")
+    .eq("cliente_id", clienteId)
+    .order("principal", { ascending: false })
+    .order("morada");
+  // Um cliente sem moradas no CRM não é um erro — é o caso normal de quem
+  // ainda só existe como nome.
+  if (error) return [];
+  return (data ?? []) as unknown as MoradaDoCliente[];
+}
+
+export interface ContactoDoCliente {
+  telefone_id: string | null;
+  telefone: string | null;
+  tipo: string | null;
+  principal: boolean;
+  nome: string;
+  email: string | null;
+}
+
+export async function contactosDoCliente(clienteId: string): Promise<ContactoDoCliente[]> {
+  const { data, error } = await supabase
+    .from("ops_v_contacto_cliente")
+    .select("telefone_id, telefone, tipo, principal, nome, email")
+    .eq("cliente_id", clienteId)
+    .order("principal", { ascending: false });
+  if (error) return [];
+  return ((data ?? []) as unknown as ContactoDoCliente[]).filter((c) => c.telefone);
+}
+
+/**
+ * Cria um local. Com `addressId`, copia a morada do CRM.
+ *
+ * Devolve `ja_existia` quando a morada já tinha virado local: quem carregou no
+ * botão quer o local, e ele já lá está — rebentar seria pedantismo.
+ */
+export async function criarLocal(l: {
+  clienteId: string;
+  nome?: string | null;
+  tipo?: string;
+  parentId?: string | null;
+  addressId?: string | null;
+}): Promise<{ ok: boolean; id: string; codigo: string; nome: string; ja_existia: boolean }> {
+  const { data, error } = await supabase.rpc("rpc_ops_criar_local", {
+    p_cliente_id: l.clienteId,
+    p_nome: l.nome ?? null,
+    p_tipo: l.tipo ?? "morada",
+    p_parent_id: l.parentId ?? null,
+    p_address_id: l.addressId ?? null,
+    p_morada: null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível criar o local.");
+  return data as unknown as {
+    ok: boolean;
+    id: string;
+    codigo: string;
+    nome: string;
+    ja_existia: boolean;
+  };
+}

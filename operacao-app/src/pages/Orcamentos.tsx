@@ -16,7 +16,6 @@ import {
   Badge,
   Button,
   Card,
-  Combobox,
   EmptyState,
   ErrorState,
   Field,
@@ -27,6 +26,7 @@ import {
 } from "../components/ui";
 import { Euro, Inbox, MapPin } from "../components/icons";
 import { euros } from "../lib/formatar";
+import SeletorDeLocal from "../components/SeletorDeLocal";
 
 /**
  * Orçamentos aceites à espera de virar obra.
@@ -91,11 +91,6 @@ export default function Orcamentos() {
   );
 
   const porFazer = orcamentos.filter((o) => !o.tem_obra).length;
-
-  const locaisDoCliente = useMemo(
-    () => (aAbrir?.cliente_id ? locais.filter((l) => l.cliente_id === aAbrir.cliente_id) : locais),
-    [locais, aAbrir]
-  );
 
   const abrir = async () => {
     if (!aAbrir) return;
@@ -264,26 +259,13 @@ export default function Orcamentos() {
               </p>
             </div>
 
-            <Field
-              label="Local"
-              hint={
-                locaisDoCliente.length === 0
-                  ? "Este cliente ainda não tem locais. Pode ficar para depois."
-                  : "Opcional. Onde é a obra."
-              }
-            >
-              <Combobox
-                value={localId}
-                onChange={setLocalId}
-                options={locaisDoCliente.map((l) => ({
-                  value: l.id,
-                  label: `${l.nome} · ${l.codigo}`,
-                }))}
-                placeholder="Por definir"
-                className="w-full"
-                disabled={locaisDoCliente.length === 0}
-              />
-            </Field>
+            <SeletorDeLocal
+              clienteId={aAbrir.cliente_id ?? ""}
+              locais={locais}
+              valor={localId}
+              aoEscolher={setLocalId}
+              aoCriar={() => setRecarga((r) => r + 1)}
+            />
 
             <Field label="Data e hora" hint="Opcional. Podes marcar depois, na ficha da obra.">
               <Input

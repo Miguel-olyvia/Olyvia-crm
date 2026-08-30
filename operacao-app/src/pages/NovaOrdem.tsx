@@ -28,6 +28,8 @@ import {
   cx,
 } from "../components/ui";
 import { ChevronLeft } from "../components/icons";
+import SeletorDeLocal from "../components/SeletorDeLocal";
+import { contactosDoCliente, type ContactoDoCliente } from "../lib/config";
 import { ROTULO_ORIGEM, ROTULO_PRIORIDADE, ORIGENS, PRIORIDADES } from "../domain/tipos";
 
 /**
@@ -71,6 +73,8 @@ export default function NovaOrdem() {
   const [agendadaPara, setAgendadaPara] = useState("");
   const [responsavelId, setResponsavelId] = useState("");
   const [maisCampos, setMaisCampos] = useState(false);
+  const [contactos, setContactos] = useState<ContactoDoCliente[]>([]);
+  const [recargaLocais, setRecargaLocais] = useState(0);
 
   const [aGravar, setAGravar] = useState(false);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
@@ -104,7 +108,7 @@ export default function NovaOrdem() {
     return () => {
       vivo = false;
     };
-  }, [activeOrgId]);
+  }, [activeOrgId, recargaLocais]);
 
   // Os ativos são do local. Sem local escolhido não se mostram — uma lista de
   // todos os equipamentos de todos os clientes não ajuda ninguém.
@@ -128,18 +132,29 @@ export default function NovaOrdem() {
     };
   }, [localId]);
 
-  // Escolher o cliente estreita os locais. Escolher o local sem cliente
-  // preenche o cliente — as duas coisas concordam, venha de onde vier.
-  const locaisDoCliente = useMemo(
-    () => (clienteId ? locais.filter((l) => l.cliente_id === clienteId) : locais),
-    [locais, clienteId]
-  );
-
-  const escolherLocal = (id: string) => {
-    setLocalId(id);
-    const l = locais.find((x) => x.id === id);
-    if (l && !clienteId) setClienteId(l.cliente_id);
-  };
+  // O contacto do cliente já está no CRM. Escrevê-lo outra vez à mão era
+  // trabalho a dobrar, com hipótese de sair diferente das duas vezes.
+  useEffect(() => {
+    if (!clienteId) {
+      setContactos([]);
+      return;
+    }
+    let vivo = true;
+    void contactosDoCliente(clienteId).then((cs) => {
+      if (!vivo) return;
+      setContactos(cs);
+      // Só se preenche o que está vazio: quem já escreveu à mão sabe algo
+      // que o CRM não sabe, e não se lhe apaga por cima.
+      const principal = cs[0];
+      if (principal) {
+        setContactoNome((n) => n || principal.nome);
+        setContactoTelefone((t) => t || principal.telefone || "");
+      }
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [clienteId]);
 
   const escolherCliente = (id: string) => {
     setClienteId(id);
@@ -236,26 +251,13 @@ export default function NovaOrdem() {
               />
             </Field>
 
-            <Field
-              label="Local"
-              hint={
-                clienteId && locaisDoCliente.length === 0
-                  ? "Este cliente ainda não tem locais."
-                  : undefined
-              }
-            >
-              <Combobox
-                value={localId}
-                onChange={escolherLocal}
-                options={locaisDoCliente.map((l) => ({
-                  value: l.id,
-                  label: `${l.nome} · ${l.codigo}`,
-                }))}
-                placeholder="Escolher local"
-                className="w-full"
-                disabled={locaisDoCliente.length === 0}
-              />
-            </Field>
+            <SeletorDeLocal
+              clienteId={clienteId}
+              locais={locais}
+              valor={localId}
+              aoEscolher={setLocalId}
+              aoCriar={() => setRecargaLocais((r) => r + 1)}
+            />
           </div>
 
           {ativos.length > 0 && (
@@ -362,7 +364,10 @@ export default function NovaOrdem() {
               )}
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Contacto no local">
+                <Field
+                  label="Contacto no local"
+                  hint={contactos.length > 0 ? "Veio da ficha do cliente. Podes mudar." : undefined}
+                >
                   <Input
                     value={contactoNome}
                     onChange={(e) => setContactoNome(e.target.value)}
@@ -370,7 +375,14 @@ export default function NovaOrdem() {
                     className="w-full"
                   />
                 </Field>
-                <Field label="Telefone">
+                <Field
+                  label="Telefone"
+                  hint={
+                    contactos.length > 1
+                      ? `O cliente tem ${contactos.length} números no CRM.`
+                      : undefined
+                  }
+                >
                   <Input
                     value={contactoTelefone}
                     onChange={(e) => setContactoTelefone(e.target.value)}

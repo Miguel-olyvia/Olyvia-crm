@@ -33,6 +33,7 @@ import {
 } from "../components/ui";
 import { AlertTriangle, Clock, Plus, Layers } from "../components/icons";
 import { data } from "../lib/formatar";
+import SeletorDeLocal from "../components/SeletorDeLocal";
 import {
   DIAS,
   RECORRENCIA_VAZIA,
@@ -238,6 +239,7 @@ export default function Planos() {
             setAEditar(null);
             setRecarga((r) => r + 1);
           }}
+          aoRecarregar={() => setRecarga((r) => r + 1)}
         />
       )}
     </div>
@@ -255,6 +257,7 @@ function FormularioPlano({
   checklists,
   aoFechar,
   aoGravar,
+  aoRecarregar,
 }: {
   plano: PlanoRow | null;
   alvos: readonly AlvoDoPlano[];
@@ -264,6 +267,8 @@ function FormularioPlano({
   checklists: readonly { id: string; codigo: string; nome: string }[];
   aoFechar: () => void;
   aoGravar: () => void;
+  /** Criar um local aqui dentro obriga a lista do pai a atualizar-se. */
+  aoRecarregar: () => void;
 }) {
   const [nome, setNome] = useState(plano?.nome ?? "");
   const [clienteId, setClienteId] = useState(plano?.cliente_id ?? "");
@@ -314,11 +319,6 @@ function FormularioPlano({
       clearTimeout(t);
     };
   }, [regra, inicio, tipo, falta]);
-
-  const locaisDoCliente = useMemo(
-    () => (clienteId ? locais.filter((l) => l.cliente_id === clienteId) : locais),
-    [locais, clienteId]
-  );
 
   const podeGravar =
     nome.trim().length > 0 &&
@@ -404,19 +404,13 @@ function FormularioPlano({
               className="w-full"
             />
           </Field>
-          <Field label="Local" hint="Opcional. Onde a manutenção é feita.">
-            <Combobox
-              value={localId}
-              onChange={setLocalId}
-              options={locaisDoCliente.map((l) => ({
-                value: l.id,
-                label: `${l.nome} · ${l.codigo}`,
-              }))}
-              placeholder="Por definir"
-              className="w-full"
-              disabled={locaisDoCliente.length === 0}
-            />
-          </Field>
+          <SeletorDeLocal
+            clienteId={clienteId}
+            locais={locais}
+            valor={localId}
+            aoEscolher={setLocalId}
+            aoCriar={aoRecarregar}
+          />
         </div>
 
         {checklists.length > 0 && (

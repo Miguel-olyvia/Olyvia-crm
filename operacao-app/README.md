@@ -137,6 +137,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/planos-crud.sql` | Criar e editar planos, e experimentar uma regra antes de a gravar | **não** |
 | `db/config.sql` | Montar a operação: códigos, checklists versionadas, medições, equipa | **não** |
 | `db/custos.sql` | Lançar material e serviços, do catálogo ou de uma compra | **não** (só lê `catalog_items` e `purchase_order_items`) |
+| `db/cliente-crm.sql` | Morada, telefone e contacto do cliente, vindos do CRM | **não** (só lê as tabelas de morada) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -257,7 +258,8 @@ npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
 npm run supabase:planos-crud    # db/planos-crud.sql
 npm run supabase:config         # db/config.sql
-npm run supabase:custos         # db/custos.sql (por último)
+npm run supabase:custos         # db/custos.sql
+npm run supabase:cliente-crm    # db/cliente-crm.sql (por último)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

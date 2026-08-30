@@ -154,6 +154,44 @@ CREATE TABLE public.purchase_order_items (
   unit_price numeric(10,2) DEFAULT 0,
   total_price numeric(10,2) DEFAULT 0);
 
+-- Moradas, telefones e emails. So as colunas que db/cliente-crm.sql le.
+CREATE TABLE public.anew_addresses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  street text NOT NULL,
+  number text NOT NULL,
+  floor text,
+  unit text,
+  postal_code text NOT NULL,
+  city text NOT NULL,
+  district text,
+  country text DEFAULT 'PT');
+
+CREATE TABLE public.anew_entity_addresses (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_id uuid,
+  address_id uuid REFERENCES public.anew_addresses(id) ON DELETE CASCADE,
+  address_type text,
+  is_primary boolean DEFAULT false,
+  valid_from timestamptz DEFAULT now(),
+  valid_to timestamptz);
+
+CREATE TABLE public.anew_entity_phones (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_id uuid,
+  phone_number text,
+  country_code text,
+  phone_type text,
+  is_primary boolean DEFAULT false,
+  created_at timestamptz DEFAULT now());
+
+CREATE TABLE public.anew_entity_emails (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_id uuid,
+  email text,
+  email_type text,
+  is_primary boolean DEFAULT false,
+  created_at timestamptz DEFAULT now());
+
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.products (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
