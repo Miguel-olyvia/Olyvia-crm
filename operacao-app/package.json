@@ -17,6 +17,7 @@
     "supabase:rpcs": "node tools/correr-sql.mjs db/rpcs.sql",
     "supabase:rpcs-tarefas": "node tools/correr-sql.mjs db/rpcs-tarefas.sql",
     "supabase:planos": "node tools/correr-sql.mjs db/planos.sql",
+    "supabase:correcoes": "node tools/correr-sql.mjs db/correcoes-modelo.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",

@@ -44,6 +44,7 @@ await db.exec(ler("permissoes.sql"));
 await db.exec(ler("rpcs.sql"));
 await db.exec(ler("rpcs-tarefas.sql"));
 await db.exec(ler("planos.sql"));
+await db.exec(ler("correcoes-modelo.sql"));
 
 // ── O expansor, isolado ──────────────────────────────────────────────────
 console.log("\n─── expandir RRULE ──────────────────────");
@@ -102,6 +103,25 @@ const expandir = async (regra, de, ate) =>
       ? ok("uma regra não suportada é recusada em voz alta, não interpretada mal")
       : mau(`recusada com mensagem errada: ${e.message}`);
   }
+
+  // Ordinal de dia da semana no mes — "primeira/ultima segunda-feira".
+  // Setembro de 2026 comeca a uma terca-feira.
+  const primeiraSeg = await expandir("FREQ=MONTHLY;BYDAY=1MO", "2026-09-01", "2026-11-30");
+  primeiraSeg.join() === "2026-09-07,2026-10-05,2026-11-02"
+    ? ok("primeira segunda-feira de cada mes")
+    : mau(`1MO deu ${primeiraSeg}`);
+
+  const ultimaSex = await expandir("FREQ=MONTHLY;BYDAY=-1FR", "2026-09-01", "2026-11-30");
+  ultimaSex.join() === "2026-09-25,2026-10-30,2026-11-27"
+    ? ok("ultima sexta-feira de cada mes")
+    : mau(`-1FR deu ${ultimaSex}`);
+
+  // Setembro e outubro de 2026 tem 4 segundas cada; novembro tem mesmo 5.
+  // A janela para aqui em outubro de proposito.
+  const quinta5 = await expandir("FREQ=MONTHLY;BYDAY=5MO", "2026-09-01", "2026-10-31");
+  quinta5.length === 0
+    ? ok("um 5.o ordinal que nao existe nao inventa datas")
+    : mau(`5MO devia dar vazio, deu ${quinta5}`);
 }
 
 // ── A materialização ─────────────────────────────────────────────────────
@@ -111,7 +131,7 @@ console.log("\n─── materializar ──────────────
     INSERT INTO public.ops_checklist (id, organization_id, codigo, nome, estado)
       VALUES ('c1c1c1c1-0000-0000-0000-0000000000c1','${ORG}','CL-0001','Extintor trimestral','publicada');
     INSERT INTO public.ops_checklist_tarefa (checklist_id, posicao, nome, tipo, unidade, limite_min, limite_max)
-      VALUES ('c1c1c1c1-0000-0000-0000-0000000000c1', 0, 'Verificacao de pressao','medicao','bar',10,15),
+      VALUES ('c1c1c1c1-0000-0000-0000-0000000000c1', 0, 'Verificacao de pressao','inspecao','bar',10,15),
              ('c1c1c1c1-0000-0000-0000-0000000000c1', 1, 'Verificacao do selo','inspecao',NULL,NULL,NULL);
     INSERT INTO public.ops_local (id, organization_id, cliente_id, codigo, nome, tipo)
       VALUES ('11ee0000-0000-0000-0000-0000000000ee','${ORG}','${CLI}','L1','Garagem','espaco');
@@ -177,6 +197,64 @@ console.log("\n─── um plano partido não parte os outros ─");
   res.ordens_criadas > 0
     ? ok(`o plano bom gerou na mesma: ${res.ordens_criadas} ordens`)
     : mau("o plano inválido impediu os outros de gerar");
+}
+
+// ── Recorrência dinâmica ────────────────────────────────────────────────
+console.log("\n─── recorrencia dinamica ────────────────");
+{
+  await db.exec(`
+    INSERT INTO public.ops_plano
+      (id, organization_id, codigo, nome, cliente_id, tipo_recorrencia, intervalo_horas, inicio_em)
+    VALUES ('eeee1111-0000-0000-0000-0000000000e1'::uuid, '${ORG}','PLN-DIN','Limpeza a cada 72h','${CLI}',
+            'dinamica', 72, current_date);
+  `);
+
+  const antes = (await um(`SELECT count(*)::int n FROM public.ops_ordem WHERE plano_id='eeee1111-0000-0000-0000-0000000000e1'`)).n;
+  await db.exec(`SELECT public.rpc_ops_materializar_planos(NULL, 120);`);
+  const depois = (await um(`SELECT count(*)::int n FROM public.ops_ordem WHERE plano_id='eeee1111-0000-0000-0000-0000000000e1'`)).n;
+  antes === depois
+    ? ok("o job diario NAO materializa planos dinamicos")
+    : mau(`o job criou ${depois - antes} ordens de um plano dinamico`);
+
+  // A primeira nasce a mao; a seguinte nasce do fecho.
+  await db.exec(`
+    INSERT INTO public.ops_ordem (organization_id, codigo, origem, estado, cliente_id, plano_id, titulo)
+    VALUES ('${ORG}','OT-DIN-1','preventiva','em_curso','${CLI}','eeee1111-0000-0000-0000-0000000000e1','Limpeza');
+  `);
+  const id = (await um(`SELECT id FROM public.ops_ordem WHERE codigo='OT-DIN-1'`)).id;
+
+  await db.exec(`SELECT public.ops_gerar_proxima_dinamica('${id}');`);
+  const abertas = (await um(`
+    SELECT count(*)::int n FROM public.ops_ordem
+     WHERE plano_id='eeee1111-0000-0000-0000-0000000000e1'
+       AND estado IN ('por_aprovar','agendada','em_curso','pausada')`)).n;
+  abertas === 1
+    ? ok("com uma ordem ainda aberta, NAO nasce outra")
+    : mau(`ficaram ${abertas} abertas`);
+
+  // A fechadura do estado aplica-se a toda a gente, inclusive a este teste.
+  // Autorizar explicitamente é o que a RPC faz — aqui fazemo-lo à mão porque
+  // não há sessão autenticada.
+  await db.exec(`
+    SELECT set_config('ops.transicao','autorizada',false);
+    UPDATE public.ops_ordem SET estado='confirmada' WHERE id='${id}';
+    SELECT set_config('ops.transicao','',false);
+  `);
+  await db.exec(`SELECT public.ops_gerar_proxima_dinamica('${id}');`);
+  const nova = await um(`
+    SELECT codigo, agendada_para FROM public.ops_ordem
+     WHERE plano_id='eeee1111-0000-0000-0000-0000000000e1' AND codigo <> 'OT-DIN-1'`);
+  nova ? ok(`depois de fechar, nasce a seguinte: ${nova.codigo}`)
+       : mau("nao nasceu a ordem seguinte");
+
+  if (nova) {
+    const h = (await um(`
+      SELECT EXTRACT(EPOCH FROM (agendada_para - now()))/3600 AS h
+        FROM public.ops_ordem WHERE codigo='${nova.codigo}'`)).h;
+    Math.abs(Number(h) - 72) < 1
+      ? ok("agendada 72h depois do fecho, como o plano manda")
+      : mau(`esperava +72h, deu +${Number(h).toFixed(1)}h`);
+  }
 }
 
 console.log("");

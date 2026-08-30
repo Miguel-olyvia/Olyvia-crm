@@ -1,7 +1,8 @@
 /**
  * Corre a SEQUÊNCIA DE INSTALAÇÃO inteira contra um Postgres limpo:
  *
- *     schema.sql → permissoes.sql → criar-utilizador.sql
+ *     schema.sql → permissoes.sql → rpcs.sql → rpcs-tarefas.sql
+ *                 → planos.sql → correcoes-modelo.sql → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
  * Serve para que ninguém descubra em produção que o terceiro ficheiro não
@@ -92,6 +93,14 @@ await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
 
 await passo("db/permissoes.sql", ler("permissoes.sql"));
 await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
+
+// A lógica na base: RPCs, triggers, planos, e as correções ao modelo.
+// A ordem importa — correcoes-modelo.sql substitui funções que planos.sql cria.
+await passo("db/rpcs.sql", ler("rpcs.sql"));
+await passo("db/rpcs-tarefas.sql", ler("rpcs-tarefas.sql"));
+await passo("db/planos.sql", ler("planos.sql"));
+await passo("db/correcoes-modelo.sql", ler("correcoes-modelo.sql"));
+await passo("db/correcoes-modelo.sql outra vez (idempotência)", ler("correcoes-modelo.sql"));
 
 // ── 3. Criar o perfil de CRM de uma conta que so existe na autenticacao ──
 await passo("db/criar-utilizador.sql", ler("criar-utilizador.sql"));

@@ -129,6 +129,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/rpcs.sql` | a máquina de estados, e o trigger que a torna obrigatória | **não** |
 | `db/rpcs-tarefas.sql` | responder a tarefas, e a corretiva que daí nasce | **não** |
 | `db/planos.sql` | RRULE e a janela de 120 dias | **não** |
+| `db/correcoes-modelo.sql` | As 5 correções vindas do Infraspeak real: especialidades, horários, medições, natureza da tarefa, recorrência dinâmica | **não** |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -210,6 +211,7 @@ npm run supabase:aplicar        # db/schema.sql
 npm run supabase:rpcs           # db/rpcs.sql
 npm run supabase:rpcs-tarefas   # db/rpcs-tarefas.sql
 npm run supabase:planos         # db/planos.sql
+npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

@@ -178,11 +178,11 @@ SELECT o.id, al.id, t.posicao, t.nome, t.tipo, t.estado, t.valor_num, t.unidade,
   FROM public.ops_ordem o
   JOIN public.ops_ordem_alvo al ON al.ordem_id = o.id
   CROSS JOIN (VALUES
-    (0, 'Verificação de pressão',      'medicao',  'feita',        12.4, 'bar', 10.0, 15.0, true,  NULL),
+    (0, 'Verificação de pressão',      'inspecao', 'feita',        12.4, 'bar', 10.0, 15.0, true,  NULL),
     (1, 'Verificação do selo',         'inspecao', 'nao_conforme', NULL, NULL,  NULL, NULL, true,  'Selo com validade expirada em maio.'),
     (2, 'Estado do suporte',           'inspecao', 'nao_conforme', NULL, NULL,  NULL, NULL, true,  'Suporte solto, com corrosão na base.'),
     (3, 'Sinalética visível',          'inspecao', 'feita',        NULL, NULL,  NULL, NULL, true,  NULL),
-    (4, 'Foto do conjunto',            'foto',     'pendente',     NULL, NULL,  NULL, NULL, true,  NULL),
+    (4, 'Foto do conjunto',            'inspecao', 'pendente',     NULL, NULL,  NULL, NULL, true,  NULL),
     (5, 'Acesso desobstruído',         'inspecao', 'pendente',     NULL, NULL,  NULL, NULL, false, NULL)
   ) AS t(posicao, nome, tipo, estado, valor_num, unidade, limite_min, limite_max, obrigatoria, observacoes)
  WHERE o.codigo = 'OT-DEMO-001'

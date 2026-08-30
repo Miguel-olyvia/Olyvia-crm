@@ -166,8 +166,12 @@ BEGIN
   END IF;
 
   -- ── o veredicto ──────────────────────────────────────────────────────
-  -- Uma medição decide-se sozinha; nas outras vale o que o técnico disser.
-  IF v_t.tipo = 'medicao' AND p_valor_num IS NOT NULL THEN
+  -- Uma tarefa com limites decide-se sozinha; nas outras vale o que o
+  -- técnico disser. O critério é ter limites, não o tipo: depois de separar
+  -- a natureza do trabalho do formato da resposta, uma 'correcao' também
+  -- pode pedir um valor com gama de aceitação.
+  IF (v_t.limite_min IS NOT NULL OR v_t.limite_max IS NOT NULL)
+     AND p_valor_num IS NOT NULL THEN
     v_estado := public.ops_avaliar_medicao(p_valor_num, v_t.limite_min, v_t.limite_max);
   ELSE
     v_estado := p_estado;
@@ -264,7 +268,9 @@ BEGIN
   RETURN jsonb_build_object(
     'ok', true,
     'estado', v_estado,
-    'avaliada_automaticamente', (v_t.tipo = 'medicao' AND p_valor_num IS NOT NULL),
+    'avaliada_automaticamente',
+      ((v_t.limite_min IS NOT NULL OR v_t.limite_max IS NOT NULL)
+       AND p_valor_num IS NOT NULL),
     'corretiva_gerada', v_nova_cod
   );
 END
