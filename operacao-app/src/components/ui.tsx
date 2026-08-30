@@ -108,9 +108,19 @@ export function Select({ className, children, ...props }: SelectHTMLAttributes<H
   );
 }
 
+/**
+ * Um campo com rótulo.
+ *
+ * `min-w-0` não é decoração: um filho de grelha ou de flex tem
+ * `min-width: auto`, e por isso recusa-se a encolher abaixo do seu conteúdo.
+ * Com um texto longo lá dentro — uma morada, o nome de um item de catálogo —
+ * a coluna crescia, o texto nunca partia, e a página saía para fora do ecrã
+ * do telemóvel. `break-words` sozinho não resolve: primeiro a caixa tem de
+ * poder encolher.
+ */
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <label className="block space-y-1.5">
+    <label className="block min-w-0 space-y-1.5">
       <span className="text-[13px] font-medium text-slate-700">{label}</span>
       {children}
       {hint && <span className="block text-xs text-slate-400">{hint}</span>}

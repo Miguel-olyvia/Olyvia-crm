@@ -95,14 +95,23 @@ export default function SeletorDeLocal({
 
   if (!clienteId) {
     return (
-      <Field label="Local" hint="Escolhe primeiro o cliente.">
-        <Combobox value="" onChange={() => {}} options={[]} placeholder="—" className="w-full" disabled />
-      </Field>
+      <div className="min-w-0">
+        <Field label="Local" hint="Escolhe primeiro o cliente.">
+          <Combobox
+            value=""
+            onChange={() => {}}
+            options={[]}
+            placeholder="—"
+            className="w-full"
+            disabled
+          />
+        </Field>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 space-y-2">
       <Field
         label="Local"
         hint={
@@ -154,7 +163,7 @@ export default function SeletorDeLocal({
 
       {/* As moradas que o CRM já tem. Um toque, e o sítio existe. */}
       {porUsar.length > 0 && (
-        <div className="rounded-lg bg-brand-50/50 p-3">
+        <div className="min-w-0 rounded-lg bg-brand-50/50 p-3">
           <p className="text-xs font-medium text-brand-800">
             {porUsar.length === 1
               ? "Este cliente tem uma morada no CRM:"
