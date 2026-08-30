@@ -355,6 +355,15 @@ salta, em vez de escorregar para o mês seguinte.
 
 ---
 
+## Documentos
+
+| | |
+|---|---|
+| [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
+| [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |
+
+---
+
 ## Fora do v1, por decisão
 
 Identificados no levantamento, nenhum necessário para fechar o ciclo:
