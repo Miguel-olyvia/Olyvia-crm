@@ -26,41 +26,96 @@ Os quatro achados que mais moldaram o desenho:
 
 ---
 
-## Arranque
+## Instalação, do zero ao ecrã com dados
+
+### 1. Dependências e ambiente
 
 ```bash
 cd operacao-app
 npm install
-cp .env.example .env    # preencher com o projeto Supabase da Olyvia
-npm run dev             # http://localhost:5274
+cp .env.example .env
 ```
 
-Login com uma conta Olyvia. É preciso ter, nessa organização:
+Preenche o `.env`. São dois grupos de variáveis, com propósitos diferentes:
 
-1. a permissão `operations.view` atribuída ao teu papel, na UI de Papéis do CRM;
-2. uma linha em `ops_utilizador_perfil` com a tua função no módulo.
+| Variável | Onde a obter | Para quê |
+|---|---|---|
+| `VITE_SUPABASE_URL` | Supabase → Project Settings → **API** | a app, no browser |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | idem | a app, no browser |
+| `DATABASE_URL` | Supabase → Project Settings → **Database** → Connection string → URI | **só** os scripts de instalação |
 
-Sem (1) não vês nada; sem (2) a app diz-te exatamente isso em vez de mostrar um ecrã
-vazio.
+> `DATABASE_URL` contém a password da base de dados. Não tem prefixo `VITE_`, por isso
+> nunca chega ao browser, e o `.env` está no `.gitignore`. Se a tua rede bloquear IPv6,
+> usa a connection string do **Session pooler** em vez da Direct connection.
+
+### 2. Ensaiar antes de aplicar
+
+```bash
+npm run validar-instalacao   # a sequência toda contra um Postgres limpo, sem Docker
+npm run supabase:verificar   # o esquema contra a TUA base, dentro de uma transação revertida
+```
+
+O primeiro corre `schema → pós-instalação → demo → remoção da demo` contra uma PGlite
+com stubs do CRM, e verifica o resultado de cada passo. O segundo liga-se mesmo ao teu
+Supabase, corre o esquema e faz `ROLLBACK` — confirma que corre na tua base sem gravar
+nada.
+
+### 3. Aplicar
+
+```bash
+npm run supabase:aplicar     # cria as 19 tabelas ops_*, RLS e permissões
+```
+
+Tudo dentro de uma transação: ou entra o ficheiro inteiro, ou não entra nada.
+
+### 4. Dar acesso a alguém
+
+Edita o bloco `CONFIGURAÇÃO` no topo de [`db/pos-instalacao.sql`](./db/pos-instalacao.sql)
+— o teu email e o nome do papel que recebe as permissões — e corre:
+
+```bash
+npm run supabase:pos-instalacao
+```
+
+Atribui as 15 permissões `operations.*` ao papel e cria o teu perfil no módulo. Se
+preferires atribuir as permissões pela UI de Papéis do CRM, deixa `papel` a `NULL` que o
+ficheiro salta essa parte.
+
+### 5. Correr
+
+```bash
+npm run dev                  # http://localhost:5274
+```
+
+Login com a tua conta Olyvia — as mesmas credenciais.
+
+### 6. Opcional: dados para ver alguma coisa
+
+```bash
+npm run supabase:demo            # 5 locais, 2 ativos, 5 ordens, 2h47m de trabalho
+npm run supabase:demo-remover    # tira tudo o que a linha de cima pôs
+```
+
+A demo escreve **exclusivamente** em tabelas `ops_*` e usa um cliente que já existe — não
+cria clientes nem utilizadores. Tudo leva prefixo `DEMO-`, por isso sai com um comando.
+
+As cinco ordens foram escolhidas para que cada ecrã tenha o que mostrar: uma em curso e
+atrasada, uma por aprovar, uma fechada à espera de confirmação, uma pausada com a retoma
+já ultrapassada, e a corretiva que nasceu de uma tarefa não conforme.
 
 ---
 
 ## Base de dados
 
 O esquema está em [`db/schema.sql`](./db/schema.sql) — 19 tabelas `ops_*`, aditivo e
-idempotente. Aplica-se **uma vez**:
+idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 
-**Supabase Studio** → SQL Editor → colar → Run
-ou `psql "$DATABASE_URL" -f db/schema.sql`
-
-Antes de aplicar, verifica sem tocar na base real e sem Docker:
-
-```bash
-npm run validar-schema
-```
-
-Corre o esquema contra um Postgres verdadeiro (PGlite, em WASM) com stubs do núcleo do
-CRM, e confirma as contagens, a RLS, e o comportamento.
+| Ficheiro | O que faz |
+|---|---|
+| `db/schema.sql` | tabelas, RLS, permissões, as duas vistas |
+| `db/pos-instalacao.sql` | permissões do papel + perfil do utilizador |
+| `db/demo.sql` | dados de demonstração, só em `ops_*` |
+| `db/demo-remover.sql` | desfaz a demo |
 
 ### A garantia que este esquema dá
 
@@ -115,12 +170,23 @@ haver 62 testes a correr em pouco mais de um segundo.
 ## Comandos
 
 ```bash
-npm run dev              # servidor de desenvolvimento
-npm run test             # 62 testes de domínio
-npm run typecheck        # tsc --noEmit
-npm run build            # typecheck + build de produção
-npm run validar-schema   # valida db/schema.sql contra Postgres
+npm run dev                     # servidor de desenvolvimento (porta 5274)
+npm run test                    # 62 testes de domínio
+npm run typecheck               # tsc --noEmit
+npm run build                   # typecheck + build de produção
+
+npm run validar-schema          # o esquema contra um Postgres limpo
+npm run validar-instalacao      # a sequência de instalação toda, ponta a ponta
+
+npm run supabase:verificar      # o esquema contra a tua base, com ROLLBACK
+npm run supabase:aplicar        # aplica db/schema.sql
+npm run supabase:pos-instalacao # permissões e perfil
+npm run supabase:demo           # dados de demonstração
+npm run supabase:demo-remover   # remove-os
 ```
+
+Os `validar-*` correm sem Docker, sem Supabase e sem rede. Os `supabase:*` precisam de
+`DATABASE_URL` no `.env` e mostram sempre a que base se vão ligar antes de escrever.
 
 ### Nota sobre a versão do rollup
 
