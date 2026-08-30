@@ -17,11 +17,6 @@
 --   DELETE FROM public.anew_permissions WHERE category = 'operations';
 -- =============================================================================
 
--- ============================================================
--- 9. Catálogo de permissões
--- ============================================================
--- Só catálogo. Ver nota 2: nenhum papel existente ganha nada.
-
 INSERT INTO public.anew_permissions
   (code, name, description, category, scope, supports_scope, is_dangerous)
 VALUES
