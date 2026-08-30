@@ -161,3 +161,11 @@ export const Inbox = (p: IconProps) => (
     <path d="M5.5 5h13l2.5 8v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5l2.5-8Z" />
   </svg>
 );
+
+export const Ajuda = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+    <path d="M12 17h.01" />
+  </svg>
+);

@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog, cx } from "./ui";
 import { ROTULO_FUNCAO } from "../domain/tipos";
 import {
+  Ajuda,
   Building,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,7 @@ const NAVEGACAO = [
   { to: "/planos", rotulo: "Planos", Icone: Clock },
   { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
   { to: "/definicoes", rotulo: "Definições", Icone: Settings },
+  { to: "/ajuda", rotulo: "Ajuda", Icone: Ajuda },
 ];
 
 export function OperacaoLayout() {

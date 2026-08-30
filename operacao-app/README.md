@@ -192,7 +192,7 @@ src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
 src/components/        layout, primitivos de UI, ícones, PainelTarefas
 src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
-                       Planos · Orçamentos · Relatório do cliente
+                       Planos · Orçamentos · Relatório · Definições · Ajuda
 ```
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
@@ -215,6 +215,9 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_obra_de_orcamento` | a obra, com o custo previsto congelado | um orçamento, uma obra |
 | `rpc_ops_registar_anexo` | um ficheiro, depois de subir ao storage | o caminho tem de bater certo |
 | `rpc_ops_gravar_plano` | um plano preventivo | a regra é expandida antes de gravar |
+| `rpc_ops_gravar_checklist` | uma checklist e as suas tarefas | publicada é imutável; editar versiona |
+| `rpc_ops_gravar_medicao` | uma medição e as suas opções | uma gama sem limites é recusada |
+| `rpc_ops_gravar_perfil` | quem é da equipa, e o custo/hora | ninguém se despromove a si próprio |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
