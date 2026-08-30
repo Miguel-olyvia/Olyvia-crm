@@ -15,6 +15,7 @@ const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 const Orcamentos = lazy(() => import("./pages/Orcamentos"));
 const Relatorio = lazy(() => import("./pages/Relatorio"));
 const Planos = lazy(() => import("./pages/Planos"));
+const Definicoes = lazy(() => import("./pages/Definicoes"));
 
 export default function App() {
   return (
@@ -51,6 +52,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar a ordem…" />}>
               <OrdemDetalhe />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/definicoes"
+          element={
+            <Suspense fallback={<Spinner label="A carregar as definições…" />}>
+              <Definicoes />
             </Suspense>
           }
         />

@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
+  Settings,
   Euro,
   ExternalLink,
   Home,
@@ -32,6 +33,7 @@ const NAVEGACAO = [
   { to: "/locais", rotulo: "Locais", Icone: Layers },
   { to: "/planos", rotulo: "Planos", Icone: Clock },
   { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
+  { to: "/definicoes", rotulo: "Definições", Icone: Settings },
 ];
 
 export function OperacaoLayout() {

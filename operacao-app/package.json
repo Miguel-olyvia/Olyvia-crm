@@ -23,6 +23,7 @@
     "supabase:orcamentos": "node tools/correr-sql.mjs db/orcamentos.sql",
     "supabase:anexos": "node tools/correr-sql.mjs db/anexos.sql",
     "supabase:planos-crud": "node tools/correr-sql.mjs db/planos-crud.sql",
+    "supabase:config": "node tools/correr-sql.mjs db/config.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",
@@ -34,6 +35,7 @@
     "validar-despacho": "node tools/validar-despacho.mjs",
     "validar-orcamentos": "node tools/validar-orcamentos.mjs",
     "validar-anexos": "node tools/validar-anexos.mjs",
+    "validar-config": "node tools/validar-config.mjs",
     "validar-restricao": "node tools/validar-restricao.mjs"
   },
   "dependencies": {

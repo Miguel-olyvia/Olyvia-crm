@@ -256,6 +256,7 @@ export async function listarLocais(orgId: string): Promise<LocalRow[]> {
 export interface AtivoRow {
   id: string;
   local_id: string;
+  categoria_id: string | null;
   codigo: string;
   nome: string;
   marca: string | null;
@@ -266,7 +267,7 @@ export interface AtivoRow {
 export async function ativosDoLocal(localId: string): Promise<AtivoRow[]> {
   const { data, error } = await supabase
     .from("ops_ativo")
-    .select("id, local_id, codigo, nome, marca, modelo, criticidade")
+    .select("id, local_id, categoria_id, codigo, nome, marca, modelo, criticidade")
     .eq("local_id", localId)
     .eq("ativo", true)
     .order("codigo");
