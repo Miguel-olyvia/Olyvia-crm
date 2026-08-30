@@ -20,8 +20,12 @@ CREATE TABLE auth.users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text,
   email_confirmed_at timestamptz);
+-- nullif() como no Supabase real: sem sessão devolve NULL em vez de rebentar
+-- com "invalid input syntax for type uuid". A diferença importa — sem ela, um
+-- teste que corre sem sessão falha com o erro errado, e manda-nos procurar o
+-- problema no sítio errado.
 CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS
-  $$ SELECT current_setting('request.jwt.claim.sub', true)::uuid $$;
+  $$ SELECT nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
 
 CREATE ROLE anon;
 CREATE ROLE authenticated;

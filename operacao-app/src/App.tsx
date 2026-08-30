@@ -11,6 +11,7 @@ import Ordens from "./pages/Ordens";
 // arranque leve para quem abre a app no telemóvel, em obra.
 const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
+const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 
 export default function App() {
   return (
@@ -25,6 +26,15 @@ export default function App() {
       >
         <Route path="/" element={<Hoje />} />
         <Route path="/ordens" element={<Ordens />} />
+        {/* Antes de "/ordens/:codigo", senão "nova" seria lido como código. */}
+        <Route
+          path="/ordens/nova"
+          element={
+            <Suspense fallback={<Spinner label="A preparar o formulário…" />}>
+              <NovaOrdem />
+            </Suspense>
+          }
+        />
         <Route
           path="/ordens/:codigo"
           element={

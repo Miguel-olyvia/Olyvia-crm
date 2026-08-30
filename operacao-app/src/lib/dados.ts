@@ -432,3 +432,114 @@ export async function responderMedicao(args: {
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a leitura.");
   return data as unknown as Resposta;
 }
+
+/* ──────────────────────── Criar, atribuir, agendar ──────────────────── */
+
+export interface NovaOrdem {
+  titulo: string;
+  clienteId: string;
+  origem?: string;
+  prioridade?: string;
+  descricao?: string | null;
+  localId?: string | null;
+  ativoId?: string | null;
+  checklistId?: string | null;
+  area?: string | null;
+  tipo?: string | null;
+  contactoNome?: string | null;
+  contactoTelefone?: string | null;
+  agendadaPara?: string | null;
+  responsavelId?: string | null;
+}
+
+export interface OrdemCriada {
+  ok: boolean;
+  id: string;
+  codigo: string;
+  estado: string;
+  tarefas: number;
+}
+
+export async function criarOrdem(o: NovaOrdem): Promise<OrdemCriada> {
+  const { data, error } = await supabase.rpc("rpc_ops_criar_ordem", {
+    p_titulo: o.titulo,
+    p_cliente_id: o.clienteId,
+    p_origem: o.origem ?? "corretiva",
+    p_prioridade: o.prioridade ?? "normal",
+    p_descricao: o.descricao ?? null,
+    p_local_id: o.localId ?? null,
+    p_ativo_id: o.ativoId ?? null,
+    p_checklist_id: o.checklistId ?? null,
+    p_area: o.area ?? null,
+    p_tipo: o.tipo ?? null,
+    p_contacto_nome: o.contactoNome ?? null,
+    p_contacto_telefone: o.contactoTelefone ?? null,
+    p_agendada_para: o.agendadaPara ?? null,
+    p_responsavel_id: o.responsavelId ?? null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível criar a ordem.");
+  return data as unknown as OrdemCriada;
+}
+
+export async function atribuirOrdem(args: {
+  ordemId: string;
+  responsavelId: string | null;
+  equipa?: readonly string[];
+}): Promise<{ ok: boolean; equipa: number }> {
+  const { data, error } = await supabase.rpc("rpc_ops_atribuir_ordem", {
+    p_ordem_id: args.ordemId,
+    p_responsavel_id: args.responsavelId,
+    p_equipa: args.equipa?.length ? [...args.equipa] : null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível atribuir a ordem.");
+  return data as unknown as { ok: boolean; equipa: number };
+}
+
+/** Uma ordem que já ocupa a agenda da mesma pessoa à mesma hora. */
+export interface Conflito {
+  codigo: string;
+  titulo: string;
+  agendada_para: string;
+}
+
+export async function agendarOrdem(args: {
+  ordemId: string;
+  agendadaPara: string;
+  janelaInicio?: string | null;
+  janelaFim?: string | null;
+}): Promise<{ ok: boolean; conflitos: Conflito[] }> {
+  const { data, error } = await supabase.rpc("rpc_ops_agendar_ordem", {
+    p_ordem_id: args.ordemId,
+    p_agendada_para: args.agendadaPara,
+    p_janela_inicio: args.janelaInicio ?? null,
+    p_janela_fim: args.janelaFim ?? null,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível agendar a ordem.");
+  return data as unknown as { ok: boolean; conflitos: Conflito[] };
+}
+
+/** Quem já está na ordem. Serve para desenhar a equipa e saber quem a executa. */
+export async function pessoasDaOrdem(
+  ordemId: string
+): Promise<{ utilizador_id: string; papel: string }[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_pessoa")
+    .select("utilizador_id, papel")
+    .eq("ordem_id", ordemId);
+  rebentar("carregar a equipa da ordem", error);
+  return (data ?? []) as unknown as { utilizador_id: string; papel: string }[];
+}
+
+/** As checklists publicadas, para escolher o procedimento ao criar uma ordem. */
+export async function listarChecklists(
+  orgId: string
+): Promise<{ id: string; codigo: string; nome: string }[]> {
+  const { data, error } = await supabase
+    .from("ops_checklist")
+    .select("id, codigo, nome")
+    .eq("organization_id", orgId)
+    .eq("estado", "publicada")
+    .order("nome");
+  rebentar("carregar as checklists", error);
+  return (data ?? []) as unknown as { id: string; codigo: string; nome: string }[];
+}

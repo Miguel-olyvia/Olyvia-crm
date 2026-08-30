@@ -131,6 +131,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/planos.sql` | RRULE e a janela de 120 dias | **não** |
 | `db/correcoes-modelo.sql` | As 5 correções vindas do Infraspeak real: especialidades, horários, medições, natureza da tarefa, recorrência dinâmica | **não** |
 | `db/medicoes.sql` | Responder a medições: o veredicto sai dos limites, e a tarefa acerta-se sozinha | **não** |
+| `db/despacho.sql` | Criar, atribuir e agendar — o caso do telefone a tocar | **não** |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -203,9 +204,17 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_transitar_ordem` | o estado da ordem, a sessão de trabalho, o custo | `ops_ordem_guarda_estado` |
 | `rpc_ops_responder_tarefa` | o estado de uma tarefa, e a corretiva que daí nasce | `ops_tarefa_guarda_estado` |
 | `rpc_ops_responder_medicao` | uma leitura, o seu veredicto, e a tarefa que se acerta | `ops_medicao_guarda` |
+| `rpc_ops_criar_ordem` | uma ordem nova, com alvo, tarefas e medições | o código sai de uma função só |
+| `rpc_ops_atribuir_ordem` | quem é responsável e quem mais vai | — |
+| `rpc_ops_agendar_ordem` | data, janela, e o aviso de choque | — |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
+
+As três primeiras têm trigger porque o que escrevem é um **veredicto**: um estado forjado
+por fora nunca mais se distingue de um verdadeiro. As três últimas não têm, e é de
+propósito — uma atribuição ou uma data erradas veem-se na lista e corrigem-se num clique.
+Trancar tudo por simetria só acrescentaria atrito onde não há nada a proteger.
 
 ---
 
@@ -230,6 +239,7 @@ npm run supabase:rpcs-tarefas   # db/rpcs-tarefas.sql
 npm run supabase:planos         # db/planos.sql
 npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
+npm run supabase:despacho       # db/despacho.sql (por último)
 npm run supabase:permissoes     # db/permissoes.sql
 npm run supabase:pos-instalacao # permissões do papel e perfil
 npm run supabase:restringir     # estreita permissões alargadas por engano

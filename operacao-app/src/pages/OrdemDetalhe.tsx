@@ -10,6 +10,7 @@ import {
   medicoesDaOrdem,
   obterOrdem,
   opcoesDeMedicoes,
+  pessoasDaOrdem,
   sessoesDaOrdem,
   tarefasDaOrdem,
   type AlvoDaOrdem,
@@ -51,6 +52,7 @@ import { formatarDuracao, tempoTotalSegundos, type Sessao } from "../domain/temp
 import { alertasDaOrdem } from "../domain/alertas";
 import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
+import PainelDespacho from "../components/PainelDespacho";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
 
 /**
@@ -73,6 +75,7 @@ export default function OrdemDetalhe() {
   const [sessoes, setSessoes] = useState<SessaoDaOrdem[]>([]);
   const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
   const [opcoes, setOpcoes] = useState<OpcaoDeMedicao[]>([]);
+  const [naOrdem, setNaOrdem] = useState<string[]>([]);
   const [equipa, setEquipa] = useState<Map<string, MembroEquipa>>(new Map());
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -96,12 +99,13 @@ export default function OrdemDetalhe() {
         setOrdem(null);
         return;
       }
-      const [als, tfs, sss, eq, cls] = await Promise.all([
+      const [als, tfs, sss, eq, cls, pes] = await Promise.all([
         alvosDaOrdem(o.id),
         tarefasDaOrdem(o.id),
         sessoesDaOrdem(o.id),
         listarEquipa(activeOrgId),
         listarClientes(activeOrgId),
+        pessoasDaOrdem(o.id),
       ]);
       // As leituras e as suas opções vêm num segundo passo porque dependem
       // das tarefas. Duas consultas, não uma por tarefa.
@@ -117,6 +121,7 @@ export default function OrdemDetalhe() {
       setMedicoes(meds);
       setOpcoes(ops);
       setEquipa(new Map(eq.map((m) => [m.utilizador_id, m])));
+      setNaOrdem(pes.map((p) => p.utilizador_id));
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
@@ -353,6 +358,20 @@ export default function OrdemDetalhe() {
           <Linha rotulo="Motivo do cancelamento" valor={ordem.motivo_cancelamento} />
         )}
       </Card>
+
+      {/* Quem vai, e quando */}
+      <PainelDespacho
+        ordemId={ordem.id}
+        estado={ordem.estado}
+        responsavelId={ordem.responsavel_id}
+        equipaDaOrdem={naOrdem}
+        agendadaPara={ordem.agendada_para}
+        janelaInicio={ordem.janela_inicio}
+        janelaFim={ordem.janela_fim}
+        equipa={[...equipa.values()]}
+        podeDespachar={contexto.funcao !== "tecnico"}
+        aoGravar={() => setRecarga((r) => r + 1)}
+      />
 
       {/* Onde o trabalho acontece */}
       <PainelTarefas

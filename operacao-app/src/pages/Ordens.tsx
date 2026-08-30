@@ -21,7 +21,7 @@ import {
   Skeleton,
   cx,
 } from "../components/ui";
-import { AlertTriangle, Inbox, Search } from "../components/icons";
+import { AlertTriangle, Inbox, Plus, Search } from "../components/icons";
 import { alertasDaOrdem, severidadeMaxima } from "../domain/alertas";
 import type { Estado } from "../domain/tipos";
 
@@ -146,6 +146,16 @@ export default function Ordens() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Ordens</h1>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <Link
+            to="/ordens/nova"
+            className={cx(
+              "inline-flex shrink-0 items-center gap-2 rounded-lg bg-brand px-3.5 py-2 text-sm",
+              "font-medium text-white shadow-sm transition-all hover:bg-brand-dark active:scale-[0.98]"
+            )}
+          >
+            <Plus width={15} height={15} /> Nova ordem
+          </Link>
         <div className="relative w-full sm:w-72">
           <Search
             width={15}
@@ -158,6 +168,7 @@ export default function Ordens() {
             placeholder="Código ou título…"
             className="pl-9"
           />
+        </div>
         </div>
       </div>
 
