@@ -13,6 +13,7 @@
     "validar-schema": "node tools/validar-schema.mjs",
     "supabase:verificar": "node tools/correr-sql.mjs db/schema.sql --dry-run",
     "supabase:aplicar": "node tools/correr-sql.mjs db/schema.sql",
+    "supabase:permissoes": "node tools/correr-sql.mjs db/permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",
     "supabase:demo-remover": "node tools/correr-sql.mjs db/demo-remover.sql",

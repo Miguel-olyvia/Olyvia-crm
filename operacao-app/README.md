@@ -63,10 +63,17 @@ nada.
 ### 3. Aplicar
 
 ```bash
-npm run supabase:aplicar     # cria as 19 tabelas ops_*, RLS e permissões
+npm run supabase:aplicar     # cria as 19 tabelas ops_*, RLS e vistas
+npm run supabase:permissoes  # as 15 permissões no catálogo do CRM
 ```
 
 Tudo dentro de uma transação: ou entra o ficheiro inteiro, ou não entra nada.
+
+São dois comandos e não um de propósito. O `schema.sql` **não escreve uma única
+linha fora de `ops_*`** — podes correr só esse e o CRM fica byte a byte como
+estava. O `permissoes.sql` é o único ficheiro do módulo que acrescenta algo a
+uma tabela do CRM (15 linhas em `anew_permissions`), e serve para as permissões
+aparecerem na UI de Papéis em vez de terem de ser atribuídas à mão por SQL.
 
 ### 4. Dar acesso a alguém
 
@@ -112,7 +119,8 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 
 | Ficheiro | O que faz |
 |---|---|
-| `db/schema.sql` | tabelas, RLS, permissões, as duas vistas |
+| `db/schema.sql` | tabelas, RLS, as duas vistas — **nada fora de `ops_*`** |
+| `db/permissoes.sql` | as 15 permissões no catálogo do CRM |
 | `db/pos-instalacao.sql` | permissões do papel + perfil do utilizador |
 | `db/demo.sql` | dados de demonstração, só em `ops_*` |
 | `db/demo-remover.sql` | desfaz a demo |
@@ -180,6 +188,7 @@ npm run validar-instalacao      # a sequência de instalação toda, ponta a pon
 
 npm run supabase:verificar      # o esquema contra a tua base, com ROLLBACK
 npm run supabase:aplicar        # aplica db/schema.sql
+npm run supabase:permissoes     # aplica db/permissoes.sql
 npm run supabase:pos-instalacao # permissões e perfil
 npm run supabase:demo           # dados de demonstração
 npm run supabase:demo-remover   # remove-os

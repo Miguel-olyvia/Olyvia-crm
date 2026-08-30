@@ -174,7 +174,7 @@ console.log(`  sem RLS ligada         ${semRls}`);
 console.log(`  policies               ${policies}`);
 console.log(`  índices ops_*          ${indices}`);
 console.log(`  funções ops_*          ${funcoes}`);
-console.log(`  permissões operations  ${permissoes}`);
+console.log(`  escritas fora de ops_*  ${permissoes}`);
 console.log(`  FK para fora do módulo ${fkParaFora.length}`);
 if (fkParaFora.length) console.log("   ", fkParaFora);
 console.log(`  tabelas sem policy     ${tabelasSemPolicy.length}`,
@@ -183,7 +183,8 @@ console.log(`  tabelas sem policy     ${tabelasSemPolicy.length}`,
 const falhas = [];
 if (semRls !== 0) falhas.push(`${semRls} tabelas sem RLS`);
 if (fkParaFora.length !== 0) falhas.push(`${fkParaFora.length} FK para fora do módulo`);
-if (permissoes !== 15) falhas.push(`${permissoes} permissões (esperadas 15)`);
+if (permissoes !== 0)
+  falhas.push(`o esquema escreveu ${permissoes} permissões — devia escrever 0 fora de ops_*`);
 
 // ── Comportamento ───────────────────────────────────────────────────────
 // As mesmas afirmações que o teste pgTAP faz, mas verificáveis sem Docker.

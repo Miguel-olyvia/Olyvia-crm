@@ -1,7 +1,7 @@
 /**
  * Corre a SEQUÊNCIA DE INSTALAÇÃO inteira contra um Postgres limpo:
  *
- *     schema.sql  →  pos-instalacao.sql  →  demo.sql  →  demo-remover.sql
+ *     schema.sql → permissoes.sql → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
  * Serve para que ninguém descubra em produção que o terceiro ficheiro não
  * corre depois do segundo. Corre em segundos, sem Docker e sem tocar no
@@ -53,6 +53,20 @@ await passo("db/schema.sql", ler("schema.sql"));
 // Idempotência: aplicar duas vezes tem de ser inofensivo. É a diferença
 // entre poder repetir a instalação e ficar com medo de lhe tocar.
 await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
+
+// Sem permissoes.sql o esquema fica de pé na mesma — só ninguém vê nada.
+// Correr a seguir prova que o catálogo é um passo à parte, não um pré-requisito.
+{
+  const n = await um(
+    `SELECT count(*)::int AS n FROM public.anew_permissions WHERE category = 'operations'`
+  );
+  n.n === 0
+    ? ok("schema.sql não escreveu uma linha fora de ops_*")
+    : mau(`schema.sql escreveu ${n.n} permissões — devia ter escrito 0`);
+}
+
+await passo("db/permissoes.sql", ler("permissoes.sql"));
+await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
 
 // ── 3. Pós-instalação, com o email do utilizador de teste ────────────────
 const posInstalacao = ler("pos-instalacao.sql").replace(

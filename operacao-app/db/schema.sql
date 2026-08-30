@@ -17,9 +17,11 @@
 --   · DROP/CREATE de nenhuma policy existente
 --   · CREATE TRIGGER em nenhuma tabela existente
 --   · FOREIGN KEY de uma tabela nova PARA uma tabela existente   ← ver nota 1
---   · UPDATE ou DELETE de qualquer linha existente
+--   · UPDATE, INSERT ou DELETE em qualquer tabela que não seja `ops_*`
 --
--- Insere 15 linhas de catálogo em `anew_permissions` — e só isso. Ver nota 2.
+-- Não escreve UMA linha fora da área de Operações. As 15 permissões do módulo
+-- vivem em `db/permissoes.sql`, à parte, porque essas sim escrevem no catálogo
+-- do CRM — corre-o quando quiseres que apareçam na UI de Papéis.
 --
 --
 -- NOTA 1 — Porque não há foreign key para as tabelas do CRM
@@ -40,13 +42,16 @@
 -- esquema. As FK ENTRE tabelas `ops_*` existem todas e são normais.
 --
 --
--- NOTA 2 — Porque inserir em `anew_permissions` é inócuo
--- ------------------------------------------------------
--- `public.has_anew_permission()` exige uma linha explícita em
--- `anew_role_permissions` — não há bypass de administrador nem wildcard
--- (lido e confirmado). Inserir códigos novos no catálogo não dá capacidade
--- nenhuma a ninguém enquanto um administrador não os atribuir a um papel na UI
--- de Papéis do CRM. Nenhum papel existente muda de comportamento.
+-- NOTA 2 — As permissões estão noutro ficheiro
+-- ---------------------------------------------
+-- As policies abaixo chamam `has_anew_permission(uid, 'operations.*')`. Esses
+-- códigos não precisam de existir em `anew_permissions` para a verificação
+-- correr — confirmado: `anew_role_permissions.permission_code` não tem foreign
+-- key para o catálogo. O que o catálogo dá é a possibilidade de os atribuir
+-- pela UI de Papéis em vez de à mão por SQL.
+--
+-- Sem correr `db/permissoes.sql`, este esquema funciona e ninguém vê nada:
+-- as policies negam tudo até alguém ter as permissões atribuídas.
 --
 --
 -- V1 E O QUE FICA PARA DEPOIS
@@ -546,33 +551,7 @@ GRANT EXECUTE ON FUNCTION public.ops_pode_ver_ordem(uuid, uuid) TO authenticated
 
 
 -- ============================================================
--- 9. Catálogo de permissões
--- ============================================================
--- Só catálogo. Ver nota 2: nenhum papel existente ganha nada.
-
-INSERT INTO public.anew_permissions
-  (code, name, description, category, scope, supports_scope, is_dangerous)
-VALUES
-  ('operations.view',             'Aceder a Operações',        'Ver o módulo de Operações',                                'operations', 'organization', false, false),
-  ('operations.orders.view',      'Ver ordens',                'Ver as ordens de trabalho em que participa',               'operations', 'organization', false, false),
-  ('operations.orders.view_all',  'Ver todas as ordens',       'Ver todas as ordens da organização, não só as próprias',   'operations', 'organization', false, false),
-  ('operations.orders.create',    'Criar ordens',              'Abrir ordens corretivas, preventivas e de obra',           'operations', 'organization', false, false),
-  ('operations.orders.edit',      'Editar ordens',             'Alterar dados, responsável e agendamento',                 'operations', 'organization', false, false),
-  ('operations.orders.approve',   'Aprovar ordens',            'Aprovar ou rejeitar ordens por aprovar',                   'operations', 'organization', false, false),
-  ('operations.orders.execute',   'Executar ordens',           'Iniciar, pausar, fechar e responder às tarefas',           'operations', 'organization', false, false),
-  ('operations.orders.confirm',   'Confirmar ordens fechadas', 'Dar por boa uma ordem já fechada pelo técnico',            'operations', 'organization', false, false),
-  ('operations.orders.cancel',    'Cancelar ordens',           'Cancelar ou reabrir uma ordem, com motivo',                'operations', 'organization', false, true),
-  ('operations.locations.view',   'Ver locais e ativos',       'Ver a árvore de locais e as fichas de ativo',              'operations', 'organization', false, false),
-  ('operations.locations.manage', 'Gerir locais e ativos',     'Criar e alterar locais, ativos e categorias',              'operations', 'organization', false, false),
-  ('operations.checklists.manage','Gerir checklists',          'Criar, versionar e publicar checklists',                   'operations', 'organization', false, false),
-  ('operations.plans.manage',     'Gerir planos',              'Criar e alterar planos de manutenção e a recorrência',     'operations', 'organization', false, false),
-  ('operations.costs.view',       'Ver custos de Operações',   'Ver custos e custo/hora. Nunca atribuir a técnicos',       'operations', 'organization', false, true),
-  ('operations.settings.manage',  'Configurar Operações',      'Gerir a equipa e o âmbito de visibilidade',                'operations', 'organization', false, true)
-ON CONFLICT (code) DO NOTHING;
-
-
--- ============================================================
--- 10. Vistas de leitura
+-- 9. Vistas de leitura
 -- ============================================================
 --
 -- `security_invoker = true` é obrigatório nas duas.
@@ -616,7 +595,7 @@ REVOKE ALL ON public.ops_v_cliente FROM anon;
 
 
 -- ============================================================
--- 11. RLS
+-- 10. RLS
 -- ============================================================
 
 DO $rls$
@@ -632,7 +611,7 @@ END
 $rls$;
 
 
--- ── 11.1 Locais, ativos, categorias, checklists, planos ───────────────────
+-- ── 10.1 Locais, ativos, categorias, checklists, planos ───────────────────
 -- Leitura com a permissão de ver; escrita com a de gerir.
 
 DO $policies$
@@ -695,7 +674,7 @@ END
 $policies$;
 
 
--- ── 11.2 Ordens ───────────────────────────────────────────────────────────
+-- ── 10.2 Ordens ───────────────────────────────────────────────────────────
 
 DROP POLICY IF EXISTS ops_ordem_select ON public.ops_ordem;
 CREATE POLICY ops_ordem_select ON public.ops_ordem
@@ -745,7 +724,7 @@ CREATE POLICY ops_ordem_delete ON public.ops_ordem
   );
 
 
--- ── 11.3 Tudo o que pende de uma ordem ────────────────────────────────────
+-- ── 10.3 Tudo o que pende de uma ordem ────────────────────────────────────
 -- Visibilidade herdada: se a ordem é visível, o filho é visível — a policy da
 -- ordem-mãe já garante que só lá chega quem está nela.
 
@@ -782,7 +761,7 @@ END
 $policies$;
 
 
--- ── 11.4 Custos — o técnico não vê dinheiro ───────────────────────────────
+-- ── 10.4 Custos — o técnico não vê dinheiro ───────────────────────────────
 
 DROP POLICY IF EXISTS ops_custo_select ON public.ops_custo;
 CREATE POLICY ops_custo_select ON public.ops_custo
@@ -805,7 +784,7 @@ CREATE POLICY ops_custo_write ON public.ops_custo
   );
 
 
--- ── 11.5 Perfis e âmbito ──────────────────────────────────────────────────
+-- ── 10.5 Perfis e âmbito ──────────────────────────────────────────────────
 -- A linha do próprio é sempre legível (a app precisa da função); as dos
 -- outros só com `operations.costs.view`. A coluna custo_hora nunca sai por
 -- aqui — a app lê `ops_v_equipa`.
@@ -857,7 +836,7 @@ CREATE POLICY ops_utilizador_cliente_write ON public.ops_utilizador_cliente
   );
 
 
--- ── 11.6 Filhos de checklist e de plano ───────────────────────────────────
+-- ── 10.6 Filhos de checklist e de plano ───────────────────────────────────
 
 DROP POLICY IF EXISTS ops_checklist_tarefa_select ON public.ops_checklist_tarefa;
 CREATE POLICY ops_checklist_tarefa_select ON public.ops_checklist_tarefa
@@ -896,7 +875,7 @@ CREATE POLICY ops_plano_alvo_write ON public.ops_plano_alvo
 
 
 -- ============================================================
--- 12. Grants
+-- 11. Grants
 -- ============================================================
 -- `anon` fica de fora de tudo.
 
@@ -916,7 +895,7 @@ $grants$;
 
 
 -- ============================================================
--- 13. Numeração — OT-2026-00842
+-- 12. Numeração — OT-2026-00842
 -- ============================================================
 -- Sequência por organização e ano. `PMP.3437940.163323715` é impossível de
 -- dizer ao telefone; isto não é.
@@ -959,20 +938,18 @@ GRANT EXECUTE ON FUNCTION public.ops_proximo_codigo(uuid, text) TO authenticated
 
 
 -- ============================================================
--- 14. Verificação
+-- 13. Verificação
 -- ============================================================
 
 DO $verificar$
 DECLARE
   v_tabelas integer;
   v_rls     integer;
-  v_perms   integer;
 BEGIN
   SELECT count(*) INTO v_tabelas FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%';
   SELECT count(*) INTO v_rls FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%' AND rowsecurity;
-  SELECT count(*) INTO v_perms FROM public.anew_permissions WHERE category = 'operations';
 
   IF v_tabelas <> 19 THEN
     RAISE EXCEPTION 'Operações: esperadas 19 tabelas, encontradas %', v_tabelas;
@@ -980,10 +957,6 @@ BEGIN
   IF v_rls <> v_tabelas THEN
     RAISE EXCEPTION 'Operações: % tabelas sem RLS', v_tabelas - v_rls;
   END IF;
-  IF v_perms <> 15 THEN
-    RAISE EXCEPTION 'Operações: esperadas 15 permissões, encontradas %', v_perms;
-  END IF;
-
-  RAISE NOTICE 'Operações v1: % tabelas, todas com RLS, % permissões.', v_tabelas, v_perms;
+  RAISE NOTICE 'Operações v1: % tabelas, todas com RLS. Nada fora de ops_* foi tocado.', v_tabelas;
 END
 $verificar$;
