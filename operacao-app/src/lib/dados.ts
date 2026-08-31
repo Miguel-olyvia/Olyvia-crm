@@ -1609,3 +1609,55 @@ export async function historicoDe(
   }
   return (data ?? []) as unknown as EventoRow[];
 }
+
+/* ─────────────────────── Um equipamento em detalhe ─────────────────────── */
+
+/**
+ * O equipamento pelo código, que é o que a etiqueta QR carrega.
+ *
+ * O código é único por organização — e é por isso que serve de endereço. Um
+ * uuid numa etiqueta seria ilegível para quem a colasse ao contrário.
+ */
+export async function ativoPorCodigo(
+  orgId: string,
+  codigo: string
+): Promise<AtivoRow | null> {
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .eq("organization_id", orgId)
+    .eq("codigo", codigo)
+    .maybeSingle();
+
+  rebentar("carregar o equipamento", error);
+  return (data as unknown as AtivoRow) ?? null;
+}
+
+/** As ordens que passaram por um equipamento, pelos alvos dela. */
+export async function ordensDoAtivo(
+  orgId: string,
+  ativoId: string,
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_alvo")
+    .select(`ordem_id, ops_ordem!inner(${COLUNAS_ORDEM}, organization_id)`)
+    .eq("ativo_id", ativoId)
+    .limit(limite);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem ordens do equipamento:", error.message);
+    return [];
+  }
+
+  const linhas = ((data ?? []) as unknown as { ops_ordem: LinhaOrdem & { organization_id: string } }[])
+    .map((l) => l.ops_ordem)
+    .filter((o) => o && o.organization_id === orgId);
+
+  // Da mais recente para trás — é a ordem por que a memória se lê.
+  return linhas.sort((a, b) => (b.criada_em ?? "").localeCompare(a.criada_em ?? ""));
+}

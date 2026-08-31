@@ -12,6 +12,7 @@ import Ordens from "./pages/Ordens";
 const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
 const LocalDetalhe = lazy(() => import("./pages/LocalDetalhe"));
+const AtivoDetalhe = lazy(() => import("./pages/AtivoDetalhe"));
 const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 const Orcamentos = lazy(() => import("./pages/Orcamentos"));
 const Relatorio = lazy(() => import("./pages/Relatorio"));
@@ -120,6 +121,15 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar o local…" />}>
               <LocalDetalhe />
+            </Suspense>
+          }
+        />
+        {/* O destino das etiquetas QR. Quem aponta a câmara aterra aqui. */}
+        <Route
+          path="/ativos/:codigo"
+          element={
+            <Suspense fallback={<Spinner label="A carregar o equipamento…" />}>
+              <AtivoDetalhe />
             </Suspense>
           }
         />

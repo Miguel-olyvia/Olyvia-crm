@@ -41,6 +41,7 @@ import {
 import { linkParaIr, temSitio } from "../domain/mapa";
 import FormAtivoDoLocal from "../components/FormAtivoDoLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
+import EtiquetasQR from "../components/EtiquetasQR";
 import HistoricoDoAtivo from "../components/Historico";
 import { IconeDaOrdem, IconeDoAtivo } from "../components/IconeDeLinha";
 import { duplicarLocal } from "../lib/config";
@@ -285,6 +286,7 @@ function Equipamentos({
   const [novo, setNovo] = useState(false);
   const [aEditar, setAEditar] = useState<string | null>(null);
   const [comHistorico, setComHistorico] = useState<string | null>(null);
+  const [comEtiquetas, setComEtiquetas] = useState(false);
   const [procura, setProcura] = useState("");
 
   const porCategoria = useMemo(
@@ -331,6 +333,11 @@ function Equipamentos({
               />
             </div>
           )}
+          {ativos.length > 0 && (
+            <Button size="sm" variant="secondary" onClick={() => setComEtiquetas(true)}>
+              Etiquetas QR
+            </Button>
+          )}
           {podeEditar && !novo && (
             <Button size="sm" onClick={() => { setNovo(true); setAEditar(null); }}>
               <Plus width={14} height={14} /> Equipamento
@@ -338,6 +345,10 @@ function Equipamentos({
           )}
         </div>
       </div>
+
+      {comEtiquetas && (
+        <EtiquetasQR local={local} ativos={ativos} aoFechar={() => setComEtiquetas(false)} />
+      )}
 
       {novo && (
         <FormAtivoDoLocal
