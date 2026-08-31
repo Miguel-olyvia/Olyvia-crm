@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRoleOrCronSecret } from "../_shared/auth.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { chooseEscalatingTier } from "./alertTiers.ts";
 
@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (!requireServiceRole(req)) {
+  if (!requireServiceRoleOrCronSecret(req)) {
     return new Response(
       JSON.stringify({ error: "Service role required" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }

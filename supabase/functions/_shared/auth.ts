@@ -195,6 +195,41 @@ export function requireServiceRole(req: Request): boolean {
 }
 
 /**
+ * Accepts a pg_cron call carrying the dedicated CRON_SHARED_SECRET, falling
+ * back to the plain service-role check.
+ *
+ * Why this exists: the cron jobs send the Vault secret 'cron_service_role_key',
+ * whose value is CRON_SHARED_SECRET — NOT the service-role key. Meanwhile the
+ * project's SUPABASE_SERVICE_ROLE_KEY no longer matches any key the project
+ * currently issues, so requireServiceRole() alone rejects every cron call with
+ * "Service role required". That is what has kept auto-schedule and
+ * pipeline-automation returning 401 on every run since late August.
+ *
+ * CRON_SHARED_SECRET is a 64-char secret that exists only in the function
+ * runtime and in Vault, is never exposed to clients, and is compared in
+ * constant time below. Rotating it means updating both sides together.
+ */
+export function requireServiceRoleOrCronSecret(req: Request): boolean {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return false;
+  const token = authHeader.replace("Bearer ", "");
+
+  const cronSecret = Deno.env.get("CRON_SHARED_SECRET");
+  if (cronSecret && timingSafeEqual(token, cronSecret)) return true;
+
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  return Boolean(serviceRoleKey) && timingSafeEqual(token, serviceRoleKey!);
+}
+
+/** Length-independent constant-time string comparison. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/**
  * Custom error class for auth failures with HTTP status codes.
  */
 export class AuthError extends Error {
