@@ -220,7 +220,7 @@ function PainelPmp({ orgId }: { orgId: string | null }) {
         />
       ) : (
         <>
-          <Card>
+          <Card className="p-4 sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-sm font-medium text-slate-700">PMP cumprido</h2>
               <span className="text-xs text-slate-500">
@@ -269,7 +269,7 @@ function PainelPmp({ orgId }: { orgId: string | null }) {
           </Card>
 
           {!cliente && porCliente.length > 1 && (
-            <Card>
+            <Card className="p-4 sm:p-5">
               <h2 className="text-sm font-medium text-slate-700">Por cliente</h2>
               <ul className="mt-3 divide-y divide-slate-100">
                 {porCliente
@@ -302,7 +302,7 @@ function PainelPmp({ orgId }: { orgId: string | null }) {
             </Card>
           )}
 
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="text-sm font-medium text-slate-700">Mês a mês</h2>
             <ul className="mt-3 space-y-2">
               {porMes.map((g) => (
@@ -322,7 +322,7 @@ function PainelPmp({ orgId }: { orgId: string | null }) {
           </Card>
 
           {falhadas.length > 0 && (
-            <Card>
+            <Card className="p-4 sm:p-5">
               <h2 className="flex items-center gap-2 text-sm font-medium text-red-700">
                 <AlertTriangle className="h-4 w-4" />
                 Em atraso, e ainda por fazer
@@ -451,7 +451,7 @@ function PainelAtivo({ orgId }: { orgId: string | null }) {
       ) : (
         <>
           {ativo && (
-            <Card>
+            <Card className="p-4 sm:p-5">
               <h2 className="text-base font-semibold text-slate-900">{ativo.nome}</h2>
               <p className="text-sm text-slate-500">
                 <span className="font-mono text-xs">{ativo.codigo}</span> · {ativo.local_nome}
@@ -500,7 +500,7 @@ function PainelAtivo({ orgId }: { orgId: string | null }) {
             <Serie key={s.medicaoDefId} serie={s} />
           ))}
 
-          <Card>
+          <Card className="p-4 sm:p-5">
             <h2 className="text-sm font-medium text-slate-700">Tudo o que se lhe fez</h2>
             {intervencoes.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">
@@ -568,7 +568,7 @@ function Serie({ serie }: { serie: SerieDeLeituras }) {
   const rumo = paraOndeVai(serie);
 
   return (
-    <Card>
+    <Card className="p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-medium text-slate-700">
           {serie.nome}

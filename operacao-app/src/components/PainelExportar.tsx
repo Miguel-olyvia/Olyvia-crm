@@ -184,7 +184,7 @@ export default function PainelExportar({ orgId }: { orgId: string | null }) {
 
   return (
     <div className="space-y-5">
-      <Card>
+      <Card className="p-4 sm:p-5">
         <h2 className="text-sm font-medium text-slate-700">O que levar</h2>
         <p className="mt-1 text-xs text-slate-500">
           Sai um ficheiro <strong>.csv</strong> que abre no Excel — uma linha por leitura, com o
@@ -259,7 +259,7 @@ export default function PainelExportar({ orgId }: { orgId: string | null }) {
       </Card>
 
       {linhas !== null && linhas.length > 0 && (
-        <Card>
+        <Card className="p-4 sm:p-5">
           <h2 className="text-sm font-medium text-slate-700">As primeiras cinco</h2>
           <p className="mt-1 text-xs text-slate-500">
             Para conferires que é isto que queres, antes de descarregar.
