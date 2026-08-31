@@ -237,7 +237,7 @@ Levantado tabela a tabela.
 | `anew_contacts` (pessoas, com `position`) | escolher a pessoa de contacto no local de uma lista, em vez de a escrever | pequeno |
 | `client_contract_*` | um contrato de manutenção gerar os planos preventivos dele | médio |
 | `client_contract_signature_requests` | o cliente **assinar** a folha de obra no telemóvel do técnico, com valor legal | médio |
-| `scheduled_emails` | mandar o relatório ao cliente sozinho, ao fechar a ordem | pequeno |
+| ~~`scheduled_emails`~~ | ~~mandar o relatório ao cliente sozinho~~ — **feito** (31 ago), ao **confirmar** e não ao fechar; ver `db/relatorio-automatico.sql` | — |
 | `product_stock`, `stocks` | saber se há material em armazém antes de o comprar | médio |
 | `email_templates` | o texto do email do relatório editável, sem mexer em código | pequeno |
 

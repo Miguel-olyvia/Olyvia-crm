@@ -42,9 +42,10 @@ import {
   cx,
 } from "../components/ui";
 import PainelPacks from "../components/PainelPacks";
+import PainelAutomatico from "../components/PainelAutomatico";
 import CampoDeMapa from "../components/CampoDeMapa";
 import { coordenadasValidas, type Coordenadas } from "../domain/mapa";
-import { Building, Check, Layers, Plus, User, X } from "../components/icons";
+import { Building, Check, Layers, Plus, Robo, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
 import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
 
@@ -58,13 +59,14 @@ import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type Tipo
  *
  *  1. Locais — onde é. Tudo pende daqui;
  *  2. Procedimentos — o que se faz lá, e o que se mede ao fazê-lo;
- *  3. Equipa — quem o faz, e quanto custa a hora.
+ *  3. Equipa — quem o faz, e quanto custa a hora;
+ *  4. Automático — o que a aplicação faz sem ninguém carregar em nada.
  *
  * O separador fica no endereço (`?ver=equipa`), para se poder mandar um link
  * a alguém a dizer "vai aqui".
  */
 
-type Separador = "locais" | "procedimentos" | "equipa";
+type Separador = "locais" | "procedimentos" | "equipa" | "automatico";
 
 export default function Definicoes() {
   const [params, setParams] = useSearchParams();
@@ -95,11 +97,15 @@ export default function Definicoes() {
         <Aba ligado={ver === "equipa"} onClick={() => trocar("equipa")} Icone={User}>
           Equipa
         </Aba>
+        <Aba ligado={ver === "automatico"} onClick={() => trocar("automatico")} Icone={Robo}>
+          Automático
+        </Aba>
       </div>
 
       {ver === "locais" && <PainelLocais />}
       {ver === "procedimentos" && <PainelProcedimentos />}
       {ver === "equipa" && <PainelEquipa />}
+      {ver === "automatico" && <PainelAutomatico />}
     </div>
   );
 }

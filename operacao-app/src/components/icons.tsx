@@ -84,6 +84,22 @@ export const MapPin = (p: IconProps) => (
   </svg>
 );
 
+export const Mail = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3.5 7 7.6 5.4a1.6 1.6 0 0 0 1.8 0L20.5 7" />
+  </svg>
+);
+
+export const Robo = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <path d="M12 4v4" />
+    <circle cx="9" cy="14" r="1.2" />
+    <circle cx="15" cy="14" r="1.2" />
+  </svg>
+);
+
 export const Clock = (p: IconProps) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.2 2" /></svg>
 );

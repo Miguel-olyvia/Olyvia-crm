@@ -1422,3 +1422,44 @@ export async function localDaOrdem(localId: string | null): Promise<LocalRow | n
   }
   return data ? comCoordenadas(data as unknown as LocalRow) : null;
 }
+
+/* ─────────────────────── Definições da organização ─────────────────────── */
+
+/** As chaves que existem. Fechadas, tal como na base. */
+export type ChaveDeDefinicao = "relatorio_automatico";
+
+/**
+ * As definições da organização, já com os valores por omissão aplicados.
+ *
+ * Uma organização que nunca mexeu em nada não tem linha nenhuma na tabela —
+ * e a resposta certa nesse caso não é "vazio", é "desligado".
+ */
+export async function lerDefinicoes(
+  orgId: string
+): Promise<Record<ChaveDeDefinicao, string>> {
+  const { data, error } = await supabase
+    .from("ops_definicao")
+    .select("chave, valor")
+    .eq("organization_id", orgId);
+
+  rebentar("ler as definições", error);
+
+  const fora: Record<ChaveDeDefinicao, string> = { relatorio_automatico: "nao" };
+  for (const l of (data ?? []) as { chave: string; valor: string }[]) {
+    if (l.chave in fora) fora[l.chave as ChaveDeDefinicao] = l.valor;
+  }
+  return fora;
+}
+
+export async function definirDefinicao(
+  orgId: string,
+  chave: ChaveDeDefinicao,
+  valor: string
+): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_definir", {
+    p_org_id: orgId,
+    p_chave: chave,
+    p_valor: valor,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a definição.");
+}
