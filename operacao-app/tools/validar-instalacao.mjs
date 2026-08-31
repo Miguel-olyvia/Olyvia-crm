@@ -316,6 +316,35 @@ console.log("\n─── depois de remover a demo ──────────
       );
 }
 
+// ── Voltar a correr um ficheiro sozinho, numa base já completa ──────────
+//
+// É isto que se faz a sério: um ficheiro muda, e cola-se SÓ esse no SQL Editor
+// do Supabase, numa base que já tem tudo o resto.
+//
+// A sequência de cima NÃO apanha este caso. Correu correcoes-modelo.sql antes de
+// orcamentos.sql, e o bloco de verificação desse ficheiro contava todas as
+// tabelas `ops_*` e comparava com 26 — o número certo naquele instante. Numa
+// base completa dá 27, e o ficheiro inteiro fazia rollback com "Esperadas 26
+// tabelas ops_*, encontradas 27". Foi assim que rebentou em produção.
+//
+// Um ficheiro que não se pode voltar a correr não serve para nada.
+
+console.log("\n─── cada ficheiro sozinho, numa base completa ─");
+
+for (const f of [
+  "schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql", "rpcs-tarefas.sql",
+  "planos.sql", "correcoes-modelo.sql", "medicoes.sql", "agenda.sql", "despacho.sql",
+  "orcamentos.sql", "anexos.sql", "planos-crud.sql", "config.sql", "custos.sql",
+  "analises.sql", "cliente-crm.sql",
+]) {
+  try {
+    await db.exec(ler(f));
+    ok(`db/${f} volta a correr sozinho`);
+  } catch (e) {
+    mau(`db/${f} não volta a correr: ${e.message.split("\n")[0]}`);
+  }
+}
+
 // ── Veredicto ────────────────────────────────────────────────────────────
 console.log("");
 if (falhas.length) {
