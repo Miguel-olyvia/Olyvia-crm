@@ -6,7 +6,7 @@
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
  *                 → agenda.sql → despacho.sql → orcamentos.sql → anexos.sql
  *                 → assinaturas.sql → mapa.sql
- *                 → relatorio-automatico.sql
+ *                 → relatorio-automatico.sql → campos-ordem.sql
  *                 → planos-crud.sql → config.sql → packs.sql → custos.sql
  *                 → analises.sql → cliente-crm.sql
  *                 → criar-utilizador.sql
@@ -130,6 +130,8 @@ await passo("db/mapa.sql", ler("mapa.sql"));
 await passo("db/mapa.sql outra vez (idempotência)", ler("mapa.sql"));
 await passo("db/relatorio-automatico.sql", ler("relatorio-automatico.sql"));
 await passo("db/relatorio-automatico.sql outra vez (idempotência)", ler("relatorio-automatico.sql"));
+await passo("db/campos-ordem.sql", ler("campos-ordem.sql"));
+await passo("db/campos-ordem.sql outra vez (idempotência)", ler("campos-ordem.sql"));
 await passo("db/planos-crud.sql", ler("planos-crud.sql"));
 await passo("db/planos-crud.sql outra vez (idempotência)", ler("planos-crud.sql"));
 await passo("db/config.sql", ler("config.sql"));
@@ -344,7 +346,7 @@ console.log("\n─── cada ficheiro sozinho, numa base completa ─");
 for (const f of [
   "schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql", "rpcs-tarefas.sql",
   "planos.sql", "correcoes-modelo.sql", "medicoes.sql", "agenda.sql", "despacho.sql",
-  "orcamentos.sql", "anexos.sql", "assinaturas.sql", "mapa.sql", "relatorio-automatico.sql", "planos-crud.sql", "config.sql", "custos.sql",
+  "orcamentos.sql", "anexos.sql", "assinaturas.sql", "mapa.sql", "relatorio-automatico.sql", "campos-ordem.sql", "planos-crud.sql", "config.sql", "custos.sql",
   "packs.sql", "analises.sql", "cliente-crm.sql",
 ]) {
   try {
