@@ -836,14 +836,19 @@ const PurchaseOrders = () => {
 
       // O status devolvido pelo RPC é a fonte da verdade — não assumir
       // 'received' (pode ter ficado 'partially_received').
-      const resultStatus = (data as { status?: string } | null)?.status;
-      const isFullyReceived = resultStatus === 'received';
+      const result = data as { status?: string; stock_skipped?: boolean } | null;
+      const isFullyReceived = result?.status === 'received';
+      // Ligada a uma Encomenda Cliente (já tem destino certo) — a receção
+      // não infla o stock geral, ver 20261115210000.
+      const stockNote = result?.stock_skipped
+        ? " Ligada a uma Encomenda Cliente — o stock geral não foi alterado."
+        : " Stock atualizado.";
 
       toast({
         title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
         description: isFullyReceived
-          ? `${receivingOrder.order_number} foi totalmente recebida — stock atualizado.`
-          : `${receivingOrder.order_number} teve uma receção parcial registada — stock atualizado nas linhas indicadas.`,
+          ? `${receivingOrder.order_number} foi totalmente recebida —${stockNote}`
+          : `${receivingOrder.order_number} teve uma receção parcial registada —${stockNote}`,
       });
       setReceiveDialogOpen(false);
       setReceivingOrder(null);
