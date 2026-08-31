@@ -42,6 +42,7 @@ import { linkParaIr, temSitio } from "../domain/mapa";
 import FormAtivoDoLocal from "../components/FormAtivoDoLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
 import HistoricoDoAtivo from "../components/Historico";
+import { IconeDaOrdem, IconeDoAtivo } from "../components/IconeDeLinha";
 import { duplicarLocal } from "../lib/config";
 
 /**
@@ -374,7 +375,8 @@ function Equipamentos({
               </li>
             ) : (
               <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
-                <span className="w-28 shrink-0 truncate font-mono text-[11px] text-slate-400">
+                <IconeDoAtivo criticidade={a.criticidade} />
+                <span className="w-24 shrink-0 truncate font-mono text-[11px] text-slate-400">
                   {a.codigo}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -460,6 +462,7 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
               to={`/ordens/${o.codigo}`}
               className="group flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5"
             >
+              <IconeDaOrdem origem={o.origem} />
               <span className="w-32 shrink-0 font-mono text-[11px] text-slate-400">
                 {o.codigo}
               </span>

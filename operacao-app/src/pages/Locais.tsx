@@ -13,6 +13,7 @@ import {
 } from "../lib/dados";
 import { Badge, Card, EmptyState, ErrorState, Input, Skeleton, cx } from "../components/ui";
 import { ChevronDown, ChevronRight, Layers, MapPin, Search } from "../components/icons";
+import { IconeDoLocal } from "../components/IconeDeLinha";
 
 /**
  * Locais e ativos, num só navegador.
@@ -208,6 +209,7 @@ function NoDaArvore({
           onClick={() => selecionar(no)}
           className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left"
         >
+          <IconeDoLocal tipo={no.tipo} />
           <span
             className={cx(
               "min-w-0 truncate text-sm",

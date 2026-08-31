@@ -22,6 +22,7 @@ import {
   cx,
 } from "../components/ui";
 import { AlertTriangle, Inbox, Plus, Search } from "../components/icons";
+import { IconeDaOrdem, IconeDoEstado } from "../components/IconeDeLinha";
 import { alertasDaOrdem, severidadeMaxima } from "../domain/alertas";
 import type { Estado } from "../domain/tipos";
 
@@ -263,6 +264,13 @@ function LinhaDeOrdem({
         )}
       >
         <div className="flex items-start gap-3">
+          {/* Os dois ícones que abrem a linha: que espécie de trabalho é, e em
+              que estado está. É o que faz uma lista de setenta linhas ser
+              percorrida com os olhos em vez de lida. */}
+          <div className="mt-0.5 flex shrink-0 items-center gap-1">
+            <IconeDaOrdem origem={ordem.origem} />
+            <IconeDoEstado estado={ordem.estado} />
+          </div>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="font-mono text-xs font-medium tabular text-slate-500">
