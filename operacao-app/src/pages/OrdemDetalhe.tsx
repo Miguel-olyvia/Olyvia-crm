@@ -461,6 +461,7 @@ export default function OrdemDetalhe() {
 
       {/* Onde o trabalho acontece */}
       <PainelTarefas
+        ordemId={ordem.id}
         tarefas={tarefas}
         medicoes={medicoes}
         opcoes={opcoes}

@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog, cx } from "./ui";
 import { ROTULO_FUNCAO } from "../domain/tipos";
+import BarraDaFila from "./BarraDaFila";
 import {
   Ajuda,
   Building,
@@ -203,6 +204,10 @@ export function OperacaoLayout() {
           </div>
         </div>
       </header>
+
+      {/* Debaixo do cabeçalho e por cima de tudo o resto: trabalho que ainda
+          não saiu do telemóvel tem de se ver sem se ir procurar. */}
+      <BarraDaFila />
 
       <main className="mx-auto max-w-6xl px-4 py-6 pb-20 md:pb-6">
         <Outlet />

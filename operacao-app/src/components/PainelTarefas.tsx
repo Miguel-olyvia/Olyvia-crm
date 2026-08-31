@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  ErroDeEscrita,
-  responderMedicao,
-  responderTarefa,
   type MedicaoDaTarefa,
   type OpcaoDeMedicao,
   type TarefaDaOrdem,
 } from "../lib/dados";
+import {
+  responderMedicaoOuGuardar,
+  responderTarefaOuGuardar,
+  type Resultado,
+} from "../lib/fila";
 import {
   Badge,
   Barra,
@@ -19,7 +21,7 @@ import {
   Textarea,
   cx,
 } from "./ui";
-import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronRight, X } from "./icons";
+import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronRight, Clock, X } from "./icons";
 import {
   comoSeResponde,
   faltaParaGravar,
@@ -52,12 +54,14 @@ import { ROTULO_TIPO_TAREFA, type EstadoTarefa, type TipoTarefa } from "../domai
 type Rascunho = { num: string; texto: string };
 
 export default function PainelTarefas({
+  ordemId,
   tarefas,
   medicoes,
   opcoes,
   permissao,
   aoGravar,
 }: {
+  ordemId: string;
   tarefas: readonly TarefaDaOrdem[];
   medicoes: readonly MedicaoDaTarefa[];
   opcoes: readonly OpcaoDeMedicao[];
@@ -70,6 +74,8 @@ export default function PainelTarefas({
   const [aGravar, setAGravar] = useState<string | null>(null);
   const [erros, setErros] = useState<Record<string, string>>({});
   const [corretivas, setCorretivas] = useState<Record<string, string>>({});
+  /** As que ficaram no telemóvel à espera de rede. */
+  const [naFila, setNaFila] = useState<Record<string, boolean>>({});
 
   const porTarefa = useMemo(() => {
     const m = new Map<string, Leitura[]>();
@@ -121,25 +127,29 @@ export default function PainelTarefas({
     }
   }, [tarefas, permissao.pode]);
 
-  const gravar = async (chave: string, fn: () => Promise<{ corretiva_gerada: string | null }>) => {
+  /**
+   * Grava — ou guarda no telemóvel, se a rede tiver ido embora.
+   *
+   * Os três fins são coisas diferentes e o ecrã diz qual foi. Chamar
+   * "gravado" a uma resposta que ainda está no telemóvel seria a maneira mais
+   * rápida de se perder a confiança nisto.
+   */
+  const gravar = async (chave: string, fn: () => Promise<Resultado>) => {
     setAGravar(chave);
     setErros((e) => ({ ...e, [chave]: "" }));
     try {
       const r = await fn();
-      if (r.corretiva_gerada) {
-        setCorretivas((c) => ({ ...c, [chave]: r.corretiva_gerada as string }));
+      if (r.fim === "recusado") {
+        setErros((er) => ({ ...er, [chave]: r.motivo }));
+        return;
       }
+      if (r.fim === "na_fila") {
+        setNaFila((f) => ({ ...f, [chave]: true }));
+        return;
+      }
+      setNaFila((f) => ({ ...f, [chave]: false }));
+      if (r.corretiva) setCorretivas((c) => ({ ...c, [chave]: r.corretiva as string }));
       aoGravar();
-    } catch (e) {
-      // A base escreve mensagens para serem lidas por pessoas. Mostrar a dela
-      // é melhor do que uma genérica — só se troca quando não houve resposta.
-      setErros((er) => ({
-        ...er,
-        [chave]:
-          e instanceof ErroDeEscrita
-            ? e.message
-            : "Não foi possível falar com o servidor. Tenta outra vez.",
-      }));
     } finally {
       setAGravar(null);
     }
@@ -252,11 +262,12 @@ export default function PainelTarefas({
                         aGravar={aGravar === l.id}
                         erro={erros[l.id]}
                         corretiva={corretivas[l.id]}
+                        naFila={naFila[l.id]}
                         rascunho={rascunhos[l.id]}
                         aoMudar={(r) => setRascunhos((x) => ({ ...x, [l.id]: r }))}
                         aoResponder={(args) =>
                           gravar(l.id, () =>
-                            responderMedicao({
+                            responderMedicaoOuGuardar(ordemId, {
                               tarefaId: t.id,
                               medicaoDefId: l.medicaoDefId,
                               ...args,
@@ -274,8 +285,11 @@ export default function PainelTarefas({
                       corretiva={corretivas[t.id]}
                       rascunho={rascunhos[t.id]}
                       aoMudar={(r) => setRascunhos((x) => ({ ...x, [t.id]: r }))}
+                      naFila={naFila[t.id]}
                       aoResponder={(args) =>
-                        gravar(t.id, () => responderTarefa({ tarefaId: t.id, ...args }))
+                        gravar(t.id, () =>
+                          responderTarefaOuGuardar(ordemId, { tarefaId: t.id, ...args })
+                        )
                       }
                     />
                   )}
@@ -298,6 +312,7 @@ function BlocoMedicao({
   aGravar,
   erro,
   corretiva,
+  naFila,
   rascunho,
   aoMudar,
   aoResponder,
@@ -308,13 +323,14 @@ function BlocoMedicao({
   aGravar: boolean;
   erro?: string;
   corretiva?: string;
+  naFila?: boolean;
   rascunho?: Rascunho;
   aoMudar: (r: Rascunho) => void;
   aoResponder: (args: {
     valorNum?: number | null;
     valorTexto?: string | null;
     opcaoId?: string | null;
-  }) => void;
+  }) => void | Promise<void>;
 }) {
   // O que já está gravado é o ponto de partida; o rascunho só existe a partir
   // do momento em que alguém escreve.
@@ -424,7 +440,7 @@ function BlocoMedicao({
         </div>
       )}
 
-      <Avisos erro={erro} corretiva={corretiva} />
+      <Avisos erro={erro} corretiva={corretiva} naFila={naFila} />
     </div>
   );
 }
@@ -437,6 +453,7 @@ function BlocoVeredicto({
   aGravar,
   erro,
   corretiva,
+  naFila,
   rascunho,
   aoMudar,
   aoResponder,
@@ -446,13 +463,14 @@ function BlocoVeredicto({
   aGravar: boolean;
   erro?: string;
   corretiva?: string;
+  naFila?: boolean;
   rascunho?: Rascunho;
   aoMudar: (r: Rascunho) => void;
   aoResponder: (args: {
     estado?: string;
     valorNum?: number | null;
     observacoes?: string | null;
-  }) => void;
+  }) => void | Promise<void>;
 }) {
   const num = rascunho?.num ?? (t.valor_num == null ? "" : String(t.valor_num));
   const texto = rascunho?.texto ?? "";
@@ -555,7 +573,7 @@ function BlocoVeredicto({
       )}
 
       {aGravar && <Spinner label="A gravar" />}
-      <Avisos erro={erro} corretiva={corretiva} />
+      <Avisos erro={erro} corretiva={corretiva} naFila={naFila} />
     </div>
   );
 }
@@ -605,11 +623,31 @@ function SeloLeitura({ leitura: l }: { leitura: Leitura }) {
   return <Badge className="bg-slate-100 text-slate-600 ring-slate-200">lido</Badge>;
 }
 
-function Avisos({ erro, corretiva }: { erro?: string; corretiva?: string }) {
+function Avisos({
+  erro,
+  corretiva,
+  naFila,
+}: {
+  erro?: string;
+  corretiva?: string;
+  naFila?: boolean;
+}) {
   return (
     <>
       {erro && (
         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>
+      )}
+      {/* Guardado não é gravado, e o ecrã diz qual dos dois é. Chamar
+          "gravado" a uma resposta que ainda está no telemóvel seria a maneira
+          mais rápida de se perder a confiança nisto. */}
+      {naFila && (
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <Clock width={14} height={14} className="shrink-0" />
+          <span>
+            Sem rede. <strong className="font-semibold">A resposta ficou guardada</strong> e sai
+            sozinha quando houver sinal — podes continuar.
+          </span>
+        </p>
       )}
       {corretiva && (
         <p className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">

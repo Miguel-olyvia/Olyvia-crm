@@ -251,7 +251,19 @@ tem o telemóvel na mão. É a diferença entre um papel que se perde e uma prov
 
 Estas não vêm do CRM. Vêm de olhar para o que o técnico tem de fazer.
 
-### a) Modo offline ⭐
+### a) Modo offline ⭐ — **metade feita** (31 ago)
+
+> **O que já está:** uma resposta que não consegue sair fica guardada em
+> IndexedDB e sai sozinha quando houver rede. Sobrevive a fechar a aplicação e
+> a reiniciar o telemóvel. O ecrã distingue "gravado" de "guardado", e uma
+> resposta que o servidor **recusa** não entra na fila — guardar uma recusa
+> seria mentir ao técnico. Ver `src/lib/fila.ts` e `src/domain/fila.ts`.
+>
+> **O que falta:** a aplicação **abrir** sem rede. Hoje, se o técnico fechar o
+> separador numa cave, não volta a entrar até ter sinal. Isso é um service
+> worker — outro trabalho, com o seu próprio cuidado de cache e de CSP.
+>
+> O texto abaixo é o levantamento original, e fica como registo.
 
 **É a falha que mais depressa mata um piloto.**
 
