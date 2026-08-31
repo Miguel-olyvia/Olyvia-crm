@@ -62,6 +62,8 @@ import { alertasDaOrdem } from "../domain/alertas";
 import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
 import PainelClassificacao from "../components/PainelClassificacao";
+import BotaoDuplicar from "../components/BotaoDuplicar";
+import { duplicarOrdem } from "../lib/config";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
@@ -355,6 +357,19 @@ export default function OrdemDetalhe() {
             Antes disso o botão seria uma promessa vazia. */}
         {["fechada", "confirmada"].includes(ordem.estado) && (
           <div className="mt-4 border-t border-slate-100 pt-4">
+            <BotaoDuplicar
+              rotulo="Duplicar"
+              titulo="Duplicar a ordem"
+              nomeSugerido={ordem.titulo}
+              oQueNaoLeva={[
+                "as respostas — as tarefas vão por fazer",
+                "os custos, os anexos e a assinatura",
+                "as datas de início e de fecho",
+                "o histórico",
+              ]}
+              duplicar={(nome) => duplicarOrdem(ordem.id, nome)}
+              paraOnde={(r) => `/ordens/${r.codigo}`}
+            />
             <Link
               to={`/ordens/${ordem.codigo}/relatorio`}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:border-slate-300"

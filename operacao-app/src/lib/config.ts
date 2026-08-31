@@ -603,3 +603,48 @@ export async function listarFornecedores(orgId: string): Promise<Fornecedor[]> {
     nome: f.name ?? "(sem nome)",
   }));
 }
+
+/* ──────────────────────────── Duplicar ─────────────────────────────────── */
+
+export interface ResultadoDaCopia {
+  ok: boolean;
+  id: string;
+  codigo: string;
+  tarefas?: number;
+  alvos?: number;
+  equipamentos?: number;
+  estado?: string;
+}
+
+/**
+ * Duplicar não é clonar: copia-se o molde, nunca o que aconteceu.
+ *
+ * Uma ordem copiada nasce por fazer, um plano nasce suspenso, uma checklist
+ * nasce em rascunho, e um local não leva as coordenadas. As regras estão na
+ * base (`db/duplicar.sql`), que é onde têm de estar.
+ */
+async function duplicar(rpc: string, args: Record<string, unknown>): Promise<ResultadoDaCopia> {
+  const { data, error } = await supabase.rpc(rpc, args);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "cópia"));
+  return data as unknown as ResultadoDaCopia;
+}
+
+export const duplicarChecklist = (id: string, nome?: string | null) =>
+  duplicar("rpc_ops_duplicar_checklist", { p_checklist_id: id, p_nome: nome ?? null });
+
+export const duplicarPlano = (id: string, nome?: string | null, clienteId?: string | null) =>
+  duplicar("rpc_ops_duplicar_plano", {
+    p_plano_id: id,
+    p_nome: nome ?? null,
+    p_cliente_id: clienteId ?? null,
+  });
+
+export const duplicarLocal = (id: string, nome: string, comAtivos = true) =>
+  duplicar("rpc_ops_duplicar_local", {
+    p_local_id: id,
+    p_nome: nome,
+    p_com_ativos: comAtivos,
+  });
+
+export const duplicarOrdem = (id: string, titulo?: string | null) =>
+  duplicar("rpc_ops_duplicar_ordem", { p_ordem_id: id, p_titulo: titulo ?? null });

@@ -40,6 +40,8 @@ import {
 } from "../components/icons";
 import { linkParaIr, temSitio } from "../domain/mapa";
 import FormAtivoDoLocal from "../components/FormAtivoDoLocal";
+import BotaoDuplicar from "../components/BotaoDuplicar";
+import { duplicarLocal } from "../lib/config";
 
 /**
  * A ficha de um sítio: o que ele é, o que está lá dentro, e o que já lá se fez.
@@ -165,6 +167,25 @@ export default function LocalDetalhe() {
             </div>
           </div>
 
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {podeEditar && (
+            <BotaoDuplicar
+              titulo="Duplicar o local"
+              nomeSugerido={`${local.nome} (cópia)`}
+              exigeNome
+              oQueNaoLeva={[
+                "o ponto no mapa — dois sítios não estão no mesmo lugar",
+                "os números de série dos equipamentos",
+                "as ordens e o histórico",
+              ]}
+              comAtivos={{
+                rotulo: "Levar os equipamentos",
+                hint: "Copia os que estão aqui, com códigos novos. É quase sempre o que se quer.",
+              }}
+              duplicar={(nome, levar) => duplicarLocal(local.id, nome, levar)}
+              paraOnde={(r) => `/locais/${r.codigo}`}
+            />
+          )}
           {temSitio(local) && (
             <a
               href={linkParaIr(local) ?? "#"}
@@ -176,6 +197,7 @@ export default function LocalDetalhe() {
               Como lá chegar
             </a>
           )}
+          </div>
         </div>
 
         {(local.morada || local.cidade || local.zona) && (
