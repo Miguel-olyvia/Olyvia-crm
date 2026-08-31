@@ -156,6 +156,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu | **não** |
 | `db/documentos-e-ativos.sql` | Word, Excel e CSV nos anexos, e o histórico do equipamento | **não** (mexe no bucket `operacoes`, que é do módulo) |
 | `db/listas-operacao.sql` | Motivos de pausa por função, áreas e tipos de área | **não** |
+| `db/listas-configuraveis.sql` | O nome que cada empresa dá a prioridade, criticidade, natureza da tarefa, nível do local e origem — e as especialidades, que nunca tiveram por onde se criar | **não** |
 | `db/mensagens.sql` | A conversa entre colegas dentro da ordem. Não se apaga nem se reescreve | **sim** — só o aviso no sino, pelo `ops_notificar` |
 | `db/relatorio-manual.sql` | O botão **Enviar ao cliente**, para quando o automático está desligado ou já passou | **sim** — a mesma linha em `scheduled_emails` |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
@@ -305,6 +306,7 @@ npm run supabase:campos         # db/campos-ordem.sql
 npm run supabase:duplicar       # db/duplicar.sql (depois do campos-ordem)
 npm run supabase:documentos     # db/documentos-e-ativos.sql
 npm run supabase:listas         # db/listas-operacao.sql (pausas, áreas)
+npm run supabase:configuraveis  # db/listas-configuraveis.sql (vocabulário)
 npm run supabase:mensagens      # db/mensagens.sql (a conversa da ordem)
 npm run supabase:relatorio-manual # db/relatorio-manual.sql (depois do relatorio)
 npm run supabase:despacho       # db/despacho.sql

@@ -27,7 +27,7 @@ Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
-| `/definicoes` · **Definições** | Cinco separadores: locais e equipamentos, procedimentos, equipa, **tipos e custos**, **automático**. | quem coordena |
+| `/definicoes` · **Definições** | Seis separadores: locais e equipamentos, procedimentos, equipa, **tipos e custos**, **vocabulário** (o nome que a empresa dá às listas do código, e as especialidades), **automático**. | quem coordena |
 | `/ajuda` · **Ajuda** | Quatro portas: **Porquê mudar** (calculadora de valor e cinco fluxogramas), **O funil** (um trabalho do princípio ao fim, com o que acontece sozinho em cada passo), **Como funciona**, **Como se usa**. | todos |
 
 **A entrada de Análises não aparece a um técnico.** Não é só permissão: no
@@ -284,6 +284,7 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-documentos` | os tipos de ficheiro aceites, e a memória do equipamento |
 | `validar-listas` | motivos de pausa por função, áreas e tipos |
 | `validar-mensagens` | a conversa existe, avisa quem tem de saber, e não se reescreve |
+| `npm test` › `rotulos` | renomear não parte nada, e esconder não apaga o passado |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
@@ -303,7 +304,8 @@ schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas
   → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
   → relatorio-automatico.sql → relatorio-manual.sql
   → campos-ordem.sql → duplicar.sql
-  → documentos-e-ativos.sql → listas-operacao.sql → mensagens.sql
+  → documentos-e-ativos.sql → listas-operacao.sql
+  → listas-configuraveis.sql → mensagens.sql
   → planos-crud.sql
   → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql

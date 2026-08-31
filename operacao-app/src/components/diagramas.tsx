@@ -600,7 +600,7 @@ export function DiagramaAutomatico() {
   return (
     <Quadro
       titulo="O que a pessoa faz, e o que o sistema faz sozinho a seguir"
-      largura={720}
+      largura={920}
       altura={224}
       minWidth={620}
     >
@@ -628,9 +628,16 @@ export function DiagramaAutomatico() {
       <Caixa x={554} y={sistema} w={166} texto="Soma o custo real" sub="das sessões de trabalho" tom="brand" />
       <Seta id={id} de={[637, pessoa + 44]} para={[637, sistema - 4]} cor="brand" />
 
+      {/* O último degrau, e o que o cliente vê. Fechar é o técnico a dizer que
+          acabou; confirmar é o escritório a dizer que está bem — e só aí é que
+          alguma coisa sai para fora da empresa. */}
+      <Caixa x={740} y={pessoa} w={180} texto="Confirma a ordem" sub="o escritório reviu" />
+      <Caixa x={740} y={sistema} w={180} texto="Manda o relatório" sub="fotos e assinatura, por email" tom="brand" />
+      <Seta id={id} de={[830, pessoa + 44]} para={[830, sistema - 4]} cor="brand" />
+
       <text x="0" y="212" fontSize="10.5" fill={TINTA.textoFraco}>
-        Nada na pista de baixo salta uma regra: a reparação nasce por aprovar, e o arranque
-        volta a verificar quem pode iniciar.
+        Nada na pista de baixo salta uma regra: a reparação nasce por aprovar, o arranque
+        volta a verificar quem pode iniciar, e o email só sai se a empresa o tiver ligado.
       </text>
     </Quadro>
   );
@@ -712,15 +719,15 @@ export function DiagramaDoCRM() {
         escreve
       </text>
       <text x="360" y="160" textAnchor="middle" fontSize="10" fill={TINTA.textoFraco}>
-        uma linha no sino
+        o sino, e a fila de emails
       </text>
 
       <text x="0" y="212" fontSize="10.5" fill={TINTA.textoFraco}>
         A seta de ida é grossa e a de volta é fina de propósito: o módulo lê muito e escreve
-        uma linha só — um aviso, na tabela de notificações que o CRM já tem.
+        em duas tabelas que o CRM já tem — um aviso no sino, e uma carta na fila de emails.
       </text>
       <text x="0" y="228" fontSize="10.5" fill={TINTA.textoFraco}>
-        A outra exceção é o armazenamento das fotos, num balde próprio chamado “operacoes”.
+        A terceira exceção é o armazenamento das fotos, num balde próprio chamado “operacoes”.
       </text>
     </Quadro>
   );

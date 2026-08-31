@@ -59,14 +59,16 @@ import { useRotulos } from "../auth/Rotulos";
  * Até aqui, tudo o que o módulo faz dependia de dados que só se metiam por SQL
  * à mão. Construiu-se o carro todo e não havia forma de o abastecer.
  *
- * Três separadores, pela ordem em que se usam pela primeira vez:
+ * Seis separadores, pela ordem em que se usam pela primeira vez:
  *
  *  1. Locais — onde é. Tudo pende daqui;
  *  2. Procedimentos — o que se faz lá, e o que se mede ao fazê-lo;
  *  3. Equipa — quem o faz, e quanto custa a hora;
  *  4. Tipos e custos — como se classifica o trabalho (tipos, centros de
  *     custo, motivos de pausa, áreas), e a que conta ele vai;
- *  5. Automático — o que a aplicação faz sem ninguém carregar em nada.
+ *  5. Vocabulário — o nome que esta empresa dá às listas que vêm no código,
+ *     e as especialidades da equipa;
+ *  6. Automático — o que a aplicação faz sem ninguém carregar em nada.
  *
  * O separador fica no endereço (`?ver=equipa`), para se poder mandar um link
  * a alguém a dizer "vai aqui".

@@ -1357,9 +1357,14 @@ const POR_FAZER = [
       "o cliente ainda não abre pedidos sozinho nem acompanha o estado. O relatório vai por email ou em papel.",
   },
   {
-    o: "Trabalhar sem rede",
+    o: "Abrir a aplicação sem rede",
     porque:
-      "numa garagem sem cobertura, as respostas não gravam. A aplicação avisa, mas o valor perde-se se fechar. É a coisa mais cara da lista, e fica para quando o piloto disser quantas vezes aconteceu.",
+      "responder a tarefas e a leituras sem rede já funciona — fica guardado no telemóvel e sai sozinho quando a rede volta. O que falta é a aplicação abrir sem rede: hoje tem de ter aberto com rede pelo menos uma vez nesse dia.",
+  },
+  {
+    o: "Tirar fotos sem rede",
+    porque:
+      "uma foto não cabe na mesma fila que uma resposta de texto. Numa cave, a resposta guarda-se e a foto não.",
   },
 ] as const;
 
@@ -1397,6 +1402,21 @@ function Tutorial() {
         </h2>
         <div className="space-y-3">
           {DIA_A_DIA.map((p, i) => (
+            <Passo key={p.titulo} numero={i + 1} {...p} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Parte 3 · Quando já estiverem à vontade
+        </h2>
+        <p className="mb-3 px-1 text-sm leading-relaxed text-slate-600">
+          Nada disto é preciso no primeiro dia. São as coisas que se descobrem à terceira
+          semana, quando alguém pergunta &ldquo;e não dá para…?&rdquo;.
+        </p>
+        <div className="space-y-3">
+          {DEPOIS.map((p, i) => (
             <Passo key={p.titulo} numero={i + 1} {...p} />
           ))}
         </div>
@@ -1489,6 +1509,14 @@ function Passo({
 
 const MONTAR = [
   {
+    titulo: "Pôr a aplicação a falar como vocês",
+    onde: "Definições › Vocabulário",
+    href: "/definicoes?ver=vocabulario",
+    texto:
+      "Cinco listas vêm com o vocabulário da manutenção de edifícios: prioridade, criticidade, natureza da tarefa, nível do local e origem. Muda-lhes o nome para o vosso, muda a ordem, e esconde o que não usam.",
+    dica: "É o primeiro passo de propósito: toda a gente vai ler estas palavras dezenas de vezes por dia. As especialidades — Eletricista, AVAC, jardinagem — criam-se no mesmo ecrã, e essas inventam-se à vontade.",
+  },
+  {
     titulo: "Pôr a equipa",
     onde: "Definições › Equipa",
     href: "/definicoes?ver=equipa",
@@ -1519,6 +1547,14 @@ const MONTAR = [
     texto:
       "A lista de tarefas que o técnico vai encontrar. Em cada tarefa escolhes o que se mede, se é obrigatória, e se sai no relatório do cliente.",
     dica: "Publicar congela. Se editares uma checklist publicada, nasce a versão seguinte — e as ordens já feitas continuam a mostrar o que foi realmente pedido na altura.",
+  },
+  {
+    titulo: "Classificar o trabalho e o dinheiro",
+    onde: "Definições › Tipos e custos",
+    href: "/definicoes?ver=tipos",
+    texto:
+      "Tipos de trabalho, centros de custo, motivos de pausa e áreas. É o que faz um relatório conseguir somar — sem isto, há oito maneiras de escrever “à espera de material” e nenhuma conta bate certo.",
+    dica: "Os motivos de pausa escolhem-se por função: pausar uma ordem com “a aguardar aprovação superior” não é uma decisão de quem está no local.",
   },
   {
     titulo: "Criar os planos preventivos",
@@ -1585,10 +1621,59 @@ const DIA_A_DIA = [
   },
 ] as const;
 
+/**
+ * O que apareceu depois de o funil estar todo montado.
+ *
+ * Separado do dia a dia de propósito: são coisas que não se fazem todos os
+ * dias, e que quem está a aprender não precisa de saber ao segundo dia.
+ */
+const DEPOIS = [
+  {
+    titulo: "Colar etiquetas nos equipamentos",
+    onde: "Ficha do local › Etiquetas",
+    href: "/locais",
+    texto:
+      "Imprime uma folha de autocolantes com um QR por equipamento. Quem apontar a câmara do telemóvel abre a ficha dele — com o histórico e o botão de abrir ordem ali mesmo.",
+    dica: "Imprime a partir do endereço a sério da aplicação. Se imprimires a partir do computador de quem programa, as etiquetas apontam para lado nenhum — e isso descobre-se depois de colar trezentos autocolantes.",
+  },
+  {
+    titulo: "Falar sobre a ordem, na ordem",
+    onde: "Ficha da ordem › Conversa",
+    href: "/ordens",
+    texto:
+      "O que hoje se manda por WhatsApp — “o quadro está diferente da checklist”, “a peça só chega quinta” — escreve-se dentro da ordem. Quem está na ordem recebe aviso no sino.",
+    dica: "Não se apaga nem se reescreve, de propósito: a discussão sobre quem disse o quê é precisamente o que isto vem resolver. O cliente não vê esta conversa.",
+  },
+  {
+    titulo: "Mandar o relatório quando o cliente liga a pedir",
+    onde: "Ficha da ordem › Enviar ao cliente",
+    href: "/ordens",
+    texto:
+      "Com a ordem fechada, o botão manda o relatório para o email da ficha do cliente. Mostra o endereço antes de mandar, e avisa se já foi mandado um.",
+    dica: "Funciona mesmo com o envio automático desligado. Não há campo para escrever um email à mão — quem quiser mandar para outro sítio corrige a ficha do cliente, que é onde essa decisão pertence.",
+  },
+  {
+    titulo: "Fazer o dia render",
+    onde: "Agenda › Dia e Mapa",
+    href: "/agenda",
+    texto:
+      "Na vista de dia, o painel do dia pela estrada põe as visitas por ordem de proximidade e diz quantos quilómetros isso poupa. Na vista de mapa, vê-se a semana toda em cima do mapa.",
+    dica: "Só sugere trocar a ordem se valer mesmo a pena — mudar meia dúzia de horas de sítio para poupar dois quilómetros não compensa a chamada a cada cliente.",
+  },
+  {
+    titulo: "Não voltar a montar o que já está montado",
+    onde: "Em cada ficha › Duplicar",
+    href: "/ordens",
+    texto:
+      "Ordens, planos, locais e checklists duplicam-se. Um edifício igual ao do lado, uma inspeção que se repete noutro cliente.",
+    dica: "A cópia leva o molde e nunca o que aconteceu: as tarefas vão por fazer, sem custos, sem datas, sem histórico e com código novo.",
+  },
+] as const;
+
 const DUVIDAS = [
   {
-    q: "Respondi a uma tarefa e o valor não gravou.",
-    a: "Quase de certeza é falta de rede. A aplicação avisa quando não consegue gravar — se isso acontecer, não feches o ecrã: espera pela rede e volta a carregar. Trabalhar sem rede ainda não está feito, e é a coisa que mais queremos saber se acontece no terreno.",
+    q: "Respondi a uma tarefa e não vejo a resposta gravada.",
+    a: "Sem rede, a resposta fica guardada no telemóvel e sai sozinha quando a rede voltar — aparece um contador com quantas estão por enviar. Não é preciso fazer nada, nem repetir o trabalho. O que ainda não funciona sem rede são as fotos, e abrir a aplicação de raiz.",
   },
   {
     q: "Não consigo responder — diz que a ordem é de outra pessoa.",
