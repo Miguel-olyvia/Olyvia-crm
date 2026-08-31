@@ -9,11 +9,12 @@ import {
   useSensor, useSensors, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  arrayMove, SortableContext, verticalListSortingStrategy, useSortable,
+  SortableContext, verticalListSortingStrategy, useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { reorderPipelineModules } from "@/lib/pipeline/moduleOrder";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   Briefcase, FileText, Receipt, FileSignature, Users,
@@ -103,9 +104,11 @@ export function PipelineModuleToggle({ modules, onToggle, onReorder, onUpdateLab
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = modules.findIndex(m => m.id === active.id);
-    const newIndex = modules.findIndex(m => m.id === over.id);
-    onReorder(arrayMove(modules, oldIndex, newIndex));
+    // Mesma guarda do manípulo do fluxo: eram dois, e guardar só um deixava
+    // este aberto para arrastar o Cliente para fora do fim.
+    const reordered = reorderPipelineModules(modules, String(active.id), String(over.id));
+    if (reordered === modules) return;
+    onReorder(reordered);
   };
 
   return (
