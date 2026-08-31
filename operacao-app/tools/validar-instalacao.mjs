@@ -4,7 +4,7 @@
  *     schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql
  *                 → rpcs-tarefas.sql
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
- *                 → despacho.sql → orcamentos.sql → anexos.sql
+ *                 → agenda.sql → despacho.sql → orcamentos.sql → anexos.sql
  *                 → planos-crud.sql → config.sql → custos.sql
  *                 → analises.sql → cliente-crm.sql
  *                 → criar-utilizador.sql
@@ -114,6 +114,8 @@ await passo("db/correcoes-modelo.sql", ler("correcoes-modelo.sql"));
 await passo("db/correcoes-modelo.sql outra vez (idempotência)", ler("correcoes-modelo.sql"));
 await passo("db/medicoes.sql", ler("medicoes.sql"));
 await passo("db/medicoes.sql outra vez (idempotência)", ler("medicoes.sql"));
+await passo("db/agenda.sql", ler("agenda.sql"));
+await passo("db/agenda.sql outra vez (idempotência)", ler("agenda.sql"));
 await passo("db/despacho.sql", ler("despacho.sql"));
 await passo("db/despacho.sql outra vez (idempotência)", ler("despacho.sql"));
 await passo("db/orcamentos.sql", ler("orcamentos.sql"));

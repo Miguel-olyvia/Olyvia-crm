@@ -482,6 +482,7 @@ DECLARE
   v_funcao    text;
   v_o         record;
   v_conflitos jsonb := '[]'::jsonb;
+  v_avisos    jsonb := '[]'::jsonb;
   v_ini       timestamptz;
   v_fim       timestamptz;
 BEGIN
@@ -534,6 +535,19 @@ BEGIN
              'codigo', c.codigo, 'titulo', c.titulo, 'agendada_para', c.agendada_para)), '[]'::jsonb)
       INTO v_conflitos
       FROM public.ops_conflitos_de_agenda(v_o.responsavel_id, v_ini, v_fim, p_ordem_id) c;
+
+    -- Férias, horário e feriados, que vivem na agenda do CRM. O guarda existe
+    -- porque `agenda.sql` é opcional: sem ele agenda-se na mesma, só sem estes
+    -- avisos. Nenhum deles impede a marcação — há dias em que se vai na mesma,
+    -- e quem coordena é que decide.
+    IF to_regprocedure('public.ops_disponibilidade(uuid,uuid,timestamptz,timestamptz)')
+       IS NOT NULL THEN
+      SELECT COALESCE(jsonb_agg(jsonb_build_object(
+               'tipo', d.tipo, 'detalhe', d.detalhe, 'desde', d.desde, 'ate', d.ate)), '[]'::jsonb)
+        INTO v_avisos
+        FROM public.ops_disponibilidade(
+               v_o.responsavel_id, v_o.organization_id, v_ini, v_fim) d;
+    END IF;
   END IF;
 
   INSERT INTO public.ops_evento
@@ -545,12 +559,14 @@ BEGIN
      jsonb_build_object('agendada_para', p_agendada_para,
                         'janela_inicio', p_janela_inicio,
                         'janela_fim', p_janela_fim,
-                        'conflitos', jsonb_array_length(v_conflitos)));
+                        'conflitos', jsonb_array_length(v_conflitos),
+                        'avisos', jsonb_array_length(v_avisos)));
 
   RETURN jsonb_build_object(
     'ok', true,
     'agendada_para', p_agendada_para,
-    'conflitos', v_conflitos
+    'conflitos', v_conflitos,
+    'avisos', v_avisos
   );
 END
 $$;

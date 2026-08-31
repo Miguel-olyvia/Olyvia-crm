@@ -147,6 +147,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/cliente-crm.sql` | Morada, telefone e contacto do cliente, vindos do CRM | **não** (só lê as tabelas de morada) |
 | `db/notificacoes.sql` | Avisar no sino do CRM: ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | **sim** — só `INSERT` em `notifications` |
 | `db/analises.sql` | Três vistas: histórico do equipamento, evolução das leituras, PMP cumprido | **não** |
+| `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita | **não** (só lê 4 tabelas de agenda) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -198,7 +199,8 @@ db/correcoes-modelo    +7 tabelas: especialidades, horários, medições
 db/medicoes.sql        responder a leituras, com o veredicto na base
 db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
 db/analises.sql        3 vistas: vida do equipamento, leituras, PMP
-tools/validar-*        14 validadores contra Postgres real, sem Docker
+db/agenda.sql          férias, horários e feriados, vindos do CRM
+tools/validar-*        15 validadores contra Postgres real, sem Docker
 src/domain/            regras puras — 147 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
@@ -267,6 +269,7 @@ npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
 npm run supabase:notificacoes   # db/notificacoes.sql (antes das RPCs)
 npm run supabase:analises       # db/analises.sql
+npm run supabase:agenda         # db/agenda.sql (antes do despacho)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql

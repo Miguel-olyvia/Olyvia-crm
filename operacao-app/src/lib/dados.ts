@@ -504,12 +504,25 @@ export interface Conflito {
   agendada_para: string;
 }
 
+/**
+ * Um impedimento vindo da agenda do CRM: férias, horário ou feriado.
+ *
+ * Nunca traz o motivo da ausência — pode ser uma baixa médica, e quem marca
+ * a visita só precisa de saber que a pessoa não está. Ver `db/agenda.sql`.
+ */
+export interface AvisoDeAgenda {
+  tipo: "ausente" | "fora_de_horario" | "feriado";
+  detalhe: string;
+  desde: string;
+  ate: string;
+}
+
 export async function agendarOrdem(args: {
   ordemId: string;
   agendadaPara: string;
   janelaInicio?: string | null;
   janelaFim?: string | null;
-}): Promise<{ ok: boolean; conflitos: Conflito[] }> {
+}): Promise<{ ok: boolean; conflitos: Conflito[]; avisos: AvisoDeAgenda[] }> {
   const { data, error } = await supabase.rpc("rpc_ops_agendar_ordem", {
     p_ordem_id: args.ordemId,
     p_agendada_para: args.agendadaPara,
@@ -517,7 +530,10 @@ export async function agendarOrdem(args: {
     p_janela_fim: args.janelaFim ?? null,
   });
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível agendar a ordem.");
-  return data as unknown as { ok: boolean; conflitos: Conflito[] };
+  // `avisos` só existe se `db/agenda.sql` estiver instalado. Sem ele a RPC
+  // devolve o resto na mesma, e o ecrã fica simplesmente sem estes avisos.
+  const r = data as unknown as { ok: boolean; conflitos: Conflito[]; avisos?: AvisoDeAgenda[] };
+  return { ...r, avisos: r.avisos ?? [] };
 }
 
 /** Quem já está na ordem. Serve para desenhar a equipa e saber quem a executa. */
