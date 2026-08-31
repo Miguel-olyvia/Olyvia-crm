@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/lib/toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Zap, GitBranch, ArrowRight, FileText, Receipt, FileSignature, Users, Briefcase, GripVertical, Settings, LayoutTemplate } from "lucide-react";
@@ -17,11 +19,15 @@ import {
   useSensor, useSensors, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  arrayMove, SortableContext, horizontalListSortingStrategy, useSortable,
+  SortableContext, horizontalListSortingStrategy, useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
+import { isTerminal, reorderPipelineModules } from "@/lib/pipeline/moduleOrder";
+import { deriveEdgeWrites, isNoOp, type EdgeWrites } from "@/lib/pipeline/deriveEdgeWrites";
+import { loadAllStageActions, applyEdgeWrites } from "@/lib/pipeline/applyEdgeWrites";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 
 interface ProposalStage {
   id: string; name: string; label: string; color: string; is_won: boolean; is_lost: boolean;
@@ -44,15 +50,20 @@ interface VisualStep {
 }
 
 function SortablePipelineStep({ step, isLast }: { step: VisualStep; isLast: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: step.id });
+  // O passo terminal (Cliente) nao se arrasta: melhor um gesto que nem comeca
+  // do que um que comeca e volta atras.
+  const isTerminalStep = isTerminal({ id: step.id, enabled: true });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: step.id, disabled: isTerminalStep });
   const style = { transform: CSS.Transform.toString(transform), transition };
   const Icon = step.icon;
   return (
     <div ref={setNodeRef} style={style} className="flex items-center gap-1 min-w-0">
       <div className={cn("flex flex-col items-center gap-1 min-w-[70px] relative group rounded-lg p-1.5 transition-all", isDragging && "opacity-50 ring-2 ring-primary/40 bg-primary/5")}>
-        <div {...attributes} {...listeners} className="absolute -top-1 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
-          <GripVertical className="w-3 h-3 text-muted-foreground" />
-        </div>
+        {!isTerminalStep && (
+          <div {...attributes} {...listeners} className="absolute -top-1 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
+            <GripVertical className="w-3 h-3 text-muted-foreground" />
+          </div>
+        )}
         <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ backgroundColor: step.color + '20', color: step.color }}>
           <Icon className="w-4 h-4" />
         </div>
@@ -79,6 +90,15 @@ const CONTRACT_STAGES = [
 ];
 
 // Map action_type to the module step it creates
+const MODULE_LABEL: Record<string, string> = {
+  pedido: "Pedido", orcamento: "Orçamento", proposta: "Proposta", contrato: "Contrato", cliente: "Cliente",
+};
+
+const ACTION_LABEL: Record<string, string> = {
+  create_deal: "Pedido", create_quote: "Orçamento", create_proposal: "Proposta",
+  create_contract: "Contrato", convert_to_client: "Cliente",
+};
+
 const ACTION_TO_STEP: Record<string, string> = {
   create_deal: "pedido",
   create_quote: "orcamento",
@@ -112,6 +132,10 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
   const [mainTab, setMainTab] = useState("config");
   // Stores the derived flow: moduleId → { triggerStageName, createsModule }
   const [flowMap, setFlowMap] = useState<Record<string, { triggerStage: string; createsLabel: string }>>({});
+  // Uma reordenação fica PENDENTE até ser confirmada: arrastar reescreve regras
+  // de automação a sério, e um gesto acidental não pode fazer isso em silêncio.
+  const [pendingReorder, setPendingReorder] = useState<{ modules: any[]; writes: EdgeWrites } | null>(null);
+  const [applying, setApplying] = useState(false);
 
   const activeModules = pipelineConfig.activeModules;
 
@@ -210,13 +234,43 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
     if (open) loadStages();
   }, [open, loadStages]);
 
+  /**
+   * Caminho único para qualquer alteração à composição do pipeline — arrastar
+   * OU ligar/desligar um módulo. As duas coisas mudam o que cada módulo cria, e
+   * ambas têm de reescrever as regras: o motor não lê a configuração de módulos,
+   * só as tabelas de acções, portanto um módulo desligado cuja regra ficasse
+   * activa continuaria a ser executado.
+   */
+  const proporAlteracao = useCallback(async (novosModulos: PipelineModule[]) => {
+    if (!companyId) return;
+    const regras = await loadAllStageActions(companyId);
+    const writes = deriveEdgeWrites(regras, novosModulos);
+    if (isNoOp(writes)) {
+      // Nada de automação muda — guarda-se sem incomodar ninguém.
+      await pipelineConfig.saveModules(novosModulos);
+      return;
+    }
+    setPendingReorder({ modules: novosModulos, writes });
+  }, [companyId, pipelineConfig]);
+
+  const handleToggleModule = useCallback((moduleId: string) => {
+    const novos = pipelineConfig.modules.map((m) =>
+      m.id === moduleId ? { ...m, enabled: !m.enabled } : m,
+    );
+    void proporAlteracao(novos);
+  }, [pipelineConfig.modules, proporAlteracao]);
+
   const handleFlowDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const allModules = [...pipelineConfig.modules];
-    const oldIndex = allModules.findIndex(s => s.id === active.id);
-    const newIndex = allModules.findIndex(s => s.id === over.id);
-    pipelineConfig.reorderModules(arrayMove(allModules, oldIndex, newIndex));
+    // O Cliente é o passo terminal e tem de ficar sempre em último: nada vem
+    // depois de converter. `reorderPipelineModules` devolve o mesmo array
+    // quando o gesto é ilegal, e a comparação por identidade evita escrever.
+    const allModules = pipelineConfig.modules;
+    const reordered = reorderPipelineModules(allModules, String(active.id), String(over.id));
+    if (reordered === allModules) return;
+
+    void proporAlteracao(reordered);
   };
 
   return (
@@ -305,7 +359,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
             />
             <PipelineModuleToggle
               modules={pipelineConfig.modules}
-              onToggle={pipelineConfig.toggleModule}
+              onToggle={handleToggleModule}
               onReorder={pipelineConfig.reorderModules}
               onUpdateLabel={pipelineConfig.updateModuleLabel}
             />
@@ -356,6 +410,89 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
           </TabsContent>
         </Tabs>
       </DialogContent>
+
+      {/* Confirmação da reordenação. Mostra exactamente que regras mudam antes
+          de escrever: um arrasto acidental não pode reescrever a automação de
+          uma organização em silêncio. */}
+      <Dialog open={!!pendingReorder} onOpenChange={(o) => { if (!o) setPendingReorder(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Reordenar altera a automação</DialogTitle>
+            <DialogDescription>
+              Esta nova ordem muda o que cada módulo cria. Confirme as alterações:
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 text-sm">
+            {(pendingReorder?.writes.insert.length ?? 0) > 0 && (
+              <div>
+                <p className="font-medium text-foreground mb-1">Passa a criar</p>
+                <ul className="space-y-1">
+                  {pendingReorder!.writes.insert.map((i, k) => (
+                    <li key={k} className="text-muted-foreground">
+                      <strong>{MODULE_LABEL[i.module] || i.module}</strong> → {ACTION_LABEL[i.action_type] || i.action_type}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {(pendingReorder?.writes.deactivate.length ?? 0) > 0 && (
+              <div>
+                <p className="font-medium text-foreground mb-1">Deixa de criar</p>
+                <ul className="space-y-1">
+                  {pendingReorder!.writes.deactivate.map((r) => (
+                    <li key={r.id} className="text-muted-foreground">
+                      <strong>{MODULE_LABEL[r.module] || r.module}</strong> → {ACTION_LABEL[r.action_type] || r.action_type}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground/80 mt-1">
+                  As regras são desactivadas, não apagadas — voltar atrás repõe-nas.
+                </p>
+              </div>
+            )}
+            {(pendingReorder?.writes.needsTriggerStage.length ?? 0) > 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-500">
+                Sem fase de disparo configurada em: {pendingReorder!.writes.needsTriggerStage.map(m => MODULE_LABEL[m] || m).join(", ")}.
+                Configure a acção nesse módulo depois de reordenar.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingReorder(null)} disabled={applying}>Cancelar</Button>
+            <Button
+              disabled={applying}
+              onClick={async () => {
+                if (!pendingReorder || !companyId) return;
+                setApplying(true);
+                try {
+                  const businessUserId = await resolveCurrentBusinessUserId();
+                  if (!businessUserId) throw new Error("Utilizador não resolvido");
+                  const r = await applyEdgeWrites(companyId, pendingReorder.writes, businessUserId);
+                  if (r.erros.length > 0) {
+                    toast.error(`Falhou: ${r.erros[0]}`);
+                  } else {
+                    // `saveModules` e não `reorderModules`: a alteração pendente
+                    // tanto pode ser uma reordenação como um módulo ligado ou
+                    // desligado, e o segundo caso muda `enabled`, não a ordem.
+                    await pipelineConfig.saveModules(pendingReorder.modules);
+                    await loadFlowFromActions();
+                    toast.success(`Automação actualizada: ${r.inseridas} nova(s), ${r.desactivadas} desactivada(s)`);
+                    setPendingReorder(null);
+                  }
+                } catch (e: any) {
+                  toast.error(e?.message || "Não foi possível actualizar a automação");
+                } finally {
+                  setApplying(false);
+                }
+              }}
+            >
+              {applying ? "A aplicar…" : "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
