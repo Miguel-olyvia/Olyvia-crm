@@ -13,10 +13,9 @@ import {
 } from "../components/diagramas";
 import Calculadora from "../components/Calculadora";
 import AjudaFunil from "../components/ajuda-funil";
-import AjudaVender from "../components/ajuda-vender";
 
 /**
- * Esta página é lida por três pessoas muito diferentes, e é por isso que tem
+ * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
  * várias portas em vez de uma.
  *
  *  · **Quem decide** — o dono da empresa. Não vai clicar em nada aqui dentro.
@@ -26,9 +25,10 @@ import AjudaVender from "../components/ajuda-vender";
  *  · **Quem usa** — o gestor e o técnico. Querem saber onde é que se carrega,
  *    e porque é que o botão antigo mudou de sítio. Fala-se-lhes de passos.
  *
- *  · **Quem vende** — vai a uma reunião com alguém que não conhece nada disto.
- *    Precisa das perguntas certas, das objecções que vão aparecer, e sobretudo
- *    de saber **onde parar** — o que não se promete está escrito lá dentro.
+ * ⚠ **O CLIENTE LÊ ISTO.** Não há aqui separador nenhum só para dentro de casa:
+ * tudo o que está nesta página é para ser lido à frente de quem compra. Notas
+ * de venda — objeções, o que não prometer, guião de demonstração — não entram
+ * aqui. Vivem em `docs/pagina-de-venda.html` e nas notas da equipa.
  *
  * Uma regra ao escrever isto: cada afirmação traz a EVIDÊNCIA. Não "o
  * Infraspeak é confuso", mas "existe em produção um plano preventivo chamado
@@ -40,7 +40,7 @@ import AjudaVender from "../components/ajuda-vender";
  * lido por quem não tem três leituras para dar.
  */
 
-type Separador = "porque" | "vender" | "funil" | "funciona" | "usar";
+type Separador = "porque" | "funil" | "funciona" | "usar";
 
 /** Os nomes antigos continuam a funcionar — houve links partilhados com eles. */
 const ANTIGOS: Record<string, Separador> = { mudou: "porque", tutorial: "usar" };
@@ -49,8 +49,7 @@ export default function Ajuda() {
   const [params, setParams] = useSearchParams();
   const bruto = params.get("ver") ?? "";
   const ver: Separador =
-    bruto === "porque" || bruto === "vender" || bruto === "funil"
-    || bruto === "funciona" || bruto === "usar"
+    bruto === "porque" || bruto === "funil" || bruto === "funciona" || bruto === "usar"
       ? bruto
       : (ANTIGOS[bruto] ?? "porque");
 
@@ -75,9 +74,6 @@ export default function Ajuda() {
         <Aba ligado={ver === "porque"} onClick={() => trocar("porque")}>
           Porquê mudar
         </Aba>
-        <Aba ligado={ver === "vender"} onClick={() => trocar("vender")}>
-          Para vender
-        </Aba>
         <Aba ligado={ver === "funil"} onClick={() => trocar("funil")}>
           O funil
         </Aba>
@@ -90,7 +86,6 @@ export default function Ajuda() {
       </div>
 
       {ver === "porque" && <PorqueMudar />}
-      {ver === "vender" && <AjudaVender />}
       {ver === "funil" && <AjudaFunil />}
       {ver === "funciona" && <ComoFunciona />}
       {ver === "usar" && <Tutorial />}
@@ -103,6 +98,43 @@ export default function Ajuda() {
 function PorqueMudar() {
   return (
     <div className="space-y-4">
+      {/* O pitch. Vem antes de tudo porque quem tem trinta segundos só lê
+          isto — e porque as três frases a seguir são as únicas que se
+          precisa de decorar para explicar o produto a alguém. */}
+      <Card className="p-5 sm:p-6">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-brand-600">
+          Olyvia Operação
+        </p>
+        <h2 className="mt-1.5 max-w-[22ch] text-2xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-3xl">
+          O trabalho faz-se sempre. O que se perde é a prova.
+        </h2>
+        <p className="mt-3 max-w-prose text-sm leading-relaxed text-slate-600">
+          A equipa vai lá, resolve, tira uma foto e manda-a por WhatsApp. Três meses depois
+          o cliente pergunta o que foi feito — e a resposta está numa conversa que ninguém
+          consegue encontrar. Isto guarda o trabalho onde ele acontece: na ordem.
+        </p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          {VITORIAS.map((v) => (
+            <div
+              key={v.titulo}
+              className="rounded-xl bg-brand-50/60 p-3.5 ring-1 ring-inset ring-brand-100"
+            >
+              <p className="text-sm font-semibold leading-snug text-slate-900">{v.titulo}</p>
+              <p className="mt-1 text-sm leading-relaxed text-slate-600">{v.detalhe}</p>
+              <p className="mt-2 border-t border-brand-100 pt-2 text-xs leading-relaxed text-slate-500">
+                <span className="font-medium text-slate-600">Hoje:</span> {v.hoje}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-4 text-xs leading-relaxed text-slate-500">
+          O resto desta página é a prova de cada uma destas três linhas, tirada da vossa
+          instalação.
+        </p>
+      </Card>
+
       {/* A abertura. Isto é lido por quem tem trinta segundos, e a versão
           anterior eram dois parágrafos — que ninguém lia.
           Um número grande, quatro trocas, uma linha. */}
@@ -245,6 +277,58 @@ function PorqueMudar() {
         </p>
       </Card>
 
+      {/* O que existe aqui e lá não. É a secção mais delicada da página:
+          dizer que um produto não tem uma coisa é fácil de dizer e fácil de
+          desmentir. Por isso cada linha tem a RAZÃO de não existir lá — ou é
+          estrutural (vive dentro do Olyvia, e o Infraspeak é um sistema à
+          parte), ou foi construída de propósito. E nada entra nesta lista sem
+          ter sido visto na instalação deles. */}
+      <div>
+        <h2 className="mb-1 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          O que aqui existe e no Infraspeak não
+        </h2>
+        <p className="mb-3 max-w-prose px-1 text-sm leading-relaxed text-slate-600">
+          Estas não são diferenças de gosto nem coisas que se resolvam com uma definição.
+          Metade delas <strong>não pode existir</strong> num sistema à parte, por muito bom
+          que ele seja: o Infraspeak não conhece as férias da vossa equipa nem os vossos
+          orçamentos. A outra metade foi construída de propósito.
+        </p>
+
+        <div className="space-y-3">
+          {NOVIDADES.map((n) => (
+            <Card key={n.titulo} className="p-4 sm:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold text-slate-900">{n.titulo}</h3>
+                <Badge
+                  className={
+                    n.tipo === "estrutural"
+                      ? "bg-brand-50 text-brand-800 ring-brand-200"
+                      : "bg-emerald-50 text-emerald-800 ring-emerald-200"
+                  }
+                >
+                  {n.tipo === "estrutural" ? "Só dentro do Olyvia" : "Construído de propósito"}
+                </Badge>
+              </div>
+              <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-slate-600">
+                {n.oQueFaz}
+              </p>
+              <p className="mt-2.5 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-600">
+                <X width={14} height={14} className="mt-0.5 shrink-0 text-slate-400" />
+                <span>
+                  <strong className="font-medium text-slate-700">No Infraspeak:</strong>{" "}
+                  {n.la}
+                </span>
+              </p>
+            </Card>
+          ))}
+        </div>
+
+        <p className="mt-2 px-1 text-xs leading-relaxed text-slate-500">
+          As três primeiras são estruturais: um sistema à parte nunca as terá, porque não
+          tem acesso à vossa agenda, aos vossos orçamentos nem às vossas contas.
+        </p>
+      </div>
+
       {/* O ganho que não cabe numa conta: o que a empresa passa a SABER. Vem
           depois dos números de propósito — quem ainda não acreditou nos
           números também não vai acreditar nisto. */}
@@ -371,6 +455,115 @@ function Troca({ o, antes, depois }: { o: string; antes: string; depois: string 
     </div>
   );
 }
+
+const VITORIAS = [
+  {
+    titulo: "Sabe-se quanto custou cada obra",
+    detalhe:
+      "Horas cronometradas ao custo/hora de cada pessoa, mais material e serviços — com o orçamentado congelado ao lado.",
+    hoje: "o custo de mão de obra dá 0,00 € em todas as ordens.",
+  },
+  {
+    titulo: "Nada do que o técnico encontra se perde",
+    detalhe:
+      "Uma leitura fora da gama abre a ordem de reparação sozinha, com o problema já escrito lá dentro.",
+    hoje: "a avaria fica escrita no histórico, e morre lá.",
+  },
+  {
+    titulo: "O cliente recebe prova sem ninguém se lembrar",
+    detalhe:
+      "Ao confirmar a ordem, o relatório sai por email com as fotos, as leituras e a assinatura recolhida no local.",
+    hoje: "alguém tem de se lembrar, e escrevê-lo à noite.",
+  },
+] as const;
+
+/**
+ * O que existe aqui e no Infraspeak não.
+ *
+ * Regra ao escrever esta lista: **nada entra sem a razão de não existir lá**.
+ * Dizer "eles não têm" é fácil de dizer e fácil de desmentir na reunião
+ * seguinte; dizer "eles não podem ter, porque não conhecem as vossas férias"
+ * é uma afirmação que se aguenta.
+ *
+ * Por isso há dois tipos, e só dois:
+ *
+ *  · `estrutural` — vive dentro do Olyvia. Um sistema à parte não tem acesso
+ *    à agenda, aos orçamentos nem às contas da empresa. Não é uma questão de
+ *    lhes faltar trabalho: é impossível de fora.
+ *
+ *  · `construido` — foi feito de propósito, e foi visto a faltar na
+ *    instalação deles.
+ *
+ * Ficaram DE FORA desta lista coisas que o Infraspeak também tem, mesmo que
+ * aqui estejam melhores: mensagens na ordem, duplicar, histórico do
+ * equipamento. Meter uma dessas aqui estragava a credibilidade das outras.
+ */
+const NOVIDADES = [
+  {
+    titulo: "Uma agenda só, com as férias da equipa lá dentro",
+    tipo: "estrutural",
+    oQueFaz:
+      "Ao marcar uma visita, a agenda já sabe quem está de férias, quem tem folga e que dia é feriado — e avisa se a pessoa já tem outra coisa àquela hora. Os compromissos que já estavam na agenda da empresa aparecem ao lado das ordens.",
+    la:
+      "é um sistema à parte. Não conhece as férias nem os horários da vossa equipa, e por isso há sempre duas agendas a contradizerem-se.",
+  },
+  {
+    titulo: "Um orçamento aceite vira obra num clique",
+    tipo: "estrutural",
+    oQueFaz:
+      "As linhas do orçamento passam para a ordem com o custo previsto congelado. No fim vê-se, linha a linha, onde a obra escorregou.",
+    la:
+      "os orçamentos estão no CRM e o trabalho está no Infraspeak. Ninguém junta os dois, e por isso não se sabe que obra é que comeu o lucro do ano.",
+  },
+  {
+    titulo: "O mesmo início de sessão e os mesmos clientes",
+    tipo: "estrutural",
+    oQueFaz:
+      "Quem já entra no Olyvia entra aqui. A ficha do cliente, a morada e os contactos são os do CRM, lidos de lá — não se duplica nem se reescreve nada.",
+    la:
+      "contas separadas, e a lista de clientes escrita outra vez. Duas verdades sobre o mesmo cliente é uma questão de tempo.",
+  },
+  {
+    titulo: "O dia pela estrada, e a semana em cima do mapa",
+    tipo: "construido",
+    oQueFaz:
+      "As visitas do dia ordenadas por proximidade, com os quilómetros que isso poupa escritos ao lado — e só sugere trocar se valer mesmo a pena. A semana toda vê-se num mapa.",
+    la:
+      "marca-se a hora. O mapa não entra na conta, e quem faz a rota é quem se lembrar de a fazer.",
+  },
+  {
+    titulo: "Etiqueta QR que qualquer telemóvel lê",
+    tipo: "construido",
+    oQueFaz:
+      "Imprime-se uma folha de autocolantes e cola-se um em cada equipamento. Apontar a câmara abre a ficha dele — o que é, o que já lhe fizeram, e o botão para abrir uma ordem ali mesmo. Sem instalar nada.",
+    la:
+      "usa-se NFC. Cada etiqueta custa dinheiro, e só funciona em telemóveis com NFC ligado — metade da equipa fica de fora.",
+  },
+  {
+    titulo: "O relatório sai sozinho ao confirmar",
+    tipo: "construido",
+    oQueFaz:
+      "Com as fotos, as leituras e a assinatura. Vai para o email da ficha do cliente, e fica registado na ordem quem mandou e para onde. Também se manda à mão, quando o cliente liga a pedir.",
+    la:
+      "existe o botão «Enviar por Email», e é sempre alguém que se tem de lembrar de carregar nele. Não há nada que saia sozinho quando o trabalho é dado por bom.",
+  },
+  {
+    titulo: "O veredicto aparece antes de gravar",
+    tipo: "construido",
+    oQueFaz:
+      "Escrever 8 numa gama de 10 a 15 mostra logo «vai ficar não conforme», e que vai abrir reparação. Uma opção que abre corretiva diz isso no próprio botão.",
+    la:
+      "só se sabe depois de gravar. Quem se enganou já gerou uma ordem que ninguém pediu — e agora tem de a ir apagar.",
+  },
+  {
+    titulo: "A manutenção cumprida, calculada",
+    tipo: "construido",
+    oQueFaz:
+      "Uma percentagem por cliente e por mês: quantas visitas preventivas estavam previstas e quantas se fizeram. É o número que se leva a uma renovação de contrato.",
+    la:
+      "conta-se à mão, ordem a ordem, quando alguém precisa dele — que é sempre na véspera da reunião.",
+  },
+] as const;
 
 const TROCAS = [
   {
