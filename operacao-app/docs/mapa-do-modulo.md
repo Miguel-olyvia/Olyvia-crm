@@ -21,12 +21,13 @@ Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, histórico. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
 | `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
-| `/agenda` · **Agenda** | **Dia, semana e mês.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. | **admin, gestor, operador** |
+| `/locais/:codigo` · **Ficha do local** | O caminho até ao sítio, os sítios lá dentro, os equipamentos (criar, editar, histórico), e as últimas ordens que por lá passaram. Duplicar o local, com ou sem equipamentos. | todos; editar é de quem coordena |
+| `/agenda` · **Agenda** | **Dia, semana, mês e mapa.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. Filtros por cliente, tipo de trabalho, pessoa, especialidade e fornecedor. Na vista de dia, o dia pela estrada. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
-| `/definicoes` · **Definições** | Equipa, locais, categorias, medições, checklists, códigos. | quem coordena |
-| `/ajuda` · **Ajuda** | Três portas: **Porquê mudar** (com calculadora de valor e cinco fluxogramas), **Como funciona**, **Como se usa**. | todos |
+| `/definicoes` · **Definições** | Cinco separadores: locais e equipamentos, procedimentos, equipa, **tipos e custos**, **automático**. | quem coordena |
+| `/ajuda` · **Ajuda** | Quatro portas: **Porquê mudar** (calculadora de valor e cinco fluxogramas), **O funil** (um trabalho do princípio ao fim, com o que acontece sozinho em cada passo), **Como funciona**, **Como se usa**. | todos |
 
 **A entrada de Análises não aparece a um técnico.** Não é só permissão: no
 telemóvel a navegação é uma barra fixa, e cada entrada a mais rouba largura às
@@ -34,7 +35,7 @@ outras.
 
 ---
 
-## 2. As 28 tabelas
+## 2. As 31 tabelas
 
 Todas com prefixo `ops_`, todas com RLS ligada, **zero chaves estrangeiras para
 fora do módulo**. Há um teste que falha se alguém criar uma.
@@ -83,6 +84,9 @@ fora do módulo**. Há um teste que falha se alguém criar uma.
 | `ops_custo` · `ops_ordem_previsto` | o que se gastou, e o que estava orçamentado |
 | `ops_anexo` | fotos e ficheiros. `privada` = não sai no relatório |
 | `ops_assinatura` | uma por ordem: quem assinou, em que qualidade, e a imagem no bucket |
+| `ops_tipo_trabalho` | como a casa classifica o trabalho. Semeada com os 9 do Infraspeak. O código NÃO identifica — lá `PMP` é o código de três tipos |
+| `ops_centro_custo` | a que conta vai o trabalho. Fica no equipamento, e a ordem herda-o |
+| `ops_definicao` | interruptores por organização, com chaves fechadas por CHECK. Hoje só o relatório automático |
 | `ops_mensagem` | conversa dentro da ordem |
 | `ops_evento` | o histórico. Quem fez o quê, com o antes e o depois |
 | `ops_sequencia` | de onde saem os códigos `OT-2026-00842` |
@@ -274,10 +278,13 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-assinaturas` | uma assinatura só se recolhe onde e por quem devia |
 | `validar-mapa` | a base só aceita coordenadas que são um sítio no mapa |
 | `validar-relatorio` | o email ao cliente só sai quando devia, e para quem devia |
+| `validar-campos` | a ordem só fecha sozinha quando devia — sobretudo, quando NÃO fecha |
+| `validar-duplicar` | uma cópia leva o molde e nunca o que aconteceu |
+| `validar-documentos` | os tipos de ficheiro aceites, e a memória do equipamento |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **292 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **306 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em pouco mais de um segundo.
 
 ---
@@ -291,7 +298,8 @@ testado, e foi a razão de um deploy falhado.
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
   → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
-  → relatorio-automatico.sql → planos-crud.sql
+  → relatorio-automatico.sql → campos-ordem.sql → duplicar.sql
+  → documentos-e-ativos.sql → planos-crud.sql
   → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql
 ```

@@ -12,6 +12,7 @@ import {
   DiagramaTempoDeTrabalho,
 } from "../components/diagramas";
 import Calculadora from "../components/Calculadora";
+import AjudaFunil from "../components/ajuda-funil";
 
 /**
  * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
@@ -34,7 +35,7 @@ import Calculadora from "../components/Calculadora";
  * lido por quem não tem três leituras para dar.
  */
 
-type Separador = "porque" | "funciona" | "usar";
+type Separador = "porque" | "funil" | "funciona" | "usar";
 
 /** Os nomes antigos continuam a funcionar — houve links partilhados com eles. */
 const ANTIGOS: Record<string, Separador> = { mudou: "porque", tutorial: "usar" };
@@ -43,7 +44,7 @@ export default function Ajuda() {
   const [params, setParams] = useSearchParams();
   const bruto = params.get("ver") ?? "";
   const ver: Separador =
-    bruto === "porque" || bruto === "funciona" || bruto === "usar"
+    bruto === "porque" || bruto === "funil" || bruto === "funciona" || bruto === "usar"
       ? bruto
       : (ANTIGOS[bruto] ?? "porque");
 
@@ -68,6 +69,9 @@ export default function Ajuda() {
         <Aba ligado={ver === "porque"} onClick={() => trocar("porque")}>
           Porquê mudar
         </Aba>
+        <Aba ligado={ver === "funil"} onClick={() => trocar("funil")}>
+          O funil
+        </Aba>
         <Aba ligado={ver === "funciona"} onClick={() => trocar("funciona")}>
           Como funciona
         </Aba>
@@ -77,6 +81,7 @@ export default function Ajuda() {
       </div>
 
       {ver === "porque" && <PorqueMudar />}
+      {ver === "funil" && <AjudaFunil />}
       {ver === "funciona" && <ComoFunciona />}
       {ver === "usar" && <Tutorial />}
     </div>

@@ -51,7 +51,7 @@ schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas
 
 ### O que está verificado
 
-**19 validadores** contra Postgres a sério, **292 testes** de domínio, typecheck
+**22 validadores** contra Postgres a sério, **306 testes** de domínio, typecheck
 e build limpos. Zero chaves estrangeiras de `ops_*` para fora.
 
 **As duas únicas escritas fora de `ops_*`**, ambas deliberadas e testadas: uma

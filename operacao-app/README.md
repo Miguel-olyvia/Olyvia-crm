@@ -152,6 +152,9 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/assinaturas.sql` | A assinatura do cliente, recolhida no telemóvel do técnico | **não** (a imagem vai para o bucket que o `anexos.sql` criou) |
 | `db/mapa.sql` | Onde fica o local, no mapa — para o técnico abrir a navegação e ir | **não** (duas colunas em `ops_local`, e mais nada) |
 | `db/relatorio-automatico.sql` | Ao confirmar uma ordem, o relatório vai ao cliente por email. **Desligado até alguém o ligar** | **sim** — uma linha em `scheduled_emails`, a fila de saída que o CRM já processa |
+| `db/campos-ordem.sql` | Tipo de trabalho (os 9 do Infraspeak), centro de custo, fornecedor, e o fecho automático por tipo | **não** (o fornecedor é só um id, sem chave estrangeira) |
+| `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu | **não** |
+| `db/documentos-e-ativos.sql` | Word, Excel e CSV nos anexos, e o histórico do equipamento | **não** (mexe no bucket `operacoes`, que é do módulo) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -279,6 +282,9 @@ npm run supabase:packs          # db/packs.sql (depois do config)
 npm run supabase:assinaturas    # db/assinaturas.sql (depois dos anexos)
 npm run supabase:mapa           # db/mapa.sql (coordenadas dos locais)
 npm run supabase:relatorio      # db/relatorio-automatico.sql (depois das assinaturas)
+npm run supabase:campos         # db/campos-ordem.sql
+npm run supabase:duplicar       # db/duplicar.sql (depois do campos-ordem)
+npm run supabase:documentos     # db/documentos-e-ativos.sql
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
