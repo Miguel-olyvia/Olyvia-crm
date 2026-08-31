@@ -1,5 +1,11 @@
 # Operações — app separada
 
+> ℹ **O deploy que falhou já tem causa e correção.** O `vercel.json` recusa um
+> `buildCommand` com mais de 256 caracteres, e a cadeia com três aplicações
+> tinha 278. Passou a viver em [`tools/build-vercel.sh`](../tools/build-vercel.sh)
+> — ver [`docs/deploy-falhado.md`](docs/deploy-falhado.md).
+
+
 Aplicação **independente** do sistema Olyvia, no mesmo molde do [`duc-app`](../duc-app).
 Partilha o **mesmo backend Supabase** (mesma base de dados, mesmos utilizadores, mesmos
 clientes), mas **não altera nada** do que já existe — nem no código do CRM, nem no
@@ -359,6 +365,7 @@ salta, em vez de escorregar para o mês seguinte.
 
 | | |
 |---|---|
+| [`docs/deploy-falhado.md`](docs/deploy-falhado.md) | O deploy que falhou: porquê, como se descobriu, e o que ficou diferente para não voltar a acontecer. |
 | [`docs/onde-estamos.md`](docs/onde-estamos.md) | **Começa por aqui.** O estado, o que ficou por confirmar, por onde continuar, e as coisas que custaram a descobrir. |
 | [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
 | [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |

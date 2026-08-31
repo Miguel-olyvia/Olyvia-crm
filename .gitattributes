@@ -1,0 +1,4 @@
+# Os scripts de shell correm em Linux (o build do Vercel). Com fins de linha
+# do Windows, o bash rebenta logo na primeira linha com $'\r': command not found.
+# Ficam sempre em LF, seja qual for o core.autocrlf de quem clona.
+*.sh text eol=lf
