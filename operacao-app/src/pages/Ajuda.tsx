@@ -66,18 +66,12 @@ export default function Ajuda() {
       <div className="flex flex-wrap gap-1.5">
         <Aba ligado={ver === "porque"} onClick={() => trocar("porque")}>
           Porquê mudar
-          <span className="ml-1.5 hidden text-[11px] font-normal opacity-70 sm:inline">
-            para quem decide
-          </span>
         </Aba>
         <Aba ligado={ver === "funciona"} onClick={() => trocar("funciona")}>
           Como funciona
         </Aba>
         <Aba ligado={ver === "usar"} onClick={() => trocar("usar")}>
           Como se usa
-          <span className="ml-1.5 hidden text-[11px] font-normal opacity-70 sm:inline">
-            passo a passo
-          </span>
         </Aba>
       </div>
 
@@ -540,15 +534,22 @@ function ComoFunciona() {
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                 <th className="pb-2 font-medium">O que vem de lá</th>
                 <th className="pb-2 font-medium">Para quê</th>
-                <th className="pb-2 text-center font-medium">Escreve?</th>
+                <th className="pb-2 font-medium">Automatizado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {DO_CRM.map(([o, paraque, escreve]) => (
+              {DO_CRM.map(([o, paraque, ganho]) => (
                 <tr key={o}>
                   <td className="py-2 pr-4 font-medium text-slate-800">{o}</td>
                   <td className="py-2 pr-4 text-slate-600">{paraque}</td>
-                  <td className="py-2 text-center text-xs text-slate-500">{escreve}</td>
+                  {/* Verde COM ícone e COM palavras. Uma cor sozinha não diz nada a
+                      quem não distingue verde de vermelho — e não diz o que se ganhou. */}
+                  <td className="py-2">
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                      <Check width={12} height={12} className="shrink-0" />
+                      {ganho}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -698,15 +699,33 @@ const AUTOMATICO: readonly (readonly [string, string, string])[] = [
   ],
 ] as const;
 
+/**
+ * A terceira coluna diz o que se deixa de fazer à mão, e não se o módulo escreve
+ * na tabela. Quem lê isto quer saber o que ganha; se o módulo escreve ou lê é
+ * uma pergunta de quem constrói, e essa está respondida no desenho por cima e
+ * em `docs/mapa-do-modulo.md`.
+ */
 const DO_CRM: readonly (readonly [string, string, string])[] = [
-  ["Clientes, moradas e contactos", "abrir uma ordem sem escrever a morada à mão", "não"],
-  ["Pessoas e permissões", "quem entra, e o que cada um pode fazer", "não"],
-  ["Orçamentos aceites", "um clique transforma-o em obra", "não"],
-  ["Catálogo de material", "lançar custos sem inventar preços", "não"],
-  ["Compras e faturas de fornecedor", "o material que se comprou para aquela obra", "não"],
-  ["Férias, horários e feriados", "avisar antes de marcar uma visita a quem não está", "não"],
-  ["Notificações (o sino)", "o aviso chega onde a equipa já olha", "✓ uma linha"],
-  ["Armazenamento de ficheiros", "as fotos, num balde próprio", "✓ balde próprio"],
+  [
+    "Clientes, moradas e contactos",
+    "abrir uma ordem sem escrever a morada à mão",
+    "vem preenchido",
+  ],
+  ["Pessoas e permissões", "quem entra, e o que cada um pode fazer", "sem contas novas"],
+  ["Orçamentos aceites", "o orçamento fechado vira obra", "um clique"],
+  ["Catálogo de material", "lançar custos sem inventar preços", "preços do catálogo"],
+  [
+    "Compras e faturas de fornecedor",
+    "o material que se comprou para aquela obra",
+    "já ligadas à obra",
+  ],
+  [
+    "Férias, horários e feriados",
+    "não marcar uma visita a quem não está",
+    "avisa antes",
+  ],
+  ["Notificações (o sino)", "o aviso chega onde a equipa já olha", "avisa sozinho"],
+  ["Fotos e ficheiros", "a foto sai da câmara e fica na ordem", "sem passos pelo meio"],
 ] as const;
 
 const CAMADAS = [
