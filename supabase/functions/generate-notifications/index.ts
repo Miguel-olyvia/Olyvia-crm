@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRoleOrCronSecret } from "../_shared/auth.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { chooseEscalatingTier } from "./alertTiers.ts";
 
 initSentry();
 // Notification engine — runs via cron (service_role required)
@@ -119,13 +120,42 @@ async function fetchAll<T>(
   return results;
 }
 
+/**
+ * fetchAll for an `.in(column, ids)` filter, splitting `ids` into batches.
+ *
+ * PostgREST puts filters in the query string, so `.in()` over a long id list
+ * builds a huge URL — 539 uuids is ~22 KB — and the request dies on the way out
+ * with "TypeError: error sending request", never reaching Postgres. Batching
+ * keeps every URL small; the caller still sees one flat array.
+ */
+const IN_FILTER_BATCH = 100;
+
+async function fetchAllIn<T>(
+  supabase: any,
+  table: string,
+  column: string,
+  ids: string[],
+  selectColumns = "*",
+  refine: (q: any) => any = (q) => q,
+): Promise<T[]> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (unique.length === 0) return [];
+
+  const results: T[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_BATCH) {
+    const batch = unique.slice(i, i + IN_FILTER_BATCH);
+    results.push(...await fetchAll<T>(supabase, table, (q) => refine(q).in(column, batch), selectColumns));
+  }
+  return results;
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (!requireServiceRole(req)) {
+  if (!requireServiceRoleOrCronSecret(req)) {
     return new Response(
       JSON.stringify({ error: "Service role required" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -496,11 +526,16 @@ Deno.serve(async (req) => {
     const queuedNotificationKeys = new Set<string>();
 
     // ★ OPTIMIZATION: Batch preload ALL active notifications for dedup
-    // Instead of N individual queries, one single query loads all active notification keys
+    // Instead of N individual queries, one single query loads all active notification keys.
+    // The filter here MUST mirror the "notifications_dedup" unique index
+    // (type, entity_id, user_id) WHERE is_resolved = false — which does NOT
+    // exclude dismissed rows. Filtering on is_dismissed here made every
+    // dismissed-but-unresolved alert invisible to shouldSkip(), so it was
+    // re-queued on every run and hit the index with a 23505 forever.
     const activeNotifs = await fetchAll<any>(
       supabase,
       "notifications",
-      (q) => q.eq("kind", "alert").eq("is_resolved", false).eq("is_dismissed", false),
+      (q) => q.eq("kind", "alert").eq("is_resolved", false),
       "entity_id, type, user_id",
     );
 
@@ -567,7 +602,17 @@ Deno.serve(async (req) => {
           const cfgUrg = getAlertConfig(orgId, "proposal_no_response_urgent");
           const cfgNorm = getAlertConfig(orgId, "proposal_no_response");
 
-          if (cfgUrg.is_active && cfgUrg.days_threshold && daysSinceSent >= cfgUrg.days_threshold && !shouldSkip(p.id, "proposal_no_response_urgent", userId)) {
+          // See alertTiers.ts: once the urgent threshold is met the normal alert
+          // is retired by the resolver above ("superseded_by_urgent"), so the
+          // normal tier must be out of the picture entirely — falling through
+          // to it here re-created the alert on every run, forever.
+          const proposalTier = chooseEscalatingTier({
+            urgentApplies: Boolean(cfgUrg.is_active && cfgUrg.days_threshold && daysSinceSent >= cfgUrg.days_threshold),
+            urgentAlreadyActive: shouldSkip(p.id, "proposal_no_response_urgent", userId),
+            normalApplies: Boolean(cfgNorm.is_active && cfgNorm.days_threshold && daysSinceSent >= cfgNorm.days_threshold),
+            normalAlreadyActive: shouldSkip(p.id, "proposal_no_response", userId),
+          });
+          if (proposalTier === "urgent") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "proposal_no_response_urgent", entity_type: "proposal", entity_id: p.id,
@@ -576,7 +621,7 @@ Deno.serve(async (req) => {
               priority: "high", action_type: "send_followup",
               action_config: { proposal_id: p.id },
             });
-          } else if (cfgNorm.is_active && cfgNorm.days_threshold && daysSinceSent >= cfgNorm.days_threshold && !shouldSkip(p.id, "proposal_no_response", userId)) {
+          } else if (proposalTier === "normal") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "proposal_no_response", entity_type: "proposal", entity_id: p.id,
@@ -676,7 +721,14 @@ Deno.serve(async (req) => {
           const cfgExp = getAlertConfig(orgId, "contract_expiring");
           const ELIGIBLE_FOR_EXPIRING = ["signed", "active", "pending_signature"];
           if (!ELIGIBLE_FOR_EXPIRING.includes(ct.status)) continue;
-          if (cfgExpUrg.is_active && cfgExpUrg.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExpUrg.days_threshold && !shouldSkip(ct.id, "contract_expiring_urgent", userId)) {
+          // Same "superseded_by_urgent" churn as proposals — see alertTiers.ts.
+          const contractTier = chooseEscalatingTier({
+            urgentApplies: Boolean(cfgExpUrg.is_active && cfgExpUrg.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExpUrg.days_threshold),
+            urgentAlreadyActive: shouldSkip(ct.id, "contract_expiring_urgent", userId),
+            normalApplies: Boolean(cfgExp.is_active && cfgExp.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExp.days_threshold),
+            normalAlreadyActive: shouldSkip(ct.id, "contract_expiring", userId),
+          });
+          if (contractTier === "urgent") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "contract_expiring_urgent", entity_type: "contract", entity_id: ct.id,
@@ -685,7 +737,7 @@ Deno.serve(async (req) => {
               priority: "high", action_type: "send_renewal",
               action_config: { contract_id: ct.id },
             });
-          } else if (cfgExp.is_active && cfgExp.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExp.days_threshold && !shouldSkip(ct.id, "contract_expiring", userId)) {
+          } else if (contractTier === "normal") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "contract_expiring", entity_type: "contract", entity_id: ct.id,
@@ -770,10 +822,10 @@ Deno.serve(async (req) => {
         const actionOrgIds = [...new Set(scheduledActions.map(a => a.organization_id))];
 
         const [entityNames, actionClients, actionContacts, actionLeads] = await Promise.all([
-          fetchAll<any>(supabase, "anew_entities", (q) => q.in("id", actionEntityIds), "id, display_name"),
-          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_leads", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "converted"), "id, entity_id, organization_id"),
+          fetchAllIn<any>(supabase, "anew_entities", "id", actionEntityIds, "id, display_name"),
+          fetchAllIn<any>(supabase, "anew_clients", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "inactive")),
+          fetchAllIn<any>(supabase, "anew_contacts", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive")),
+          fetchAllIn<any>(supabase, "anew_leads", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "converted")),
         ]);
 
         const entityNameMap = new Map((entityNames || []).map((e: any) => [e.id, e.display_name]));
@@ -1234,8 +1286,21 @@ Deno.serve(async (req) => {
 
     // ─── INSERT ALL (with dedup safety) ───
     if (notifications.length > 0) {
-      const { error } = await supabase.from("notifications").insert(notifications, { onConflict: "type,entity_id,user_id", ignoreDuplicates: true } as any);
-      if (error && !error.message?.includes('duplicate key')) throw error;
+      // .insert() silently ignores onConflict/ignoreDuplicates — only .upsert()
+      // honours them. As a plain batch INSERT, a single row colliding with
+      // "notifications_dedup" rolled the whole statement back and every
+      // notification of the run was lost, with the error swallowed below.
+      // No onConflict target on purpose: "notifications_dedup" is a PARTIAL
+      // index (WHERE is_resolved = false), and ON CONFLICT (type, entity_id,
+      // user_id) cannot infer it — Postgres rejects it with 42P10 "no unique or
+      // exclusion constraint matching the ON CONFLICT specification" (verified
+      // against production with EXPLAIN). Omitting the target makes PostgREST
+      // emit a bare ON CONFLICT DO NOTHING, which arbitrates on every unique
+      // index, the partial one included.
+      const { error } = await supabase
+        .from("notifications")
+        .upsert(notifications, { ignoreDuplicates: true });
+      if (error) throw error;
     }
 
     // ─── AUDIT LOG ───

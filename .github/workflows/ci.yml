@@ -34,4 +34,5 @@ jobs:
             supabase/functions/create-user/index.test.ts \
             supabase/functions/send-schedule-invite/index.test.ts \
             supabase/functions/suggest-schedule-assignee/index.test.ts \
-            supabase/functions/export-data/index.test.ts
+            supabase/functions/export-data/index.test.ts \
+            supabase/functions/generate-notifications/alertTiers.test.ts

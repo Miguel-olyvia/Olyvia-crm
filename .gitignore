@@ -66,3 +66,13 @@ tests/.auth/
 
 # Local secrets
 env
+
+# Arquivado no vault a 2026-08-31 (vault/ficheiros/arquivo-repositorio/).
+# Fora do repositorio, mas nao apagado: codigo morto que ninguem importa,
+# lockfiles de um gestor que o projecto nao usa, e um zip do proprio src.
+eliminar/
+eliminar.md
+.prewarm
+bun.lock
+bun.lockb
+src (2).zip
