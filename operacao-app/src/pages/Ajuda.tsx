@@ -107,7 +107,7 @@ function PorqueMudar() {
 
       <div>
         <h2 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Quatro perguntas que hoje ficam sem resposta
+          Quatro perguntas que o Infraspeak não responde
         </h2>
         <div className="space-y-3">
           {PERGUNTAS.map((p) => (
@@ -279,12 +279,12 @@ function PorqueMudar() {
 
 function Pergunta({
   pergunta,
-  hoje,
+  infraspeak,
   agora,
   prova,
 }: {
   pergunta: string;
-  hoje: string;
+  infraspeak: string;
   agora: string;
   prova?: string;
 }) {
@@ -293,8 +293,10 @@ function Pergunta({
       <h3 className="text-sm font-semibold text-slate-900">{pergunta}</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg bg-red-50/70 px-3 py-2.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-red-700">Hoje</p>
-          <p className="mt-1 text-sm leading-relaxed text-slate-700">{hoje}</p>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-red-700">
+            Infraspeak
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{infraspeak}</p>
         </div>
         <div className="rounded-lg bg-brand-50 px-3 py-2.5">
           <p className="text-[11px] font-medium uppercase tracking-wide text-brand-800">
@@ -315,7 +317,7 @@ function Pergunta({
 const PERGUNTAS = [
   {
     pergunta: "Esta obra deu lucro?",
-    hoje: "Ninguém sabe. O orçamento vive no comercial, o que se gastou vive na manutenção, e nada os liga. O custo de mão de obra é zero em todas as ordens.",
+    infraspeak: "Ninguém sabe. O orçamento vive no comercial, o que se gastou vive na manutenção, e nada os liga. O custo de mão de obra é zero em todas as ordens.",
     agora:
       "O orçamento aceite vira obra com o custo previsto congelado ao lado. No fim: previsto, gasto, e o desvio em euros e em percentagem, linha a linha.",
     prova:
@@ -323,19 +325,19 @@ const PERGUNTAS = [
   },
   {
     pergunta: "A manutenção deste cliente foi feita?",
-    hoje: "Conta-se à mão, ordem a ordem, quando o cliente pergunta ou quando o contrato está para renovar.",
+    infraspeak: "Conta-se à mão, ordem a ordem, quando o cliente pergunta ou quando o contrato está para renovar.",
     agora:
       "Uma percentagem por cliente e por mês, com a lista das que ficaram por fazer. É o indicador pelo qual um contrato se renova.",
   },
   {
     pergunta: "Aquela avaria que o técnico reportou já foi resolvida?",
-    hoje: "O relato fica escrito no histórico do equipamento e morre lá. Alguém tem de se lembrar dele.",
+    infraspeak: "O relato fica escrito no histórico do equipamento e morre lá. Alguém tem de se lembrar dele.",
     agora:
       "Uma tarefa não conforme abre uma ordem de reparação sozinha, já com o cliente, o sítio, o equipamento e o que o técnico escreveu. E as duas ficam ligadas.",
   },
   {
     pergunta: "Este equipamento compensa reparar outra vez, ou substituir?",
-    hoje: "Decide-se de cabeça. As leituras estão guardadas, mas espalhadas por ordens, sem ninguém as somar.",
+    infraspeak: "Decide-se de cabeça. As leituras estão guardadas, mas espalhadas por ordens, sem ninguém as somar.",
     agora:
       "A ficha do equipamento mostra tudo o que já se lhe fez e a evolução das leituras. Três avarias em doze meses levantam a pergunta sozinhas.",
   },
