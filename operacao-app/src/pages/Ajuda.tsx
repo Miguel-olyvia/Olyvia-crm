@@ -13,10 +13,11 @@ import {
 } from "../components/diagramas";
 import Calculadora from "../components/Calculadora";
 import AjudaFunil from "../components/ajuda-funil";
+import AjudaVender from "../components/ajuda-vender";
 
 /**
- * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
- * três portas em vez de uma.
+ * Esta página é lida por três pessoas muito diferentes, e é por isso que tem
+ * várias portas em vez de uma.
  *
  *  · **Quem decide** — o dono da empresa. Não vai clicar em nada aqui dentro.
  *    Quer saber o que a empresa ganha em sair do Infraspeak, e o que arrisca.
@@ -24,6 +25,10 @@ import AjudaFunil from "../components/ajuda-funil";
  *
  *  · **Quem usa** — o gestor e o técnico. Querem saber onde é que se carrega,
  *    e porque é que o botão antigo mudou de sítio. Fala-se-lhes de passos.
+ *
+ *  · **Quem vende** — vai a uma reunião com alguém que não conhece nada disto.
+ *    Precisa das perguntas certas, das objecções que vão aparecer, e sobretudo
+ *    de saber **onde parar** — o que não se promete está escrito lá dentro.
  *
  * Uma regra ao escrever isto: cada afirmação traz a EVIDÊNCIA. Não "o
  * Infraspeak é confuso", mas "existe em produção um plano preventivo chamado
@@ -35,7 +40,7 @@ import AjudaFunil from "../components/ajuda-funil";
  * lido por quem não tem três leituras para dar.
  */
 
-type Separador = "porque" | "funil" | "funciona" | "usar";
+type Separador = "porque" | "vender" | "funil" | "funciona" | "usar";
 
 /** Os nomes antigos continuam a funcionar — houve links partilhados com eles. */
 const ANTIGOS: Record<string, Separador> = { mudou: "porque", tutorial: "usar" };
@@ -44,7 +49,8 @@ export default function Ajuda() {
   const [params, setParams] = useSearchParams();
   const bruto = params.get("ver") ?? "";
   const ver: Separador =
-    bruto === "porque" || bruto === "funil" || bruto === "funciona" || bruto === "usar"
+    bruto === "porque" || bruto === "vender" || bruto === "funil"
+    || bruto === "funciona" || bruto === "usar"
       ? bruto
       : (ANTIGOS[bruto] ?? "porque");
 
@@ -69,6 +75,9 @@ export default function Ajuda() {
         <Aba ligado={ver === "porque"} onClick={() => trocar("porque")}>
           Porquê mudar
         </Aba>
+        <Aba ligado={ver === "vender"} onClick={() => trocar("vender")}>
+          Para vender
+        </Aba>
         <Aba ligado={ver === "funil"} onClick={() => trocar("funil")}>
           O funil
         </Aba>
@@ -81,6 +90,7 @@ export default function Ajuda() {
       </div>
 
       {ver === "porque" && <PorqueMudar />}
+      {ver === "vender" && <AjudaVender />}
       {ver === "funil" && <AjudaFunil />}
       {ver === "funciona" && <ComoFunciona />}
       {ver === "usar" && <Tutorial />}
