@@ -267,6 +267,8 @@ emails diferentes. Identificar pessoas por email, nunca por nome.
 | | |
 |---|---|
 | [`../README.md`](../README.md) | como está construído, os ficheiros SQL, a autorização em três camadas |
+| [`mapa-do-modulo.md`](mapa-do-modulo.md) | **o inventário**: ecrãs, tabelas, vistas, escritas, avisos, ordem de instalação |
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com o levantamento do que o CRM já tem |
+| [`deploy-falhado.md`](deploy-falhado.md) | o deploy que falhou, e porquê |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |
-| `/ajuda` na app | o que mudou face ao Infraspeak, e o tutorial da equipa |
+| `/ajuda` na app | três portas: porquê mudar (para quem decide), como funciona (com fluxogramas), como se usa |

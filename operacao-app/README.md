@@ -206,6 +206,7 @@ src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
 src/components/        layout, primitivos de UI, ícones, PainelTarefas
+src/components/diagramas.tsx  os fluxogramas da ajuda, em SVG à mão
 src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
                        Planos · Orçamentos · Relatório · Análises
                        Definições · Ajuda
@@ -377,6 +378,7 @@ salta, em vez de escorregar para o mês seguinte.
 | | |
 |---|---|
 | [`docs/deploy-falhado.md`](docs/deploy-falhado.md) | O deploy que falhou: porquê, como se descobriu, e o que ficou diferente para não voltar a acontecer. |
+| [`docs/mapa-do-modulo.md`](docs/mapa-do-modulo.md) | **O inventário.** Os 11 ecrãs, as 27 tabelas, as 13 vistas, as 20 operações de escrita, os avisos, e a ordem de instalação. |
 | [`docs/onde-estamos.md`](docs/onde-estamos.md) | **Começa por aqui.** O estado, o que ficou por confirmar, por onde continuar, e as coisas que custaram a descobrir. |
 | [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
 | [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |

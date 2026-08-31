@@ -2,25 +2,47 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Card, cx } from "../components/ui";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, X } from "../components/icons";
+import {
+  DiagramaCicloDaOrdem,
+  DiagramaNaoConformidade,
+  DiagramaOndeVive,
+  DiagramaOrigens,
+  DiagramaTempoDeTrabalho,
+} from "../components/diagramas";
 
 /**
- * O que mudou, e como se usa.
+ * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
+ * três portas em vez de uma.
  *
- * Duas coisas diferentes na mesma página, de propósito: quem chega novo lê o
- * tutorial; quem vem do Infraspeak precisa primeiro de perceber PORQUE é que
- * as coisas mudaram de sítio, senão passa a semana à procura do botão antigo.
+ *  · **Quem decide** — o dono da empresa. Não vai clicar em nada aqui dentro.
+ *    Quer saber o que a empresa ganha em sair do Infraspeak, e o que arrisca.
+ *    Fala-se-lhe de dinheiro, de contratos e de risco, com a prova ao lado.
  *
- * Uma regra ao escrever isto: cada diferença traz a EVIDÊNCIA. Não "o
+ *  · **Quem usa** — o gestor e o técnico. Querem saber onde é que se carrega,
+ *    e porque é que o botão antigo mudou de sítio. Fala-se-lhes de passos.
+ *
+ * Uma regra ao escrever isto: cada afirmação traz a EVIDÊNCIA. Não "o
  * Infraspeak é confuso", mas "existe em produção um plano preventivo chamado
- * PMP CORRETIVA". A evidência é o que torna a mudança discutível em vez de
- * uma questão de gosto — e o que permite a alguém dizer que estamos errados.
+ * PMP CORRETIVA". A evidência é o que torna a mudança discutível em vez de uma
+ * questão de gosto — e o que permite a alguém dizer que estamos errados.
+ *
+ * Os desenhos vivem em `components/diagramas.tsx`. Um fluxograma explica em
+ * três segundos o que um parágrafo explica em três leituras, e isto tem de ser
+ * lido por quem não tem três leituras para dar.
  */
 
-type Separador = "mudou" | "tutorial";
+type Separador = "porque" | "funciona" | "usar";
+
+/** Os nomes antigos continuam a funcionar — houve links partilhados com eles. */
+const ANTIGOS: Record<string, Separador> = { mudou: "porque", tutorial: "usar" };
 
 export default function Ajuda() {
   const [params, setParams] = useSearchParams();
-  const ver = (params.get("ver") as Separador) || "mudou";
+  const bruto = params.get("ver") ?? "";
+  const ver: Separador =
+    bruto === "porque" || bruto === "funciona" || bruto === "usar"
+      ? bruto
+      : (ANTIGOS[bruto] ?? "porque");
 
   const trocar = (s: Separador) => {
     const p = new URLSearchParams(params);
@@ -35,48 +57,127 @@ export default function Ajuda() {
           Operações, explicado
         </h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          O que mudou em relação ao Infraspeak, e como se faz cada coisa.
+          O que a empresa ganha, como funciona por dentro, e como se faz cada coisa.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <Aba ligado={ver === "mudou"} onClick={() => trocar("mudou")}>
-          O que mudou, e porquê
+        <Aba ligado={ver === "porque"} onClick={() => trocar("porque")}>
+          Porquê mudar
+          <span className="ml-1.5 hidden text-[11px] font-normal opacity-70 sm:inline">
+            para quem decide
+          </span>
         </Aba>
-        <Aba ligado={ver === "tutorial"} onClick={() => trocar("tutorial")}>
+        <Aba ligado={ver === "funciona"} onClick={() => trocar("funciona")}>
+          Como funciona
+        </Aba>
+        <Aba ligado={ver === "usar"} onClick={() => trocar("usar")}>
           Como se usa
+          <span className="ml-1.5 hidden text-[11px] font-normal opacity-70 sm:inline">
+            passo a passo
+          </span>
         </Aba>
       </div>
 
-      {ver === "mudou" ? <OQueMudou /> : <Tutorial />}
+      {ver === "porque" && <PorqueMudar />}
+      {ver === "funciona" && <ComoFunciona />}
+      {ver === "usar" && <Tutorial />}
     </div>
   );
 }
 
-/* ════════════════════════ O que mudou, e porquê ═════════════════════════ */
+/* ══════════════════════════ 1 · Porquê mudar ════════════════════════════ */
 
-function OQueMudou() {
+function PorqueMudar() {
   return (
     <div className="space-y-4">
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">O método</h2>
+        <h2 className="text-base font-semibold text-slate-900">Em duas linhas</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          Não se copiou o Infraspeak. Copiou-se <strong>o que a operação faz</strong>, e
-          deixou-se de fora o que o software impôs por acidente.
+          A operação passa a viver <strong>dentro do Olyvia</strong>, ao lado dos clientes, dos
+          orçamentos e das compras que já lá estão. Não é uma cópia do Infraspeak: é o mesmo
+          trabalho, sem as voltas que o software obrigava a dar.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          O levantamento deu-nos uma coisa rara: as <strong>marcas de uso</strong>. Cada
-          convenção de nomes inventada, cada campo desviado para outra coisa, cada plano
-          preventivo chamado &ldquo;CORRETIVA&rdquo; é a operação real a protestar contra o
-          modelo. Foram essas marcas que decidiram o que simplificar — não o gosto de ninguém.
+          O que se segue não é opinião. Cada ponto traz a <strong>prova tirada da vossa
+          instância real</strong> do Infraspeak — os nomes inventados, os campos desviados, os
+          números impossíveis. São essas marcas que dizem onde é que o modelo apertava.
         </p>
       </Card>
 
-      <div className="space-y-3">
-        {DIFERENCAS.map((d, i) => (
-          <Diferenca key={d.titulo} numero={i + 1} {...d} />
-        ))}
+      <div>
+        <h2 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          Quatro perguntas que hoje ficam sem resposta
+        </h2>
+        <div className="space-y-3">
+          {PERGUNTAS.map((p) => (
+            <Pergunta key={p.pergunta} {...p} />
+          ))}
+        </div>
       </div>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">
+          O que acontece quando um técnico encontra um problema
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          É a diferença que mais dinheiro vale. O trabalho do técnico é o mesmo nas duas
+          linhas — o que muda é o que o sistema faz com o que ele encontrou.
+        </p>
+        <div className="mt-3">
+          <DiagramaNaoConformidade />
+        </div>
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertTriangle width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>
+            <strong className="font-medium">A prova:</strong> o histórico dos vossos
+            equipamentos está cheio de relatos de técnicos — portões avariados, geradores que
+            não arrancam — que nunca viraram ordem nenhuma. A funcionalidade existe no
+            Infraspeak: na opção &ldquo;Não Conforme&rdquo; do extintor, a caixa que abriria a
+            reparação está <strong>desligada</strong>.
+          </span>
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">
+          Quanto custou, de verdade, esta obra
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          O Infraspeak mede o tempo de uma ordem como fecho menos início. Uma ordem aberta em
+          janeiro e fechada em maio conta noites, fins de semana e férias como trabalho.
+        </p>
+        <div className="mt-3">
+          <DiagramaTempoDeTrabalho />
+        </div>
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertTriangle width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>
+            <strong className="font-medium">A prova:</strong> há uma ordem na vossa instância
+            com <strong className="font-mono">5303:05:34</strong> de tempo de execução. E o
+            campo &ldquo;custo por hora&rdquo; existe na ficha de cada utilizador, mas nunca foi
+            preenchido — por isso o custo de mão de obra é <strong>0,00 €</strong> em todas as
+            ordens.
+          </span>
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">Onde vive a informação</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          A razão de fundo pela qual ninguém sabe se uma obra deu lucro: o orçamento está num
+          sistema e o custo está noutro.
+        </p>
+        <div className="mt-3">
+          <DiagramaOndeVive />
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          As duas metades já existiam. As linhas de orçamento do CRM já guardavam o custo de
+          material e de mão de obra; ninguém as tinha ligado ao que se gasta a sério. Um
+          orçamento aceite passa a virar obra com um clique, com o previsto congelado ao lado
+          do gasto.
+        </p>
+      </Card>
 
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">O resultado, em números</h2>
@@ -92,11 +193,12 @@ function OQueMudou() {
             <tbody className="divide-y divide-slate-100">
               {[
                 ["Conceitos que o utilizador tem de perceber", "13", "7"],
-                ["Entradas de menu", "13", "7"],
+                ["Entradas de menu", "13", "8"],
                 ["Ecrãs de “trabalho a fazer”", "3", "1"],
                 ["Catálogos de estados", "2", "1"],
                 ["Níveis fixos de hierarquia física", "4", "os que forem precisos"],
                 ["Motores de relatório", "2", "1"],
+                ["Sistemas onde a informação vive", "2", "1"],
               ].map(([o, a, b]) => (
                 <tr key={o}>
                   <td className="py-2 pr-3 text-slate-700">{o}</td>
@@ -110,16 +212,52 @@ function OQueMudou() {
           </table>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Menos conceitos não é uma questão de estética. Cada conceito a mais é uma decisão
-          que alguém tem de tomar em cima de um telhado, com o telemóvel numa mão.
+          Menos conceitos não é uma questão de estética. Cada conceito a mais é uma decisão que
+          alguém tem de tomar em cima de um telhado, com o telemóvel numa mão.
         </p>
       </Card>
 
       <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">O que NÃO muda</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Porque a pergunta a seguir a &ldquo;o que ganhamos&rdquo; é sempre &ldquo;o que
+          arriscamos&rdquo;.
+        </p>
+        <ul className="mt-3 space-y-2">
+          {NAO_MUDA.map((x) => (
+            <li key={x.o} className="flex items-start gap-2.5 text-sm">
+              <span className="mt-0.5 shrink-0 text-emerald-600">
+                <Check width={14} height={14} />
+              </span>
+              <span>
+                <strong className="font-medium text-slate-800">{x.o}</strong>
+                <span className="text-slate-600"> — {x.detalhe}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+
+      <div>
+        <h2 className="mb-2 px-1 text-sm font-semibold uppercase tracking-wide text-slate-500">
+          As mudanças, uma a uma
+        </h2>
+        <p className="mb-3 px-1 text-sm text-slate-600">
+          Catorze diferenças, cada uma com o que o Infraspeak faz, o que passa a acontecer, e a
+          prova. Carrega para abrir.
+        </p>
+        <div className="space-y-3">
+          {DIFERENCAS.map((d, i) => (
+            <Diferenca key={d.titulo} numero={i + 1} {...d} />
+          ))}
+        </div>
+      </div>
+
+      <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">O que ainda não está feito</h2>
         <p className="mt-2 text-sm text-slate-600">
-          Para não haver surpresas. Nada disto impede a equipa de trabalhar; são coisas que
-          o Infraspeak tem e nós ainda não.
+          Para não haver surpresas. Nada disto impede a equipa de trabalhar; são coisas que o
+          Infraspeak tem e nós ainda não.
         </p>
         <ul className="mt-3 space-y-2">
           {POR_FAZER.map((x) => (
@@ -138,6 +276,261 @@ function OQueMudou() {
     </div>
   );
 }
+
+function Pergunta({
+  pergunta,
+  hoje,
+  agora,
+  prova,
+}: {
+  pergunta: string;
+  hoje: string;
+  agora: string;
+  prova?: string;
+}) {
+  return (
+    <Card className="p-4">
+      <h3 className="text-sm font-semibold text-slate-900">{pergunta}</h3>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg bg-red-50/70 px-3 py-2.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-red-700">Hoje</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{hoje}</p>
+        </div>
+        <div className="rounded-lg bg-brand-50 px-3 py-2.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-brand-800">
+            Com o Olyvia
+          </p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-700">{agora}</p>
+        </div>
+      </div>
+      {prova && (
+        <p className="mt-2.5 text-xs leading-relaxed text-slate-500">
+          <strong className="font-medium text-slate-600">A prova:</strong> {prova}
+        </p>
+      )}
+    </Card>
+  );
+}
+
+const PERGUNTAS = [
+  {
+    pergunta: "Esta obra deu lucro?",
+    hoje: "Ninguém sabe. O orçamento vive no comercial, o que se gastou vive na manutenção, e nada os liga. O custo de mão de obra é zero em todas as ordens.",
+    agora:
+      "O orçamento aceite vira obra com o custo previsto congelado ao lado. No fim: previsto, gasto, e o desvio em euros e em percentagem, linha a linha.",
+    prova:
+      "as linhas de orçamento do CRM já guardavam custo de material e de mão de obra. A informação existia; faltava juntá-la.",
+  },
+  {
+    pergunta: "A manutenção deste cliente foi feita?",
+    hoje: "Conta-se à mão, ordem a ordem, quando o cliente pergunta ou quando o contrato está para renovar.",
+    agora:
+      "Uma percentagem por cliente e por mês, com a lista das que ficaram por fazer. É o indicador pelo qual um contrato se renova.",
+  },
+  {
+    pergunta: "Aquela avaria que o técnico reportou já foi resolvida?",
+    hoje: "O relato fica escrito no histórico do equipamento e morre lá. Alguém tem de se lembrar dele.",
+    agora:
+      "Uma tarefa não conforme abre uma ordem de reparação sozinha, já com o cliente, o sítio, o equipamento e o que o técnico escreveu. E as duas ficam ligadas.",
+  },
+  {
+    pergunta: "Este equipamento compensa reparar outra vez, ou substituir?",
+    hoje: "Decide-se de cabeça. As leituras estão guardadas, mas espalhadas por ordens, sem ninguém as somar.",
+    agora:
+      "A ficha do equipamento mostra tudo o que já se lhe fez e a evolução das leituras. Três avarias em doze meses levantam a pergunta sozinhas.",
+  },
+] as const;
+
+const NAO_MUDA = [
+  {
+    o: "A mesma base de dados",
+    detalhe:
+      "os clientes, os utilizadores e as permissões são os do Olyvia. Não há sincronizações nem contas a duplicar.",
+  },
+  {
+    o: "O CRM fica intocado",
+    detalhe:
+      "o módulo só acrescenta. Não altera uma tabela do CRM, e há testes automáticos que falham se alguém tentar.",
+  },
+  {
+    o: "Quem entra é quem já entrava",
+    detalhe:
+      "as permissões são as do Olyvia. Uma pessoa sem acesso a Operações não vê a área sequer.",
+  },
+  {
+    o: "Os dados são vossos",
+    detalhe: "estão na vossa base de dados, e saem dela quando quiserem, sem pedir a ninguém.",
+  },
+  {
+    o: "O Infraspeak pode continuar ligado",
+    detalhe:
+      "nada aqui apaga nada de lá. Dá para correr os dois em paralelo durante o tempo que for preciso.",
+  },
+] as const;
+
+/* ═════════════════════════ 2 · Como funciona ════════════════════════════ */
+
+function ComoFunciona() {
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">De onde vem uma ordem</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Três maneiras de nascer, um objeto só. É a simplificação que mais se nota no
+          dia-a-dia.
+        </p>
+        <div className="mt-3">
+          <DiagramaOrigens />
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          No Infraspeak, o trabalho preventivo é uma &ldquo;Ocorrência&rdquo; e o corretivo é um
+          &ldquo;Pedido&rdquo;: dois ecrãs, dois catálogos de estados, dois catálogos de motivos
+          de pausa, dois relatórios — para guardar exatamente os mesmos campos.
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">O ciclo de vida de uma ordem</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Sete estados, e as únicas passagens possíveis entre eles.
+        </p>
+        <div className="mt-3">
+          <DiagramaCicloDaOrdem />
+        </div>
+        <p className="mt-3 text-sm leading-relaxed text-slate-700">
+          Isto não é uma sugestão do ecrã. A regra está gravada na base de dados: uma tentativa
+          de mudar o estado por fora é recusada, mesmo vinda de alguém que falasse diretamente
+          com o servidor. É o que faz de um registo uma prova, e não uma opinião.
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">
+          Porque é que ninguém pode falsificar um registo
+        </h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Três fechaduras diferentes, uma a seguir à outra. Uma sozinha não chegava.
+        </p>
+        <ol className="mt-3 space-y-2.5">
+          {CAMADAS.map((c, i) => (
+            <li key={c.titulo} className="flex items-start gap-3 text-sm">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-50 font-mono text-[11px] font-semibold text-brand-800">
+                {i + 1}
+              </span>
+              <span>
+                <strong className="font-medium text-slate-800">{c.titulo}</strong>
+                <span className="text-slate-600"> — {c.texto}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          Na prática: quem responde a uma tarefa fica registado com nome e hora, e o valor
+          anterior fica guardado ao lado do novo. Ninguém apaga, ninguém reescreve.
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">Quem pode fazer o quê</h2>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[30rem] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th className="pb-2 font-medium">&nbsp;</th>
+                <th className="pb-2 text-center font-medium">Técnico</th>
+                <th className="pb-2 text-center font-medium">Gestor</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {[
+                ["Ver as ordens em que está", true, true],
+                ["Responder a tarefas e medições", true, true],
+                ["Tirar fotos", true, true],
+                ["Abrir uma ordem", "fica por aprovar", true],
+                ["Atribuir e marcar datas", false, true],
+                ["Ver custos", false, "com permissão"],
+                ["Ver análises e PMP", false, true],
+                ["Criar locais, checklists, equipa", false, true],
+              ].map(([o, t, g]) => (
+                <tr key={String(o)}>
+                  <td className="py-2 pr-3 text-slate-700">{o}</td>
+                  <td className="py-2 text-center">
+                    <Marca v={t} />
+                  </td>
+                  <td className="py-2 text-center">
+                    <Marca v={g} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Um técnico nem vê a entrada de Análises no menu. Não é só permissão: no telemóvel a
+          navegação é uma barra fixa, e cada entrada a mais rouba espaço às outras.
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">Quem é avisado, e quando</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Os avisos aparecem no <strong>sino do Olyvia</strong>, o mesmo que a equipa já abre
+          todos os dias. Não há um segundo sino para ninguém se lembrar de espreitar.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="w-full min-w-[28rem] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th className="pb-2 font-medium">Quando</th>
+                <th className="pb-2 font-medium">Quem recebe</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {AVISOS.map(([quando, quem]) => (
+                <tr key={quando}>
+                  <td className="py-2 pr-4 text-slate-700">{quando}</td>
+                  <td className="py-2 text-slate-500">{quem}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs leading-relaxed text-slate-500">
+          Os três últimos são os que hoje se perdem em silêncio: não acontece nada que os
+          denuncie, só o relógio a passar. O sistema olha para o relógio de hora a hora.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+const CAMADAS = [
+  {
+    titulo: "Quem chega à linha",
+    texto:
+      "a base de dados só devolve as ordens dos clientes a que a pessoa tem acesso. Não é o ecrã a esconder: a linha não sai da base.",
+  },
+  {
+    titulo: "Como se escreve",
+    texto:
+      "nenhuma escrita é direta. Tudo passa por uma operação com nome — iniciar, responder, fechar — que volta a verificar quem é a pessoa e se aquilo é permitido naquele momento.",
+  },
+  {
+    titulo: "A fechadura de trás",
+    texto:
+      "e se alguém tentar escrever por fora, um guarda na própria tabela recusa. Foi feito de propósito para não haver caminho nenhum sem passar pelas regras.",
+  },
+] as const;
+
+const AVISOS: readonly (readonly [string, string])[] = [
+  ["Uma ordem passa a ser tua", "quem a recebe"],
+  ["Uma não conformidade gerou trabalho novo", "quem coordena"],
+  ["Uma ordem passou da hora e não começou", "o responsável, ou quem coordena"],
+  ["Uma pausa expirou e ninguém retomou", "o responsável e quem coordena"],
+  ["Um plano preventivo falhou a gerar ordens", "quem coordena"],
+] as const;
+
+/* ═══════════════════ Peça comum: uma diferença ══════════════════════════ */
 
 function Diferenca({
   numero,
@@ -300,6 +693,15 @@ const DIFERENCAS = [
     feito: true,
   },
   {
+    titulo: "Ninguém tem de se lembrar sozinho",
+    porque: "As três falhas que se perdiam em silêncio passam a avisar.",
+    infraspeak:
+      "Não há avisos. Um pedido fica parado até alguém abrir a aplicação e reparar nele. Uma ordem que passou da data, ou uma pausa que expirou, não denunciam nada — não acontece nada, e é isso o problema.",
+    olyvia:
+      "Cinco avisos no sino do Olyvia, o mesmo que a equipa já usa: ordem atribuída, reparação à espera de aprovação, ordem atrasada, pausa expirada, plano que falhou. O link leva direito à ordem.",
+    feito: true,
+  },
+  {
     titulo: "A recorrência guarda a regra, não as ocorrências",
     porque: "Milhares de linhas futuras afogam o que é para esta semana.",
     infraspeak:
@@ -336,12 +738,39 @@ const DIFERENCAS = [
     feito: true,
   },
   {
-    titulo: "Agenda por dia e por pessoa",
-    porque: "Uma grelha das 00:00 às 23:00 onde tudo está às 09:00 é precisão falsa.",
+    titulo: "O histórico do equipamento responde a uma pergunta",
+    porque: "“Este extintor tem dado problemas?” decide-se com dados, não de cabeça.",
     infraspeak:
-      "O calendário não carrega nada até se aplicarem filtros, e depois mostra tudo empilhado às 09:00 — porque a hora é simbólica. Não há apoio a zonas, com edifícios em Lisboa, Braga e Porto no mesmo dia.",
+      "As leituras ficam guardadas dentro de cada ordem. Para ver a evolução de um contador ao longo do ano, abre-se ordem a ordem.",
     olyvia:
-      "Por agora: ao marcar uma data, avisa-se se a pessoa já tem outra coisa a essa hora, com o código da outra ordem. Falta o ecrã de agenda por dia, com carga por pessoa e agrupamento por zona.",
+      "A ficha do equipamento junta tudo: as visitas, as avarias, e cada medição desenhada ao longo do tempo. Três avarias em doze meses levantam a pergunta sozinhas.",
+    feito: true,
+  },
+  {
+    titulo: "A manutenção cumprida é um número",
+    porque: "É por ele que um contrato de manutenção se renova.",
+    infraspeak:
+      "Há exportações por edifício, mas ninguém soma. Quando o cliente pergunta, conta-se à mão.",
+    olyvia:
+      "PMP por cliente e por mês, com a percentagem feita a horas separada da percentagem feita. E a lista das que ficaram por fazer, que é a pergunta a seguir.",
+    feito: true,
+  },
+  {
+    titulo: "A agenda sabe quem está de férias",
+    porque: "Marcar uma visita a quem não está é descobrir na véspera.",
+    infraspeak:
+      "O calendário não carrega nada até se aplicarem filtros, e depois mostra tudo empilhado às 09:00 — porque a hora é simbólica.",
+    olyvia:
+      "Ao marcar, avisa se a pessoa já tem trabalho àquela hora, se está de férias, se é feriado, ou se está fora do horário dela. Nunca diz o motivo de uma ausência — pode ser uma baixa médica.",
+    feito: true,
+  },
+  {
+    titulo: "Agenda do dia, com todos lado a lado",
+    porque: "Ver a carga de uma semana ainda obriga a abrir ordem a ordem.",
+    infraspeak:
+      "Existe um calendário, com os problemas acima. Não há apoio a zonas, com edifícios em Lisboa, Braga e Porto no mesmo dia.",
+    olyvia:
+      "Falta o ecrã de agenda por dia, com a carga de cada pessoa e agrupamento por zona. Os avisos de choque e de disponibilidade já existem.",
     feito: false,
   },
   {
@@ -357,14 +786,19 @@ const DIFERENCAS = [
 
 const POR_FAZER = [
   {
-    o: "Ecrã de agenda",
+    o: "Ecrã de agenda por dia",
     porque:
-      "hoje marca-se a data na ficha da ordem, e o sistema avisa de choques. Falta a vista do dia com todos os técnicos lado a lado.",
+      "hoje marca-se a data na ficha da ordem, e o sistema avisa de choques, férias e feriados. Falta a vista do dia com todos os técnicos lado a lado.",
   },
   {
-    o: "Histórico do equipamento",
+    o: "Assinatura do cliente no telemóvel",
     porque:
-      "as leituras já ficam todas gravadas, mas ainda não há um ecrã que mostre a evolução de um contador ao longo do ano.",
+      "o relatório tem uma linha para assinar à caneta. O Olyvia já sabe recolher assinaturas com validade legal — falta ligar as duas coisas.",
+  },
+  {
+    o: "Exportar medições para folha de cálculo",
+    porque:
+      "para quem tem de entregar leituras a uma entidade reguladora. Os dados estão todos gravados.",
   },
   {
     o: "Packs de configuração por setor",
@@ -376,12 +810,13 @@ const POR_FAZER = [
       "o cliente ainda não abre pedidos sozinho nem acompanha o estado. O relatório vai por email ou em papel.",
   },
   {
-    o: "Notificações",
-    porque: "ninguém recebe aviso de nada. Vê-se abrindo a aplicação.",
+    o: "Trabalhar sem rede",
+    porque:
+      "numa garagem sem cobertura, as respostas não gravam. A aplicação avisa, mas o valor perde-se se fechar. É a coisa mais cara da lista, e fica para quando o piloto disser quantas vezes aconteceu.",
   },
 ] as const;
 
-/* ═══════════════════════════════ Tutorial ═══════════════════════════════ */
+/* ══════════════════════════ 3 · Como se usa ═════════════════════════════ */
 
 function Tutorial() {
   return (
@@ -389,9 +824,9 @@ function Tutorial() {
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">Antes de tudo</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          A ordem por que se faz as coisas importa. Cada passo depende do anterior — não vale
-          a pena criar um plano preventivo antes de haver uma checklist, nem uma checklist
-          antes de haver medições.
+          A ordem por que se faz as coisas importa. Cada passo depende do anterior — não vale a
+          pena criar um plano preventivo antes de haver uma checklist, nem uma checklist antes
+          de haver medições.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-slate-700">
           Faz-se <strong>uma vez</strong>. Depois disso, o dia-a-dia é só a parte 2.
@@ -421,43 +856,25 @@ function Tutorial() {
       </div>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">Quem pode fazer o quê</h2>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[30rem] text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="pb-2 font-medium">&nbsp;</th>
-                <th className="pb-2 text-center font-medium">Técnico</th>
-                <th className="pb-2 text-center font-medium">Gestor</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {[
-                ["Ver as ordens em que está", true, true],
-                ["Responder a tarefas e medições", true, true],
-                ["Tirar fotos", true, true],
-                ["Abrir uma ordem", "fica por aprovar", true],
-                ["Atribuir e marcar datas", false, true],
-                ["Ver custos", false, "com permissão"],
-                ["Criar locais, checklists, equipa", false, true],
-              ].map(([o, t, g]) => (
-                <tr key={String(o)}>
-                  <td className="py-2 pr-3 text-slate-700">{o}</td>
-                  <td className="py-2 text-center">
-                    <Marca v={t} />
-                  </td>
-                  <td className="py-2 text-center">
-                    <Marca v={g} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-3 text-xs text-slate-500">
-          Isto não é uma sugestão do ecrã: é imposto na base de dados. Mesmo quem falasse
-          diretamente com o servidor seria recusado.
+        <h2 className="text-base font-semibold text-slate-900">O ciclo, de uma vez só</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Se te perderes, é este o caminho. Só se passa de um estado para o outro pelas setas.
         </p>
+        <div className="mt-3">
+          <DiagramaCicloDaOrdem />
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">Se alguma coisa correr mal</h2>
+        <dl className="mt-3 space-y-3">
+          {DUVIDAS.map((d) => (
+            <div key={d.q}>
+              <dt className="text-sm font-medium text-slate-800">{d.q}</dt>
+              <dd className="mt-0.5 text-sm leading-relaxed text-slate-600">{d.a}</dd>
+            </div>
+          ))}
+        </dl>
       </Card>
     </div>
   );
@@ -579,15 +996,15 @@ const DIA_A_DIA = [
     titulo: "Dizer quem vai, e quando",
     onde: "Na ficha da ordem",
     texto:
-      "Escolhes o responsável e a data lado a lado, para escolheres a pessoa a olhar para o dia dela. Quem entra na ordem passa a poder executá-la.",
-    dica: "Se marcares alguém que já tem trabalho a essa hora, aparece o aviso com o código da outra ordem — e a marcação fica feita à mesma. Avisar não é impedir.",
+      "Escolhes o responsável e a data lado a lado, para escolheres a pessoa a olhar para o dia dela. Quem entra na ordem passa a poder executá-la, e recebe o aviso no sino.",
+    dica: "Se marcares alguém que já tem trabalho a essa hora, que esteja de férias, ou num feriado, aparece o aviso — e a marcação fica feita à mesma. Avisar não é impedir: há dias em que se vai na mesma, e quem coordena é que decide.",
   },
   {
     titulo: "Fazer o trabalho",
     onde: "Na ficha da ordem",
     texto:
-      "O técnico carrega em Iniciar, e a partir daí responde às tarefas. Escolher “Conforme” grava logo — não há escolher e depois gravar.",
-    dica: "Se a tarefa tiver medições, responde-se por elas e a tarefa acerta-se sozinha quando a última entra. Um valor fora dos limites avisa antes de gravares.",
+      "Responde-se às tarefas pela ordem em que aparecem. Escolher “Conforme” grava logo — não há escolher e depois gravar.",
+    dica: "Não é preciso carregar em Iniciar: a primeira resposta inicia a ordem sozinha, e o cronómetro começa aí. Se a tarefa tiver medições, responde-se por elas e a tarefa acerta-se sozinha quando a última entra.",
   },
   {
     titulo: "Tirar fotos",
@@ -610,6 +1027,41 @@ const DIA_A_DIA = [
     texto:
       "Quando o comercial fecha um orçamento no CRM, ele aparece aqui. Um clique transforma-o em obra, com os custos previstos já carregados.",
     dica: "O número que se mostra é o CUSTO das linhas, não o preço ao cliente. Comparar o gasto contra o preço de venda daria um lucro bonito e falso.",
+  },
+  {
+    titulo: "Ver como está a correr",
+    onde: "Análises",
+    href: "/analises",
+    texto:
+      "Duas coisas: a manutenção preventiva cumprida por cliente e por mês, e a ficha de um equipamento com tudo o que já se lhe fez.",
+    dica: "Só quem coordena vê esta entrada. A percentagem vem sempre com a lista das ordens em atraso — porque a pergunta a seguir a uma percentagem é sempre “quais?”.",
+  },
+] as const;
+
+const DUVIDAS = [
+  {
+    q: "Respondi a uma tarefa e o valor não gravou.",
+    a: "Quase de certeza é falta de rede. A aplicação avisa quando não consegue gravar — se isso acontecer, não feches o ecrã: espera pela rede e volta a carregar. Trabalhar sem rede ainda não está feito, e é a coisa que mais queremos saber se acontece no terreno.",
+  },
+  {
+    q: "Não consigo responder — diz que a ordem é de outra pessoa.",
+    a: "Um técnico só responde às ordens em que está. Fala com quem distribui o trabalho para te acrescentar à ordem; leva dois segundos.",
+  },
+  {
+    q: "Não consigo fechar a ordem.",
+    a: "Falta responder a alguma tarefa obrigatória. O ecrã diz quantas faltam, mesmo em cima da lista.",
+  },
+  {
+    q: "Marquei mal uma tarefa como não conforme e já nasceu uma reparação.",
+    a: "A ordem nova aparece com o código no ecrã. Abre-a e cancela-a, com o motivo — fica tudo registado, e é melhor assim do que apagar sem deixar rasto.",
+  },
+  {
+    q: "A câmara não abre no telemóvel.",
+    a: "Acontece quando se abre a aplicação por um endereço de rede local em vez do endereço a sério. Em www.olyvia-ai.com/operacao funciona.",
+  },
+  {
+    q: "Entrei no Olyvia mas o Operações pede a palavra-passe outra vez.",
+    a: "É de propósito. As duas áreas guardam a sessão em sítios separados, para uma nunca poder desligar a outra.",
   },
 ] as const;
 
