@@ -578,7 +578,7 @@ test.describe('embed snippet forwards lead origin to the database', () => {
   test('direct visit with no referrer leaves source resolution unchanged', async ({ page }) => {
     const s = suffix()
     const email = `e2edirect${s}@example.test`
-    const { } = await submitThroughEmbedDirect(page, clientSite.origin, '/', email, `E2EDIRECT${s}`)
+    await submitThroughEmbedDirect(page, clientSite.origin, '/', email, `E2EDIRECT${s}`)
 
     const lead = await fetchLeadByEmail(email)
     console.log('[DIRECT] lead:', JSON.stringify(lead, null, 2))
