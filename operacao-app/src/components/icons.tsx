@@ -199,6 +199,32 @@ export const Mensagens = (p: IconProps) => (
   </svg>
 );
 
+/** Um QR code, para as etiquetas dos equipamentos. */
+export const QrCode = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <path d="M14 14h3v3h-3zM20 14v0M14 20v0M20 20v0" />
+  </svg>
+);
+
+/** Uma chave de fendas — a reparação que nasce de uma inspeção. */
+export const Ferramenta = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.4 2.4 0 0 1-3.4-3.4l8.4-8.4Z" />
+    <path d="M15 5.5 18.5 2 22 5.5 18.5 9" />
+  </svg>
+);
+
+/** Um telemóvel — a parte que decide se a equipa usa isto ou não. */
+export const Telemovel = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="6" y="2" width="12" height="20" rx="2.5" />
+    <path d="M11 18.5h2" />
+  </svg>
+);
+
 export const Ajuda = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />

@@ -1,7 +1,22 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Card, cx } from "../components/ui";
-import { AlertTriangle, Check, ChevronDown, ChevronRight, X } from "../components/icons";
+import {
+  AlertTriangle,
+  Building,
+  Calendario,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Euro,
+  Eye,
+  Ferramenta,
+  Grafico,
+  Mail,
+  MapPin,
+  QrCode,
+  X,
+} from "../components/icons";
 import {
   DiagramaAutomatico,
   DiagramaCicloDaOrdem,
@@ -13,6 +28,7 @@ import {
 } from "../components/diagramas";
 import Calculadora from "../components/Calculadora";
 import AjudaFunil from "../components/ajuda-funil";
+import ComparacaoDeFluxo from "../components/ComparacaoDeFluxo";
 
 /**
  * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
@@ -120,7 +136,8 @@ function PorqueMudar() {
               key={v.titulo}
               className="rounded-xl bg-brand-50/60 p-3.5 ring-1 ring-inset ring-brand-100"
             >
-              <p className="text-sm font-semibold leading-snug text-slate-900">{v.titulo}</p>
+              <v.Icone width={18} height={18} className="text-brand-600" aria-hidden="true" />
+              <p className="mt-2 text-sm font-semibold leading-snug text-slate-900">{v.titulo}</p>
               <p className="mt-1 text-sm leading-relaxed text-slate-600">{v.detalhe}</p>
               <p className="mt-2 border-t border-brand-100 pt-2 text-xs leading-relaxed text-slate-500">
                 <span className="font-medium text-slate-600">Hoje:</span> {v.hoje}
@@ -134,6 +151,10 @@ function PorqueMudar() {
           instalação.
         </p>
       </Card>
+
+      {/* O panorama, antes de qualquer prova. Um desenho conta em dois
+          segundos o que a página inteira demora a demonstrar. */}
+      <ComparacaoDeFluxo />
 
       {/* A abertura. Isto é lido por quem tem trinta segundos, e a versão
           anterior eram dois parágrafos — que ninguém lia.
@@ -177,12 +198,14 @@ function PorqueMudar() {
       <Calculadora />
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Ferramenta width={17} height={17} className="shrink-0 text-brand-600" />
           O que acontece quando um técnico encontra um problema
         </h2>
-        <p className="mt-1.5 text-sm text-slate-600">
-          É a diferença que mais dinheiro vale. O trabalho do técnico é o mesmo nas duas
-          linhas — o que muda é o que o sistema faz com o que ele encontrou.
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          <strong className="font-medium text-slate-800">O benefício:</strong> nenhuma avaria
+          encontrada se perde. O trabalho do técnico é o mesmo nas duas linhas — muda o que o
+          sistema faz com o que ele encontrou.
         </p>
         <div className="mt-3">
           <DiagramaNaoConformidade />
@@ -200,11 +223,13 @@ function PorqueMudar() {
       </Card>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Euro width={17} height={17} className="shrink-0 text-brand-600" />
           Quanto custou, de verdade, esta obra
         </h2>
-        <p className="mt-1.5 text-sm text-slate-600">
-          O Infraspeak mede o tempo de uma ordem como fecho menos início. Uma ordem aberta em
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          <strong className="font-medium text-slate-800">O benefício:</strong> saber que
+          margem teve cada obra. Lá, o tempo é fecho menos início — uma ordem aberta em
           janeiro e fechada em maio conta noites, fins de semana e férias como trabalho.
         </p>
         <div className="mt-3">
@@ -223,10 +248,13 @@ function PorqueMudar() {
       </Card>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">Onde vive a informação</h2>
-        <p className="mt-1.5 text-sm text-slate-600">
-          A razão de fundo pela qual ninguém sabe se uma obra deu lucro: o orçamento está num
-          sistema e o custo está noutro.
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Building width={17} height={17} className="text-brand-600" />
+          Onde vive a informação
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          <strong className="font-medium text-slate-800">O benefício:</strong> o orçamentado e
+          o gasto na mesma linha. Hoje o orçamento está num sistema e o custo está noutro.
         </p>
         <div className="mt-3">
           <DiagramaOndeVive />
@@ -240,7 +268,10 @@ function PorqueMudar() {
       </Card>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">O resultado, em números</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Grafico width={17} height={17} className="text-brand-600" />
+          O resultado, em números
+        </h2>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[26rem] text-sm">
             <thead>
@@ -294,38 +325,49 @@ function PorqueMudar() {
           orçamentos. A outra metade foi construída de propósito.
         </p>
 
-        <div className="space-y-3">
+        <div className="grid gap-2.5 sm:grid-cols-2">
           {NOVIDADES.map((n) => (
-            <Card key={n.titulo} className="p-4 sm:p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-semibold text-slate-900">{n.titulo}</h3>
-                <Badge
-                  className={
+            <div
+              key={n.titulo}
+              className="rounded-xl border border-slate-200 bg-white p-3.5"
+            >
+              <div className="flex items-start gap-2.5">
+                <span
+                  className={cx(
+                    "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
                     n.tipo === "estrutural"
-                      ? "bg-brand-50 text-brand-800 ring-brand-200"
-                      : "bg-emerald-50 text-emerald-800 ring-emerald-200"
-                  }
+                      ? "bg-brand-50 text-brand-600 ring-1 ring-inset ring-brand-100"
+                      : "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-100"
+                  )}
                 >
-                  {n.tipo === "estrutural" ? "Só dentro do Olyvia" : "Construído de propósito"}
-                </Badge>
+                  <n.Icone width={16} height={16} aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold leading-snug text-slate-900">
+                    {n.titulo}
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-600">{n.ganho}</p>
+                </div>
               </div>
-              <p className="mt-1.5 max-w-prose text-sm leading-relaxed text-slate-600">
-                {n.oQueFaz}
-              </p>
-              <p className="mt-2.5 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-600">
-                <X width={14} height={14} className="mt-0.5 shrink-0 text-slate-400" />
+              <p className="mt-2.5 flex items-start gap-1.5 border-t border-slate-100 pt-2 text-xs leading-relaxed text-slate-500">
+                <X width={12} height={12} className="mt-0.5 shrink-0 text-slate-300" />
                 <span>
-                  <strong className="font-medium text-slate-700">No Infraspeak:</strong>{" "}
-                  {n.la}
+                  <span className="font-medium text-slate-600">Lá:</span> {n.la}
                 </span>
               </p>
-            </Card>
+            </div>
           ))}
         </div>
 
-        <p className="mt-2 px-1 text-xs leading-relaxed text-slate-500">
-          As três primeiras são estruturais: um sistema à parte nunca as terá, porque não
-          tem acesso à vossa agenda, aos vossos orçamentos nem às vossas contas.
+        <p className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-[3px] bg-brand-200" aria-hidden="true" />
+            Só dentro do Olyvia
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-[3px] bg-emerald-200" aria-hidden="true" />
+            Construído de propósito
+          </span>
         </p>
       </div>
 
@@ -333,7 +375,8 @@ function PorqueMudar() {
           depois dos números de propósito — quem ainda não acreditou nos
           números também não vai acreditar nisto. */}
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Calendario width={17} height={17} className="shrink-0 text-brand-600" />
           O que a empresa passa a saber ao fim de um ano
         </h2>
         <p className="mt-1.5 max-w-prose text-sm text-slate-600">
@@ -358,9 +401,13 @@ function PorqueMudar() {
       </Card>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">O que NÃO muda</h2>
-        <p className="mt-1.5 text-sm text-slate-600">
-          Porque a pergunta a seguir a &ldquo;o que ganhamos&rdquo; é sempre &ldquo;o que
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <Check width={17} height={17} className="text-brand-600" />
+          O que NÃO muda
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+          <strong className="font-medium text-slate-800">O benefício:</strong> ligar isto não
+          parte nada. A pergunta a seguir a &ldquo;o que ganhamos&rdquo; é sempre &ldquo;o que
           arriscamos&rdquo;.
         </p>
         <ul className="mt-3 space-y-2">
@@ -395,7 +442,10 @@ function PorqueMudar() {
       </div>
 
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">O que ainda não está feito</h2>
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
+          <AlertTriangle width={17} height={17} className="text-brand-600" />
+          O que ainda não está feito
+        </h2>
         <p className="mt-2 max-w-prose text-sm text-slate-600">
           Para não haver surpresas. Sobraram <strong>duas</strong>, e nenhuma delas impede a
           equipa de trabalhar hoje.
@@ -458,18 +508,21 @@ function Troca({ o, antes, depois }: { o: string; antes: string; depois: string 
 
 const VITORIAS = [
   {
+    Icone: Euro,
     titulo: "Sabe-se quanto custou cada obra",
     detalhe:
       "Horas cronometradas ao custo/hora de cada pessoa, mais material e serviços — com o orçamentado congelado ao lado.",
     hoje: "o custo de mão de obra dá 0,00 € em todas as ordens.",
   },
   {
+    Icone: Ferramenta,
     titulo: "Nada do que o técnico encontra se perde",
     detalhe:
       "Uma leitura fora da gama abre a ordem de reparação sozinha, com o problema já escrito lá dentro.",
     hoje: "a avaria fica escrita no histórico, e morre lá.",
   },
   {
+    Icone: Mail,
     titulo: "O cliente recebe prova sem ninguém se lembrar",
     detalhe:
       "Ao confirmar a ordem, o relatório sai por email com as fotos, as leituras e a assinatura recolhida no local.",
@@ -500,68 +553,67 @@ const VITORIAS = [
  */
 const NOVIDADES = [
   {
-    titulo: "Uma agenda só, com as férias da equipa lá dentro",
+    Icone: Calendario,
     tipo: "estrutural",
-    oQueFaz:
-      "Ao marcar uma visita, a agenda já sabe quem está de férias, quem tem folga e que dia é feriado — e avisa se a pessoa já tem outra coisa àquela hora. Os compromissos que já estavam na agenda da empresa aparecem ao lado das ordens.",
-    la:
-      "é um sistema à parte. Não conhece as férias nem os horários da vossa equipa, e por isso há sempre duas agendas a contradizerem-se.",
+    titulo: "Uma agenda só",
+    ganho:
+      "Ao marcar, já sabe quem está de férias e quem tem folga — e avisa se a pessoa já tem outra coisa àquela hora.",
+    la: "é um sistema à parte. Não conhece as férias da vossa equipa.",
   },
   {
-    titulo: "Um orçamento aceite vira obra num clique",
+    Icone: Euro,
     tipo: "estrutural",
-    oQueFaz:
-      "As linhas do orçamento passam para a ordem com o custo previsto congelado. No fim vê-se, linha a linha, onde a obra escorregou.",
-    la:
-      "os orçamentos estão no CRM e o trabalho está no Infraspeak. Ninguém junta os dois, e por isso não se sabe que obra é que comeu o lucro do ano.",
+    titulo: "O orçamento vira obra num clique",
+    ganho:
+      "Com o previsto congelado ao lado do gasto. Vê-se, linha a linha, onde a obra escorregou.",
+    la: "os orçamentos estão no CRM e o trabalho lá. Ninguém junta os dois.",
   },
   {
-    titulo: "O mesmo início de sessão e os mesmos clientes",
+    Icone: Building,
     tipo: "estrutural",
-    oQueFaz:
-      "Quem já entra no Olyvia entra aqui. A ficha do cliente, a morada e os contactos são os do CRM, lidos de lá — não se duplica nem se reescreve nada.",
-    la:
-      "contas separadas, e a lista de clientes escrita outra vez. Duas verdades sobre o mesmo cliente é uma questão de tempo.",
+    titulo: "Os mesmos clientes, o mesmo login",
+    ganho: "A ficha do cliente é a do CRM, lida de lá. Não se escreve nada duas vezes.",
+    la: "contas à parte e a lista de clientes escrita outra vez.",
   },
   {
-    titulo: "O dia pela estrada, e a semana em cima do mapa",
+    Icone: MapPin,
     tipo: "construido",
-    oQueFaz:
-      "As visitas do dia ordenadas por proximidade, com os quilómetros que isso poupa escritos ao lado — e só sugere trocar se valer mesmo a pena. A semana toda vê-se num mapa.",
-    la:
-      "marca-se a hora. O mapa não entra na conta, e quem faz a rota é quem se lembrar de a fazer.",
+    titulo: "O dia pela estrada",
+    ganho:
+      "As visitas por ordem de proximidade, com os quilómetros poupados ao lado. E a semana toda num mapa.",
+    la: "marca-se a hora. O mapa não entra na conta.",
   },
   {
-    titulo: "Etiqueta QR que qualquer telemóvel lê",
+    Icone: QrCode,
     tipo: "construido",
-    oQueFaz:
-      "Imprime-se uma folha de autocolantes e cola-se um em cada equipamento. Apontar a câmara abre a ficha dele — o que é, o que já lhe fizeram, e o botão para abrir uma ordem ali mesmo. Sem instalar nada.",
-    la:
-      "usa-se NFC. Cada etiqueta custa dinheiro, e só funciona em telemóveis com NFC ligado — metade da equipa fica de fora.",
+    titulo: "Etiqueta que qualquer telemóvel lê",
+    ganho:
+      "Aponta a câmara ao equipamento e abre a ficha dele — com o histórico e o botão de abrir ordem.",
+    la: "usa NFC: paga-se por etiqueta, e nem todos os telemóveis leem.",
   },
   {
-    titulo: "O relatório sai sozinho ao confirmar",
+    Icone: Mail,
     tipo: "construido",
-    oQueFaz:
-      "Com as fotos, as leituras e a assinatura. Vai para o email da ficha do cliente, e fica registado na ordem quem mandou e para onde. Também se manda à mão, quando o cliente liga a pedir.",
-    la:
-      "existe o botão «Enviar por Email», e é sempre alguém que se tem de lembrar de carregar nele. Não há nada que saia sozinho quando o trabalho é dado por bom.",
+    titulo: "O relatório sai sozinho",
+    ganho:
+      "Ao confirmar a ordem, vai por email com as fotos, as leituras e a assinatura de quem recebeu.",
+    la: "há o botão de enviar. Alguém tem sempre de se lembrar dele.",
   },
   {
-    titulo: "O veredicto aparece antes de gravar",
+    Icone: Eye,
     tipo: "construido",
-    oQueFaz:
-      "Escrever 8 numa gama de 10 a 15 mostra logo «vai ficar não conforme», e que vai abrir reparação. Uma opção que abre corretiva diz isso no próprio botão.",
-    la:
-      "só se sabe depois de gravar. Quem se enganou já gerou uma ordem que ninguém pediu — e agora tem de a ir apagar.",
+    titulo: "O veredicto antes de gravar",
+    ganho:
+      "Escrever 8 numa gama de 10 a 15 avisa logo: vai ficar não conforme, e vai abrir reparação.",
+    la: "só se sabe depois. Quem se enganou já gerou uma ordem que ninguém pediu.",
   },
   {
+    Icone: Grafico,
+    tipo: "construido",
     titulo: "A manutenção cumprida, calculada",
-    tipo: "construido",
-    oQueFaz:
-      "Uma percentagem por cliente e por mês: quantas visitas preventivas estavam previstas e quantas se fizeram. É o número que se leva a uma renovação de contrato.",
-    la:
-      "conta-se à mão, ordem a ordem, quando alguém precisa dele — que é sempre na véspera da reunião.",
+    ganho:
+      "Uma percentagem por cliente e por mês. É o número que se leva a uma renovação de contrato.",
+    la: "conta-se à mão, ordem a ordem, na véspera da reunião.",
   },
 ] as const;
 
