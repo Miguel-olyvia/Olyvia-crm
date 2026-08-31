@@ -8,12 +8,8 @@ import type {
 } from "react";
 import { Check, ChevronRight, Search, X } from "./icons";
 import type { Estado, EstadoTarefa, Origem, Prioridade } from "../domain/tipos";
-import {
-  ROTULO_ESTADO,
-  ROTULO_ESTADO_TAREFA,
-  ROTULO_ORIGEM,
-  ROTULO_PRIORIDADE,
-} from "../domain/tipos";
+import { ROTULO_ESTADO, ROTULO_ESTADO_TAREFA } from "../domain/tipos";
+import { useRotulos } from "../auth/Rotulos";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -434,7 +430,9 @@ const CORES_ORIGEM: Record<Origem, string> = {
 };
 
 export function OrigemOrdem({ origem }: { origem: Origem }) {
-  return <Badge className={CORES_ORIGEM[origem]}>{ROTULO_ORIGEM[origem]}</Badge>;
+  // A cor vem do código (é o motor); o nome vem da empresa.
+  const { nome } = useRotulos();
+  return <Badge className={CORES_ORIGEM[origem]}>{nome("origem", origem)}</Badge>;
 }
 
 const CORES_PRIORIDADE: Record<Prioridade, string> = {
@@ -445,8 +443,11 @@ const CORES_PRIORIDADE: Record<Prioridade, string> = {
 };
 
 export function PrioridadeOrdem({ prioridade }: { prioridade: Prioridade }) {
+  const { nome } = useRotulos();
   if (prioridade === "normal") return null; // o normal não precisa de etiqueta
-  return <Badge className={CORES_PRIORIDADE[prioridade]}>{ROTULO_PRIORIDADE[prioridade]}</Badge>;
+  return (
+    <Badge className={CORES_PRIORIDADE[prioridade]}>{nome("prioridade", prioridade)}</Badge>
+  );
 }
 
 const CORES_TAREFA: Record<EstadoTarefa, string> = {

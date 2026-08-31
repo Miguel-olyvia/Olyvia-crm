@@ -31,7 +31,8 @@ import {
   type Leitura,
   type Permissao,
 } from "../domain/respostas";
-import { ROTULO_TIPO_TAREFA, type EstadoTarefa, type TipoTarefa } from "../domain/tipos";
+import type { EstadoTarefa } from "../domain/tipos";
+import { useRotulos } from "../auth/Rotulos";
 
 /**
  * O ecrã onde o trabalho acontece.
@@ -69,6 +70,7 @@ export default function PainelTarefas({
   /** Recarrega a ordem. A app não adivinha o novo estado — vai buscá-lo. */
   aoGravar: () => void;
 }) {
+  const rotulos = useRotulos();
   const [aberta, setAberta] = useState<string | null>(null);
   const [rascunhos, setRascunhos] = useState<Record<string, Rascunho>>({});
   const [aGravar, setAGravar] = useState<string | null>(null);
@@ -233,7 +235,7 @@ export default function PainelTarefas({
                   </span>
 
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-slate-400">
-                    <span>{ROTULO_TIPO_TAREFA[t.tipo as TipoTarefa] ?? t.tipo}</span>
+                    <span>{rotulos.nome("tipo_tarefa", t.tipo)}</span>
                     {resumo.total > 0 && (
                       <span className="tabular">
                         · {resumo.total - resumo.porLer}/{resumo.total} leituras

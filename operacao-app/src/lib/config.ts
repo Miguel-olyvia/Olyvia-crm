@@ -8,6 +8,7 @@
 
 import { supabase } from "./supabase";
 import { ErroDeEscrita, ErroDeDados } from "./dados";
+import type { Lista, RotuloGravado } from "../domain/rotulos";
 
 function rebentar(contexto: string, error: { message: string } | null): void {
   if (!error) return;
@@ -835,4 +836,93 @@ export async function gravarTipoDeArea(t: {
     p_ativo: t.ativo ?? true,
   });
   if (error) throw new ErroDeEscrita(traduzir(error.message, "tipo"));
+}
+
+/* ───────────────── Os nomes que a empresa dá às listas ───────────────── */
+
+
+/**
+ * O que esta organização renomeou, reordenou ou escondeu.
+ *
+ * Uma organização que nunca abriu este ecrã devolve lista vazia — e é
+ * exatamente isso que faz `opcoesDaLista` cair nos nomes do código.
+ */
+export async function listarRotulos(orgId: string): Promise<RotuloGravado[]> {
+  const { data, error } = await supabase
+    .from("ops_rotulo")
+    .select("lista, valor, nome, ordem, ativo")
+    .eq("organization_id", orgId);
+  // Sem rótulos a aplicação funciona na mesma. Um erro aqui não pode deixar
+  // ninguém sem caixas de escolha.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem rótulos próprios:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as RotuloGravado[];
+}
+
+export async function gravarRotulo(r: {
+  orgId: string;
+  lista: Lista;
+  valor: string;
+  nome: string;
+  ordem?: number | null;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_rotulo", {
+    p_org_id: r.orgId,
+    p_lista: r.lista,
+    p_valor: r.valor,
+    p_nome: r.nome,
+    p_ordem: r.ordem ?? null,
+    p_ativo: r.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "nome"));
+}
+
+/** Voltar aos nomes de origem. Apaga as linhas; o código volta a mandar. */
+export async function reporRotulos(orgId: string, lista?: Lista): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_repor_rotulos", {
+    p_org_id: orgId,
+    p_lista: lista ?? null,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "nome"));
+}
+
+/* ─────────────────────── Especialidades (escrita) ─────────────────────── */
+
+export async function gravarEspecialidade(e: {
+  orgId: string;
+  nome: string;
+  id?: string | null;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_skill", {
+    p_org_id: e.orgId,
+    p_nome: e.nome,
+    p_id: e.id ?? null,
+    p_ativo: e.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "especialidade"));
+}
+
+/**
+ * As especialidades de uma pessoa, todas de uma vez.
+ *
+ * Manda-se o conjunto inteiro e não uma de cada vez: assim não há o estado a
+ * meio de "tirei uma, ainda não pus a outra", que no filtro da agenda dá uma
+ * pessoa a desaparecer sem ninguém perceber porquê.
+ */
+export async function especialidadesDaPessoa(
+  orgId: string,
+  utilizadorId: string,
+  skills: readonly string[]
+): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_skills_do_utilizador", {
+    p_org_id: orgId,
+    p_utilizador_id: utilizadorId,
+    p_skills: [...skills],
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "especialidade"));
 }

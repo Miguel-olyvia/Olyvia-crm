@@ -31,6 +31,7 @@
     "supabase:duplicar": "node tools/correr-sql.mjs db/duplicar.sql",
     "supabase:documentos": "node tools/correr-sql.mjs db/documentos-e-ativos.sql",
     "supabase:listas": "node tools/correr-sql.mjs db/listas-operacao.sql",
+    "supabase:configuraveis": "node tools/correr-sql.mjs db/listas-configuraveis.sql",
     "supabase:mensagens": "node tools/correr-sql.mjs db/mensagens.sql",
     "supabase:relatorio-manual": "node tools/correr-sql.mjs db/relatorio-manual.sql",
     "supabase:planos-crud": "node tools/correr-sql.mjs db/planos-crud.sql",

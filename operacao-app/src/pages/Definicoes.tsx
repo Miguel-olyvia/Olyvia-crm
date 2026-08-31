@@ -45,11 +45,13 @@ import PainelPacks from "../components/PainelPacks";
 import PainelAutomatico from "../components/PainelAutomatico";
 import PainelTiposECustos from "../components/PainelTiposECustos";
 import PainelListas from "../components/PainelListas";
+import PainelVocabulario from "../components/PainelVocabulario";
 import CampoDeMapa from "../components/CampoDeMapa";
 import { coordenadasValidas, type Coordenadas } from "../domain/mapa";
-import { Building, Check, Euro, Layers, Plus, Robo, User, X } from "../components/icons";
+import { Building, Check, Euro, Layers, List, Plus, Robo, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
-import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
+import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
+import { useRotulos } from "../auth/Rotulos";
 
 /**
  * Onde se monta a operação.
@@ -70,7 +72,13 @@ import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type Tipo
  * a alguém a dizer "vai aqui".
  */
 
-type Separador = "locais" | "procedimentos" | "equipa" | "tipos" | "automatico";
+type Separador =
+  | "locais"
+  | "procedimentos"
+  | "equipa"
+  | "tipos"
+  | "vocabulario"
+  | "automatico";
 
 export default function Definicoes() {
   const [params, setParams] = useSearchParams();
@@ -104,6 +112,9 @@ export default function Definicoes() {
         <Aba ligado={ver === "tipos"} onClick={() => trocar("tipos")} Icone={Euro}>
           Tipos e custos
         </Aba>
+        <Aba ligado={ver === "vocabulario"} onClick={() => trocar("vocabulario")} Icone={List}>
+          Vocabulário
+        </Aba>
         <Aba ligado={ver === "automatico"} onClick={() => trocar("automatico")} Icone={Robo}>
           Automático
         </Aba>
@@ -118,6 +129,7 @@ export default function Definicoes() {
           <PainelListas />
         </div>
       )}
+      {ver === "vocabulario" && <PainelVocabulario />}
       {ver === "automatico" && <PainelAutomatico />}
     </div>
   );
@@ -339,6 +351,7 @@ function FormLocal({
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
+  const rotulos = useRotulos();
   const { activeOrgId } = useAuth();
   const [codigo, setCodigo] = useState(local?.codigo ?? "");
   const [nome, setNome] = useState(local?.nome ?? "");
@@ -410,10 +423,11 @@ function FormLocal({
           </Field>
           <Field label="Tipo">
             <Select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full">
-              <option value="morada">Morada</option>
-              <option value="edificio">Edifício</option>
-              <option value="piso">Piso</option>
-              <option value="espaco">Espaço</option>
+              {rotulos.opcoes("tipo_local").map((x) => (
+                <option key={x.valor} value={x.valor}>
+                  {x.nome}
+                </option>
+              ))}
             </Select>
           </Field>
         </div>
@@ -465,6 +479,7 @@ function FormAtivo({
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
+  const rotulos = useRotulos();
   const { activeOrgId } = useAuth();
   const [codigo, setCodigo] = useState(ativo?.codigo ?? "");
   const [nome, setNome] = useState(ativo?.nome ?? "");
@@ -540,10 +555,11 @@ function FormAtivo({
               onChange={(e) => setCriticidade(e.target.value)}
               className="w-full"
             >
-              <option value="baixa">Baixa</option>
-              <option value="normal">Normal</option>
-              <option value="alta">Alta</option>
-              <option value="critica">Crítica</option>
+              {rotulos.opcoes("criticidade").map((x) => (
+                <option key={x.valor} value={x.valor}>
+                  {x.nome}
+                </option>
+              ))}
             </Select>
           </Field>
         </div>
@@ -989,6 +1005,7 @@ function FormChecklist({
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
+  const rotulos = useRotulos();
   const { activeOrgId } = useAuth();
   const [nome, setNome] = useState(checklist?.nome ?? "");
   const [tarefas, setTarefas] = useState<TarefaParaGravar[]>([]);
@@ -1115,9 +1132,9 @@ function FormChecklist({
                           onChange={(e) => mudar(i, { tipo: e.target.value })}
                           className="text-xs"
                         >
-                          {TIPOS_TAREFA.map((x) => (
-                            <option key={x} value={x}>
-                              {ROTULO_TIPO_TAREFA[x as TipoTarefa]}
+                          {rotulos.opcoes("tipo_tarefa").map((x) => (
+                            <option key={x.valor} value={x.valor}>
+                              {x.nome}
                             </option>
                           ))}
                         </Select>

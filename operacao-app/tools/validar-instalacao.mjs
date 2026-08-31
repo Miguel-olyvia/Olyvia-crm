@@ -8,7 +8,7 @@
  *                 → assinaturas.sql → mapa.sql
  *                 → relatorio-automatico.sql → relatorio-manual.sql → campos-ordem.sql → duplicar.sql
  *                 → documentos-e-ativos.sql
- *                 → listas-operacao.sql → mensagens.sql
+ *                 → listas-operacao.sql → listas-configuraveis.sql → mensagens.sql
  *                 → planos-crud.sql → config.sql → packs.sql → custos.sql
  *                 → analises.sql → cliente-crm.sql
  *                 → criar-utilizador.sql
@@ -140,6 +140,8 @@ await passo("db/documentos-e-ativos.sql", ler("documentos-e-ativos.sql"));
 await passo("db/documentos-e-ativos.sql outra vez (idempotência)", ler("documentos-e-ativos.sql"));
 await passo("db/listas-operacao.sql", ler("listas-operacao.sql"));
 await passo("db/listas-operacao.sql outra vez (idempotência)", ler("listas-operacao.sql"));
+await passo("db/listas-configuraveis.sql", ler("listas-configuraveis.sql"));
+await passo("db/listas-configuraveis.sql outra vez (idempotência)", ler("listas-configuraveis.sql"));
 await passo("db/mensagens.sql", ler("mensagens.sql"));
 await passo("db/mensagens.sql outra vez (idempotência)", ler("mensagens.sql"));
 await passo("db/relatorio-manual.sql", ler("relatorio-manual.sql"));
@@ -358,7 +360,7 @@ console.log("\n─── cada ficheiro sozinho, numa base completa ─");
 for (const f of [
   "schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql", "rpcs-tarefas.sql",
   "planos.sql", "correcoes-modelo.sql", "medicoes.sql", "agenda.sql", "despacho.sql",
-  "orcamentos.sql", "anexos.sql", "assinaturas.sql", "mapa.sql", "relatorio-automatico.sql", "relatorio-manual.sql", "campos-ordem.sql", "duplicar.sql", "documentos-e-ativos.sql", "listas-operacao.sql", "mensagens.sql", "planos-crud.sql", "config.sql", "custos.sql",
+  "orcamentos.sql", "anexos.sql", "assinaturas.sql", "mapa.sql", "relatorio-automatico.sql", "relatorio-manual.sql", "campos-ordem.sql", "duplicar.sql", "documentos-e-ativos.sql", "listas-operacao.sql", "listas-configuraveis.sql", "mensagens.sql", "planos-crud.sql", "config.sql", "custos.sql",
   "packs.sql", "analises.sql", "cliente-crm.sql",
 ]) {
   try {

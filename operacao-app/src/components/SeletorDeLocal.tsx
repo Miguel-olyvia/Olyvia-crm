@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRotulos } from "../auth/Rotulos";
 import { ErroDeEscrita, type LocalRow } from "../lib/dados";
 import {
   criarLocal,
@@ -244,6 +245,7 @@ function FormLocalRapido({
   aoFechar: () => void;
   aoCriar: (id: string) => void;
 }) {
+  const rotulos = useRotulos();
   const [nome, setNome] = useState("");
   const [tipo, setTipo] = useState("morada");
   const [parentId, setParentId] = useState("");
@@ -297,10 +299,11 @@ function FormLocalRapido({
 
         <div className="grid gap-2 sm:grid-cols-2">
           <Select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full text-sm">
-            <option value="morada">Morada</option>
-            <option value="edificio">Edifício</option>
-            <option value="piso">Piso</option>
-            <option value="espaco">Espaço</option>
+            {rotulos.opcoes("tipo_local").map((x) => (
+              <option key={x.valor} value={x.valor}>
+                {x.nome}
+              </option>
+            ))}
           </Select>
 
           {locais.length > 0 && (
