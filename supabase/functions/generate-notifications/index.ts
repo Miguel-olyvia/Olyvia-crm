@@ -120,6 +120,35 @@ async function fetchAll<T>(
   return results;
 }
 
+/**
+ * fetchAll for an `.in(column, ids)` filter, splitting `ids` into batches.
+ *
+ * PostgREST puts filters in the query string, so `.in()` over a long id list
+ * builds a huge URL — 539 uuids is ~22 KB — and the request dies on the way out
+ * with "TypeError: error sending request", never reaching Postgres. Batching
+ * keeps every URL small; the caller still sees one flat array.
+ */
+const IN_FILTER_BATCH = 100;
+
+async function fetchAllIn<T>(
+  supabase: any,
+  table: string,
+  column: string,
+  ids: string[],
+  selectColumns = "*",
+  refine: (q: any) => any = (q) => q,
+): Promise<T[]> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (unique.length === 0) return [];
+
+  const results: T[] = [];
+  for (let i = 0; i < unique.length; i += IN_FILTER_BATCH) {
+    const batch = unique.slice(i, i + IN_FILTER_BATCH);
+    results.push(...await fetchAll<T>(supabase, table, (q) => refine(q).in(column, batch), selectColumns));
+  }
+  return results;
+}
+
 Deno.serve(async (req) => {
   const corsHeaders = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -793,10 +822,10 @@ Deno.serve(async (req) => {
         const actionOrgIds = [...new Set(scheduledActions.map(a => a.organization_id))];
 
         const [entityNames, actionClients, actionContacts, actionLeads] = await Promise.all([
-          fetchAll<any>(supabase, "anew_entities", (q) => q.in("id", actionEntityIds), "id, display_name"),
-          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive"), "id, entity_id, organization_id"),
-          fetchAll<any>(supabase, "anew_leads", (q) => q.in("entity_id", actionEntityIds).in("organization_id", actionOrgIds).neq("status", "converted"), "id, entity_id, organization_id"),
+          fetchAllIn<any>(supabase, "anew_entities", "id", actionEntityIds, "id, display_name"),
+          fetchAllIn<any>(supabase, "anew_clients", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "inactive")),
+          fetchAllIn<any>(supabase, "anew_contacts", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive")),
+          fetchAllIn<any>(supabase, "anew_leads", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "converted")),
         ]);
 
         const entityNameMap = new Map((entityNames || []).map((e: any) => [e.id, e.display_name]));
