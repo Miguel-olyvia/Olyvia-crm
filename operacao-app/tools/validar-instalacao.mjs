@@ -5,7 +5,7 @@
  *                 → rpcs-tarefas.sql
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
  *                 → agenda.sql → despacho.sql → orcamentos.sql → anexos.sql
- *                 → planos-crud.sql → config.sql → custos.sql
+ *                 → planos-crud.sql → config.sql → packs.sql → custos.sql
  *                 → analises.sql → cliente-crm.sql
  *                 → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
@@ -126,6 +126,8 @@ await passo("db/planos-crud.sql", ler("planos-crud.sql"));
 await passo("db/planos-crud.sql outra vez (idempotência)", ler("planos-crud.sql"));
 await passo("db/config.sql", ler("config.sql"));
 await passo("db/config.sql outra vez (idempotência)", ler("config.sql"));
+await passo("db/packs.sql", ler("packs.sql"));
+await passo("db/packs.sql outra vez (idempotência)", ler("packs.sql"));
 await passo("db/custos.sql", ler("custos.sql"));
 await passo("db/custos.sql outra vez (idempotência)", ler("custos.sql"));
 await passo("db/analises.sql", ler("analises.sql"));
@@ -335,7 +337,7 @@ for (const f of [
   "schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql", "rpcs-tarefas.sql",
   "planos.sql", "correcoes-modelo.sql", "medicoes.sql", "agenda.sql", "despacho.sql",
   "orcamentos.sql", "anexos.sql", "planos-crud.sql", "config.sql", "custos.sql",
-  "analises.sql", "cliente-crm.sql",
+  "packs.sql", "analises.sql", "cliente-crm.sql",
 ]) {
   try {
     await db.exec(ler(f));

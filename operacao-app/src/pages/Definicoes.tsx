@@ -41,6 +41,7 @@ import {
   Toggle,
   cx,
 } from "../components/ui";
+import PainelPacks from "../components/PainelPacks";
 import { Building, Check, Layers, Plus, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
 import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
@@ -631,6 +632,14 @@ function PainelProcedimentos() {
 
   return (
     <>
+      {/* O pack antes de tudo: se a organização está vazia, é o caminho mais
+          curto entre abrir isto e ter uma checklist a sério. */}
+      <PainelPacks
+        orgId={activeOrgId}
+        vazio={checklists.length === 0 && medicoes.length === 0}
+        aoInstalar={() => setRecarga((r) => r + 1)}
+      />
+
       {/* Medições primeiro: uma checklist não as pode usar antes de existirem. */}
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -1001,10 +1001,10 @@ const DIFERENCAS = [
     titulo: "Configuração pré-preenchida por setor",
     porque: "Uma árvore de definições vazia acaba sempre em caixote.",
     infraspeak:
-      "Entrega tudo vazio. Cada cliente constrói a sua taxonomia à mão, sem curadoria — e daí vem o caixote.",
+      "Entrega tudo vazio. Cada cliente constrói a sua taxonomia à mão, sem curadoria — e daí vem o caixote: categorias chamadas “BM24 PISO” e pastas comerciais dentro de “Manutenções”.",
     olyvia:
-      "A ideia é entregar packs prontos (Manutenção, Obras, Limpeza) com categorias, checklists e tipos já feitos. Ainda não está construído.",
-    feito: false,
+      "Três packs prontos — Manutenção, Obras e Limpeza — com categorias, medições e checklists já publicadas. Instalar acrescenta o que falta e nunca reescreve o que já lá estava.",
+    feito: true,
   },
 ] as const;
 
@@ -1013,10 +1013,6 @@ const POR_FAZER = [
     o: "Assinatura do cliente no telemóvel",
     porque:
       "o relatório tem uma linha para assinar à caneta. O Olyvia já sabe recolher assinaturas com validade legal — falta ligar as duas coisas.",
-  },
-  {
-    o: "Packs de configuração por setor",
-    porque: "hoje monta-se tudo à mão em Definições. Funciona, mas dá trabalho no primeiro dia.",
   },
   {
     o: "Portal do cliente",

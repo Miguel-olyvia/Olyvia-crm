@@ -31,6 +31,7 @@
     "supabase:cliente-crm": "node tools/correr-sql.mjs db/cliente-crm.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
+    "supabase:packs": "node tools/correr-sql.mjs db/packs.sql",
     "supabase:demo": "node tools/correr-sql.mjs db/demo.sql",
     "supabase:demo-remover": "node tools/correr-sql.mjs db/demo-remover.sql",
     "validar-instalacao": "node tools/validar-instalacao.mjs",
@@ -46,6 +47,7 @@
     "validar-custos": "node tools/validar-custos.mjs",
     "validar-analises": "node tools/validar-analises.mjs",
     "validar-cliente-crm": "node tools/validar-cliente-crm.mjs",
+    "validar-packs": "node tools/validar-packs.mjs",
     "validar-restricao": "node tools/validar-restricao.mjs"
   },
   "dependencies": {

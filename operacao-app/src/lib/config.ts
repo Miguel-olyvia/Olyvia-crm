@@ -419,3 +419,43 @@ export async function criarLocal(l: {
     ja_existia: boolean;
   };
 }
+
+/* ────────────────────── Packs de configuração ────────────────────── */
+
+export interface Pack {
+  pack: string;
+  nome: string;
+  descricao: string;
+  categorias: number;
+  medicoes: number;
+  checklists: number;
+}
+
+export interface ResultadoDoPack {
+  ok: boolean;
+  pack: string;
+  nome: string;
+  criadas: { categorias: number; medicoes: number; checklists: number };
+  saltadas: { categorias: number; medicoes: number; checklists: number };
+}
+
+export async function listarPacks(): Promise<Pack[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_packs");
+  if (error) {
+    // `db/packs.sql` é opcional. Sem ele não há packs para oferecer, e o resto
+    // das Definições continua a funcionar — por isso isto não rebenta.
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem packs de configuração:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as Pack[];
+}
+
+export async function instalarPack(orgId: string, pack: string): Promise<ResultadoDoPack> {
+  const { data, error } = await supabase.rpc("rpc_ops_instalar_pack", {
+    _org_id: orgId,
+    _pack: pack,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível instalar o pack.");
+  return data as unknown as ResultadoDoPack;
+}
