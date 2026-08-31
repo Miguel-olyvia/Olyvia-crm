@@ -648,3 +648,50 @@ export const duplicarLocal = (id: string, nome: string, comAtivos = true) =>
 
 export const duplicarOrdem = (id: string, titulo?: string | null) =>
   duplicar("rpc_ops_duplicar_ordem", { p_ordem_id: id, p_titulo: titulo ?? null });
+
+/* ───────────────────────── Especialidades ──────────────────────────────── */
+
+export interface Especialidade {
+  id: string;
+  nome: string;
+}
+
+export async function listarEspecialidades(orgId: string): Promise<Especialidade[]> {
+  const { data, error } = await supabase
+    .from("ops_skill")
+    .select("id, nome")
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("nome");
+  rebentar("carregar as especialidades", error);
+  return (data ?? []) as unknown as Especialidade[];
+}
+
+/**
+ * Quem tem cada especialidade.
+ *
+ * Devolve um mapa `especialidade → utilizadores`, que é como o filtro da
+ * agenda a usa: escolhe-se "Eletricista" e ficam as ordens de quem o é.
+ */
+export async function quemTemCadaEspecialidade(
+  orgId: string
+): Promise<Map<string, string[]>> {
+  const { data, error } = await supabase
+    .from("ops_utilizador_skill")
+    .select("utilizador_id, skill_id, ops_skill!inner(organization_id)")
+    .eq("ops_skill.organization_id", orgId);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem especialidades:", error.message);
+    return new Map();
+  }
+
+  const fora = new Map<string, string[]>();
+  for (const l of (data ?? []) as { utilizador_id: string; skill_id: string }[]) {
+    const lista = fora.get(l.skill_id) ?? [];
+    lista.push(l.utilizador_id);
+    fora.set(l.skill_id, lista);
+  }
+  return fora;
+}

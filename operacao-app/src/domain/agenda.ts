@@ -26,6 +26,9 @@ export interface OrdemNaAgenda {
   prioridade: string;
   responsavel_id: string | null;
   local_id: string | null;
+  cliente_id: string | null;
+  tipo_trabalho_id: string | null;
+  fornecedor_id: string | null;
   agendada_para: string | null;
   janela_inicio: string | null;
   janela_fim: string | null;
@@ -243,8 +246,11 @@ export function posicaoDoCompromisso(c: Compromisso, dia: Date): Posicao | null 
       prioridade: "normal",
       responsavel_id: c.utilizador_id,
       // Um compromisso do CRM não tem local de Operações — e por isso nunca
-      // entra numa rota. O `onde` que ele traz é texto escrito à mão.
+      // entra numa rota nem no mapa. O `onde` que ele traz é texto à mão.
       local_id: null,
+      cliente_id: null,
+      tipo_trabalho_id: null,
+      fornecedor_id: null,
       agendada_para: c.inicio,
       janela_inicio: c.inicio,
       janela_fim: c.fim,
@@ -339,4 +345,90 @@ export function cargaComCompromissos(
     compromissos: compromissos.length,
     horas: Math.round((base.horas + horas) * 10) / 10,
   };
+}
+
+/* ─────────────────────────── Filtrar a agenda ──────────────────────────── */
+
+/**
+ * As cinco perguntas que se fazem a olhar para uma agenda cheia.
+ *
+ * Vazio quer dizer "todos" — e não "nenhum". É a diferença entre um filtro que
+ * ajuda e um ecrã que nasce em branco à espera que alguém adivinhe.
+ */
+export interface FiltroDaAgenda {
+  clienteId?: string | null;
+  tipoTrabalhoId?: string | null;
+  responsavelId?: string | null;
+  fornecedorId?: string | null;
+  /** Escolhe-se a especialidade; filtram-se as ordens de quem a tem. */
+  especialidadeId?: string | null;
+}
+
+export const FILTRO_VAZIO: FiltroDaAgenda = {};
+
+export function temFiltro(f: FiltroDaAgenda): boolean {
+  return Object.values(f).some((v) => !!v);
+}
+
+export function quantosFiltros(f: FiltroDaAgenda): number {
+  return Object.values(f).filter(Boolean).length;
+}
+
+/**
+ * As ordens que passam o filtro.
+ *
+ * `quemTem` é o mapa especialidade → utilizadores. Uma ordem sem responsável
+ * nunca passa um filtro de especialidade: não se sabe de quem é, e dizer que
+ * sim seria adivinhar.
+ */
+export function filtrarOrdens(
+  ordens: readonly OrdemNaAgenda[],
+  f: FiltroDaAgenda,
+  quemTem?: ReadonlyMap<string, readonly string[]>
+): OrdemNaAgenda[] {
+  const daEspecialidade = f.especialidadeId
+    ? new Set(quemTem?.get(f.especialidadeId) ?? [])
+    : null;
+
+  return ordens.filter((o) => {
+    if (f.clienteId && o.cliente_id !== f.clienteId) return false;
+    if (f.tipoTrabalhoId && o.tipo_trabalho_id !== f.tipoTrabalhoId) return false;
+    if (f.responsavelId && o.responsavel_id !== f.responsavelId) return false;
+    if (f.fornecedorId && o.fornecedor_id !== f.fornecedorId) return false;
+    if (daEspecialidade) {
+      if (!o.responsavel_id) return false;
+      if (!daEspecialidade.has(o.responsavel_id)) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * A equipa que ainda faz sentido mostrar, dado o filtro.
+ *
+ * Com um filtro ativo, uma grelha com as vinte pessoas da casa e dezanove
+ * linhas vazias não é uma agenda filtrada — é a mesma agenda com buracos. Sem
+ * filtro nenhum, mostram-se todos, porque uma pessoa livre é informação.
+ */
+export function equipaVisivel<T extends { utilizador_id: string }>(
+  equipa: readonly T[],
+  ordens: readonly OrdemNaAgenda[],
+  f: FiltroDaAgenda,
+  quemTem?: ReadonlyMap<string, readonly string[]>
+): T[] {
+  if (!temFiltro(f)) return [...equipa];
+
+  const comTrabalho = new Set(
+    ordens.map((o) => o.responsavel_id).filter((x): x is string => !!x)
+  );
+
+  // Com um filtro de especialidade, quem a tem aparece mesmo sem trabalho —
+  // é precisamente a pergunta "quem é que está livre e sabe fazer isto?".
+  const daEspecialidade = f.especialidadeId
+    ? new Set(quemTem?.get(f.especialidadeId) ?? [])
+    : null;
+
+  return equipa.filter(
+    (p) => comTrabalho.has(p.utilizador_id) || daEspecialidade?.has(p.utilizador_id)
+  );
 }

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import {
   ErroDeDados,
   compromissosDoCRM,
   indisponibilidadesDoPeriodo,
+  listarClientes,
   listarEquipa,
   listarLocais,
   ordensDoPeriodo,
+  type Cliente,
   type IndisponibilidadeNoDia,
   type LocalRow,
   type MembroEquipa,
@@ -16,10 +18,25 @@ import { Badge, Card, EmptyState, ErrorState, IconButton, Skeleton, cx } from ".
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock, User } from "../components/icons";
 import SeletorDeData from "../components/SeletorDeData";
 import RotaDoDia from "../components/RotaDoDia";
+import FiltrosDaAgenda from "../components/FiltrosDaAgenda";
+import MapaDaAgenda from "../components/MapaDaAgenda";
 import {
+  listarEspecialidades,
+  listarFornecedores,
+  listarTiposTrabalho,
+  quemTemCadaEspecialidade,
+  type Especialidade,
+  type Fornecedor,
+  type TipoTrabalho,
+} from "../lib/config";
+import {
+  FILTRO_VAZIO,
   HORA_ABRE,
   HORA_FECHA,
   cargaComCompromissos,
+  equipaVisivel,
+  filtrarOrdens,
+  type FiltroDaAgenda,
   cargaPesada,
   chaveDoDia,
   diasDaSemana,
@@ -54,7 +71,7 @@ import {
  *    ocupada aparecia como livre.
  */
 
-type Vista = "dia" | "semana" | "mes";
+type Vista = "dia" | "semana" | "mes" | "mapa";
 
 const CORES_ORIGEM: Record<string, string> = {
   preventiva: "bg-brand-100 text-brand-800 ring-brand-200",
@@ -75,7 +92,9 @@ function rotuloDoPeriodo(vista: Vista, dia: Date): string {
   if (vista === "dia") {
     return dia.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" });
   }
-  if (vista === "semana") {
+  // O mapa cobre a mesma semana. Sem esta linha, o rótulo dizia o mês e o
+  // mapa mostrava a semana — duas afirmações diferentes lado a lado.
+  if (vista === "semana" || vista === "mapa") {
     const dias = diasDaSemana(dia);
     const a = dias[0];
     const b = dias[6];
@@ -89,7 +108,7 @@ function rotuloDoPeriodo(vista: Vista, dia: Date): string {
 /** O que carregar, conforme a vista. */
 function periodoDaVista(vista: Vista, dia: Date): [Date, Date] {
   if (vista === "dia") return [dia, dia];
-  if (vista === "semana") {
+  if (vista === "mapa" || vista === "semana") {
     const dias = diasDaSemana(dia);
     return [dias[0], dias[6]];
   }
@@ -99,6 +118,7 @@ function periodoDaVista(vista: Vista, dia: Date): [Date, Date] {
 
 export default function Agenda() {
   const { activeOrgId, funcao } = useAuth();
+  const navegar = useNavigate();
   const [vista, setVista] = useState<Vista>("dia");
   const [dia, setDia] = useState(() => {
     const d = new Date();
@@ -111,6 +131,12 @@ export default function Agenda() {
   const [indisp, setIndisp] = useState<IndisponibilidadeNoDia[]>([]);
   const [compromissos, setCompromissos] = useState<Compromisso[]>([]);
   const [locais, setLocais] = useState<LocalRow[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [tipos, setTipos] = useState<TipoTrabalho[]>([]);
+  const [especialidades, setEspecialidades] = useState<Especialidade[]>([]);
+  const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [quemTem, setQuemTem] = useState<Map<string, string[]>>(new Map());
+  const [filtro, setFiltro] = useState<FiltroDaAgenda>(FILTRO_VAZIO);
   const [erro, setErro] = useState<string | null>(null);
   const [aCarregar, setACarregar] = useState(true);
 
@@ -121,18 +147,30 @@ export default function Agenda() {
     setACarregar(true);
     setErro(null);
     try {
-      const [e, o, i, c, l] = await Promise.all([
+      const [e, o, i, c, l, cl, tp, esp, fo, qt] = await Promise.all([
         listarEquipa(activeOrgId),
         ordensDoPeriodo(activeOrgId, de, ate),
         indisponibilidadesDoPeriodo(activeOrgId, de, ate),
         compromissosDoCRM(activeOrgId, de, ate),
         listarLocais(activeOrgId),
+        // As listas dos filtros. Falhar numa delas tira o filtro, e não a
+        // agenda — quem vem ver o dia quer ver o dia.
+        listarClientes(activeOrgId).catch(() => [] as Cliente[]),
+        listarTiposTrabalho(activeOrgId).catch(() => [] as TipoTrabalho[]),
+        listarEspecialidades(activeOrgId).catch(() => [] as Especialidade[]),
+        listarFornecedores(activeOrgId).catch(() => [] as Fornecedor[]),
+        quemTemCadaEspecialidade(activeOrgId).catch(() => new Map<string, string[]>()),
       ]);
       setEquipa(e);
       setOrdens(o);
       setIndisp(i);
       setCompromissos(c);
       setLocais(l);
+      setClientes(cl);
+      setTipos(tp);
+      setEspecialidades(esp);
+      setFornecedores(fo);
+      setQuemTem(qt);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Não foi possível carregar a agenda.");
     } finally {
@@ -148,10 +186,21 @@ export default function Agenda() {
     setDia((d) =>
       vista === "dia"
         ? somarDias(d, n)
-        : vista === "semana"
+        : vista === "semana" || vista === "mapa"
           ? somarDias(d, n * 7)
           : new Date(d.getFullYear(), d.getMonth() + n, 1)
     );
+
+  // Aplica-se uma vez, e todas as vistas recebem o resultado. Filtrar dentro
+  // de cada uma daria quatro sítios onde a mesma regra podia divergir.
+  const ordensVisiveis = useMemo(
+    () => filtrarOrdens(ordens, filtro, quemTem),
+    [ordens, filtro, quemTem]
+  );
+  const equipaNaGrelha = useMemo(
+    () => equipaVisivel(equipa, ordensVisiveis, filtro, quemTem),
+    [equipa, ordensVisiveis, filtro, quemTem]
+  );
 
   const podeVer = funcao === "admin" || funcao === "gestor" || funcao === "operador";
   if (!podeVer) {
@@ -190,6 +239,7 @@ export default function Agenda() {
               ["dia", "Dia"],
               ["semana", "Semana"],
               ["mes", "Mês"],
+              ["mapa", "Mapa"],
             ] as const
           ).map(([v, r]) => (
             <button
@@ -210,6 +260,20 @@ export default function Agenda() {
         </nav>
       </header>
 
+      {!erro && !aCarregar && (
+        <div className="mb-4">
+          <FiltrosDaAgenda
+            filtro={filtro}
+            aoMudar={setFiltro}
+            clientes={clientes}
+            tipos={tipos}
+            equipa={equipa}
+            especialidades={especialidades}
+            fornecedores={fornecedores}
+          />
+        </div>
+      )}
+
       {erro && <ErrorState message={erro} onRetry={() => void carregar()} />}
       {!erro && aCarregar && <Skeleton className="h-72" />}
 
@@ -226,8 +290,8 @@ export default function Agenda() {
           {vista === "dia" && (
             <VistaDoDia
               dia={dia}
-              equipa={equipa}
-              ordens={ordens}
+              equipa={equipaNaGrelha}
+              ordens={ordensVisiveis}
               indisp={indisp}
               compromissos={compromissos}
               locais={locais}
@@ -236,17 +300,24 @@ export default function Agenda() {
           {vista === "semana" && (
             <VistaDaSemana
               dia={dia}
-              equipa={equipa}
-              ordens={ordens}
+              equipa={equipaNaGrelha}
+              ordens={ordensVisiveis}
               indisp={indisp}
               compromissos={compromissos}
               aoEscolherDia={irParaODia}
             />
           )}
+          {vista === "mapa" && (
+            <MapaDaAgenda
+              ordens={ordensVisiveis}
+              locais={locais}
+              aoEscolher={(codigo) => navegar(`/ordens/${codigo}`)}
+            />
+          )}
           {vista === "mes" && (
             <VistaDoMes
               dia={dia}
-              ordens={ordens}
+              ordens={ordensVisiveis}
               indisp={indisp}
               compromissos={compromissos}
               aoEscolherDia={irParaODia}
