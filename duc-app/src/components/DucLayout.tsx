@@ -1,8 +1,20 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { Combobox, ConfirmDialog } from "./ui";
-import { ChevronLeft, LogOut, ExternalLink, Settings, DucMark, Bell, Help, Chart, FileText } from "./icons";
+import { Combobox, ConfirmDialog, cx } from "./ui";
+import {
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  ExternalLink,
+  Settings,
+  DucMark,
+  Bell,
+  Help,
+  Chart,
+  FileText,
+  Building,
+} from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 
@@ -18,12 +30,22 @@ export function DucLayout() {
   const location = useLocation();
   const isDetail = location.pathname !== "/";
   const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
 
   // Rotas de detalhe do DUC já têm barra de ações fixa no fundo — evita colisão
   const isDucDetail = location.pathname.startsWith("/duc/");
   const showFooterNav = !isDucDetail;
 
-  // Itens da footer nav (mobile)
+  // Itens da bottom nav (mobile)
   const navItems = [
     { to: "/", label: "Início", Icon: FileText, active: location.pathname === "/" },
     { to: "/dashboard", label: "Dashboard", Icon: Chart, active: location.pathname === "/dashboard" },
@@ -32,19 +54,29 @@ export function DucLayout() {
     { to: "/ajuda", label: "Ajuda", Icon: Help, active: location.pathname === "/ajuda" },
   ];
 
+  // Links do rodapé (desktop) — todos os destinos da app, com rótulos completos.
+  const footerLinks = [
+    { to: "/", label: "DUCs", Icon: FileText },
+    { to: "/dashboard", label: "Dashboard", Icon: Chart },
+    { to: "/notificacoes", label: "Notificações", Icon: Bell },
+    { to: "/config", label: "Configurações", Icon: Settings },
+    { to: "/ajuda", label: "Ajuda", Icon: Help },
+  ];
+
   return (
     <div className="app-canvas min-h-screen">
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/85 backdrop-blur print:hidden">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-3 sm:gap-3 sm:px-4">
           {/* Esquerda: seletor de organização (pesquisável) */}
-          <div className="flex flex-1 items-center">
+          <div className="flex min-w-0 flex-1 items-center">
             {orgs.length > 0 && (
               <Combobox
-                className="w-full max-w-[210px]"
+                className="w-full max-w-[140px] sm:max-w-[220px]"
                 value={activeOrgId ?? ""}
                 onChange={setActiveOrgId}
                 placeholder="Organização…"
                 searchPlaceholder="Pesquisar organização…"
+                icon={<Building width={15} height={15} />}
                 options={orgs.map((o) => ({ value: o.id, label: o.name }))}
               />
             )}
@@ -58,82 +90,93 @@ export function DucLayout() {
             className="flex shrink-0 items-center gap-2 text-brand transition-transform hover:scale-105"
           >
             <DucMark />
-            <span className="text-lg font-semibold tracking-tight text-slate-800">DUC</span>
+            <span className="hidden text-lg font-semibold tracking-tight text-slate-800 min-[400px]:inline">
+              DUC
+            </span>
           </Link>
 
-          {/* Direita: ações */}
-          <div className="flex flex-1 items-center justify-end gap-2.5">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
-                {initials(userName, userEmail)}
-              </div>
-              <div className="hidden text-right leading-tight md:block">
-                <div className="text-sm font-medium text-slate-700">{userName}</div>
-                <div className="text-[11px] text-slate-400">{userEmail}</div>
-              </div>
-            </div>
-
-            <Link
-              to="/dashboard"
-              title="Dashboard"
-              className={
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 " +
-                (location.pathname === "/dashboard" ? "text-brand" : "text-slate-400 hover:text-slate-700")
-              }
-            >
-              <Chart width={17} height={17} />
-            </Link>
-
-            <Link
-              to="/notificacoes"
-              title="Notificações"
-              className={
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 " +
-                (location.pathname === "/notificacoes" ? "text-brand" : "text-slate-400 hover:text-slate-700")
-              }
-            >
-              <Bell width={17} height={17} />
-            </Link>
-
-            <Link
-              to="/ajuda"
-              title="Ajuda"
-              className={
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 " +
-                (location.pathname === "/ajuda" ? "text-brand" : "text-slate-400 hover:text-slate-700")
-              }
-            >
-              <Help width={17} height={17} />
-            </Link>
-
-            <Link
-              to="/config"
-              title="Configurações do DUC"
-              className={
-                "inline-flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-slate-100 " +
-                (location.pathname === "/config" ? "text-brand" : "text-slate-400 hover:text-slate-700")
-              }
-            >
-              <Settings width={17} height={17} />
-            </Link>
-
-            <a
-              href={OLYVIA_URL}
-              target="_blank"
-              rel="noreferrer"
-              title="Ir para a Olyvia"
-              className="hidden h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-brand sm:inline-flex"
-            >
-              Olyvia <ExternalLink width={14} height={14} />
-            </a>
-
+          {/* Direita: menu do utilizador (dropdown) */}
+          <div ref={menuRef} className="relative flex min-w-0 flex-1 items-center justify-end">
             <button
-              onClick={() => setConfirmingLogout(true)}
-              title="Sair"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+              type="button"
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex max-w-full items-center gap-2.5 rounded-full py-1 pl-1 pr-1 transition-colors hover:bg-slate-100 sm:pr-2"
             >
-              <LogOut width={17} height={17} />
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
+                {initials(userName, userEmail)}
+              </span>
+              <span className="hidden min-w-0 max-w-[180px] text-left leading-tight md:block lg:max-w-[220px]">
+                <span className="block truncate text-sm font-medium text-slate-700">{userName}</span>
+                <span className="block truncate text-[11px] text-slate-400">{userEmail}</span>
+              </span>
+              <ChevronRight
+                width={15}
+                height={15}
+                className={cx(
+                  "hidden shrink-0 text-slate-400 transition-transform md:block",
+                  menuOpen ? "-rotate-90" : "rotate-90"
+                )}
+              />
             </button>
+
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-40 mt-2 w-[min(15rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-elevated animate-in-pop">
+                <div className="mb-1 flex items-center gap-2.5 rounded-lg bg-slate-50 px-2.5 py-2">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-xs font-semibold text-brand-800 ring-1 ring-inset ring-brand-100">
+                    {initials(userName, userEmail)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-700">{userName}</p>
+                    <p className="truncate text-[11px] text-slate-400">{userEmail}</p>
+                  </div>
+                </div>
+
+                {[
+                  { to: "/dashboard", label: "Dashboard", Icon: Chart },
+                  { to: "/notificacoes", label: "Notificações", Icon: Bell },
+                  { to: "/ajuda", label: "Ajuda", Icon: Help },
+                  { to: "/config", label: "Configurações", Icon: Settings },
+                ].map(({ to, label, Icon }) => {
+                  const active = location.pathname === to;
+                  return (
+                    <Link
+                      key={to}
+                      to={to}
+                      onClick={() => setMenuOpen(false)}
+                      className={cx(
+                        "flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm transition-colors sm:py-2",
+                        active ? "bg-brand-50 text-brand-800" : "text-slate-600 hover:bg-slate-50"
+                      )}
+                    >
+                      <Icon width={16} height={16} /> {label}
+                    </Link>
+                  );
+                })}
+
+                <a
+                  href={OLYVIA_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 sm:py-2"
+                >
+                  <ExternalLink width={16} height={16} /> Olyvia
+                </a>
+
+                <div className="my-1 h-px bg-slate-100" />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setConfirmingLogout(true);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
+                >
+                  <LogOut width={16} height={16} /> Sair
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -156,21 +199,122 @@ export function DucLayout() {
         <Outlet />
       </main>
 
+      {/* Footer rico — só desktop (mobile já tem a bottom nav). Todos os links do DUC. */}
+      <footer className="mt-10 hidden border-t border-slate-200/80 bg-white/60 print:hidden md:block">
+        <div className="mx-auto max-w-6xl px-4 py-9">
+          <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
+            {/* Marca + tagline */}
+            <div className="max-w-xs">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-2 text-brand transition-transform hover:scale-105"
+              >
+                <DucMark />
+                <span className="text-lg font-semibold tracking-tight text-slate-800">DUC</span>
+              </Link>
+              <p className="mt-2.5 text-xs leading-relaxed text-slate-400">
+                Documento Único de Cliente — todo o percurso do cliente, etapa a etapa, num só sítio.
+              </p>
+            </div>
+
+            {/* Todos os links, agrupados */}
+            <nav aria-label="Navegação do rodapé" className="grid grid-cols-2 gap-x-12 gap-y-6 sm:grid-cols-2">
+              <div>
+                <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Navegar
+                </p>
+                <ul className="space-y-1.5">
+                  {footerLinks.map(({ to, label, Icon }) => (
+                    <li key={to}>
+                      <Link
+                        to={to}
+                        className={cx(
+                          "group inline-flex items-center gap-2 text-sm transition-colors",
+                          location.pathname === to
+                            ? "font-medium text-brand"
+                            : "text-slate-500 hover:text-brand"
+                        )}
+                      >
+                        <Icon
+                          width={15}
+                          height={15}
+                          className="text-slate-400 transition-colors group-hover:text-brand"
+                        />
+                        {label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Mais
+                </p>
+                <ul className="space-y-1.5">
+                  <li>
+                    <a
+                      href={OLYVIA_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="group inline-flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-brand"
+                    >
+                      <ExternalLink
+                        width={15}
+                        height={15}
+                        className="text-slate-400 transition-colors group-hover:text-brand"
+                      />
+                      Plataforma Olyvia
+                    </a>
+                  </li>
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingLogout(true)}
+                      className="group inline-flex items-center gap-2 text-sm text-slate-500 transition-colors hover:text-red-600"
+                    >
+                      <LogOut
+                        width={15}
+                        height={15}
+                        className="text-slate-400 transition-colors group-hover:text-red-500"
+                      />
+                      Terminar sessão
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </nav>
+          </div>
+
+          <div className="mt-8 flex flex-col items-center justify-between gap-2 border-t border-slate-100 pt-5 text-[11px] text-slate-400 sm:flex-row">
+            <span>© {new Date().getFullYear()} Olyvia · Documento Único de Cliente</span>
+            <a
+              href={OLYVIA_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-brand"
+            >
+              olyvia-ai.com <ExternalLink width={12} height={12} />
+            </a>
+          </div>
+        </div>
+      </footer>
+
       {/* Bottom nav — apenas mobile; escondida no detalhe do DUC para não colidir */}
       {showFooterNav && (
-        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[max(0.4rem,env(safe-area-inset-bottom))] md:hidden print:hidden">
-          <div className="mx-auto flex max-w-6xl justify-around">
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur pb-[max(0.35rem,env(safe-area-inset-bottom))] md:hidden print:hidden">
+          <div className="mx-auto flex max-w-6xl items-stretch justify-around">
             {navItems.map(({ to, label, Icon, active }) => (
               <Link
                 key={to}
                 to={to}
+                aria-current={active ? "page" : undefined}
                 className={
-                  "flex flex-col items-center gap-0.5 px-2 py-1.5 text-[10px] transition-colors " +
-                  (active ? "text-brand" : "text-slate-400 hover:text-slate-600")
+                  "flex min-h-[46px] flex-1 basis-0 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] transition-colors " +
+                  (active ? "font-semibold text-brand" : "text-slate-400 hover:text-slate-600")
                 }
               >
                 <Icon width={20} height={20} />
-                {label}
+                <span className="max-w-full truncate">{label}</span>
               </Link>
             ))}
           </div>
@@ -180,7 +324,11 @@ export function DucLayout() {
       {confirmingLogout && (
         <ConfirmDialog
           title="Terminar sessão"
-          confirmLabel="Sair"
+          confirmLabel={
+            <>
+              <LogOut width={15} height={15} /> Sair
+            </>
+          }
           tone="brand"
           icon={<LogOut width={18} height={18} />}
           message={

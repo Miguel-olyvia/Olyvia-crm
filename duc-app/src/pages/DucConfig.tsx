@@ -33,6 +33,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  EmptyState,
   Select,
   Spinner,
   cx,
@@ -44,6 +45,9 @@ import {
   Settings,
   Building,
   Check,
+  ChevronRight,
+  FileText,
+  Sheet,
 } from "../components/icons";
 import {
   StageNodeComponent,
@@ -486,72 +490,85 @@ export default function DucConfig() {
   // ---- render -------------------------------------------------------------
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] min-h-[560px] flex-col">
-      {/* Toolbar */}
-      <Card className="mb-4 px-5 py-4">
-        <div className="flex flex-wrap items-center gap-4">
+    <div className="flex min-h-[560px] flex-col md:h-[calc(100vh-9rem)]">
+      {/* Toolbar — identidade à esquerda, org+estado ao centro, ações à direita.
+          Em mobile empilha em linhas que quebram sem transbordar. */}
+      <Card className="mb-4 px-4 py-3.5 sm:px-5 sm:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
+          {/* Identidade */}
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">
               <Settings width={18} height={18} />
             </span>
-            <div>
+            <div className="min-w-0">
               <h1 className="text-lg font-semibold leading-tight text-slate-800">
                 Configuração do DUC
               </h1>
-              <p className="text-xs text-slate-400">
-                Fluxo de etapas · arraste, clique para editar
+              <p className="truncate text-xs text-slate-400">
+                Fluxo de etapas · clique numa etapa para editar
               </p>
             </div>
           </div>
 
-          <div className="h-8 w-px bg-slate-200" />
+          <div className="hidden h-8 w-px bg-slate-200 lg:block" />
 
-          <label className="flex items-center gap-2">
-            <Building width={16} height={16} className="text-slate-400" />
-            <Select
-              value={orgId ?? ""}
-              onChange={(e) => setOrgId(e.target.value || null)}
-              className="min-w-[13rem]"
-            >
-              {orgs.length === 0 && <option value="">Sem organizações</option>}
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </Select>
-          </label>
+          {/* Organização + variante/estado */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <label className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+              <Building width={16} height={16} className="shrink-0 text-slate-400" />
+              <Select
+                value={orgId ?? ""}
+                onChange={(e) => setOrgId(e.target.value || null)}
+                className="min-w-0 flex-1 sm:min-w-[13rem]"
+              >
+                {orgs.length === 0 && <option value="">Sem organizações</option>}
+                {orgs.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
 
-          <div className="flex items-center gap-2">
-            <Badge className="bg-slate-50 text-slate-600 ring-slate-200">
-              {VARIANT_LABELS[variant]}
-            </Badge>
-            {custom ? (
-              <Badge className="bg-brand-50 text-brand-800 ring-brand-100">
-                <Check width={12} height={12} /> Personalizado
+            <div className="flex items-center gap-2">
+              <Badge className="bg-slate-50 text-slate-600 ring-slate-200">
+                {VARIANT_LABELS[variant]}
               </Badge>
-            ) : (
-              <Badge>Template base</Badge>
-            )}
+              {custom ? (
+                <Badge className="bg-brand-50 text-brand-800 ring-brand-100">
+                  <Check width={12} height={12} /> Personalizado
+                </Badge>
+              ) : (
+                <Badge>Template base</Badge>
+              )}
+            </div>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs">
+          {/* Estado de guardado + ações */}
+          <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+            <span className="mr-auto text-xs lg:mr-1">
               {error ? (
-                <span className="text-red-600">{error}</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 font-medium text-red-600 ring-1 ring-inset ring-red-100">
+                  <AlertTriangle width={13} height={13} /> {error}
+                </span>
               ) : saving ? (
-                <span className="text-slate-400">A guardar…</span>
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-1 text-slate-500 ring-1 ring-inset ring-slate-200">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate-400" />
+                  A guardar…
+                </span>
               ) : hasErrors ? (
-                <span className="inline-flex items-center gap-1 text-amber-600">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 font-medium text-amber-700 ring-1 ring-inset ring-amber-100">
                   <AlertTriangle width={13} height={13} /> Chaves em falta/duplicadas
                 </span>
               ) : dirty ? (
-                <span className="inline-flex items-center gap-1.5 text-amber-600">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2 py-1 font-medium text-amber-700 ring-1 ring-inset ring-amber-100">
                   <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
                   Alterações por guardar
                 </span>
               ) : savedAt ? (
-                <span className="text-slate-400">Guardado às {savedAt}</span>
+                <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2 py-1 font-medium text-teal-700 ring-1 ring-inset ring-teal-100">
+                  <Check width={13} height={13} /> Guardado às {savedAt}
+                </span>
               ) : (
                 ""
               )}
@@ -566,7 +583,9 @@ export default function DucConfig() {
               onClick={() => setConfirmReset(true)}
               disabled={saving || !custom}
             >
-              <AlertTriangle width={15} height={15} /> Repor template
+              <AlertTriangle width={15} height={15} />
+              <span className="hidden sm:inline">Repor template</span>
+              <span className="sm:hidden">Repor</span>
             </Button>
             <Button onClick={() => void save()} disabled={saving || !dirty || hasErrors}>
               <Save width={16} height={16} /> Guardar
@@ -575,27 +594,39 @@ export default function DucConfig() {
         </div>
       </Card>
 
-      {/* Canvas + inspetor */}
-      <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200/80 shadow-card">
+      {/* Canvas + inspetor. Em mobile a altura acompanha o conteúdo (lista);
+          em ≥md ocupa o resto do ecrã para o canvas ReactFlow. */}
+      <div className="relative min-h-[420px] flex-1 overflow-hidden rounded-xl border border-slate-200/80 shadow-card md:min-h-0">
         {loading ? (
-          <div className="flex h-full items-center justify-center bg-white">
+          <div className="flex h-full min-h-[420px] items-center justify-center bg-white">
             <Spinner label="A carregar configuração…" />
           </div>
         ) : !orgId ? (
-          <div className="flex h-full items-center justify-center bg-white p-10 text-center text-sm text-slate-500">
-            Selecione uma organização para configurar.
+          <div className="flex h-full min-h-[420px] items-center justify-center bg-white">
+            <EmptyState
+              icon={<Building width={22} height={22} />}
+              title="Selecione uma organização"
+              description="Escolha uma organização na barra acima para ver e configurar o fluxo do DUC."
+            />
           </div>
         ) : stages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 bg-white p-10 text-center">
-            <p className="text-sm text-slate-500">Sem etapas para esta organização.</p>
-            <Button variant="secondary" size="sm" onClick={addStage}>
-              <Plus width={15} height={15} /> Adicionar etapa
-            </Button>
+          <div className="flex h-full min-h-[420px] items-center justify-center bg-white">
+            <EmptyState
+              icon={<Settings width={22} height={22} />}
+              title="Sem etapas nesta organização"
+              description="Comece por adicionar a primeira etapa do fluxo."
+              action={
+                <Button variant="secondary" size="sm" onClick={addStage}>
+                  <Plus width={15} height={15} /> Adicionar etapa
+                </Button>
+              }
+            />
           </div>
         ) : (
           <>
+            {/* Canvas ReactFlow — só em ≥md (arrastar não funciona bem em ecrã pequeno). */}
             <ReactFlow
-              className="duc-flow"
+              className="duc-flow hidden h-full md:block"
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
@@ -623,10 +654,84 @@ export default function DucConfig() {
               />
             </ReactFlow>
 
-            {/* Drawer do inspetor */}
+            {/* Lista vertical de etapas — alternativa usável em mobile (< md).
+                Usa o MESMO estado/handler de seleção que o clique no nó. */}
+            <div className="h-full overflow-y-auto bg-slate-50/60 p-3 md:hidden">
+              <div className="mb-3 flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-[11px] text-slate-400 ring-1 ring-inset ring-slate-200">
+                <AlertTriangle width={12} height={12} className="shrink-0" />
+                Melhor visto em ecrã maior para arrastar as etapas.
+              </div>
+              <ul className="space-y-2">
+                {stages.map((stage, i) => {
+                  const stageHasError =
+                    (fieldKeyErrors[i]?.size ?? 0) > 0 ||
+                    stage.fields.some((f) => !f.key.trim());
+                  const sectionCount = stage.itemSections?.length ?? 0;
+                  return (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIdx(i)}
+                        className={cx(
+                          "flex w-full items-center gap-3 rounded-xl border bg-white px-3 py-3 text-left shadow-card transition-colors",
+                          selectedIdx === i
+                            ? "border-brand ring-2 ring-brand/30"
+                            : stageHasError
+                              ? "border-red-300"
+                              : "border-slate-200/80 hover:border-slate-300"
+                        )}
+                      >
+                        <span
+                          className={cx(
+                            "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold ring-1",
+                            stageHasError
+                              ? "bg-red-50 text-red-600 ring-red-100"
+                              : "bg-brand-50 text-brand-800 ring-brand-100"
+                          )}
+                        >
+                          {stage.no}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold leading-tight text-slate-800">
+                            {stage.title || "Sem título"}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs text-slate-400">
+                            {stage.responsible || "Sem responsável"}
+                          </p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            <span className="inline-flex items-center gap-1 rounded-md bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
+                              <FileText width={11} height={11} /> {stage.fields.length}{" "}
+                              {stage.fields.length === 1 ? "campo" : "campos"}
+                            </span>
+                            {sectionCount > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-teal-50 px-1.5 py-0.5 text-[11px] font-medium text-teal-700 ring-1 ring-inset ring-teal-100">
+                                <Sheet width={11} height={11} /> {sectionCount}{" "}
+                                {sectionCount === 1 ? "tabela" : "tabelas"}
+                              </span>
+                            )}
+                            {stageHasError && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600 ring-1 ring-inset ring-red-100">
+                                <AlertTriangle width={11} height={11} /> Chaves inválidas
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight
+                          width={16}
+                          height={16}
+                          className="shrink-0 text-slate-300"
+                        />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            {/* Drawer do inspetor — ecrã inteiro em mobile, painel lateral em ≥sm. */}
             <div
               className={cx(
-                "absolute inset-y-0 right-0 z-10 w-full max-w-[26rem] border-l border-slate-200 bg-white shadow-elevated transition-transform duration-200 ease-out",
+                "absolute inset-y-0 right-0 z-10 w-full border-l border-slate-200 bg-white shadow-elevated transition-transform duration-200 ease-out sm:max-w-[26rem]",
                 selectedStage ? "translate-x-0" : "pointer-events-none translate-x-full"
               )}
             >

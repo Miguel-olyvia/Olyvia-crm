@@ -172,6 +172,7 @@ export function Combobox({
   searchPlaceholder = "Pesquisar…",
   className,
   disabled,
+  icon,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -180,6 +181,7 @@ export function Combobox({
   searchPlaceholder?: string;
   className?: string;
   disabled?: boolean;
+  icon?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -222,8 +224,9 @@ export function Combobox({
         type="button"
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
+        className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors hover:border-slate-300 focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:opacity-50"
       >
+        {icon && <span className="shrink-0 text-slate-400">{icon}</span>}
         <span className={cx("min-w-0 flex-1 truncate text-left", !selected && "text-slate-400")}>
           {selected ? selected.label : placeholder}
         </span>
@@ -416,9 +419,12 @@ export function ConfirmDialog({
 }: {
   title: string;
   message: ReactNode;
-  confirmLabel?: string;
-  /** "danger" (vermelho, default) ou "brand" (ação positiva, ex.: fechar etapa). */
-  tone?: "danger" | "brand";
+  confirmLabel?: ReactNode;
+  /**
+   * "danger" (vermelho, default), "brand" (ação positiva, ex.: fechar etapa) ou
+   * "neutral" (slate, ação sem peso, ex.: dispensar etapa).
+   */
+  tone?: "danger" | "brand" | "neutral";
   icon?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
@@ -426,7 +432,9 @@ export function ConfirmDialog({
   const bubble =
     tone === "brand"
       ? "bg-brand-50 text-brand-700 ring-brand-100"
-      : "bg-red-50 text-red-500 ring-red-100";
+      : tone === "neutral"
+        ? "bg-slate-100 text-slate-500 ring-slate-200"
+        : "bg-red-50 text-red-500 ring-red-100";
   return (
     <Modal
       title={title}
@@ -435,9 +443,12 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" onClick={onCancel}>
-            Cancelar
+            <X width={15} height={15} /> Cancelar
           </Button>
-          <Button variant={tone === "brand" ? "primary" : "danger"} onClick={onConfirm}>
+          <Button
+            variant={tone === "brand" ? "primary" : tone === "neutral" ? "secondary" : "danger"}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </Button>
         </>
@@ -474,25 +485,29 @@ export function Modal({
   const widths = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" };
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm animate-in-fade"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm animate-in-fade sm:items-center sm:p-4"
       onClick={onClose}
     >
       <div
         className={cx(
-          "w-full overflow-hidden rounded-2xl bg-white shadow-elevated animate-in-pop",
+          // Bottom-sheet em mobile (sobe de baixo, cantos só em cima); modal
+          // centrado em ≥sm. Corpo com scroll para conteúdos longos.
+          "flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-elevated animate-in-pop sm:max-h-[85vh] sm:rounded-2xl",
           widths[size]
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+        {/* Puxador (só mobile) */}
+        <div className="mx-auto mt-2 h-1.5 w-10 shrink-0 rounded-full bg-slate-200 sm:hidden" />
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-5 py-4">
           <h2 className="text-base font-semibold text-slate-800">{title}</h2>
           <IconButton label="Fechar" onClick={onClose}>
             <X width={16} height={16} />
           </IconButton>
         </div>
-        <div className="px-5 py-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3.5">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))]">
             {footer}
           </div>
         )}

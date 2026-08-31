@@ -39,6 +39,9 @@ task-done.ps1
 
 # Documentation lives outside the Git repository in ../vault
 docs/
+# ...menos os do modulo de Operacoes, que fazem parte dele e sao ligados
+# a partir do operacao-app/README.md.
+!operacao-app/docs/
 ficheiros/
 
 .env

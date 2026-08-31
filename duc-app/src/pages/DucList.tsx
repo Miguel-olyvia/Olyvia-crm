@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
@@ -15,9 +15,11 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
 import { StatusSelect } from "../components/StatusSelect";
+import { Celebration } from "../components/Celebration";
+import { fetchDismissedClientIds, dismissClient, restoreClient } from "../lib/dismissed";
 import {
   STATUS_LABELS,
   VARIANT_LABELS,
@@ -28,6 +30,7 @@ import {
 import { entityDisplayName } from "../lib/names";
 import { fetchClientOlyviaInfo, prefillBlocksFromInfo } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
+import { isStageResolved } from "../lib/types";
 import type { ClientOption, DucRecord, DucStatus, TrackingEntry } from "../lib/types";
 
 function entityName(row: {
@@ -39,7 +42,86 @@ function entityName(row: {
 }
 
 function doneCount(tracking: TrackingEntry[] | null | undefined): number {
-  return (tracking ?? []).filter((t) => t.state === "done").length;
+  return (tracking ?? []).filter((t) => isStageResolved(t.state)).length;
+}
+
+// Base da plataforma Olyvia (o CRM) — para deep-links como "Ver proposta".
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
+
+/**
+ * Menu de ações por DUC (lista): abrir o DUC, ver a proposta ligada na Olyvia
+ * (o id da proposta é obtido on-demand ao abrir), e ver os contratos do cliente.
+ */
+function DucActionsMenu({ duc, onOpen }: { duc: DucRecord; onOpen: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [loadingProposal, setLoadingProposal] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const openProposal = async () => {
+    if (loadingProposal) return;
+    if (!duc.client_id) {
+      window.open(`${OLYVIA_URL}/proposals`, "_blank", "noopener");
+      setOpen(false);
+      return;
+    }
+    setLoadingProposal(true);
+    const info = await fetchClientOlyviaInfo(duc.client_id);
+    setLoadingProposal(false);
+    setOpen(false);
+    const url = info?.proposalId
+      ? `${OLYVIA_URL}/proposals?open=${info.proposalId}`
+      : `${OLYVIA_URL}/proposals`;
+    window.open(url, "_blank", "noopener");
+  };
+
+  const itemCls =
+    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-slate-600 transition-colors hover:bg-slate-50";
+
+  return (
+    <div ref={ref} className="relative inline-block text-left" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Ações"
+        aria-label="Ações do DUC"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <circle cx="12" cy="5" r="1.6" />
+          <circle cx="12" cy="12" r="1.6" />
+          <circle cx="12" cy="19" r="1.6" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-elevated animate-in-pop">
+          <button type="button" className={itemCls} onClick={() => { setOpen(false); onOpen(duc.id); }}>
+            <FileText width={16} height={16} className="text-slate-400" /> Abrir DUC
+          </button>
+          <button type="button" className={cx(itemCls, loadingProposal && "opacity-60")} onClick={() => void openProposal()}>
+            <ExternalLink width={16} height={16} className="text-slate-400" />
+            {loadingProposal ? "A abrir proposta…" : "Ver proposta na Olyvia"}
+          </button>
+          <a
+            href={`${OLYVIA_URL}/client-contracts`}
+            target="_blank"
+            rel="noreferrer"
+            className={itemCls}
+            onClick={() => setOpen(false)}
+          >
+            <Building width={16} height={16} className="text-slate-400" /> Ver contratos
+          </a>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -206,8 +288,10 @@ export default function DucList() {
   const [showCreate, setShowCreate] = useState(false);
   const [presetClient, setPresetClient] = useState<ClientOption | null>(null);
   const [deleting, setDeleting] = useState<DucRecord | null>(null);
+  const [celebrateId, setCelebrateId] = useState<string | null>(null);
 
   const [pending, setPending] = useState<ClientOption[]>([]);
+  const [dismissedClients, setDismissedClients] = useState<ClientOption[]>([]);
   const [contractCount, setContractCount] = useState(0);
   const [loadingPending, setLoadingPending] = useState(false);
 
@@ -329,9 +413,30 @@ export default function DucList() {
     }
     const withDuc = new Set((withDucRows ?? []).map((r) => r.client_id as string));
     setContractCount(valid.length);
-    setPending(valid.filter((c) => !withDuc.has(c.id)));
+    // Exclui os "dispensados" (não precisam de DUC) da lista de por documentar.
+    const dismissed = await fetchDismissedClientIds(activeOrgId);
+    const notDocumented = valid.filter((c) => !withDuc.has(c.id));
+    setPending(notDocumented.filter((c) => !dismissed.has(c.id)));
+    setDismissedClients(notDocumented.filter((c) => dismissed.has(c.id)));
     setLoadingPending(false);
   }, [activeOrgId, businessUserId]);
+
+  const handleDismiss = useCallback(
+    async (c: ClientOption) => {
+      if (!activeOrgId) return;
+      await dismissClient(c.id, activeOrgId, businessUserId);
+      void loadPending();
+    },
+    [activeOrgId, businessUserId, loadPending]
+  );
+  const handleRestore = useCallback(
+    async (c: ClientOption) => {
+      if (!activeOrgId) return;
+      await restoreClient(c.id, activeOrgId);
+      void loadPending();
+    },
+    [activeOrgId, loadPending]
+  );
 
   useEffect(() => {
     if (view === "pending") void loadPending();
@@ -474,48 +579,54 @@ export default function DucList() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
             Documento Único de Cliente
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
             Vês os clientes da tua área com contrato assinado.
           </p>
         </div>
-        <Button onClick={() => openCreate(null)} disabled={!activeOrgId}>
+        <Button
+          onClick={() => openCreate(null)}
+          disabled={!activeOrgId}
+          className="w-full justify-center sm:w-auto"
+        >
           <Plus width={16} height={16} /> Novo DUC
         </Button>
       </div>
 
-      {/* Abas */}
-      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      {/* Abas — largura total e distribuídas em mobile; inline em desktop */}
+      <div className="flex w-full rounded-lg border border-slate-200 bg-white p-1 shadow-sm sm:inline-flex sm:w-auto">
         <button
           onClick={() => setView("ducs")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "ducs" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          DUCs {totalDucs > 0 && `(${totalDucs})`}
+          <FileText width={15} height={15} className="shrink-0" /> DUCs {totalDucs > 0 && `(${totalDucs})`}
         </button>
         <button
           onClick={() => setView("kanban")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "kanban" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          Kanban
+          <Sheet width={15} height={15} className="shrink-0" /> Kanban
         </button>
         <button
           onClick={() => setView("pending")}
           className={
-            "rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors " +
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
             (view === "pending" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
           }
         >
-          Por documentar
+          <Building width={15} height={15} className="shrink-0" />{" "}
+          <span className="sm:hidden">Pendentes</span>
+          <span className="hidden sm:inline">Por documentar</span>
         </button>
       </div>
 
@@ -545,7 +656,7 @@ export default function DucList() {
         />
       ) : view === "kanban" ? (
         <div className="space-y-3">
-          <div className="relative sm:max-w-xs">
+          <div className="relative w-full sm:max-w-xs">
             <Search
               width={16}
               height={16}
@@ -567,22 +678,34 @@ export default function DucList() {
               <Spinner label="A carregar etapas…" />
             </Card>
           ) : (
-            <DucKanban
-              ducs={filtered}
-              clientNames={clientNames}
-              stages={kanbanStages}
-              onDropCard={requestMove}
-              onOpen={(id) => navigate(`/duc/${id}`)}
-            />
+            <>
+              {/* Indício de que o quadro faz scroll lateral (só em ecrãs estreitos) */}
+              {kanbanStages.length > 1 && (
+                <p className="flex items-center gap-1 text-xs text-slate-400 sm:hidden">
+                  <ChevronRight width={13} height={13} className="animate-pulse" />
+                  Desliza para o lado para ver as {kanbanStages.length} etapas
+                </p>
+              )}
+              <DucKanban
+                ducs={filtered}
+                clientNames={clientNames}
+                stages={kanbanStages}
+                onDropCard={requestMove}
+                onOpen={(id) => navigate(`/duc/${id}`)}
+              />
+            </>
           )}
         </div>
       ) : (
         <PendingView
           loading={loadingPending}
           pending={pending}
+          dismissedClients={dismissedClients}
           contractCount={contractCount}
-          ducCount={Math.max(0, contractCount - pending.length)}
+          ducCount={Math.max(0, contractCount - pending.length - dismissedClients.length)}
           onCreate={(c) => openCreate(c)}
+          onDismiss={handleDismiss}
+          onRestore={handleRestore}
         />
       )}
 
@@ -596,7 +719,22 @@ export default function DucList() {
             setShowCreate(false);
             setPresetClient(null);
           }}
-          onCreated={(id) => navigate(`/duc/${id}`)}
+          onCreated={(id) => {
+            // Fecha o modal e festeja antes de abrir o novo DUC.
+            setShowCreate(false);
+            setPresetClient(null);
+            setCelebrateId(id);
+          }}
+        />
+      )}
+
+      {celebrateId && (
+        <Celebration
+          onDone={() => {
+            const id = celebrateId;
+            setCelebrateId(null);
+            navigate(`/duc/${id}`);
+          }}
         />
       )}
 
@@ -817,7 +955,7 @@ function DucsView({
                         {d.duc_number ?? "—"}
                       </div>
                     </div>
-                    <div onClick={(e) => e.stopPropagation()}>
+                    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                       <StatusSelect
                         value={d.status}
                         onChange={(s) => onStatusChange(d.id, s)}
@@ -826,11 +964,11 @@ function DucsView({
                   </div>
 
                   <div className="mt-3 flex items-center gap-2">
-                    <Badge className="bg-brand-50 text-brand-800 ring-brand-100">
-                      {VARIANT_LABELS[d.variant]}
+                    <Badge className="min-w-0 max-w-[45%] bg-brand-50 text-brand-800 ring-brand-100">
+                      <span className="truncate">{VARIANT_LABELS[d.variant]}</span>
                     </Badge>
-                    <div className="ml-auto flex items-center gap-2">
-                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100 sm:w-20">
                         <div
                           className="h-full rounded-full bg-brand transition-all"
                           style={{ width: `${(done / total) * 100}%` }}
@@ -840,24 +978,28 @@ function DucsView({
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5">
-                    <div className="flex items-center gap-2">
+                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <OpenBadge duc={d} />
                       <span className="text-xs text-slate-400">
                         {new Date(d.updated_at).toLocaleDateString("pt-PT")}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      title="Eliminar"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-red-50 hover:text-red-500"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDelete(d);
-                      }}
-                    >
-                      <Trash width={15} height={15} />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <DucActionsMenu duc={d} onOpen={onOpen} />
+                      <button
+                        type="button"
+                        title="Eliminar"
+                        aria-label="Eliminar DUC"
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500 active:bg-red-50 active:text-red-500"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDelete(d);
+                        }}
+                      >
+                        <Trash width={16} height={16} />
+                      </button>
+                    </div>
                   </div>
                 </Card>
               );
@@ -946,17 +1088,20 @@ function DucsView({
                         {new Date(d.updated_at).toLocaleDateString("pt-PT")}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          title="Eliminar"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(d);
-                          }}
-                        >
-                          <Trash width={15} height={15} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <DucActionsMenu duc={d} onOpen={onOpen} />
+                          <button
+                            type="button"
+                            title="Eliminar"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(d);
+                            }}
+                          >
+                            <Trash width={15} height={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -990,10 +1135,41 @@ function StatRow({
   ducCount: number;
   pendingCount: number;
 }) {
-  const items = [
-    { label: "Clientes com contrato", value: contractCount, color: "text-slate-800", dot: "bg-slate-300" },
-    { label: "Com DUC", value: ducCount, color: "text-emerald-600", dot: "bg-emerald-500" },
-    { label: "Por documentar", value: pendingCount, color: "text-amber-600", dot: "bg-amber-500" },
+  // Destaca "Por documentar" quando há pendentes: acento âmbar (>0) ou vermelho
+  // se o volume for elevado. Cada cartão tem ícone próprio.
+  const alert = pendingCount > 0;
+  const items: Array<{
+    label: string;
+    value: number;
+    icon: JSX.Element;
+    accent: string; // cor do valor + ícone
+    ring: string; // moldura do cartão (destaque)
+    iconBg: string; // fundo do ícone
+  }> = [
+    {
+      label: "Clientes com contrato",
+      value: contractCount,
+      icon: <Building width={16} height={16} />,
+      accent: "text-slate-800",
+      ring: "ring-slate-200",
+      iconBg: "bg-slate-100 text-slate-500",
+    },
+    {
+      label: "Com DUC",
+      value: ducCount,
+      icon: <FileText width={16} height={16} />,
+      accent: "text-emerald-600",
+      ring: "ring-emerald-100",
+      iconBg: "bg-emerald-50 text-emerald-600",
+    },
+    {
+      label: "Por documentar",
+      value: pendingCount,
+      icon: alert ? <AlertTriangle width={16} height={16} /> : <FileText width={16} height={16} />,
+      accent: alert ? "text-amber-600" : "text-slate-800",
+      ring: alert ? "ring-2 ring-amber-200" : "ring-slate-200",
+      iconBg: alert ? "bg-amber-50 text-amber-600" : "bg-slate-100 text-slate-500",
+    },
   ];
   const pct = contractCount > 0 ? Math.round((ducCount / contractCount) * 100) : 0;
   return (
@@ -1002,50 +1178,128 @@ function StatRow({
         {items.map((s) => (
           <Card
             key={s.label}
-            className="p-3.5 transition-shadow duration-150 hover:shadow-elevated sm:p-4"
+            className={cx(
+              "p-3.5 transition-shadow duration-150 hover:shadow-elevated sm:p-4",
+              s.ring
+            )}
           >
-            <div className={cx("text-2xl font-semibold tabular-nums sm:text-3xl", s.color)}>
-              {s.value}
+            <div className="flex items-center justify-between gap-2">
+              <div className={cx("text-2xl font-semibold tabular-nums sm:text-3xl", s.accent)}>
+                {s.value}
+              </div>
+              <span
+                className={cx(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+                  s.iconBg
+                )}
+              >
+                {s.icon}
+              </span>
             </div>
-            <div className="mt-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:text-[11px]">
-              <span className={cx("h-1.5 w-1.5 shrink-0 rounded-full", s.dot)} />
+            <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:text-[11px]">
               <span className="truncate">{s.label}</span>
             </div>
           </Card>
         ))}
       </div>
       {/* Barra de cobertura — quantos clientes já têm DUC */}
-      <div className="flex items-center gap-3 px-0.5">
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
-          <div
-            className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
+      <div className="space-y-1 px-0.5">
+        <div className="flex items-center gap-3">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className="text-xs font-medium tabular-nums text-slate-600">{pct}%</span>
         </div>
-        <span className="text-xs tabular-nums text-slate-500">{pct}% documentado</span>
+        <div className="flex items-center justify-between text-[11px] text-slate-400">
+          <span>{ducCount} documentados</span>
+          <span>{pendingCount > 0 ? `${pendingCount} por documentar` : "tudo documentado"}</span>
+        </div>
       </div>
     </div>
   );
 }
 
+/** Tom (classes) do badge de urgência a partir dos dias sem DUC. */
+function urgencyTone(days: number): { badge: string; avatar: string } {
+  if (days <= 7) {
+    return {
+      badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      avatar: "bg-emerald-50 text-emerald-600 ring-emerald-100",
+    };
+  }
+  if (days <= 30) {
+    return {
+      badge: "bg-amber-50 text-amber-700 ring-amber-200",
+      avatar: "bg-amber-50 text-amber-600 ring-amber-100",
+    };
+  }
+  return {
+    badge: "bg-red-50 text-red-700 ring-red-200",
+    avatar: "bg-red-50 text-red-600 ring-red-100",
+  };
+}
+
+/** Iniciais do cliente para o avatar (fallback a "?"). */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last).toUpperCase() || "?";
+}
+
 function PendingView({
   loading,
   pending,
+  dismissedClients,
   contractCount,
   ducCount,
   onCreate,
+  onDismiss,
+  onRestore,
 }: {
   loading: boolean;
   pending: ClientOption[];
+  dismissedClients: ClientOption[];
   contractCount: number;
   ducCount: number;
   onCreate: (c: ClientOption) => void;
+  onDismiss: (c: ClientOption) => void;
+  onRestore: (c: ClientOption) => void;
 }) {
   const [q, setQ] = useState("");
+  // Hero do resumo pode ser fechado (só nesta sessão) — não é um alerta permanente.
+  const [heroClosed, setHeroClosed] = useState(false);
+  // Cliente a dispensar ("não precisa de DUC") a aguardar confirmação.
+  const [confirmingDismiss, setConfirmingDismiss] = useState<ClientOption | null>(null);
+
+  // Ordena por urgência: mais dias sem DUC primeiro. Sem `since` vai para o fim.
+  const sorted = useMemo(() => {
+    return [...pending].sort((a, b) => {
+      const da = a.since ? daysSince(a.since) : -1;
+      const db = b.since ? daysSince(b.since) : -1;
+      return db - da; // descendente por dias → mais antigo primeiro
+    });
+  }, [pending]);
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return s ? pending.filter((c) => c.name.toLowerCase().includes(s)) : pending;
-  }, [pending, q]);
+    return s ? sorted.filter((c) => c.name.toLowerCase().includes(s)) : sorted;
+  }, [sorted, q]);
+
+  // Cliente mais antigo à espera de DUC (para o hero).
+  const oldest = useMemo(() => {
+    let best: { c: ClientOption; days: number } | null = null;
+    for (const c of pending) {
+      if (!c.since) continue;
+      const d = daysSince(c.since);
+      if (!best || d > best.days) best = { c, days: d };
+    }
+    return best;
+  }, [pending]);
 
   if (loading) {
     return (
@@ -1060,13 +1314,59 @@ function PendingView({
       {pending.length === 0 ? (
         <Card>
           <EmptyState
-            icon={<Building width={22} height={22} />}
+            icon={<ClientSketch width={24} height={24} />}
             title="Nada por documentar"
-            description="Todos os clientes da área com contrato válido já têm DUC. 🎉"
+            description="Todos os clientes da área com contrato válido já têm DUC."
           />
         </Card>
       ) : (
         <>
+          {/* Hero — resumo da área com o caso mais urgente em destaque (fechável) */}
+          {!heroClosed && (
+            <Card className="relative border-amber-200 bg-gradient-to-br from-amber-50 to-white p-4 ring-amber-100 sm:p-5">
+              <button
+                type="button"
+                onClick={() => setHeroClosed(true)}
+                aria-label="Fechar resumo"
+                title="Fechar resumo"
+                className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg text-amber-500/70 transition-colors hover:bg-amber-100/70 hover:text-amber-700"
+              >
+                <X width={16} height={16} />
+              </button>
+              <div className="flex flex-col gap-3 pr-8 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3 sm:items-center">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-600 ring-1 ring-inset ring-amber-200">
+                    <ClientSketch width={24} height={24} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold text-slate-900 sm:text-lg">
+                      {pending.length} cliente{pending.length === 1 ? "" : "s"} à espera de DUC
+                    </p>
+                    {oldest ? (
+                      <p className="text-sm text-slate-500">
+                        O mais antigo é{" "}
+                        <span className="font-medium text-slate-700">{oldest.c.name}</span>, há{" "}
+                        <span className="font-medium text-amber-700">{oldest.days} dias</span> sem
+                        documentar.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
+                    )}
+                  </div>
+                </div>
+                {oldest && (
+                  <Button
+                    size="sm"
+                    onClick={() => onCreate(oldest.c)}
+                    className="w-full justify-center sm:w-auto"
+                  >
+                    <Plus width={14} height={14} /> Documentar o mais antigo
+                  </Button>
+                )}
+              </div>
+            </Card>
+          )}
+
           <div className="relative">
             <Search
               width={16}
@@ -1089,30 +1389,134 @@ function PendingView({
               />
             </Card>
           ) : (
-            <Card className="overflow-hidden">
-      <ul className="divide-y divide-slate-100">
-        {filtered.map((c) => (
-          <li key={c.id} className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50/60">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-50 text-brand-800 ring-1 ring-inset ring-brand-100">
-              <Building width={16} height={16} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate font-medium text-slate-800">{c.name}</p>
-              <p className="text-xs text-slate-400">
-                {c.since
-                  ? `Contrato há ${daysSince(c.since)} dias · sem DUC`
-                  : "Contrato válido · sem DUC"}
-              </p>
-            </div>
-            <Button size="sm" onClick={() => onCreate(c)}>
-              <Plus width={14} height={14} /> Criar DUC <ChevronRight width={14} height={14} />
-            </Button>
-          </li>
-        ))}
-      </ul>
-            </Card>
+            <ul className="space-y-2.5">
+              {filtered.map((c) => {
+                const days = c.since ? daysSince(c.since) : null;
+                const tone = urgencyTone(days ?? 0);
+                const daysLabel =
+                  days === null
+                    ? "sem data de contrato"
+                    : days === 0
+                      ? "hoje"
+                      : days === 1
+                        ? "há 1 dia"
+                        : `há ${days} dias`;
+                return (
+                  <li key={c.id}>
+                    <Card className="flex flex-col gap-3 p-4 transition-shadow duration-150 hover:shadow-elevated sm:flex-row sm:items-center">
+                      {/* Avatar com iniciais, cor por urgência */}
+                      <span
+                        className={cx(
+                          "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ring-1 ring-inset",
+                          days === null ? "bg-slate-100 text-slate-500 ring-slate-200" : tone.avatar
+                        )}
+                      >
+                        {initials(c.name)}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-800">{c.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {days === null ? (
+                            <Badge className="bg-slate-50 text-slate-500 ring-slate-200">
+                              <Clock width={12} height={12} className="mr-1" />
+                              sem data · sem DUC
+                            </Badge>
+                          ) : (
+                            <Badge className={tone.badge}>
+                              <Clock width={12} height={12} className="mr-1" />
+                              {daysLabel} sem DUC
+                            </Badge>
+                          )}
+                          {days !== null && days > 30 && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-red-600">
+                              <AlertTriangle width={12} height={12} /> urgente
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex w-full gap-2 sm:w-auto">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirmingDismiss(c)}
+                          title="Este cliente não precisa de DUC"
+                          className="min-h-[40px] flex-1 justify-center whitespace-nowrap border border-slate-200 sm:min-h-0 sm:flex-none sm:border-0"
+                        >
+                          Não precisa
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="min-h-[40px] flex-1 justify-center sm:min-h-0 sm:flex-none"
+                          onClick={() => onCreate(c)}
+                        >
+                          <Plus width={14} height={14} /> Criar DUC{" "}
+                          <ChevronRight width={14} height={14} />
+                        </Button>
+                      </div>
+                    </Card>
+                  </li>
+                );
+              })}
+            </ul>
           )}
         </>
+      )}
+
+      {confirmingDismiss && (
+        <ConfirmDialog
+          title="Marcar cliente como “Não precisa”"
+          tone="neutral"
+          confirmLabel={
+            <>
+              <X width={15} height={15} /> Não precisa
+            </>
+          }
+          icon={<ClientSketch width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que{" "}
+              <span className="font-medium text-slate-800">{confirmingDismiss.name}</span> não
+              precisa de DUC? Sai da lista de pendentes e vai para “Dispensados”, de onde podes
+              repor a qualquer momento.
+            </>
+          }
+          onCancel={() => setConfirmingDismiss(null)}
+          onConfirm={() => {
+            onDismiss(confirmingDismiss);
+            setConfirmingDismiss(null);
+          }}
+        />
+      )}
+
+      {/* Dispensados — clientes marcados como "não precisa de DUC" (reversível). */}
+      {dismissedClients.length > 0 && (
+        <Card className="p-4">
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-600">
+            <ClientSketch width={16} height={16} className="text-slate-400" />
+            Dispensados ({dismissedClients.length}){" "}
+            <span className="font-normal text-slate-400">— não precisam de DUC · podes repor</span>
+          </p>
+          <ul className="divide-y divide-slate-100">
+            {dismissedClients.map((c) => (
+              <li key={c.id} className="flex items-center gap-3 py-2">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-semibold text-slate-500">
+                  {initials(c.name)}
+                </span>
+                <p className="min-w-0 flex-1 truncate text-sm text-slate-500">{c.name}</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => onRestore(c)}
+                >
+                  Repor
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
   );

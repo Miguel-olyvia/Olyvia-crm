@@ -3,10 +3,11 @@ import { useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Badge, Button, Card, Combobox, ConfirmDialog, Modal, Spinner, Textarea, Toggle, cx } from "../components/ui";
-import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock } from "../components/icons";
+import { Printer, Save, Check, Trash, Plus, Paperclip, FileText, AlertTriangle, Clock, ExternalLink, X, Upload } from "../components/icons";
 import { AttachmentsPanel } from "../components/AttachmentsPanel";
 import { StatusSelect } from "../components/StatusSelect";
 import { StageFlowView } from "../components/flow/StageFlowView";
+import { DucChat } from "../components/DucChat";
 import {
   fetchClientOlyviaInfo,
   prefillBlocksFromInfo,
@@ -19,6 +20,19 @@ import {
 import { fetchEffectiveStages } from "../lib/ducConfig";
 import { notifyStage } from "../lib/notify";
 import { logDucEvent, fetchDucEvents, type DucEvent } from "../lib/events";
+import {
+  fetchCollaborators,
+  addCollaborator,
+  removeCollaborator,
+  sendMagicLink,
+  type DucCollaborator,
+} from "../lib/collaborators";
+import {
+  fetchShares,
+  createShare,
+  revokeShare,
+  type PublicShare,
+} from "../lib/publicShare";
 import {
   CHANGE_LOG_COLUMNS,
   STATUS_LABELS,
@@ -52,6 +66,9 @@ const nextKey = () => `tmp-${keyCounter++}`;
 
 const AUTOSAVE_MS = 2500;
 
+// Base da plataforma Olyvia (o CRM) — para deep-links como "Ver proposta".
+const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
+
 export default function DucDetail() {
   const { id } = useParams<{ id: string }>();
   const { businessUserId, userName } = useAuth();
@@ -67,6 +84,8 @@ export default function DucDetail() {
   const [currentStage, setCurrentStage] = useState(1);
   const [items, setItems] = useState<LocalItem[]>([]);
   const [clientName, setClientName] = useState<string | null>(null);
+  // Id da proposta ligada (para o deep-link "Ver proposta" na Olyvia).
+  const [proposalId, setProposalId] = useState<string | null>(null);
   // Estrutura efetiva das etapas para esta organização (config dinâmica por
   // entidade; cai no template base quando a org não tem override guardado).
   const [configStages, setConfigStages] = useState<DucStage[]>([]);
@@ -79,8 +98,23 @@ export default function DucDetail() {
 
   // Etapa a aguardar confirmação de fecho (null = sem diálogo aberto).
   const [confirmingClose, setConfirmingClose] = useState<number | null>(null);
-  // Fecho bloqueado (ordem das etapas OU campos obrigatórios em falta).
-  const [blockedClose, setBlockedClose] = useState<{ title: string; items: string[] } | null>(null);
+  // Etapa a dispensar ("Não precisa") a aguardar confirmação.
+  const [confirmingSkip, setConfirmingSkip] = useState<number | null>(null);
+  // Fecho/avanço bloqueado (ordem das etapas OU campos obrigatórios em falta).
+  // `intro` permite reaproveitar o modal para o fecho e para o avanço de etapa.
+  const [blockedClose, setBlockedClose] = useState<
+    { title: string; items: string[]; intro?: string } | null
+  >(null);
+  // Link público gerado a partir do cabeçalho.
+  const [shareModalUrl, setShareModalUrl] = useState<string | null>(null);
+  const [sharingHeader, setSharingHeader] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+
+  // Âmbito da impressão: documento completo ou só a etapa em foco. O menu de PDF
+  // (cabeçalho + barra mobile) escreve aqui antes de chamar window.print().
+  const [printScope, setPrintScope] = useState<"all" | "current">("all");
+  // Controla a abertura do menu de PDF (desktop e mobile partilham o estado).
+  const [pdfMenuOpen, setPdfMenuOpen] = useState(false);
 
   const savingRef = useRef(false);
   // Conta cada edição; usada para NÃO limpar `dirty` quando o utilizador altera
@@ -153,6 +187,7 @@ export default function DucDetail() {
       const info = await fetchClientOlyviaInfo(row.client_id);
       if (info) {
         setClientName(info.name);
+        setProposalId(info.proposalId);
         setBlocks(mergePrefill(row.blocks ?? {}, prefillBlocksFromInfo(info)));
         // Semeia itens a partir das linhas do orçamento assinado nas secções que
         // a configuração desta organização tem — âmbito ("o que foi VENDIDO"),
@@ -164,17 +199,25 @@ export default function DucDetail() {
         const seedFor = (section: DucSection, lines: ScopeLine[]): LocalItem[] => {
           if (!presentSections.has(section)) return [];
           if ((itemRows ?? []).some((r) => r.section === section)) return [];
-          return lines.map((l, idx) => ({
-            key: nextKey(),
-            section,
-            position: idx,
-            label: l.label,
-            description: l.description,
-            qty: l.qty,
-            unit: l.unit,
-            included: true,
-            meta: {} as Record<string, unknown>,
-          }));
+          return lines.map((l, idx) => {
+            // Colunas próprias vão nos campos base; atributos do produto (Modelo/Cor,
+            // Dimensão) são colunas `own:false` → guardadas em `meta`. Observações usa
+            // a descrição da linha ou, em falta, os restantes atributos.
+            const meta: Record<string, unknown> = {};
+            if (l.modeloCor) meta.modelo_cor = l.modeloCor;
+            if (l.dimensao) meta.dimensao = l.dimensao;
+            return {
+              key: nextKey(),
+              section,
+              position: idx,
+              label: l.label,
+              description: l.description || l.otherAttrs || "",
+              qty: l.qty,
+              unit: l.unit,
+              included: true,
+              meta,
+            };
+          });
         };
         const seeded = [
           ...seedFor("scope", prefillScopeItemsFromInfo(info)),
@@ -245,6 +288,50 @@ export default function DucDetail() {
     }
     return true;
   };
+  // Dispensa/reativa uma etapa ("Não precisa"). Persiste já (como o fecho) e
+  // regista quem/quando dispensou. Reativar volta ao estado `pending` e limpa a
+  // assinatura. Devolve true se gravou.
+  const skipStage = async (stage: number, skip: boolean): Promise<boolean> => {
+    const patch = {
+      state: (skip ? "skipped" : "pending") as TrackingEntry["state"],
+      date: skip ? new Date().toISOString().slice(0, 10) : null,
+      signed_by: skip ? userName ?? businessUserId ?? "—" : null,
+    };
+    const newTracking: TrackingEntry[] = tracking.some((t) => t.stage === stage)
+      ? tracking.map((t) => (t.stage === stage ? { ...t, ...patch } : t))
+      : [...tracking, { stage, ...patch }];
+    setTracking(newTracking);
+    if (!id) return false;
+    const { error: upErr } = await supabase
+      .from("anew_client_ducs")
+      .update({ tracking: newTracking })
+      .eq("id", id);
+    if (upErr) {
+      setError(upErr.message);
+      return false;
+    }
+    setSavedAt(new Date().toLocaleTimeString("pt-PT"));
+    if (duc) {
+      void logDucEvent({
+        duc_id: id,
+        organization_id: duc.organization_id,
+        event_type: skip ? "stage_skipped" : "stage_unskipped",
+        stage_no: stage,
+        detail: skip ? `Etapa ${stage} dispensada (não precisa)` : `Etapa ${stage} reativada`,
+        actor_id: businessUserId,
+        actor_name: userName ?? null,
+      });
+    }
+    return true;
+  };
+  // Dispensar pede confirmação (fica registada); reativar é direto.
+  const requestSkip = (stage: number, skip: boolean) => {
+    if (!skip) {
+      void skipStage(stage, false);
+      return;
+    }
+    setConfirmingSkip(stage);
+  };
   // Fechar pede confirmação (ação com peso: assina a etapa); reabrir é direto.
   // Antes de confirmar, valida os campos OBRIGATÓRIOS da etapa.
   const requestToggleClose = (stage: number, close: boolean) => {
@@ -310,6 +397,26 @@ export default function DucDetail() {
     setVariant(v);
     markDirty();
   };
+  // Gera um link público (só leitura) a partir do cabeçalho e copia-o.
+  const handleShare = async () => {
+    if (!duc) return;
+    setSharingHeader(true);
+    setShareCopied(false);
+    const res = await createShare(duc.id, duc.organization_id, businessUserId);
+    setSharingHeader(false);
+    if ("error" in res) {
+      setError(
+        /exist|relation|schema cache|permission|denied|not find/i.test(res.error)
+          ? "Falta aplicar a tabela de partilhas no Supabase (duc-app/db/schema.sql §11)."
+          : res.error
+      );
+      return;
+    }
+    const url = `${window.location.origin}${import.meta.env.BASE_URL}share/${res.token}`;
+    void navigator.clipboard?.writeText(url).then(() => setShareCopied(true)).catch(() => {});
+    setShareModalUrl(url);
+  };
+
   const changeStatus = (s: DucStatus) => {
     if (id && duc && s !== status) {
       void logDucEvent({
@@ -326,6 +433,22 @@ export default function DucDetail() {
   };
   const changeStage = (n: number) => {
     const advancing = n > currentStage;
+    // Ao AVANÇAR de fase, valida os campos obrigatórios da etapa que se deixa —
+    // se faltarem, mostra QUAIS e não deixa passar (recuar/consultar é livre).
+    if (advancing) {
+      const leaving = configStages.find((s) => s.no === currentStage);
+      if (leaving) {
+        const gaps = missingRequiredFields(leaving, variant, blocks[leaving.key]);
+        if (gaps.length > 0) {
+          setBlockedClose({
+            title: "Faltam campos obrigatórios",
+            intro: `Preenche estes campos da etapa ${leaving.no}. ${leaving.title.split(" — ")[0]} antes de avançar:`,
+            items: gaps.map((f) => f.label),
+          });
+          return;
+        }
+      }
+    }
     setCurrentStage(n);
     markDirty();
     if (!id) return;
@@ -350,6 +473,15 @@ export default function DucDetail() {
           });
         }
       });
+  };
+
+  // Dispara a impressão no âmbito escolhido. Fixa o `printScope` (React ainda
+  // não re-renderizou ao clicar) e espera um tick para o atributo `data-print-*`
+  // já estar no DOM antes de abrir o diálogo de impressão do browser.
+  const runPrint = (scope: "all" | "current") => {
+    setPrintScope(scope);
+    setPdfMenuOpen(false);
+    requestAnimationFrame(() => window.print());
   };
 
   // ---- gravar -------------------------------------------------------------
@@ -493,6 +625,13 @@ export default function DucDetail() {
   const totalStages = visibleStages.length || tracking.length || 1;
   const doneStages = visibleStages.filter((s) => stageDone(s.no)).length;
 
+  // Secção (keyName) a manter na impressão "só a etapa atual": a etapa em foco no
+  // rail, ou a etapa em curso se estivermos noutra vista (rastreio, anexos…).
+  const currentSectionKey =
+    visibleStages.find((s) => s.key === activeKey)?.key ??
+    visibleStages.find((s) => s.no === currentStage)?.key ??
+    activeKey;
+
   if (loading) return <Spinner label="A carregar DUC…" />;
   if (notFound || !duc) {
     return (
@@ -505,6 +644,7 @@ export default function DucDetail() {
   const navItems: Array<{ key: string; label: string; done?: boolean; no?: number }> = [
     { key: "rastreio", label: "Rastreio do testemunho" },
     { key: "fluxo", label: "Fluxo" },
+    { key: "chat", label: "Conversa" },
     ...visibleStages.map((s) => ({
       key: s.key,
       label: `${s.no}. ${s.title.split(" — ")[1] ?? s.title}`,
@@ -514,39 +654,53 @@ export default function DucDetail() {
     { key: "registo", label: "Registo de alterações" },
     { key: "historico", label: "Histórico" },
     { key: "anexos", label: "Anexos" },
+    ...(businessUserId ? [{ key: "colaboradores", label: "Colaboradores" }] : []),
   ];
 
   return (
-    <div className="pb-24 md:pb-4">
+    <div className="pb-24 md:pb-4" data-print-scope={printScope}>
+      {/* CSS de impressão — gera um DOCUMENTO (não um screenshot da viewport):
+          cada etapa em página nova, campos legíveis, controlos escondidos. No
+          âmbito "current" só a secção marcada com data-print-current aparece. */}
+      <style>{PRINT_CSS}</style>
+
       {/* Cabeçalho + progresso + ações */}
-      <Card className="mb-6 p-5 print:border-0 print:shadow-none">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs text-slate-400">{duc.duc_number}</span>
+      <Card className="mb-6 overflow-hidden p-0 print:border-0 print:shadow-none">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 bg-gradient-to-br from-brand-50/60 via-white to-white p-4 print:bg-none sm:gap-5 sm:p-5">
+          <div className="min-w-0 flex-1 basis-full sm:basis-auto">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-md bg-slate-900/5 px-2 py-0.5 font-mono text-xs font-medium tracking-tight text-slate-500">
+                {duc.duc_number}
+              </span>
               <Badge className="bg-brand-50 text-brand-800 ring-brand-100">{VARIANT_LABELS[variant]}</Badge>
             </div>
-            <h1 className="mt-1 text-xl font-semibold text-slate-800">
+            <h1 className="mt-2 break-words text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
               {clientName ?? duc.title ?? "DUC"}
             </h1>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="h-2 w-48 overflow-hidden rounded-full bg-slate-100">
+            <div className="mt-4 flex items-center gap-3">
+              <div className="h-2.5 w-52 max-w-full overflow-hidden rounded-full bg-slate-200/70 ring-1 ring-inset ring-slate-200">
                 <div
-                  className="h-full rounded-full bg-brand transition-all"
+                  className="h-full rounded-full bg-gradient-to-r from-brand to-brand-light transition-all duration-500"
                   style={{ width: `${(doneStages / totalStages) * 100}%` }}
                 />
               </div>
-              <span className="text-xs text-slate-500">{doneStages}/{totalStages} etapas fechadas</span>
+              <span className="text-xs font-medium tabular-nums text-slate-600">
+                {doneStages}/{totalStages} <span className="font-normal text-slate-400">etapas fechadas</span>
+              </span>
             </div>
           </div>
 
           <div className="flex w-full flex-col gap-3 print:hidden sm:w-auto sm:items-end">
-            <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end sm:gap-1">
-              <span className="text-xs font-medium text-slate-500">Estado</span>
+            <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-end sm:gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Estado</span>
               <StatusSelect value={status} onChange={changeStatus} />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-auto text-xs text-slate-400 sm:mr-0">
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 print:hidden sm:px-5">
+          <div className="hidden flex-1 flex-wrap items-center gap-2 sm:flex">
+            <span className="mr-auto text-xs text-slate-400 sm:mr-0">
                 {error ? (
                   <span className="text-red-600">{error}</span>
                 ) : saving ? (
@@ -558,10 +712,39 @@ export default function DucDetail() {
                 ) : (
                   "Tudo guardado"
                 )}
-              </span>
-              <Button variant="secondary" onClick={() => window.print()}>
-                <Printer /> PDF
-              </Button>
+            </span>
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            {/* No telemóvel, PDF e Guardar vivem na barra fixa inferior — aqui só
+                Partilhar, que não existe nessa barra. */}
+            <div className="hidden sm:block">
+              <PdfMenu
+                open={pdfMenuOpen}
+                onOpenChange={setPdfMenuOpen}
+                onPrint={runPrint}
+              />
+            </div>
+            {proposalId && (
+              <a
+                href={`${OLYVIA_URL}/proposals?open=${proposalId}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir a proposta na plataforma Olyvia"
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-brand sm:flex-none"
+              >
+                <FileText width={15} height={15} /> Ver proposta
+                <ExternalLink width={13} height={13} />
+              </a>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => void handleShare()}
+              disabled={sharingHeader}
+              className="flex-1 sm:flex-none"
+            >
+              <ExternalLink /> {sharingHeader ? "A gerar…" : "Partilhar"}
+            </Button>
+            <div className="hidden sm:block">
               <Button onClick={() => void save()} disabled={saving || !dirty}>
                 <Save /> Guardar
               </Button>
@@ -570,32 +753,40 @@ export default function DucDetail() {
         </div>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[248px_1fr]">
         {/* Rail de navegação */}
-        <nav className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-2 print:hidden lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0 lg:sticky lg:top-20 lg:self-start">
+        <nav className="-mx-4 flex snap-x snap-proximity gap-1.5 overflow-x-auto scroll-px-4 px-4 pb-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden print:hidden lg:mx-0 lg:snap-none lg:flex-col lg:gap-0.5 lg:overflow-visible lg:rounded-xl lg:border lg:border-slate-200/70 lg:bg-white/60 lg:p-2 lg:px-2 lg:pb-2 lg:shadow-sm lg:sticky lg:top-20 lg:self-start">
           {navItems.map((n) => {
             const active = activeKey === n.key;
             return (
               <button
                 key={n.key}
                 type="button"
+                aria-current={active ? "page" : undefined}
                 onClick={() => setActiveKey(n.key)}
                 className={cx(
-                  "group flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-2 text-sm transition-all lg:w-full",
+                  "group relative flex shrink-0 snap-start items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2.5 text-sm font-medium transition-all lg:w-full lg:px-2.5 lg:py-2",
                   active
-                    ? "bg-brand text-white shadow-sm"
-                    : "text-slate-600 hover:bg-slate-100"
+                    ? "bg-brand text-white shadow-sm shadow-brand/20 lg:bg-brand-50 lg:font-semibold lg:text-brand-800 lg:shadow-none"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 )}
               >
+                {/* Indicador de item ativo (desktop) */}
+                <span
+                  className={cx(
+                    "absolute left-0 top-1/2 hidden h-5 w-1 -translate-y-1/2 rounded-r-full bg-brand transition-all lg:block",
+                    active ? "opacity-100" : "opacity-0"
+                  )}
+                />
                 {n.no != null ? (
                   <span
                     className={cx(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset",
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ring-1 ring-inset transition-colors",
                       n.done
                         ? "bg-emerald-500 text-white ring-emerald-500"
                         : active
-                          ? "bg-white/20 text-white ring-white/30"
-                          : "bg-white text-slate-500 ring-slate-200"
+                          ? "bg-white/20 text-white ring-white/30 lg:bg-brand lg:text-white lg:ring-brand"
+                          : "bg-white text-slate-500 ring-slate-200 group-hover:ring-slate-300"
                     )}
                   >
                     {n.done ? <Check width={13} height={13} /> : n.no}
@@ -603,8 +794,10 @@ export default function DucDetail() {
                 ) : (
                   <span
                     className={cx(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
-                      active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors",
+                      active
+                        ? "bg-white/20 text-white lg:bg-brand-100 lg:text-brand-800"
+                        : "bg-slate-100 text-slate-400 group-hover:text-slate-500"
                     )}
                   >
                     {n.key === "anexos" ? (
@@ -630,11 +823,19 @@ export default function DucDetail() {
             </p>
           </div>
 
-          <Section active={activeKey === "rastreio"} keyName="rastreio">
+          <Section
+            active={activeKey === "rastreio"}
+            keyName="rastreio"
+            printCurrent={currentSectionKey === "rastreio"}
+          >
             <TrackingBoard stages={visibleStages} tracking={tracking} onChange={setTrackingEntry} onToggleClose={requestToggleClose} currentStage={currentStage} onStageChange={changeStage} />
           </Section>
 
-          <Section active={activeKey === "fluxo"} keyName="fluxo">
+          <Section
+            active={activeKey === "fluxo"}
+            keyName="fluxo"
+            printCurrent={currentSectionKey === "fluxo"}
+          >
             <Card className="p-3 print:hidden">
               <div className="mb-3 flex items-center justify-between px-2 pt-1">
                 <h2 className="text-base font-semibold text-slate-800">Fluxo do DUC</h2>
@@ -642,6 +843,7 @@ export default function DucDetail() {
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Fechada</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-brand" /> Atual</span>
                   <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-300" /> Pendente</span>
+                  <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-slate-400" /> Não precisa</span>
                 </div>
               </div>
               <StageFlowView
@@ -656,8 +858,23 @@ export default function DucDetail() {
             </Card>
           </Section>
 
+          <Section active={activeKey === "chat"} keyName="chat">
+            <DucChat
+              ducId={duc.id}
+              orgId={duc.organization_id}
+              businessUserId={businessUserId}
+              userName={userName}
+              ducNumber={duc.duc_number}
+            />
+          </Section>
+
           {visibleStages.map((stage) => (
-            <Section key={stage.key} active={activeKey === stage.key} keyName={stage.key}>
+            <Section
+              key={stage.key}
+              active={activeKey === stage.key}
+              keyName={stage.key}
+              printCurrent={currentSectionKey === stage.key}
+            >
               <StageCard
                 stage={stage}
                 variant={variant}
@@ -675,11 +892,16 @@ export default function DucDetail() {
                 onUpdateItem={updateItem}
                 onRemoveItem={removeItem}
                 onToggleClose={requestToggleClose}
+                onSkip={requestSkip}
               />
             </Section>
           ))}
 
-          <Section active={activeKey === "registo"} keyName="registo">
+          <Section
+            active={activeKey === "registo"}
+            keyName="registo"
+            printCurrent={currentSectionKey === "registo"}
+          >
             <Card className="p-5 print:border-0 print:shadow-none">
               <ItemsTable
                 section={CHANGE_LOG_COLUMNS}
@@ -691,13 +913,31 @@ export default function DucDetail() {
             </Card>
           </Section>
 
-          <Section active={activeKey === "historico"} keyName="historico">
+          <Section
+            active={activeKey === "historico"}
+            keyName="historico"
+            printCurrent={currentSectionKey === "historico"}
+          >
             <HistoryTimeline duc={duc} tracking={tracking} stages={visibleStages} />
           </Section>
 
-          <Section active={activeKey === "anexos"} keyName="anexos">
+          <Section
+            active={activeKey === "anexos"}
+            keyName="anexos"
+            printCurrent={currentSectionKey === "anexos"}
+          >
             {businessUserId ? (
               <AttachmentsPanel ducId={duc.id} orgId={duc.organization_id} businessUserId={businessUserId} />
+            ) : null}
+          </Section>
+
+          <Section active={activeKey === "colaboradores"} keyName="colaboradores">
+            {businessUserId ? (
+              <CollaboratorsPanel
+                ducId={duc.id}
+                orgId={duc.organization_id}
+                businessUserId={businessUserId}
+              />
             ) : null}
           </Section>
         </div>
@@ -719,10 +959,14 @@ export default function DucDetail() {
               "Tudo guardado"
             )}
           </span>
-          <Button variant="secondary" onClick={() => window.print()} aria-label="Exportar PDF">
-            <Printer />
-          </Button>
-          <Button onClick={() => void save()} disabled={saving || !dirty}>
+          <PdfMenu
+            open={pdfMenuOpen}
+            onOpenChange={setPdfMenuOpen}
+            onPrint={runPrint}
+            dropUp
+            iconOnly
+          />
+          <Button onClick={() => void save()} disabled={saving || !dirty} className="px-4 py-2.5">
             <Save /> Guardar
           </Button>
         </div>
@@ -768,6 +1012,31 @@ export default function DucDetail() {
         />
       )}
 
+      {confirmingSkip !== null && (
+        <ConfirmDialog
+          title="Marcar como “Não precisa”"
+          tone="neutral"
+          confirmLabel="Não precisa"
+          icon={<X width={18} height={18} />}
+          message={
+            <>
+              Tens a certeza que a etapa{" "}
+              <span className="font-medium text-slate-800">
+                {confirmingSkip}.{" "}
+                {visibleStages.find((s) => s.no === confirmingSkip)?.title.split(" — ")[0]}
+              </span>{" "}
+              não é necessária para este DUC? Deixa de contar como pendente (mas fica registada) e
+              podes reativá-la a qualquer momento.
+            </>
+          }
+          onCancel={() => setConfirmingSkip(null)}
+          onConfirm={async () => {
+            await skipStage(confirmingSkip, true);
+            setConfirmingSkip(null);
+          }}
+        />
+      )}
+
       {blockedClose && (
         <Modal
           title={blockedClose.title}
@@ -776,7 +1045,9 @@ export default function DucDetail() {
           footer={<Button onClick={() => setBlockedClose(null)}>Entendi</Button>}
         >
           <div className="space-y-2">
-            <p className="text-sm text-slate-600">Não é possível fechar esta etapa ainda:</p>
+            <p className="text-sm text-slate-600">
+              {blockedClose.intro ?? "Não é possível fechar esta etapa ainda:"}
+            </p>
             <ul className="max-h-52 space-y-1 overflow-y-auto rounded-lg bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-inset ring-amber-100">
               {blockedClose.items.map((m, i) => (
                 <li key={i} className="flex gap-1.5">
@@ -787,22 +1058,190 @@ export default function DucDetail() {
           </div>
         </Modal>
       )}
+
+      {shareModalUrl && (
+        <Modal
+          title="Link público (só leitura)"
+          size="md"
+          onClose={() => setShareModalUrl(null)}
+          footer={<Button onClick={() => setShareModalUrl(null)}>Fechar</Button>}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Qualquer pessoa com este link vê o documento completo, sem conta. Não é indexado no
+              Google. Podes revogá-lo na aba <span className="font-medium">Colaboradores</span>.
+            </p>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2">
+              <input
+                readOnly
+                value={shareModalUrl}
+                onFocus={(e) => e.target.select()}
+                className="min-w-0 flex-1 bg-transparent font-mono text-xs text-slate-600 outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void navigator.clipboard
+                    ?.writeText(shareModalUrl)
+                    .then(() => setShareCopied(true))
+                    .catch(() => {});
+                }}
+                className="shrink-0 rounded-md px-2.5 py-1 text-xs font-medium text-brand hover:bg-brand-50"
+              >
+                {shareCopied ? "Copiado!" : "Copiar"}
+              </button>
+            </div>
+            <a
+              href={shareModalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark"
+            >
+              Abrir numa nova aba <ExternalLink width={14} height={14} />
+            </a>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
-/** Secção: visível no ecrã só se ativa; sempre visível na impressão. */
+// ---------------------------------------------------------------------------
+
+/** Menu de PDF: botão que abre um dropdown com "Documento completo" e "Só a
+ *  etapa atual". Fecha ao clicar fora ou ao escolher. Escondido na impressão. */
+function PdfMenu({
+  open,
+  onOpenChange,
+  onPrint,
+  dropUp,
+  iconOnly,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onPrint: (scope: "all" | "current") => void;
+  /** Abre para cima (barra fixa mobile). */
+  dropUp?: boolean;
+  /** Só ícone, sem rótulo "PDF" (barra mobile). */
+  iconOnly?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fecha ao clicar fora do menu.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOpenChange(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open, onOpenChange]);
+
+  return (
+    <div ref={ref} className="relative print:hidden">
+      <Button
+        variant="secondary"
+        onClick={() => onOpenChange(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Exportar PDF"
+      >
+        <Printer />
+        {!iconOnly && "PDF"}
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          className={cx(
+            "absolute right-0 z-40 w-56 rounded-lg border border-slate-200 bg-white p-1 shadow-lg",
+            dropUp ? "bottom-full mb-2" : "top-full mt-2"
+          )}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onPrint("all")}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+          >
+            <FileText width={15} height={15} className="text-slate-400" />
+            Documento completo
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => onPrint("current")}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+          >
+            <Printer width={15} height={15} className="text-slate-400" />
+            Só a etapa atual
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/** CSS aplicado só na impressão. Trata o detalhe como documento paginado. */
+const PRINT_CSS = `
+@media print {
+  /* Página A4 com margens confortáveis. */
+  @page { size: A4; margin: 16mm 14mm; }
+
+  /* Cada secção/etapa começa em página nova e não se corta a meio. */
+  [data-print-scope] [data-section] { break-before: page; break-inside: auto; }
+  [data-print-scope] [data-section]:first-of-type { break-before: auto; }
+  [data-print-scope] .print\\:mb-6 { margin-bottom: 0; }
+
+  /* Cartões e linhas de tabela: não partir a meio de uma página. */
+  [data-print-scope] [data-section] > * { break-inside: avoid; }
+  [data-print-scope] tr, [data-print-scope] .grid > * { break-inside: avoid; }
+
+  /* Âmbito "só a etapa atual": esconde tudo menos a secção marcada. */
+  [data-print-scope="current"] [data-section]:not([data-print-current]) { display: none !important; }
+  [data-print-scope="current"] [data-print-current] { break-before: auto; }
+
+  /* Campos: imprimir o VALOR de forma legível — sem sombras, fundo branco,
+     bordas leves, e sem cortar o texto. */
+  [data-print-scope] input,
+  [data-print-scope] textarea,
+  [data-print-scope] select {
+    border: 1px solid #cbd5e1 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    color: #0f172a !important;
+    -webkit-text-fill-color: #0f172a !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+  }
+  /* Textarea cresce com o conteúdo em vez de cortar/scroll. */
+  [data-print-scope] textarea { height: auto !important; min-height: 3.5rem; white-space: pre-wrap; }
+  /* Tabelas de itens: sem scroll horizontal, colunas visíveis. */
+  [data-print-scope] .overflow-x-auto { overflow: visible !important; }
+}
+`;
+
+/** Secção: visível no ecrã só se ativa; na impressão sai sempre (âmbito "all")
+ *  ou só a que estiver marcada como atual (âmbito "current", via CSS). */
 function Section({
   active,
   keyName,
+  printCurrent,
   children,
 }: {
   active: boolean;
   keyName: string;
+  /** Marca esta secção como a "etapa atual" para a impressão de âmbito único. */
+  printCurrent?: boolean;
   children: ReactNode;
 }) {
   return (
-    <section data-section={keyName} className={cx(!active && "hidden print:block", "print:mb-6")}>
+    <section
+      data-section={keyName}
+      data-print-current={printCurrent ? "" : undefined}
+      className={cx(!active && "hidden print:block", "print:mb-6")}
+    >
       {children}
     </section>
   );
@@ -823,6 +1262,7 @@ function StageCard({
   onUpdateItem,
   onRemoveItem,
   onToggleClose,
+  onSkip,
 }: {
   stage: DucStage;
   variant: DucVariant;
@@ -836,10 +1276,12 @@ function StageCard({
   onUpdateItem: (key: string, patch: Partial<LocalItem>) => void;
   onRemoveItem: (key: string) => void;
   onToggleClose: (stageNo: number, close: boolean) => void;
+  onSkip: (stageNo: number, skip: boolean) => void;
 }) {
   const fields = fieldsForVariant(stage.fields, variant);
   const sections = sectionsForVariant(stage, variant);
   const done = entry?.state === "done";
+  const skipped = entry?.state === "skipped";
   // Alerta de etapa parada: só na etapa atual, por fechar, com limite configurado.
   const alertDays = stage.notify?.alertAfterDays ?? 0;
   const openDays =
@@ -850,22 +1292,45 @@ function StageCard({
   return (
     <Card
       className={cx(
-        "p-5 print:border-0 print:shadow-none",
+        "p-4 print:border-0 print:shadow-none sm:p-6",
         done && "ring-1 ring-emerald-100"
       )}
     >
-      <div className="mb-4 flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold text-slate-800">
-          <span className="mr-2 text-brand">{stage.no}</span>
-          {stage.title}
-        </h2>
+      <div className="mb-5 flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className={cx(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-bold tabular-nums ring-1 ring-inset",
+              done
+                ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                : isCurrent
+                  ? "bg-brand text-white ring-brand"
+                  : "bg-brand-50 text-brand-800 ring-brand-100"
+            )}
+          >
+            {stage.no}
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold leading-snug text-slate-900">
+              {stage.title}
+            </h2>
+            {stage.responsible && (
+              <p className="mt-0.5 text-xs text-slate-400">
+                Responsável: <span className="font-medium text-slate-500">{stage.responsible}</span>
+              </p>
+            )}
+          </div>
+        </div>
         <div className="flex shrink-0 items-center gap-2">
-          {done && (
+          {done ? (
             <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
               <Check width={12} height={12} /> Fechada
             </Badge>
-          )}
-          <span className="text-xs text-slate-400">{stage.responsible}</span>
+          ) : skipped ? (
+            <Badge className="bg-slate-200 text-slate-600 ring-slate-300">Não precisa</Badge>
+          ) : isCurrent ? (
+            <Badge className="bg-brand-50 text-brand-800 ring-brand-100">Etapa atual</Badge>
+          ) : null}
         </div>
       </div>
       {isStale && (
@@ -875,10 +1340,14 @@ function StageCard({
           devem ser alertados.
         </div>
       )}
-      {stage.intro && <p className="mb-4 text-xs text-slate-500">{stage.intro}</p>}
+      {stage.intro && (
+        <p className="mb-5 rounded-lg bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-500 ring-1 ring-inset ring-slate-100">
+          {stage.intro}
+        </p>
+      )}
 
       {fields.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
           {fields.map((field) => (
             <FieldRenderer
               key={field.key}
@@ -901,34 +1370,83 @@ function StageCard({
         />
       ))}
 
-      {/* Fecho da etapa — assinatura (quem/quando) + botão fechar/reabrir */}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 print:hidden">
+      {/* Fecho da etapa — assinatura (quem/quando) + fechar/reabrir/dispensar */}
+      <div
+        className={cx(
+          "mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3.5 ring-1 ring-inset print:hidden",
+          done
+            ? "bg-emerald-50/60 ring-emerald-100"
+            : skipped
+              ? "bg-slate-100/70 ring-slate-200"
+              : "bg-slate-50 ring-slate-100"
+        )}
+      >
         {done ? (
-          <p className="text-xs text-slate-500">
-            Fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
-            {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+          <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+            <Check width={14} height={14} className="shrink-0" />
+            <span>
+              Fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+              {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+            </span>
+          </p>
+        ) : skipped ? (
+          <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+            <X width={14} height={14} className="shrink-0" />
+            <span>
+              Não precisa{entry?.signed_by ? ` · dispensada por ${entry.signed_by}` : ""}
+              {entry?.date ? ` · ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}
+            </span>
           </p>
         ) : (
-          <p className="text-xs text-slate-400">Etapa por fechar.</p>
+          <p className="text-xs font-medium text-slate-500">Etapa por fechar.</p>
         )}
-        <Button
-          variant={done ? "secondary" : "primary"}
-          onClick={() => onToggleClose(stage.no, !done)}
-        >
-          {done ? (
-            "Reabrir etapa"
-          ) : (
-            <>
-              <Check /> Fechar etapa
-            </>
-          )}
-        </Button>
+        {skipped ? (
+          <Button
+            variant="secondary"
+            onClick={() => onSkip(stage.no, false)}
+            className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
+          >
+            Reativar etapa
+          </Button>
+        ) : (
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            {!done && (
+              <Button
+                variant="ghost"
+                onClick={() => onSkip(stage.no, true)}
+                className="w-full justify-center py-2.5 text-slate-500 sm:w-auto sm:py-2"
+              >
+                <X width={15} height={15} /> Não precisa
+              </Button>
+            )}
+            <Button
+              variant={done ? "secondary" : "primary"}
+              onClick={() => onToggleClose(stage.no, !done)}
+              className="w-full justify-center py-2.5 sm:w-auto sm:py-2"
+            >
+              {done ? (
+                "Reabrir etapa"
+              ) : (
+                <>
+                  <Check /> Fechar etapa
+                </>
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Registo de assinatura visível também na impressão */}
+      {/* Registo visível também na impressão */}
       {done && (
         <p className="mt-4 hidden text-xs text-slate-500 print:block">
           Etapa fechada{entry?.signed_by ? ` por ${entry.signed_by}` : ""}
+          {entry?.date ? ` em ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}.
+        </p>
+      )}
+      {skipped && (
+        <p className="mt-4 hidden text-xs text-slate-500 print:block">
+          Etapa dispensada (não precisa)
+          {entry?.signed_by ? ` por ${entry.signed_by}` : ""}
           {entry?.date ? ` em ${new Date(entry.date).toLocaleDateString("pt-PT")}` : ""}.
         </p>
       )}
@@ -950,7 +1468,12 @@ function HistoryTimeline({
   const stageTitle = (no: number) =>
     stages.find((s) => s.no === no)?.title.split(" — ")[0] ?? `Etapa ${no}`;
 
-  type Ev = { when: string; title: string; who?: string | null; kind: "create" | "close" | "update" };
+  type Ev = {
+    when: string;
+    title: string;
+    who?: string | null;
+    kind: "create" | "close" | "status" | "skip" | "update";
+  };
 
   // Eventos reais da tabela de auditoria (quando aplicada).
   const [dbEvents, setDbEvents] = useState<DucEvent[] | null>(null);
@@ -979,12 +1502,26 @@ function HistoryTimeline({
   if (duc.updated_at)
     reconstructed.push({ when: duc.updated_at, title: "Última alteração", kind: "update" });
 
+  const kindOf = (t: DucEvent["event_type"]): Ev["kind"] => {
+    switch (t) {
+      case "created":
+        return "create";
+      case "stage_closed":
+        return "close";
+      case "status_changed":
+        return "status";
+      case "stage_skipped":
+      case "stage_unskipped":
+        return "skip";
+      default:
+        return "update";
+    }
+  };
   const fromDb: Ev[] = (dbEvents ?? []).map((e) => ({
     when: e.created_at ?? "",
     title: e.detail ?? e.event_type,
     who: e.actor_name,
-    kind:
-      e.event_type === "created" ? "create" : e.event_type === "stage_closed" ? "close" : "update",
+    kind: kindOf(e.event_type),
   }));
 
   // Prefere o histórico real da BD; se ainda não houver, mostra o reconstruído.
@@ -1014,13 +1551,21 @@ function HistoryTimeline({
                   ? "bg-emerald-500 text-white"
                   : e.kind === "create"
                     ? "bg-brand text-white"
-                    : "bg-slate-300 text-white"
+                    : e.kind === "status"
+                      ? "bg-blue-500 text-white"
+                      : e.kind === "skip"
+                        ? "bg-slate-400 text-white"
+                        : "bg-slate-300 text-white"
               )}
             >
               {e.kind === "close" ? (
                 <Check width={11} height={11} />
               ) : e.kind === "create" ? (
                 <FileText width={11} height={11} />
+              ) : e.kind === "status" ? (
+                <Upload width={11} height={11} />
+              ) : e.kind === "skip" ? (
+                <X width={11} height={11} />
               ) : (
                 <Clock width={11} height={11} />
               )}
@@ -1037,6 +1582,203 @@ function HistoryTimeline({
         {fromDb.length > 0
           ? "Histórico de auditoria (append-only) — cada ação fica registada por quem e quando."
           : "Reconstruído dos dados da ficha. Aplica a tabela de auditoria (duc-app/db/schema.sql §8) para registo completo de cada ação."}
+      </p>
+    </Card>
+  );
+}
+
+function CollaboratorsPanel({
+  ducId,
+  orgId,
+  businessUserId,
+}: {
+  ducId: string;
+  orgId: string;
+  businessUserId: string;
+}) {
+  const [rows, setRows] = useState<DucCollaborator[]>([]);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<"viewer" | "editor">("viewer");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Links públicos (só leitura, por token).
+  const [shares, setShares] = useState<PublicShare[]>([]);
+  const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+  const shareUrl = (token: string) =>
+    `${window.location.origin}${import.meta.env.BASE_URL}share/${token}`;
+
+  const load = useCallback(() => {
+    void fetchCollaborators(ducId).then(setRows);
+    void fetchShares(ducId).then(setShares);
+  }, [ducId]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const generateLink = async () => {
+    setSharing(true);
+    const res = await createShare(ducId, orgId, businessUserId);
+    setSharing(false);
+    if ("error" in res) {
+      setMsg(
+        /exist|relation|schema cache|permission|denied|not find/i.test(res.error)
+          ? "Falta aplicar a tabela de partilhas no Supabase (duc-app/db/schema.sql §11)."
+          : res.error
+      );
+      return;
+    }
+    void navigator.clipboard?.writeText(shareUrl(res.token)).catch(() => {});
+    setCopied(res.token);
+    load();
+  };
+
+  const invite = async () => {
+    const e = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
+      setMsg("Email inválido.");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    const err = await addCollaborator(ducId, orgId, e, role, businessUserId);
+    if (err) {
+      setMsg(
+        /exist|relation|schema cache|permission|denied|not find/i.test(err)
+          ? "Não foi possível convidar. Falta aplicar a tabela de colaboradores no Supabase (duc-app/db/schema.sql §9)."
+          : err
+      );
+      setBusy(false);
+      return;
+    }
+    // Envia o magic link para o externo entrar.
+    await sendMagicLink(e, window.location.origin + import.meta.env.BASE_URL);
+    setEmail("");
+    setMsg(`Convite enviado para ${e}.`);
+    setBusy(false);
+    load();
+  };
+
+  const remove = async (id: string) => {
+    await removeCollaborator(id);
+    load();
+  };
+
+  return (
+    <Card className="p-5 print:hidden">
+      <h2 className="mb-1 text-base font-semibold text-slate-800">Colaboradores externos</h2>
+      <p className="mb-4 text-xs text-slate-400">
+        Convida pessoas de fora da organização para ver ou editar este DUC. Recebem um link de
+        acesso (magic link) por email.
+      </p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void invite();
+          }}
+          placeholder="email@externo.pt"
+          className="min-w-0 flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+        />
+        <Combobox
+          className="sm:w-36"
+          value={role}
+          onChange={(v) => setRole(v as "viewer" | "editor")}
+          options={[
+            { value: "viewer", label: "Ver" },
+            { value: "editor", label: "Editar" },
+          ]}
+        />
+        <Button onClick={() => void invite()} disabled={busy}>
+          <Plus width={14} height={14} /> Convidar
+        </Button>
+      </div>
+      {msg && <p className="mt-2 text-xs text-slate-500">{msg}</p>}
+
+      <div className="mt-4 divide-y divide-slate-100">
+        {rows.length === 0 ? (
+          <p className="py-3 text-center text-xs text-slate-400">Sem colaboradores externos.</p>
+        ) : (
+          rows.map((c) => (
+            <div key={c.id} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-slate-800">{c.email}</p>
+                <p className="text-xs text-slate-400">
+                  {c.role === "editor" ? "Pode editar" : "Só leitura"}
+                  {c.accepted_at ? " · aceitou" : " · convite pendente"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void remove(c.id)}
+                className="text-slate-300 transition-colors hover:text-red-500"
+                title="Remover colaborador"
+              >
+                <Trash width={15} height={15} />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Link público (só leitura, por token) */}
+      <div className="mt-6 border-t border-slate-100 pt-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">Link público (só leitura)</h3>
+            <p className="text-xs text-slate-400">
+              Qualquer pessoa com o link vê o documento completo — sem conta. Não é indexado no
+              Google.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => void generateLink()} disabled={sharing}>
+            <Plus width={14} height={14} /> {sharing ? "A gerar…" : "Gerar link"}
+          </Button>
+        </div>
+
+        {shares.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {shares.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/50 px-2.5 py-2"
+              >
+                <input
+                  readOnly
+                  value={shareUrl(s.token)}
+                  onFocus={(e) => e.target.select()}
+                  className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-slate-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(shareUrl(s.token)).catch(() => {});
+                    setCopied(s.token);
+                  }}
+                  className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-brand hover:bg-brand-50"
+                >
+                  {copied === s.token ? "Copiado!" : "Copiar"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void revokeShare(s.id).then(load)}
+                  title="Revogar link"
+                  className="shrink-0 text-slate-300 transition-colors hover:text-red-500"
+                >
+                  <Trash width={14} height={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-4 text-[11px] text-slate-400">
+        Requer as tabelas aplicadas no Supabase (duc-app/db/schema.sql §9 colaboradores, §11 links
+        públicos) e o magic link ativo no Auth.
       </p>
     </Card>
   );
@@ -1069,6 +1811,7 @@ function TrackingBoard({
           const entry =
             tracking.find((t) => t.stage === stage.no) ?? { stage: stage.no, state: "pending" as const };
           const done = entry.state === "done";
+          const skipped = entry.state === "skipped";
           const isCurrent = stage.no === currentStage;
           return (
             <div
@@ -1081,7 +1824,12 @@ function TrackingBoard({
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800">
+                  <p
+                    className={cx(
+                      "text-sm font-medium text-slate-800",
+                      skipped && "line-through text-slate-400"
+                    )}
+                  >
                     {stage.no} · {stage.title.split(" — ")[0]}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-400">{stage.responsible}</p>
@@ -1095,15 +1843,21 @@ function TrackingBoard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleClose(stage.no, !done);
+                    // Numa etapa dispensada, o pill não fecha — abre a etapa para reativar.
+                    if (skipped) onStageChange(stage.no);
+                    else onToggleClose(stage.no, !done);
                   }}
                   className={cx(
                     "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
-                    done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                    done
+                      ? "bg-emerald-100 text-emerald-700"
+                      : skipped
+                        ? "bg-slate-200 text-slate-500"
+                        : "bg-slate-100 text-slate-500"
                   )}
                 >
                   {done && <Check width={12} height={12} />}
-                  {done ? "Fechado" : "Pendente"}
+                  {done ? "Fechado" : skipped ? "Não precisa" : "Pendente"}
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
@@ -1143,13 +1897,19 @@ function TrackingBoard({
               const entry =
                 tracking.find((t) => t.stage === stage.no) ?? { stage: stage.no, state: "pending" as const };
               const done = entry.state === "done";
+              const skipped = entry.state === "skipped";
               return (
                 <tr
                   key={stage.no}
                   className={cx("cursor-pointer", stage.no === currentStage && "bg-teal-50/50")}
                   onClick={() => onStageChange(stage.no)}
                 >
-                  <td className="py-2 pr-3 font-medium text-slate-700">
+                  <td
+                    className={cx(
+                      "py-2 pr-3 font-medium text-slate-700",
+                      skipped && "line-through text-slate-400"
+                    )}
+                  >
                     {stage.no} · {stage.title.split(" — ")[0]}
                   </td>
                   <td className="py-2 pr-3 text-slate-500">{stage.responsible}</td>
@@ -1158,15 +1918,20 @@ function TrackingBoard({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onToggleClose(stage.no, !done);
+                        if (skipped) onStageChange(stage.no);
+                        else onToggleClose(stage.no, !done);
                       }}
                       className={cx(
                         "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
-                        done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                        done
+                          ? "bg-emerald-100 text-emerald-700"
+                          : skipped
+                            ? "bg-slate-200 text-slate-500"
+                            : "bg-slate-100 text-slate-500"
                       )}
                     >
                       {done && <Check width={12} height={12} />}
-                      {done ? "Fechado" : "Pendente"}
+                      {done ? "Fechado" : skipped ? "Não precisa" : "Pendente"}
                     </button>
                     {done && entry.signed_by && (
                       <span className="mt-0.5 block text-[11px] text-slate-400">
@@ -1413,7 +2178,7 @@ function PhasesField({
 
 // ---------------------------------------------------------------------------
 
-const EMPTY_ADDRESS: AddressValue = { street: "", number: "", postal: "", city: "" };
+const EMPTY_ADDRESS: AddressValue = { street: "", number: "", postal: "", city: "", district: "" };
 
 function toAddress(v: unknown): AddressValue {
   if (v && typeof v === "object" && !Array.isArray(v)) {
@@ -1457,10 +2222,16 @@ function AddressField({
         placeholder="Cód. postal"
       />
       <input
-        className={cx(inputCls, "col-span-3 sm:col-span-4")}
+        className={cx(inputCls, "col-span-3 sm:col-span-2")}
         value={a.city}
         onChange={(e) => set({ city: e.target.value })}
         placeholder="Localidade"
+      />
+      <input
+        className={cx(inputCls, "col-span-3 sm:col-span-2")}
+        value={a.district ?? ""}
+        onChange={(e) => set({ district: e.target.value })}
+        placeholder="Distrito"
       />
     </div>
   );
@@ -1497,20 +2268,20 @@ function ItemsTable({
   };
 
   return (
-    <div className="mt-5">
-      <div className="mb-2 flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-700">{section.title}</h3>
-          {section.hint && <p className="text-xs text-slate-400">{section.hint}</p>}
+    <div className="mt-6 border-t border-dashed border-slate-200 pt-5 first:mt-5 first:border-t-0 first:pt-0">
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-800">{section.title}</h3>
+          {section.hint && <p className="mt-0.5 text-xs text-slate-400">{section.hint}</p>}
         </div>
-        <Button variant="secondary" onClick={onAdd} className="px-2 py-1 text-xs print:hidden">
+        <Button variant="secondary" onClick={onAdd} className="shrink-0 px-2 py-1 text-xs print:hidden">
           <Plus width={14} height={14} /> Linha
         </Button>
       </div>
 
-      <div className="overflow-x-auto rounded-md border border-slate-200">
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
+          <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-400">
             <tr>
               {section.columns.map((c) => (
                 <th key={c.field} className="px-2 py-2">

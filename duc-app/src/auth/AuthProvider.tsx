@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { acceptCollaboratorInvites } from "../lib/collaborators";
 
 export interface OrgOption {
   id: string;
@@ -71,8 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!anewUser) {
+      // Utilizador EXTERNO (sem perfil anew_users): pode ser colaborador convidado
+      // por magic link. Marca os convites como aceites; o acesso aos DUCs vem da
+      // RLS de colaborador (§9). Não tem organização própria.
+      const email = currentSession.user.email;
+      if (email) void acceptCollaboratorInvites(currentSession.user.id, email);
       setBusinessUserId(null);
-      setUserName(null);
+      setUserName(email ?? null);
       setOrgs([]);
       return;
     }
