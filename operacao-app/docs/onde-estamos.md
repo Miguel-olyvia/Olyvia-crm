@@ -7,9 +7,30 @@
 
 ---
 
-> ⚠ **Escrito antes do merge.** O merge está feito e o módulo está no ar em
-> `/operacao`. O deploy que falhou pelo meio era do `vercel.json`, não do
-> módulo — ver [`deploy-falhado.md`](deploy-falhado.md).
+> ⚠ **As secções 1 a 9 foram escritas a 30 de agosto, antes do merge.** O que
+> mudou desde aí está na **§0**, logo a seguir — começa por aí.
+
+## 0. O que mudou a 31 de agosto
+
+O módulo está **no ar** em `/operacao`, e as cinco coisas que estavam em §5
+estão **todas feitas**:
+
+| | |
+|---|---|
+| Notificações | no sino do CRM — ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado |
+| Iniciar a ordem | a primeira resposta inicia-a; ninguém tem de se lembrar do botão |
+| Relatório do ativo | `/analises` › Equipamento: tudo o que se lhe fez, e a evolução das leituras |
+| PMP cumprido | `/analises` › Manutenção preventiva, por cliente e por mês |
+| Agenda | marcar uma visita passa a avisar de férias, horário e feriados |
+
+**Falta correr SQL em produção.** Sete ficheiros — a lista está no
+[`README.md`](../README.md), e os comandos em §6 aqui abaixo.
+
+O que continua por fazer, por ordem: **assinatura do cliente no telemóvel**,
+**exportar medições**, e **offline** — esse só quando o piloto disser quantas
+vezes falhou por falta de rede. Ver [`a-seguir.md`](a-seguir.md).
+
+---
 
 ## 1. O estado, em três linhas
 

@@ -304,13 +304,15 @@ a sessão de trabalho começa na mesma, e o tempo continua certo.
 
 Assumindo que o piloto corre e a equipa fica a usar:
 
-1. **Notificações** — a falha mais sentida, e a mais barata (meio dia)
-2. **Iniciar a ordem sozinha** — uma hora, e tira um passo a toda a gente
-3. **Relatório do ativo** — o que a operação mais pede depois de usar
-4. **Agenda: férias e horários** — para o aviso de choque dizer a verdade
-5. **PMP cumprido** — quando alguém tiver de falar com um cliente sobre o contrato
+1. ~~**Notificações**~~ — **feito** (31 ago). No sino do CRM; ver `db/notificacoes.sql`
+2. ~~**Iniciar a ordem sozinha**~~ — **feito** (31 ago). A primeira resposta inicia-a
+3. ~~**Relatório do ativo**~~ — **feito** (31 ago). `/analises` › Equipamento
+4. ~~**Agenda: férias e horários**~~ — **feito** (31 ago). Não foi preciso tabela de
+   mapa nenhuma: `schedule_resources.user_id` já aponta para `anew_users.id`
+5. ~~**PMP cumprido**~~ — **feito** (31 ago). `/analises` › Manutenção preventiva
 6. **Assinatura do cliente no telemóvel** — troca papel por prova
-7. **Offline** — quando o piloto disser quantas vezes falhou por falta de rede
+7. **Exportar medições** — para quem tem de entregar dados a uma entidade reguladora
+8. **Offline** — quando o piloto disser quantas vezes falhou por falta de rede
 
 E, em paralelo, o **formulário público mandado por WhatsApp** — como teste
 barato da ideia do WhatsApp a sério.
