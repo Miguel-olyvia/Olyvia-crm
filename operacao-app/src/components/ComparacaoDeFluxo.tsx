@@ -13,8 +13,10 @@ import { ChevronDown, Ferramenta } from "./icons";
  *  · **Passos curtos, três a cinco palavras.** Isto é para ser contado num
  *    relance, não lido. Quem quiser o detalhe tem-no mais abaixo na página.
  *
- *  · **O número grande em cima.** Nove contra três é o argumento inteiro. Se
- *    alguém só olhar dois segundos, é isso que leva.
+ *  · **O nome do sistema numa faixa de cor, com o VS ao meio.** Sem isso são
+ *    duas listas que por acaso estão lado a lado; ninguém percebe que é um
+ *    confronto. Nove contra três é o argumento inteiro, e quem só olhar dois
+ *    segundos tem de levar isso.
  *
  *  · **Os passos que desaparecem estão marcados**, não apagados. Ver o que
  *    deixa de se fazer vale mais do que ver a lista curta já limpa — é a
@@ -63,16 +65,32 @@ export default function ComparacaoDeFluxo() {
         O mesmo trabalho, do princípio ao fim, nos dois sistemas.
       </p>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      {/* Três colunas e não duas: o "VS" no meio é o que faz isto ler-se como
+          uma comparação e não como duas listas que por acaso estão ao lado. */}
+      <div className="mt-4 grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr] sm:gap-2">
         <Coluna
-          titulo="No Infraspeak"
+          titulo="Infraspeak"
           numero={INFRASPEAK.length}
           passos={INFRASPEAK}
           tom="cinzento"
           remate="E se ninguém ler o histórico, a avaria morre ali."
         />
+
+        <div className="flex items-center justify-center sm:px-1">
+          {/* No telemóvel as colunas empilham, e uma linha por cima e por baixo
+              do VS mantém a leitura de cima para baixo. */}
+          <span className="h-px flex-1 bg-slate-200 sm:hidden" aria-hidden="true" />
+          <span
+            className="mx-3 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold uppercase tracking-wide text-white sm:mx-0"
+            aria-hidden="true"
+          >
+            vs
+          </span>
+          <span className="h-px flex-1 bg-slate-200 sm:hidden" aria-hidden="true" />
+        </div>
+
         <Coluna
-          titulo="No Olyvia"
+          titulo="Olyvia"
           numero={OLYVIA.length}
           passos={OLYVIA}
           tom="roxo"
@@ -110,22 +128,22 @@ function Coluna({
           : "rounded-xl bg-slate-50 p-3.5 ring-1 ring-inset ring-slate-200"
       }
     >
-      <div className="flex items-baseline gap-2">
-        <span
-          className={
-            roxo
-              ? "font-mono text-3xl font-semibold leading-none text-brand-700"
-              : "font-mono text-3xl font-semibold leading-none text-slate-400"
-          }
-        >
-          {numero}
-        </span>
-        <span className="text-sm font-medium text-slate-700">
-          passos · <span className="font-normal text-slate-500">{titulo}</span>
+      {/* O nome do sistema é o que tem de saltar. Antes vinha a seguir ao
+          número, em cinzento, e ninguém percebia que aquilo era um confronto. */}
+      <div
+        className={
+          roxo
+            ? "-m-3.5 mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-t-xl bg-brand-600 px-3.5 py-2.5"
+            : "-m-3.5 mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-t-xl bg-slate-600 px-3.5 py-2.5"
+        }
+      >
+        <span className="text-base font-bold tracking-tight text-white">{titulo}</span>
+        <span className="rounded-md bg-white/20 px-2 py-0.5 font-mono text-xs font-semibold text-white">
+          {numero} passos
         </span>
       </div>
 
-      <ol className="mt-3 space-y-0">
+      <ol className="space-y-0">
         {passos.map((p, i) => (
           <li key={p.texto}>
             <div className="flex items-start gap-2">

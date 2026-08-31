@@ -275,10 +275,18 @@ function PorqueMudar() {
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[26rem] text-sm">
             <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                <th className="pb-2 font-medium">&nbsp;</th>
-                <th className="pb-2 text-center font-medium">Infraspeak</th>
-                <th className="pb-2 text-center font-medium">Olyvia</th>
+              <tr className="text-left">
+                <th className="pb-2.5">&nbsp;</th>
+                <th className="pb-2.5 text-center">
+                  <span className="inline-block rounded bg-slate-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+                    Infraspeak
+                  </span>
+                </th>
+                <th className="pb-2.5 text-center">
+                  <span className="inline-block rounded bg-brand-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
+                    Olyvia
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -482,22 +490,24 @@ function Troca({ o, antes, depois }: { o: string; antes: string; depois: string 
       <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{o}</p>
       <div className="mt-2 flex items-stretch gap-2">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            <span className="h-2 w-2 shrink-0 rounded-[3px] bg-[#b91c1c]" aria-hidden="true" />
-            Infraspeak
+          <p>
+            <span className="inline-block rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+              Infraspeak
+            </span>
           </p>
           <p className="mt-0.5 text-sm leading-snug text-slate-500">{antes}</p>
         </div>
         <ChevronRight
           width={16}
           height={16}
-          className="mt-4 shrink-0 self-start text-slate-300"
+          className="mt-3.5 shrink-0 self-start text-slate-400"
           aria-hidden="true"
         />
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            <span className="h-2 w-2 shrink-0 rounded-[3px] bg-[#5b21b6]" aria-hidden="true" />
-            Olyvia
+          <p>
+            <span className="inline-block rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+              Olyvia
+            </span>
           </p>
           <p className="mt-0.5 text-sm font-medium leading-snug text-slate-900">{depois}</p>
         </div>
@@ -655,17 +665,21 @@ function Pergunta({
     <Card className="p-4">
       <h3 className="text-sm font-semibold text-slate-900">{pergunta}</h3>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg bg-red-50/70 px-3 py-2.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-red-700">
+        <div className="overflow-hidden rounded-lg ring-1 ring-inset ring-slate-200">
+          <p className="bg-slate-600 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-white">
             Infraspeak
           </p>
-          <p className="mt-1 text-sm leading-relaxed text-slate-700">{infraspeak}</p>
-        </div>
-        <div className="rounded-lg bg-brand-50 px-3 py-2.5">
-          <p className="text-[11px] font-medium uppercase tracking-wide text-brand-800">
-            Com o Olyvia
+          <p className="bg-slate-50 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+            {infraspeak}
           </p>
-          <p className="mt-1 text-sm leading-relaxed text-slate-700">{agora}</p>
+        </div>
+        <div className="overflow-hidden rounded-lg ring-1 ring-inset ring-brand-200">
+          <p className="bg-brand-600 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-white">
+            Olyvia
+          </p>
+          <p className="bg-brand-50/60 px-3 py-2.5 text-sm leading-relaxed text-slate-700">
+            {agora}
+          </p>
         </div>
       </div>
       {prova && (
@@ -1123,12 +1137,16 @@ function Diferenca({
         <div className="border-t border-slate-100 bg-slate-50/60 p-4 pl-11">
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">No Infraspeak</p>
-              <p className="mt-1 text-sm leading-relaxed text-slate-700">{infraspeak}</p>
+              <span className="inline-block rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                Infraspeak
+              </span>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{infraspeak}</p>
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-brand">Aqui</p>
-              <p className="mt-1 text-sm leading-relaxed text-slate-700">{olyvia}</p>
+              <span className="inline-block rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                Olyvia
+              </span>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-700">{olyvia}</p>
             </div>
           </div>
 
