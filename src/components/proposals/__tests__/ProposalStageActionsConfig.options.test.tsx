@@ -83,11 +83,24 @@ describe("ProposalStageActionsConfig — opções oferecidas", () => {
     expect(await openActionTypeOptions()).not.toContain("Enviar Notificação");
   });
 
-  it("mantém as restantes acções oferecidas", async () => {
+  it("não oferece 'Enviar Email' como acção nova — o motor já dispara templates de email a cada mudança de fase da proposta (trigger-email-template), ter as duas portas duplicava envios", async () => {
+    expect(await openActionTypeOptions()).not.toContain("Enviar Email");
+  });
+
+  // "Criar Tarefa" saiu da escolha pela mesma razao das outras: o motor nao le
+  // proposal_stage_actions, por isso uma tarefa configurada aqui era gravada e
+  // nunca criada.
+  it("deixa de oferecer Criar Tarefa", async () => {
     const options = await openActionTypeOptions();
 
-    expect(options).toContain("Criar Tarefa");
-    expect(options).toContain("Enviar Email");
+    expect(options).not.toContain("Criar Tarefa");
+  });
+
+  // Sobra o unico que faz sentido oferecer: funciona, mas nao por esta tabela
+  // -- esta fixo no codigo pela flag is_won da fase.
+  it("mantém Criar Contrato oferecido", async () => {
+    const options = await openActionTypeOptions();
+
     expect(options).toContain("Criar Contrato");
   });
 });

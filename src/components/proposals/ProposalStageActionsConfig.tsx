@@ -67,6 +67,12 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
     icon: <Send className="w-4 h-4 text-blue-600" />,
     description: "Envia uma notificação interna",
   },
+  // Mantido apenas para rotular linhas já existentes na tabela (ver
+  // SELECTABLE_ACTION_TYPES abaixo) — deixou de ser oferecido como opção nova:
+  // o motor já dispara templates de email a cada mudança de fase da proposta
+  // (execute-workflow → trigger-email-template, moduleMap proposal→proposals),
+  // ter as duas portas duplicava envios para quem configurasse nas duas, e não
+  // explicava nada para quem configurasse só aqui.
   send_email: {
     label: "Enviar Email",
     icon: <Mail className="w-4 h-4 text-purple-600" />,
@@ -92,15 +98,32 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
  * nenhum de `supabase/` — nem edge function, nem migração, nem trigger de BD.
  * Não existe nada que a execute, aqui ou noutro módulo.
  *
- * Nota mais ampla, para quem vier a seguir: o motor
- * (`supabase/functions/execute-workflow`) lê `lead_stage_actions`,
- * `deal_stage_actions`, `quote_stage_actions` e `contract_stage_actions`, mas
- * NÃO lê `proposal_stage_actions`. `create_task` e `send_email` continuam
- * escolhíveis por decisão deliberada de âmbito, não por estarem confirmados
- * como executados nesta superfície — antes de confiar em qualquer um deles,
- * verificar o motor.
+ * `send_email` foi retirado da escolha por uma razão diferente: existe, mas
+ * está a mais. O motor (`supabase/functions/execute-workflow`) já chama
+ * `trigger-email-template` a cada mudança de fase (moduleMap inclui
+ * proposal→proposals) — uma proposta que muda de fase já dispara templates de
+ * email por si só. Ter `send_email` escolhível aqui dava duas portas para a
+ * mesma casa: configurar nos dois lados duplicava o envio, configurar só
+ * aqui não fazia nada (esta tabela não é lida pelo motor para este tipo).
+ *
+ * `create_task` foi retirado da escolha pela razão original: o motor NÃO lê
+ * esta tabela. Lê `lead_stage_actions`, `deal_stage_actions`,
+ * `quote_stage_actions` e `contract_stage_actions` — nunca
+ * `proposal_stage_actions`. Uma tarefa configurada aqui era gravada e nunca
+ * criada. O `ai-assistant/tools/stage_actions.ts` já o dizia por escrito:
+ * "proposal → proposal_stage_actions (READ-ONLY via agente — executor NÃO lê
+ * esta tabela)".
+ *
+ * Sobra `create_contract`, e é o único que faz sentido oferecer: funciona, mas
+ * NÃO por esta tabela — está fixo no código pela flag is_won da fase. As duas
+ * regras guardadas hoje (uma delas numa organização com dados reais) são desse
+ * tipo e continuam a funcionar como sempre funcionaram.
+ *
+ * Retirou-se a promessa, não se implementou a funcionalidade. Ligar esta
+ * superfície ao motor é decisão de produto por tomar, não uma correcção — e
+ * enquanto não for tomada, a interface passa a dizer a verdade sobre o que faz.
  */
-const SELECTABLE_ACTION_TYPES = ["create_task", "send_email", "create_contract"] as const;
+const SELECTABLE_ACTION_TYPES = ["create_contract"] as const;
 
 export function ProposalStageActionsConfig({ stages, companyId }: Props) {
   const { toast } = useToast();
