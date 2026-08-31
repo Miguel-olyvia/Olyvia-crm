@@ -6,13 +6,16 @@ import {
   compromissosDoCRM,
   indisponibilidadesDoPeriodo,
   listarEquipa,
+  listarLocais,
   ordensDoPeriodo,
   type IndisponibilidadeNoDia,
+  type LocalRow,
   type MembroEquipa,
 } from "../lib/dados";
 import { Badge, Card, EmptyState, ErrorState, IconButton, Skeleton, cx } from "../components/ui";
 import { AlertTriangle, ChevronLeft, ChevronRight, Clock, User } from "../components/icons";
 import SeletorDeData from "../components/SeletorDeData";
+import RotaDoDia from "../components/RotaDoDia";
 import {
   HORA_ABRE,
   HORA_FECHA,
@@ -107,6 +110,7 @@ export default function Agenda() {
   const [ordens, setOrdens] = useState<OrdemNaAgenda[]>([]);
   const [indisp, setIndisp] = useState<IndisponibilidadeNoDia[]>([]);
   const [compromissos, setCompromissos] = useState<Compromisso[]>([]);
+  const [locais, setLocais] = useState<LocalRow[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [aCarregar, setACarregar] = useState(true);
 
@@ -117,16 +121,18 @@ export default function Agenda() {
     setACarregar(true);
     setErro(null);
     try {
-      const [e, o, i, c] = await Promise.all([
+      const [e, o, i, c, l] = await Promise.all([
         listarEquipa(activeOrgId),
         ordensDoPeriodo(activeOrgId, de, ate),
         indisponibilidadesDoPeriodo(activeOrgId, de, ate),
         compromissosDoCRM(activeOrgId, de, ate),
+        listarLocais(activeOrgId),
       ]);
       setEquipa(e);
       setOrdens(o);
       setIndisp(i);
       setCompromissos(c);
+      setLocais(l);
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Não foi possível carregar a agenda.");
     } finally {
@@ -224,6 +230,7 @@ export default function Agenda() {
               ordens={ordens}
               indisp={indisp}
               compromissos={compromissos}
+              locais={locais}
             />
           )}
           {vista === "semana" && (
@@ -259,12 +266,14 @@ function VistaDoDia({
   ordens,
   indisp,
   compromissos,
+  locais,
 }: {
   dia: Date;
   equipa: readonly MembroEquipa[];
   ordens: readonly OrdemNaAgenda[];
   indisp: readonly IndisponibilidadeNoDia[];
   compromissos: readonly Compromisso[];
+  locais: readonly LocalRow[];
 }) {
   const chave = chaveDoDia(dia);
   const doDia = useMemo(() => indisp.filter((i) => i.dia.slice(0, 10) === chave), [indisp, chave]);
@@ -341,6 +350,10 @@ function VistaDoDia({
           })}
         </ul>
       </Card>
+
+      {/* Depois da grelha, e não antes: primeiro vê-se quem tem o dia cheio,
+          e só depois se pergunta quantos quilómetros custa. */}
+      <RotaDoDia equipa={equipa} ordens={ordens} locais={locais} />
     </div>
   );
 }

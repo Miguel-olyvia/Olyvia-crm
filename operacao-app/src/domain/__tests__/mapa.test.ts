@@ -3,7 +3,9 @@ import {
   comoTexto,
   coordenadasDeLink,
   coordenadasValidas,
+  MAXIMO_DE_PARAGENS,
   linkParaIr,
+  linkParaRota,
   linkParaVer,
   temSitio,
 } from "../mapa";
@@ -170,5 +172,41 @@ describe("os links que se abrem", () => {
 describe("as coordenadas escritas", () => {
   it("levam seis casas — chegam a uns dez centímetros", () => {
     expect(comoTexto(LISBOA)).toBe("38.722300, -9.139300");
+  });
+});
+
+describe("o link do dia inteiro", () => {
+  const PORTO = { latitude: 41.1579, longitude: -8.6291 };
+  const CASCAIS = { latitude: 38.6979, longitude: -9.4215 };
+
+  it("com duas paragens é só origem e destino", () => {
+    const u = linkParaRota([LISBOA, PORTO])!;
+    expect(u).toContain("origin=38.7223%2C-9.1393");
+    expect(u).toContain("destination=41.1579%2C-8.6291");
+    expect(u).not.toContain("waypoints");
+  });
+
+  it("as do meio vão em waypoints, pela ordem dada", () => {
+    const u = linkParaRota([LISBOA, CASCAIS, PORTO])!;
+    expect(u).toContain("waypoints=38.6979%2C-9.4215");
+    expect(u).toContain("destination=41.1579%2C-8.6291");
+  });
+
+  it("de carro, que é como o técnico anda", () => {
+    expect(linkParaRota([LISBOA, PORTO])).toContain("travelmode=driving");
+  });
+
+  it("uma paragem só não é um caminho", () => {
+    expect(linkParaRota([LISBOA])).toBeNull();
+    expect(linkParaRota([])).toBeNull();
+  });
+
+  it("um dia grande de mais recusa-se, em vez de cortar em silêncio", () => {
+    // Cortar daria um caminho que salta sítios sem ninguém perceber.
+    const muitas = Array.from({ length: MAXIMO_DE_PARAGENS + 1 }, (_, i) => ({
+      latitude: 38.7 + i * 0.01,
+      longitude: -9.1,
+    }));
+    expect(linkParaRota(muitas)).toBeNull();
   });
 });

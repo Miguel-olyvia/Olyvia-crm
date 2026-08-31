@@ -276,7 +276,7 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **243 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **276 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em pouco mais de um segundo.
 
 ---

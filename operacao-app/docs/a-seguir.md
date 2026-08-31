@@ -263,7 +263,18 @@ O que é preciso: guardar as respostas no telemóvel e sincronizar quando houver
 rede. Não é pouco trabalho — é a coisa mais cara desta lista — mas é a que
 separa uma app de escritório de uma app de terreno.
 
-### b) Ordenar o dia por proximidade
+### b) Ordenar o dia por proximidade — **feito** (31 ago)
+
+> A agenda, na vista de dia, mostra o dia de cada pessoa pela estrada: os
+> quilómetros pela hora marcada, os quilómetros pela melhor ordem, e quantas
+> visitas teriam de ser remarcadas para os poupar. Não reordena nada sozinho.
+>
+> Sem geocodificação e sem serviço pago: as coordenadas entram à mão em
+> `ops_local` (ver `db/mapa.sql`), e a distância calcula-se com haversine.
+>
+> O texto abaixo é o levantamento original, e fica como registo.
+
+
 
 Hoje as ordens do dia aparecem por hora. Se forem quatro em pontos diferentes
 da cidade, o técnico decide o caminho de cabeça.

@@ -190,3 +190,39 @@ export function temSitio(local: {
 }): boolean {
   return alvoDoLocal(local) !== null;
 }
+
+/**
+ * O link que abre o **dia inteiro** no Maps, pela ordem dada.
+ *
+ * `origin` é a primeira paragem, `destination` a última, e as do meio vão em
+ * `waypoints` separadas por `|`. O Google traça o caminho todo de uma vez, e o
+ * técnico segue sem voltar aqui entre paragens.
+ *
+ * O Google aceita poucos pontos intermédios num link destes — na prática, nove.
+ * Um dia com mais paragens do que isso é raro, e cortar em silêncio daria um
+ * caminho que salta sítios sem ninguém perceber. Por isso devolve-se `null`, e
+ * o ecrã diz que o dia é grande de mais para um link só.
+ */
+export const MAXIMO_DE_PARAGENS = 11;
+
+export function linkParaRota(
+  paragens: readonly { latitude: number; longitude: number }[]
+): string | null {
+  if (paragens.length < 2) return null;
+  if (paragens.length > MAXIMO_DE_PARAGENS) return null;
+
+  const ponto = (p: { latitude: number; longitude: number }) => `${p.latitude},${p.longitude}`;
+  const origem = paragens[0];
+  const destino = paragens[paragens.length - 1];
+  const meio = paragens.slice(1, -1);
+
+  const partes = [
+    `origin=${encodeURIComponent(ponto(origem))}`,
+    `destination=${encodeURIComponent(ponto(destino))}`,
+  ];
+  if (meio.length > 0) {
+    partes.push(`waypoints=${encodeURIComponent(meio.map(ponto).join("|"))}`);
+  }
+
+  return `https://www.google.com/maps/dir/?api=1&${partes.join("&")}&travelmode=driving`;
+}

@@ -38,6 +38,7 @@ const ordem = (p: Partial<OrdemNaAgenda> = {}): OrdemNaAgenda => ({
   origem: "preventiva",
   prioridade: "normal",
   responsavel_id: "p1",
+  local_id: null,
   agendada_para: as(9),
   janela_inicio: null,
   janela_fim: null,

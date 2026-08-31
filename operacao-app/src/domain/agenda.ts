@@ -25,6 +25,7 @@ export interface OrdemNaAgenda {
   origem: string;
   prioridade: string;
   responsavel_id: string | null;
+  local_id: string | null;
   agendada_para: string | null;
   janela_inicio: string | null;
   janela_fim: string | null;
@@ -241,6 +242,9 @@ export function posicaoDoCompromisso(c: Compromisso, dia: Date): Posicao | null 
       origem: "crm",
       prioridade: "normal",
       responsavel_id: c.utilizador_id,
+      // Um compromisso do CRM não tem local de Operações — e por isso nunca
+      // entra numa rota. O `onde` que ele traz é texto escrito à mão.
+      local_id: null,
       agendada_para: c.inicio,
       janela_inicio: c.inicio,
       janela_fim: c.fim,

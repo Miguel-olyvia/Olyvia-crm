@@ -1198,7 +1198,7 @@ export async function ordensDoDia(orgId: string, dia: Date): Promise<OrdemNaAgen
     .from("ops_ordem")
     .select(
       "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
-        "agendada_para, janela_inicio, janela_fim"
+        "local_id, agendada_para, janela_inicio, janela_fim"
     )
     .eq("organization_id", orgId)
     .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada"])
