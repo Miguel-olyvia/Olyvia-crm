@@ -248,6 +248,29 @@ console.log("\n─── o corpo do email ────────────�
   conferir(html.includes("&amp; Filhos"), "o & também");
 }
 
+console.log("\n─── fica tudo no histórico ──────────────");
+{
+  const ev = await todos(
+    `SELECT tipo, descricao FROM public.ops_evento
+      WHERE entidade = 'ordem' AND tipo = 'relatorio_enviado'`
+  );
+  conferir(ev.length >= 1, "o envio ao cliente fica na ficha da ordem");
+  if (ev.length) {
+    conferir(
+      ev[0].descricao.includes("cliente@exemplo.pt"),
+      "e diz para que endereço foi — sem se ir a uma tabela do CRM"
+    );
+  }
+
+  // Ligar isto faz sair emails da empresa: é das decisões mais consequentes
+  // que o módulo permite, e tem de ter dono e data. Mas só pela RPC — quem
+  // mexe na tabela à mão (como este teste faz) não inventa histórico.
+  const def = await todos(
+    `SELECT tipo FROM public.ops_evento WHERE entidade = 'definicao'`
+  );
+  conferir(def.length === 0, "mexer na tabela à mão não inventa histórico");
+}
+
 console.log("\n─── quem pode ligar isto ────────────────");
 {
   conferir(

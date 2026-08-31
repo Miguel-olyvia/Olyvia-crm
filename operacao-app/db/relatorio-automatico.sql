@@ -112,6 +112,7 @@ AS $$
 DECLARE
   v_user   uuid := public.current_business_user_id();
   v_funcao text;
+  v_antes  text;
 BEGIN
   IF v_user IS NULL THEN
     RAISE EXCEPTION 'Sem sessão.' USING ERRCODE = 'insufficient_privilege';
@@ -134,12 +135,33 @@ BEGIN
     RAISE EXCEPTION 'O relatório automático só pode ser "sim" ou "nao".';
   END IF;
 
+  SELECT valor INTO v_antes
+    FROM public.ops_definicao
+   WHERE organization_id = p_org_id AND chave = p_chave;
+
   INSERT INTO public.ops_definicao (organization_id, chave, valor, atualizada_por)
   VALUES (p_org_id, p_chave, p_valor, v_user)
   ON CONFLICT (organization_id, chave) DO UPDATE
     SET valor = EXCLUDED.valor,
         atualizada_em = now(),
         atualizada_por = EXCLUDED.atualizada_por;
+
+  -- Ligar isto faz sair emails da empresa. É das decisões mais consequentes
+  -- que o módulo permite, e ficava sem registo nenhum de quem a tomou.
+  IF v_antes IS DISTINCT FROM p_valor THEN
+    INSERT INTO public.ops_evento
+      (organization_id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois)
+    VALUES
+      (p_org_id, 'definicao', p_org_id, 'definicao_alterada',
+       CASE WHEN p_chave = 'relatorio_automatico'
+            THEN CASE WHEN p_valor = 'sim'
+                      THEN 'Relatório automatico ao cliente: LIGADO'
+                      ELSE 'Relatório automatico ao cliente: DESLIGADO' END
+            ELSE p_chave || ' = ' || p_valor END,
+       v_user,
+       jsonb_build_object('chave', p_chave, 'valor', v_antes),
+       jsonb_build_object('chave', p_chave, 'valor', p_valor));
+  END IF;
 
   RETURN jsonb_build_object('ok', true, 'chave', p_chave, 'valor', p_valor);
 END
@@ -395,6 +417,17 @@ BEGIN
      v_o.codigo || ' — ' || v_o.titulo,
      v_html,
      now(), 'pending');
+
+  -- Fica na ficha da ordem. Uma pessoa que abra a ordem daqui a um ano tem de
+  -- poder ver que o cliente recebeu, para onde, e quando — sem ir procurar a
+  -- uma tabela do CRM que ela nem sabe que existe.
+  INSERT INTO public.ops_evento
+    (organization_id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois)
+  VALUES
+    (v_o.organization_id, 'ordem', _ordem_id, 'relatorio_enviado',
+     'Relatório enviado ao cliente para ' || btrim(v_email),
+     _autor_id, NULL,
+     jsonb_build_object('para', btrim(v_email), 'automatico', true));
 
   RETURN true;
 EXCEPTION WHEN OTHERS THEN
