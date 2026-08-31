@@ -155,6 +155,9 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/campos-ordem.sql` | Tipo de trabalho (os 9 do Infraspeak), centro de custo, fornecedor, e o fecho automático por tipo | **não** (o fornecedor é só um id, sem chave estrangeira) |
 | `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu | **não** |
 | `db/documentos-e-ativos.sql` | Word, Excel e CSV nos anexos, e o histórico do equipamento | **não** (mexe no bucket `operacoes`, que é do módulo) |
+| `db/listas-operacao.sql` | Motivos de pausa por função, áreas e tipos de área | **não** |
+| `db/mensagens.sql` | A conversa entre colegas dentro da ordem. Não se apaga nem se reescreve | **sim** — só o aviso no sino, pelo `ops_notificar` |
+| `db/relatorio-manual.sql` | O botão **Enviar ao cliente**, para quando o automático está desligado ou já passou | **sim** — a mesma linha em `scheduled_emails` |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -164,8 +167,18 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/diagnostico-*.sql` · `verificar-acesso.sql` | só leem | não |
 
 A coluna da direita é a que interessa quando alguém pergunta se isto mexe no CRM. Os
-**quatro ficheiros que constroem o módulo** não escrevem uma linha fora de `ops_*`, e há
-um teste que falha se isso mudar.
+ficheiros que constroem o módulo não escrevem uma linha fora de `ops_*`, e há um teste
+que falha se isso mudar.
+
+O que escreve para fora são **três coisas, e são sempre as mesmas**:
+
+1. `INSERT` em `notifications` — o sino que o CRM já tem.
+2. `INSERT` em `scheduled_emails` — a fila de saída que o CRM já processa. Duas
+   funções escrevem lá: o gatilho do relatório automático e o botão de mandar à mão.
+   Há um teste que falha se aparecer uma terceira.
+3. O bucket `operacoes`, que é do módulo.
+
+Os fornecedores e os clientes são **lidos** do CRM. Nunca escritos.
 
 ### A garantia que este esquema dá
 
@@ -243,6 +256,10 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_gravar_medicao` | uma medição e as suas opções | uma gama sem limites é recusada |
 | `rpc_ops_gravar_perfil` | quem é da equipa, e o custo/hora | ninguém se despromove a si próprio |
 | `rpc_ops_lancar_custo` | material e serviços gastos | o mesmo material não entra em duas obras |
+| `rpc_ops_duplicar_*` | uma cópia de ordem, plano, local ou checklist | leva o molde, nunca o que aconteceu |
+| `rpc_ops_gravar_tipo_trabalho` · `_centro_custo` · `_motivo_pausa` · `_area` · `_area_tipo` | as listas da operação | só quem gere |
+| `rpc_ops_escrever_mensagem` | uma mensagem na conversa da ordem | não se apaga nem se reescreve; avisa quem está na ordem |
+| `rpc_ops_enviar_relatorio` | põe o relatório na fila de emails do CRM | só quem gere, só com a ordem fechada, só para o email da ficha do cliente |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
@@ -266,6 +283,8 @@ npm run validar-schema          # o esquema contra um Postgres limpo
 npm run validar-instalacao      # a sequência de instalação toda, ponta a ponta
 npm run validar-rpcs            # a máquina de estados é MESMO imposta na base?
 npm run validar-planos          # a RRULE e a janela de 120 dias
+npm run validar-mensagens       # a conversa avisa quem tem de saber, e não se reescreve
+npm run validar-relatorio       # o email ao cliente, automático e à mão
 npm run validar-restricao       # restringir permissões não corta quem o corre
 
 npm run supabase:verificar      # o esquema contra a tua base, com ROLLBACK
@@ -285,6 +304,9 @@ npm run supabase:relatorio      # db/relatorio-automatico.sql (depois das assina
 npm run supabase:campos         # db/campos-ordem.sql
 npm run supabase:duplicar       # db/duplicar.sql (depois do campos-ordem)
 npm run supabase:documentos     # db/documentos-e-ativos.sql
+npm run supabase:listas         # db/listas-operacao.sql (pausas, áreas)
+npm run supabase:mensagens      # db/mensagens.sql (a conversa da ordem)
+npm run supabase:relatorio-manual # db/relatorio-manual.sql (depois do relatorio)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
@@ -401,13 +423,19 @@ salta, em vez de escorregar para o mês seguinte.
 
 ## Fora do v1, por decisão
 
-Identificados no levantamento, nenhum necessário para fechar o ciclo:
+O que à partida ficou de fora e **continua de fora**, com a razão:
 
-- os ecrãs de Planos, Agenda, Análises e Definições — o modelo suporta-os, falta a
-  interface
-- agendamentos múltiplos por ordem (`RETIFICAÇÃO MEDIDAS`, `INÍCIO OBRA`)
-- SLA por cliente × área × prioridade
-- áreas, tipos e prioridades como tabelas de configuração — hoje são colunas
-- histórico e gráfico das medições na ficha de ativo (as leituras já ficam gravadas)
-- regras de notificação, portal do cliente, relatório em PDF
-- ponte com a agenda do CRM (`schedule_items`) e com o Inventário
+| | Porquê |
+|---|---|
+| **Portal do cliente** | É um produto, não uma funcionalidade: contas, permissões e um ecrã público. Ver [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md). Hoje a base **recusa** escrever no canal `cliente` das mensagens, para ninguém escrever a pensar que o cliente lê |
+| **Abrir a app sem rede** (service worker) | Responder a tarefas e medições sem rede já funciona. Abrir a app sem rede é outra coisa, e a forma de a resolver depende de saber onde a rede falha — espera pelo piloto |
+| **Fotos sem rede** | O mesmo. Uma foto não cabe na mesma fila que uma resposta de texto |
+| **WhatsApp** | A conversa da ordem é entre colegas. Ligar ao WhatsApp é integrar com uma empresa terceira e mudar quem vê o quê |
+| **Stock, Vendas e Compras** | O Infraspeak tem; a Olyvia não os usa. Construir o que ninguém abre é custo puro |
+| **SLA por cliente × área × prioridade** | O modelo suporta-o (áreas e tipos já são tabelas). Falta alguém querer os prazos escritos |
+| **Etiquetas NFC** | Custam dinheiro por unidade e precisam de telemóvel com NFC ligado. O QR imprime-se numa folha de autocolantes e lê-se com a câmara de qualquer telemóvel |
+
+O que estava nesta lista e **já está feito**: os ecrãs de Planos, Agenda, Análises e
+Definições; áreas e tipos como tabelas de configuração; histórico e evolução das
+medições na ficha do equipamento; o relatório ao cliente (pela impressão do browser,
+automático e à mão); e a ponte com a agenda do CRM.

@@ -29,12 +29,44 @@ fazer estão feitas. Restava uma, e está mais abaixo.
 | **Packs de configuração** — Manutenção, Obras, Limpeza | `/definicoes` › Procedimentos |
 | **Assinatura do cliente** no telemóvel do técnico | ficha da ordem, depois de fechar |
 
+E, mais tarde no mesmo dia:
+
+| | Onde se vê |
+|---|---|
+| **Onde fica o local, no mapa**, e o botão que abre a navegação | ficha do local, ficha da ordem |
+| **O dia pela estrada** — a ordem das visitas por proximidade, e quantos km se poupam | `/agenda` › Dia |
+| **Mapa da agenda** — a semana toda em cima do mapa | `/agenda` › Mapa |
+| **Relatório automático ao cliente** ao confirmar a ordem. Desligado até alguém o ligar | `/definições` › Automático |
+| **Enviar o relatório à mão** — para quando o automático está desligado ou o cliente ligou a pedir | ficha da ordem, depois de fechar |
+| **Fila de envio** — responder sem rede e sair tudo quando a rede volta | ficha da ordem |
+| **Tipo de trabalho, centro de custo e fornecedor** na ordem, e o fecho automático por tipo | `/definições` › Tipos e custos |
+| **Motivos de pausa por função, áreas e tipos de área** | `/definições` › Listas |
+| **Duplicar** ordens, planos, locais e checklists — o molde, nunca o que aconteceu | em cada ficha |
+| **Word, Excel, CSV e PDF** nos anexos | ficha da ordem |
+| **Histórico do equipamento** — mudanças de sítio, categoria e criticidade | ficha do equipamento |
+| **Etiquetas QR** para colar nos equipamentos, e a ficha onde a câmara aterra | ficha do local › Etiquetas |
+| **Ícones nas listas**, como no Infraspeak mas no roxo da nossa marca | todas as listas |
+| **A conversa dentro da ordem** — entre colegas, guardada com o trabalho, sem se poder apagar | ficha da ordem |
+| **O funil, do princípio ao fim** | `/ajuda` › O funil |
+
 ### O que falta
 
-**Trabalhar sem rede.** É a mais cara da lista, e a recomendação continua a ser
-esperar pelo piloto — não por ser difícil, mas porque a forma de a resolver
-depende de saber ONDE a rede falha. Se for só responder a tarefas é uma coisa;
-se for tirar fotos numa cave é outra, bem mais cara.
+**Trabalhar sem rede, a sério.** Metade está feita: responder a tarefas e a
+medições sem rede já funciona — fica guardado no telemóvel e sai sozinho
+quando a rede volta. O que falta é o resto: **abrir a aplicação** sem rede
+(service worker) e **tirar fotos** sem rede. A recomendação continua a ser
+esperar pelo piloto, porque a forma de resolver depende de saber ONDE a rede
+falha.
+
+**O portal do cliente.** Ficou de fora de propósito — ver
+[`portal-do-cliente.md`](portal-do-cliente.md). A base recusa hoje escrever no
+canal `cliente` das mensagens, precisamente para ninguém escrever a pensar que
+o cliente lê.
+
+**O email que não chegou.** O relatório automático pôs duas ordens em
+`scheduled_emails` com `status = 'sent'`, e o email não chegou à caixa de
+entrada. O módulo fez a parte dele (a carta está no marco do correio); o que
+falta confirmar é o lado do CRM — `email_logs` e o SMTP da organização.
 
 ### Os ficheiros SQL, por ordem
 
@@ -44,18 +76,29 @@ e foi a razão de um deploy falhado.
 ```
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
-  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql
+  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
+  → relatorio-automatico.sql → relatorio-manual.sql
+  → campos-ordem.sql → duplicar.sql
+  → documentos-e-ativos.sql → listas-operacao.sql → mensagens.sql
   → planos-crud.sql → config.sql → packs.sql → custos.sql → analises.sql
   → cliente-crm.sql → pos-instalacao.sql
 ```
 
 ### O que está verificado
 
-**22 validadores** contra Postgres a sério, **306 testes** de domínio, typecheck
-e build limpos. Zero chaves estrangeiras de `ops_*` para fora.
+Os validadores correm contra Postgres a sério (PGlite), mais os testes de
+domínio sobre funções puras. Typecheck e build limpos. Zero chaves
+estrangeiras de `ops_*` para fora — e um teste que falha se alguém criar uma.
 
-**As duas únicas escritas fora de `ops_*`**, ambas deliberadas e testadas: uma
-linha no sino (`notifications`), e os ficheiros no balde `operacoes`.
+**As três únicas escritas fora de `ops_*`**, todas deliberadas e testadas:
+
+1. uma linha no sino (`notifications`);
+2. uma linha na fila de emails (`scheduled_emails`) — e **só duas funções**
+   escrevem lá: o gatilho do relatório automático e o botão de mandar à mão.
+   Há uma verificação que falha se aparecer uma terceira;
+3. os ficheiros no balde `operacoes`, que é do módulo.
+
+Fornecedores e clientes são **lidos** do CRM. Nunca escritos.
 
 ### Onde está o resto
 

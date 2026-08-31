@@ -11,17 +11,18 @@
 
 ## 1. Os ecrãs
 
-Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
+Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 
 | Rota | O que faz | Quem vê |
 |---|---|---|
 | `/` · **Hoje** | O que espera por mim e o que está a correr mal. Nada de filtros antes de mostrar. Ao abrir, quem coordena dispara a verificação de atrasos. | todos |
 | `/ordens` · **Ordens** | A lista, com filtros por estado, origem e pessoa. | todos (só as suas, se técnico) |
 | `/ordens/nova` · **Nova ordem** | Quatro campos obrigatórios; o resto atrás de um clique. | todos (técnico → fica `por_aprovar`) |
-| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, histórico. | quem está na ordem, e quem coordena |
+| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
 | `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
-| `/locais/:codigo` · **Ficha do local** | O caminho até ao sítio, os sítios lá dentro, os equipamentos (criar, editar, histórico), e as últimas ordens que por lá passaram. Duplicar o local, com ou sem equipamentos. | todos; editar é de quem coordena |
+| `/locais/:codigo` · **Ficha do local** | O caminho até ao sítio, os sítios lá dentro, os equipamentos (criar, editar, histórico), e as últimas ordens que por lá passaram. Duplicar o local; imprimir as **etiquetas QR** dos equipamentos. | todos; editar é de quem coordena |
+| `/ativos/:codigo` · **Ficha do equipamento** | Onde a etiqueta QR aterra. O que é, o que já lhe fizeram, e o botão para abrir uma ordem ali mesmo. | todos |
 | `/agenda` · **Agenda** | **Dia, semana, mês e mapa.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. Filtros por cliente, tipo de trabalho, pessoa, especialidade e fornecedor. Na vista de dia, o dia pela estrada. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
@@ -281,6 +282,8 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-campos` | a ordem só fecha sozinha quando devia — sobretudo, quando NÃO fecha |
 | `validar-duplicar` | uma cópia leva o molde e nunca o que aconteceu |
 | `validar-documentos` | os tipos de ficheiro aceites, e a memória do equipamento |
+| `validar-listas` | motivos de pausa por função, áreas e tipos |
+| `validar-mensagens` | a conversa existe, avisa quem tem de saber, e não se reescreve |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
@@ -298,8 +301,10 @@ testado, e foi a razão de um deploy falhado.
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
   → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
-  → relatorio-automatico.sql → campos-ordem.sql → duplicar.sql
-  → documentos-e-ativos.sql → planos-crud.sql
+  → relatorio-automatico.sql → relatorio-manual.sql
+  → campos-ordem.sql → duplicar.sql
+  → documentos-e-ativos.sql → listas-operacao.sql → mensagens.sql
+  → planos-crud.sql
   → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql
 ```
