@@ -91,17 +91,31 @@ export default function Ajuda() {
 function PorqueMudar() {
   return (
     <div className="space-y-4">
+      {/* A abertura. Isto é lido por quem tem trinta segundos, e a versão
+          anterior eram dois parágrafos — que ninguém lia.
+          Um número grande, quatro trocas, uma linha. */}
       <Card className="p-5">
-        <h2 className="text-base font-semibold text-slate-900">Em duas linhas</h2>
-        <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          A operação passa a viver <strong>dentro do Olyvia</strong>, ao lado dos clientes, dos
-          orçamentos e das compras que já lá estão. Não é uma cópia do Infraspeak: é o mesmo
-          trabalho, sem as voltas que o software obrigava a dar.
+        <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+          O custo de mão de obra registado no Infraspeak
         </p>
-        <p className="mt-2 text-sm leading-relaxed text-slate-700">
-          O que se segue não é opinião. Cada ponto traz a <strong>prova tirada da vossa
-          instância real</strong> do Infraspeak — os nomes inventados, os campos desviados, os
-          números impossíveis. São essas marcas que dizem onde é que o modelo apertava.
+        {/* Figuras proporcionais, não tabulares: `tabular-nums` dá a cada
+            algarismo a largura de um zero, e a este tamanho o número sai frouxo. */}
+        <p className="mt-1 text-5xl font-semibold tracking-tight text-slate-900">0,00 €</p>
+        <p className="mt-2 max-w-prose text-sm leading-relaxed text-slate-600">
+          Em <strong className="font-medium text-slate-800">todas</strong> as ordens da vossa
+          instância. Não é avaria: o campo existe e nunca foi preenchido — e por isso
+          ninguém sabe quanto custa uma obra.
+        </p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {TROCAS.map((t) => (
+            <Troca key={t.o} {...t} />
+          ))}
+        </div>
+
+        <p className="mt-4 text-xs leading-relaxed text-slate-500">
+          Cada número aqui saiu da vossa instância real. O que se segue explica cada um,
+          com a prova ao lado.
         </p>
       </Card>
 
@@ -276,6 +290,67 @@ function PorqueMudar() {
     </div>
   );
 }
+
+/**
+ * Uma troca, lida num relance: o que o Infraspeak dá, o que o Olyvia dá.
+ *
+ * A cor vive num quadrado pequeno ao lado do nome, e não no texto. O texto usa
+ * sempre tinta normal — um valor pintado de vermelho lê-se como um alarme, e
+ * estes não são alarmes, são factos. O nome ao lado do quadrado é que carrega
+ * a identidade, e por isso isto continua a ler-se sem cor nenhuma.
+ */
+function Troca({ o, antes, depois }: { o: string; antes: string; depois: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50/70 p-3 ring-1 ring-slate-200/70">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{o}</p>
+      <div className="mt-2 flex items-stretch gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <span className="h-2 w-2 shrink-0 rounded-[3px] bg-[#b91c1c]" aria-hidden="true" />
+            Infraspeak
+          </p>
+          <p className="mt-0.5 text-sm leading-snug text-slate-500">{antes}</p>
+        </div>
+        <ChevronRight
+          width={16}
+          height={16}
+          className="mt-4 shrink-0 self-start text-slate-300"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+            <span className="h-2 w-2 shrink-0 rounded-[3px] bg-[#5b21b6]" aria-hidden="true" />
+            Olyvia
+          </p>
+          <p className="mt-0.5 text-sm font-medium leading-snug text-slate-900">{depois}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TROCAS = [
+  {
+    o: "Uma avaria encontrada",
+    antes: "fica escrita no histórico, e morre lá",
+    depois: "abre a reparação sozinha",
+  },
+  {
+    o: "O tempo de uma ordem",
+    antes: "5303 h — fecho menos início",
+    depois: "6 h 20 de trabalho a sério",
+  },
+  {
+    o: "A manutenção cumprida",
+    antes: "conta-se à mão, ordem a ordem",
+    depois: "uma percentagem por cliente",
+  },
+  {
+    o: "Onde vive a informação",
+    antes: "dois sistemas que não se falam",
+    depois: "a mesma base de dados",
+  },
+] as const;
 
 function Pergunta({
   pergunta,
