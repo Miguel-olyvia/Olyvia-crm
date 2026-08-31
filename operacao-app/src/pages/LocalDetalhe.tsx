@@ -41,6 +41,7 @@ import {
 import { linkParaIr, temSitio } from "../domain/mapa";
 import FormAtivoDoLocal from "../components/FormAtivoDoLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
+import HistoricoDoAtivo from "../components/Historico";
 import { duplicarLocal } from "../lib/config";
 
 /**
@@ -219,7 +220,7 @@ export default function LocalDetalhe() {
         aoGravar={() => setRecarga((r) => r + 1)}
       />
 
-      <Historico ordens={ordens} />
+      <HistoricoDeOrdens ordens={ordens} />
     </div>
   );
 }
@@ -282,6 +283,7 @@ function Equipamentos({
 }) {
   const [novo, setNovo] = useState(false);
   const [aEditar, setAEditar] = useState<string | null>(null);
+  const [comHistorico, setComHistorico] = useState<string | null>(null);
   const [procura, setProcura] = useState("");
 
   const porCategoria = useMemo(
@@ -397,6 +399,13 @@ function Equipamentos({
                     {a.criticidade}
                   </span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setComHistorico(comHistorico === a.id ? null : a.id)}
+                  className="shrink-0 text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  histórico
+                </button>
                 {podeEditar && (
                   <button
                     type="button"
@@ -405,6 +414,11 @@ function Equipamentos({
                   >
                     editar
                   </button>
+                )}
+                {comHistorico === a.id && (
+                  <div className="w-full rounded-lg bg-slate-50 p-3">
+                    <HistoricoDoAtivo entidade="ativo" entidadeId={a.id} />
+                  </div>
                 )}
               </li>
             )
@@ -423,7 +437,7 @@ function Equipamentos({
 
 /* ───────────────────────────── Histórico ───────────────────────────────── */
 
-function Historico({ ordens }: { ordens: readonly LinhaOrdem[] }) {
+function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
   if (ordens.length === 0) {
     return (
       <Card className="p-4 sm:p-5">

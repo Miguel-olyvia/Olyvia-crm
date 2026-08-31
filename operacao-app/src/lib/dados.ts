@@ -1566,3 +1566,45 @@ export function caminhoAteLocal(
   }
   return caminho;
 }
+
+/* ─────────────────────────────── Histórico ─────────────────────────────── */
+
+export interface EventoRow {
+  id: string;
+  entidade: string;
+  entidade_id: string;
+  tipo: string;
+  descricao: string | null;
+  autor_id: string | null;
+  antes: Record<string, unknown> | null;
+  depois: Record<string, unknown> | null;
+  criado_em: string;
+}
+
+/**
+ * O que aconteceu a uma coisa, do mais recente para trás.
+ *
+ * O módulo escreve histórico desde o primeiro dia e nunca o mostrou a
+ * ninguém. Isto é a porta que faltava — serve para o equipamento, e serve
+ * para tudo o resto que a use a seguir.
+ */
+export async function historicoDe(
+  entidade: string,
+  entidadeId: string,
+  limite = 30
+): Promise<EventoRow[]> {
+  const { data, error } = await supabase
+    .from("ops_evento")
+    .select("id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois, criado_em")
+    .eq("entidade", entidade)
+    .eq("entidade_id", entidadeId)
+    .order("criado_em", { ascending: false })
+    .limit(limite);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem histórico:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as EventoRow[];
+}
