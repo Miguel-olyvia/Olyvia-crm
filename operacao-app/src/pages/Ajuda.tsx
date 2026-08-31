@@ -998,6 +998,15 @@ const DIFERENCAS = [
     feito: true,
   },
   {
+    titulo: "A assinatura do cliente fica com a ordem",
+    porque: "O papel perde-se, molha-se, fica no carro.",
+    infraspeak:
+      "O relatório sai com uma linha para assinar à caneta. Depois alguém tem de guardar a folha, e seis meses depois ninguém sabe onde ela está.",
+    olyvia:
+      "O cliente assina com o dedo no telemóvel do técnico, com o nome e a qualidade em que assina — cliente, condómino, encarregado. Fica com a ordem e sai no relatório. É o equivalente digital da folha de obra assinada; não é uma assinatura eletrónica qualificada, e o ecrã diz isso.",
+    feito: true,
+  },
+  {
     titulo: "Configuração pré-preenchida por setor",
     porque: "Uma árvore de definições vazia acaba sempre em caixote.",
     infraspeak:
@@ -1009,11 +1018,6 @@ const DIFERENCAS = [
 ] as const;
 
 const POR_FAZER = [
-  {
-    o: "Assinatura do cliente no telemóvel",
-    porque:
-      "o relatório tem uma linha para assinar à caneta. O Olyvia já sabe recolher assinaturas com validade legal — falta ligar as duas coisas.",
-  },
   {
     o: "Portal do cliente",
     porque:
@@ -1224,11 +1228,11 @@ const DIA_A_DIA = [
     dica: "Liga “só para nós” nas fotos internas — essas não saem no relatório do cliente.",
   },
   {
-    titulo: "Fechar e entregar",
+    titulo: "Fechar, assinar e entregar",
     onde: "Na ficha da ordem",
     texto:
-      "Fechar exige que as tarefas obrigatórias tenham resposta. Depois de fechada, aparece o botão do relatório para o cliente.",
-    dica: "O relatório sai em PDF pela impressão do browser. Não leva custos, nem tarefas privadas, nem nomes internos — o cliente comprou o resultado, não o processo.",
+      "Fechar exige que as tarefas obrigatórias tenham resposta. Depois de fechada aparecem duas coisas: o botão do relatório, e a caixa para o cliente assinar no telemóvel.",
+    dica: "Escreve sempre a QUALIDADE de quem assina — cliente, condómino, porteiro. Uma assinatura ilegível de alguém que passava não vale nada seis meses depois. O relatório sai em PDF pela impressão do browser, e não leva custos nem tarefas privadas.",
   },
   {
     titulo: "Pôr um orçamento a andar",

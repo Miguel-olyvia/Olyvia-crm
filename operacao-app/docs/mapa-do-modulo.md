@@ -34,7 +34,7 @@ outras.
 
 ---
 
-## 2. As 27 tabelas
+## 2. As 28 tabelas
 
 Todas com prefixo `ops_`, todas com RLS ligada, **zero chaves estrangeiras para
 fora do módulo**. Há um teste que falha se alguém criar uma.
@@ -82,6 +82,7 @@ fora do módulo**. Há um teste que falha se alguém criar uma.
 | `ops_sessao_trabalho` | quem começou, quando, quando parou. **É daqui que sai o custo real** |
 | `ops_custo` · `ops_ordem_previsto` | o que se gastou, e o que estava orçamentado |
 | `ops_anexo` | fotos e ficheiros. `privada` = não sai no relatório |
+| `ops_assinatura` | uma por ordem: quem assinou, em que qualidade, e a imagem no bucket |
 | `ops_mensagem` | conversa dentro da ordem |
 | `ops_evento` | o histórico. Quem fez o quê, com o antes e o depois |
 | `ops_sequencia` | de onde saem os códigos `OT-2026-00842` |
@@ -131,6 +132,7 @@ uma destas.
 |---|---|
 | `rpc_ops_lancar_custo` · `rpc_ops_remover_custo` | material e serviços, do catálogo ou de uma compra |
 | `rpc_ops_registar_anexo` · `rpc_ops_remover_anexo` | fotos e ficheiros, depois de subirem ao storage |
+| `rpc_ops_assinar_ordem` | a assinatura do cliente. Só numa ordem fechada, e só por quem lá esteve |
 | `rpc_ops_obra_de_orcamento` | um orçamento aceite vira obra, com o previsto congelado |
 
 ### Configuração
@@ -237,7 +239,7 @@ Nenhum destes avisos impede a marcação. Quem coordena é que decide.
 
 ---
 
-## 7. Os 16 validadores
+## 7. Os 17 validadores
 
 Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`.
 
@@ -257,6 +259,7 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-config` | checklists versionadas, medições, equipa |
 | `validar-custos` | material e serviços, e que o técnico não vê custo/hora |
 | `validar-cliente-crm` | morada e contacto, sem escrever no CRM |
+| `validar-assinaturas` | uma assinatura só se recolhe onde e por quem devia |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
@@ -273,7 +276,7 @@ testado, e foi a razão de um deploy falhado.
 ```
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
-  → despacho.sql → orcamentos.sql → anexos.sql → planos-crud.sql
+  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → planos-crud.sql
   → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql
 ```

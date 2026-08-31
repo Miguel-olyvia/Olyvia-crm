@@ -311,7 +311,8 @@ Assumindo que o piloto corre e a equipa fica a usar:
    mapa nenhuma: `schedule_resources.user_id` já aponta para `anew_users.id`.
    O **ecrã de agenda por dia** também ficou feito, em `/agenda`
 5. ~~**PMP cumprido**~~ — **feito** (31 ago). `/analises` › Manutenção preventiva
-6. **Assinatura do cliente no telemóvel** — troca papel por prova
+6. ~~**Assinatura do cliente no telemóvel**~~ — **feito** (31 ago). Com nome e
+   qualidade. Não é assinatura qualificada, e o ecrã di-lo
 7. ~~**Exportar medições**~~ — **feito** (31 ago). `/analises` › Exportar medições
 8. **Offline** — quando o piloto disser quantas vezes falhou por falta de rede
 

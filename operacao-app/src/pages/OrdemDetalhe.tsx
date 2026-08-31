@@ -61,6 +61,7 @@ import PainelTarefas from "../components/PainelTarefas";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
+import PainelAssinatura from "../components/PainelAssinatura";
 import PainelCustos from "../components/PainelCustos";
 import { comparacaoPorItem, custosDaOrdem, type ComparacaoPorItem, type LinhaDeCusto } from "../lib/custos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
@@ -446,6 +447,15 @@ export default function OrdemDetalhe() {
         equipa={equipa}
         podeAnexar={!!businessUserId}
         aoMudar={() => setRecarga((r) => r + 1)}
+      />
+
+      {/* A assinatura de quem recebeu o trabalho. Só aparece depois de fechar:
+          antes disso o trabalho não acabou, e uma assinatura a meio prova o quê? */}
+      <PainelAssinatura
+        ordemId={ordem.id}
+        organizationId={activeOrgId ?? ""}
+        fechada={ordem.estado === "fechada"}
+        podeAssinar={!!businessUserId}
       />
 
       {/* Sessões — o que faz o custo de mão de obra existir */}

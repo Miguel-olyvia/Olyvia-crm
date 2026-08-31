@@ -17,6 +17,8 @@ import {
   type OpcaoDeMedicao,
   type OrdemCompleta,
   type TarefaDaOrdem,
+  assinaturaDaOrdem,
+  type Assinatura,
 } from "../lib/dados";
 import { Button, ErrorState, Skeleton } from "../components/ui";
 import { ChevronLeft } from "../components/icons";
@@ -58,6 +60,8 @@ export default function Relatorio() {
   const [cliente, setCliente] = useState<string | null>(null);
   const [tempo, setTempo] = useState(0);
   const [alvos, setAlvos] = useState(0);
+  const [assinatura, setAssinatura] = useState<Assinatura | null>(null);
+  const [urlAssinatura, setUrlAssinatura] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [aCarregar, setACarregar] = useState(true);
 
@@ -71,12 +75,13 @@ export default function Relatorio() {
           if (vivo) setErro("Ordem não encontrada, ou sem permissão para a ver.");
           return;
         }
-        const [tfs, sss, cls, anx, als] = await Promise.all([
+        const [tfs, sss, cls, anx, als, ass] = await Promise.all([
           tarefasDaOrdem(o.id),
           sessoesDaOrdem(o.id),
           listarClientes(activeOrgId),
           anexosDaOrdem(o.id),
           alvosDaOrdem(o.id),
+          assinaturaDaOrdem(o.id),
         ]);
         const meds = await medicoesDaOrdem(tfs.map((t) => t.id));
         // O nome da opção escolhida, para o relatório dizer "Ilegível" em vez
@@ -91,6 +96,11 @@ export default function Relatorio() {
         setMedicoes(meds);
         setOpcoes(new Map(ops.map((o: OpcaoDeMedicao) => [o.id, o.nome])));
         setAnexos(anx.filter((a) => !a.privado));
+        setAssinatura(ass);
+        if (ass) {
+          const m = await urlsDosAnexos([ass.caminho]);
+          if (vivo) setUrlAssinatura(m.get(ass.caminho) ?? null);
+        }
         setAlvos(als.length);
         setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
 
@@ -325,10 +335,31 @@ export default function Relatorio() {
           <p>
             Emitido a {dataHora(new Date().toISOString())} · {ordem.codigo}
           </p>
-          <div className="text-right">
-            <div className="mb-1 h-10 w-48 border-b border-slate-300" />
-            <p>Assinatura do cliente</p>
-          </div>
+          {/* Com assinatura recolhida, a linha em branco desaparece. Deixar as
+              duas seria convidar a assinar por cima do que já está assinado. */}
+          {assinatura ? (
+            <div className="text-right">
+              {urlAssinatura ? (
+                <img
+                  src={urlAssinatura}
+                  alt={`Assinatura de ${assinatura.nome}`}
+                  className="mb-1 ml-auto h-10 w-auto max-w-[12rem] object-contain"
+                />
+              ) : (
+                <div className="mb-1 h-10 w-48" />
+              )}
+              <p className="border-t border-slate-300 pt-1 text-slate-600">
+                {assinatura.nome}
+                {assinatura.qualidade ? ` · ${assinatura.qualidade}` : ""}
+              </p>
+              <p>Assinado a {dataHora(assinatura.assinada_em)}</p>
+            </div>
+          ) : (
+            <div className="text-right">
+              <div className="mb-1 h-10 w-48 border-b border-slate-300" />
+              <p>Assinatura do cliente</p>
+            </div>
+          )}
         </footer>
       </article>
     </>

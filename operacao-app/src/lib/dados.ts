@@ -1208,3 +1208,75 @@ export async function impedimentosDoDia(
   }
   return (data ?? []) as unknown as ImpedimentoDaEquipa[];
 }
+
+/* ───────────────────────── Assinatura do cliente ───────────────────────── */
+
+export interface Assinatura {
+  id: string;
+  ordem_id: string;
+  nome: string;
+  qualidade: string | null;
+  caminho: string;
+  recolhida_por: string | null;
+  assinada_em: string;
+}
+
+export async function assinaturaDaOrdem(ordemId: string): Promise<Assinatura | null> {
+  const { data, error } = await supabase
+    .from("ops_assinatura")
+    .select("id, ordem_id, nome, qualidade, caminho, recolhida_por, assinada_em")
+    .eq("ordem_id", ordemId)
+    .maybeSingle();
+  // A tabela é opcional: sem `db/assinaturas.sql` a ficha da ordem continua a
+  // abrir, só sem o painel.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem assinatura:", error.message);
+    return null;
+  }
+  return (data as unknown as Assinatura) ?? null;
+}
+
+/**
+ * Sobe a imagem e regista a assinatura.
+ *
+ * Mesma coreografia dos anexos, e pela mesma razão: são duas escritas em
+ * sítios diferentes, e se a segunda falhar o ficheiro não pode ficar órfão.
+ */
+export async function assinarOrdem(args: {
+  ordemId: string;
+  organizationId: string;
+  imagem: Blob;
+  nome: string;
+  qualidade?: string | null;
+}): Promise<{ ok: boolean; substituiu: boolean; caminho: string }> {
+  const caminho = `${args.organizationId}/${args.ordemId}/assinatura-${nomeSorteado()}.png`;
+
+  const { error: erroUpload } = await supabase.storage
+    .from(BUCKET)
+    .upload(caminho, args.imagem, { contentType: "image/png", upsert: false });
+
+  if (erroUpload) {
+    const m = erroUpload.message ?? "";
+    throw new ErroDeEscrita(
+      m.includes("Bucket not found")
+        ? "O armazenamento de Operações não está criado. Falta correr db/anexos.sql."
+        : m || "Não foi possível guardar a assinatura."
+    );
+  }
+
+  const { data, error } = await supabase.rpc("rpc_ops_assinar_ordem", {
+    p_ordem_id: args.ordemId,
+    p_caminho: caminho,
+    p_nome: args.nome,
+    p_qualidade: args.qualidade ?? null,
+  });
+
+  if (error) {
+    await supabase.storage.from(BUCKET).remove([caminho]);
+    throw new ErroDeEscrita(error.message || "Não foi possível registar a assinatura.");
+  }
+
+  const r = data as unknown as { substituiu: boolean };
+  return { ok: true, substituiu: Boolean(r?.substituiu), caminho };
+}
