@@ -581,3 +581,147 @@ export function DiagramaOndeVive() {
     </Quadro>
   );
 }
+
+/* ══════════════ 6. O que se faz sozinho, e o que é da pessoa ════════════ */
+
+/**
+ * Duas pistas: em cima o que a pessoa faz, em baixo o que o sistema faz a
+ * seguir, sem se pedir.
+ *
+ * Vale a pena separá-las assim porque "abre sozinha" assusta com razão. Ver as
+ * duas pistas lado a lado mostra o que é automático (o trabalho chato) e o que
+ * continua a ser decisão de alguém — nada na pista de baixo salta uma regra.
+ */
+export function DiagramaAutomatico() {
+  const id = "au";
+  const pessoa = 46;
+  const sistema = 152;
+
+  return (
+    <Quadro
+      titulo="O que a pessoa faz, e o que o sistema faz sozinho a seguir"
+      largura={720}
+      altura={224}
+      minWidth={620}
+    >
+      <Pontas id={id} />
+
+      <Rotulo x={0} y={18} cor={TINTA.texto} peso="600" tamanho={11}>
+        A PESSOA
+      </Rotulo>
+      <Rotulo x={0} y={124} cor={TINTA.brand} peso="600" tamanho={11}>
+        O SISTEMA, SOZINHO
+      </Rotulo>
+
+      {/* A ordem preventiva nasce antes de haver pessoa nenhuma envolvida. */}
+      <Caixa x={0} y={sistema} w={158} texto="Cria a ordem" sub="a data do plano chegou" tom="brand" />
+
+      <Caixa x={178} y={pessoa} w={158} texto="Responde à 1.ª tarefa" sub="chegou ao local" />
+      <Caixa x={178} y={sistema} w={158} texto="Inicia a ordem" sub="o cronómetro arranca" tom="brand" />
+      <Seta id={id} de={[257, pessoa + 44]} para={[257, sistema - 4]} cor="brand" />
+
+      <Caixa x={356} y={pessoa} w={178} texto="Marca não conforme" sub="encontrou uma avaria" tom="aviso" />
+      <Caixa x={356} y={sistema} w={178} texto="Abre a reparação, e avisa" sub="fica POR APROVAR" tom="brand" />
+      <Seta id={id} de={[445, pessoa + 44]} para={[445, sistema - 4]} cor="brand" />
+
+      <Caixa x={554} y={pessoa} w={166} texto="Fecha a ordem" sub="o trabalho acabou" />
+      <Caixa x={554} y={sistema} w={166} texto="Soma o custo real" sub="das sessões de trabalho" tom="brand" />
+      <Seta id={id} de={[637, pessoa + 44]} para={[637, sistema - 4]} cor="brand" />
+
+      <text x="0" y="212" fontSize="10.5" fill={TINTA.textoFraco}>
+        Nada na pista de baixo salta uma regra: a reparação nasce por aprovar, e o arranque
+        volta a verificar quem pode iniciar.
+      </text>
+    </Quadro>
+  );
+}
+
+/* ═══════════════ 7. O que vem do CRM, e o que volta lá ══════════════════ */
+
+/**
+ * A pergunta que aparece sempre a seguir a "vive dentro do Olyvia": então o que
+ * é que vai lá buscar?
+ *
+ * Uma seta grossa a entrar, uma fininha a sair. A assimetria é o ponto: o
+ * módulo lê muito e escreve uma linha só.
+ */
+export function DiagramaDoCRM() {
+  const id = "crm";
+  const linhas = [
+    "Clientes, moradas e contactos",
+    "Pessoas, e o que cada uma pode",
+    "Orçamentos aceites",
+    "Catálogo de material e compras",
+    "Férias, horários e feriados",
+  ];
+
+  return (
+    <Quadro
+      titulo="O que Operações vai buscar ao CRM, e a única coisa que lá escreve"
+      largura={720}
+      altura={236}
+      minWidth={620}
+    >
+      <Pontas id={id} />
+
+      {/* ── O CRM ── */}
+      <rect x="0" y="24" width="292" height="164" rx="10" fill="#f8fafc"
+            stroke={TINTA.cinza} strokeWidth="1.5" />
+      <text x="14" y="46" fontSize="12" fontWeight="600" fill={TINTA.texto}>
+        Olyvia CRM
+      </text>
+      {linhas.map((l, i) => (
+        <g key={l}>
+          <circle cx="20" cy={66 + i * 22} r="2.5" fill={TINTA.cinza} />
+          <text x="30" y={70 + i * 22} fontSize="10.5" fill={TINTA.textoFraco}>
+            {l}
+          </text>
+        </g>
+      ))}
+
+      {/* ── Operações ── */}
+      <rect x="428" y="24" width="292" height="164" rx="10" fill={TINTA.brandClaro}
+            stroke={TINTA.brand} strokeWidth="2" />
+      <text x="442" y="46" fontSize="12" fontWeight="600" fill="#4c1d95">
+        Operações
+      </text>
+      {[
+        "27 tabelas próprias, todas ops_*",
+        "Zero chaves estrangeiras para fora",
+        "Não altera uma linha do CRM",
+      ].map((l, i) => (
+        <g key={l}>
+          <circle cx="448" cy={70 + i * 22} r="2.5" fill={TINTA.brand} />
+          <text x="458" y={74 + i * 22} fontSize="10.5" fill={TINTA.textoFraco}>
+            {l}
+          </text>
+        </g>
+      ))}
+
+      {/* ── Lê: grosso ── */}
+      <path d="M 296 84 L 420 84" fill="none" stroke={TINTA.brand} strokeWidth="6"
+            markerEnd={`url(#${id}-brand)`} opacity="0.85" />
+      <text x="358" y="72" textAnchor="middle" fontSize="11" fontWeight="600" fill="#4c1d95">
+        lê
+      </text>
+
+      {/* ── Escreve: fininho, e no sentido contrário ── */}
+      <path d="M 420 142 L 300 142" fill="none" stroke={TINTA.verde} strokeWidth="1.5"
+            markerEnd={`url(#${id}-verde)`} />
+      <text x="360" y="132" textAnchor="middle" fontSize="11" fontWeight="600" fill={TINTA.verde}>
+        escreve
+      </text>
+      <text x="360" y="160" textAnchor="middle" fontSize="10" fill={TINTA.textoFraco}>
+        uma linha no sino
+      </text>
+
+      <text x="0" y="212" fontSize="10.5" fill={TINTA.textoFraco}>
+        A seta de ida é grossa e a de volta é fina de propósito: o módulo lê muito e escreve
+        uma linha só — um aviso, na tabela de notificações que o CRM já tem.
+      </text>
+      <text x="0" y="228" fontSize="10.5" fill={TINTA.textoFraco}>
+        A outra exceção é o armazenamento das fotos, num balde próprio chamado “operacoes”.
+      </text>
+    </Quadro>
+  );
+}

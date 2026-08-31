@@ -188,7 +188,28 @@ uma ordem continua a funcionar.
 
 ---
 
-## 6. A agenda do CRM
+## 6. O que vem do CRM
+
+Tudo **só leitura**, exceto as duas exceções da linha de baixo.
+
+| O que vem de lá | Tabelas | Para quê |
+|---|---|---|
+| Clientes, moradas e contactos | `anew_clients` · `anew_entities` · `anew_addresses` · `anew_entity_addresses` · `anew_entity_phones` · `anew_entity_emails` | abrir uma ordem sem escrever a morada à mão |
+| Pessoas e permissões | `anew_users` · `anew_memberships` · `anew_roles` · `anew_role_permissions` · `anew_permissions` · `anew_organizations` | quem entra, e o que cada um pode fazer |
+| Orçamentos aceites | `quotes` · `quote_lines` | um clique transforma-o em obra, com o previsto congelado |
+| Catálogo de material | `catalog_items` | lançar custos sem inventar preços |
+| Compras a fornecedores | `purchase_orders` · `purchase_order_items` | o material que se comprou para aquela obra |
+| Férias, horários, feriados | `schedule_resources` · `resource_time_off` · `resource_availability_rules` · `schedule_holidays` | avisar antes de marcar uma visita a quem não está |
+| **Notificações** | `notifications` | **ESCREVE** — uma linha por aviso, só `INSERT` |
+| **Ficheiros** | `storage` | **ESCREVE** — num balde próprio, `operacoes` |
+
+E também três funções de autorização do CRM, reutilizadas em vez de
+reimplementadas: `get_user_visible_org_ids()`, `has_anew_permission()`,
+`is_system_admin_user()` e `current_business_user_id()`.
+
+---
+
+## 6b. A agenda do CRM
 
 Só leitura, quatro tabelas: `schedule_resources`, `resource_time_off`,
 `resource_availability_rules`, `schedule_holidays`.

@@ -3,7 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Card, cx } from "../components/ui";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, X } from "../components/icons";
 import {
+  DiagramaAutomatico,
   DiagramaCicloDaOrdem,
+  DiagramaDoCRM,
   DiagramaNaoConformidade,
   DiagramaOndeVive,
   DiagramaOrigens,
@@ -482,6 +484,88 @@ function ComoFunciona() {
       </Card>
 
       <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">O que acontece sozinho</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          “Abre sozinha” assusta com razão, por isso vale a pena ver as duas pistas lado a
+          lado: o que continua a ser decisão de alguém, e o que o sistema faz a seguir.
+        </p>
+        <div className="mt-3">
+          <DiagramaAutomatico />
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th className="pb-2 font-medium">O que se faz sozinho</th>
+                <th className="pb-2 font-medium">Quando</th>
+                <th className="pb-2 font-medium">O que NÃO faz</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {AUTOMATICO.map(([o, quando, nao]) => (
+                <tr key={o}>
+                  <td className="py-2 pr-4 font-medium text-slate-800">{o}</td>
+                  <td className="py-2 pr-4 text-slate-600">{quando}</td>
+                  <td className="py-2 text-slate-500">{nao}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">
+          <Check width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>
+            A reparação automática nasce sempre <strong>por aprovar</strong>. Trabalho novo que
+            aparece do nada passa por alguém antes de entrar na fila — e essa pessoa recebe o
+            aviso no sino no mesmo minuto.
+          </span>
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">O que vem do CRM</h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          A pergunta que aparece sempre a seguir a “vive dentro do Olyvia”: então o que é que
+          vai lá buscar, e o que é que mexe?
+        </p>
+        <div className="mt-3">
+          <DiagramaDoCRM />
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[34rem] text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                <th className="pb-2 font-medium">O que vem de lá</th>
+                <th className="pb-2 font-medium">Para quê</th>
+                <th className="pb-2 text-center font-medium">Escreve?</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {DO_CRM.map(([o, paraque, escreve]) => (
+                <tr key={o}>
+                  <td className="py-2 pr-4 font-medium text-slate-800">{o}</td>
+                  <td className="py-2 pr-4 text-slate-600">{paraque}</td>
+                  <td className="py-2 text-center text-xs text-slate-500">{escreve}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-3 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertTriangle width={14} height={14} className="mt-0.5 shrink-0" />
+          <span>
+            <strong className="font-medium">Privacidade:</strong> o CRM guarda o motivo de uma
+            ausência, e isso pode ser uma baixa médica. Quem marca uma visita só vê as{" "}
+            <strong>datas</strong> — o motivo nunca sai de lá. Há um teste que falha se sair.
+          </span>
+        </p>
+      </Card>
+
+      <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">
           Porque é que ninguém pode falsificar um registo
         </h2>
@@ -580,6 +664,50 @@ function ComoFunciona() {
     </div>
   );
 }
+
+const AUTOMATICO: readonly (readonly [string, string, string])[] = [
+  [
+    "Nascem as ordens preventivas",
+    "todos os dias, 120 dias à frente",
+    "não inventa datas — segue a regra do plano",
+  ],
+  [
+    "Nasce uma reparação",
+    "quando uma tarefa fica não conforme",
+    "não entra na fila: fica por aprovar",
+  ],
+  [
+    "A ordem inicia-se",
+    "à primeira resposta do técnico",
+    "não salta a verificação de quem pode iniciar",
+  ],
+  [
+    "A tarefa acerta-se",
+    "quando a última medição entra",
+    "não decide por ti — o veredicto sai dos limites",
+  ],
+  [
+    "Soma-se o custo de mão de obra",
+    "ao fechar cada sessão de trabalho",
+    "não conta noites nem fins de semana",
+  ],
+  [
+    "Avisa de atrasos e pausas expiradas",
+    "de hora a hora",
+    "não repete enquanto o primeiro estiver por ler",
+  ],
+] as const;
+
+const DO_CRM: readonly (readonly [string, string, string])[] = [
+  ["Clientes, moradas e contactos", "abrir uma ordem sem escrever a morada à mão", "não"],
+  ["Pessoas e permissões", "quem entra, e o que cada um pode fazer", "não"],
+  ["Orçamentos aceites", "um clique transforma-o em obra", "não"],
+  ["Catálogo de material", "lançar custos sem inventar preços", "não"],
+  ["Compras e faturas de fornecedor", "o material que se comprou para aquela obra", "não"],
+  ["Férias, horários e feriados", "avisar antes de marcar uma visita a quem não está", "não"],
+  ["Notificações (o sino)", "o aviso chega onde a equipa já olha", "✓ uma linha"],
+  ["Armazenamento de ficheiros", "as fotos, num balde próprio", "✓ balde próprio"],
+] as const;
 
 const CAMADAS = [
   {
