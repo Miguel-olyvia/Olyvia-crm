@@ -142,6 +142,12 @@ const PurchaseOrders = () => {
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
   // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
   const [orderSourceInfo, setOrderSourceInfo] = useState<{ contractId: string; contractNumber: string; clientName: string } | null>(null);
+  // Ligação manual, só na criação (20261115200000) — resolve o caso
+  // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
+  // escolhe-se a Encomenda Cliente que está a satisfazer.
+  const [newOrderClientOrderId, setNewOrderClientOrderId] = useState("");
+  const [clientOrderOptions, setClientOrderOptions] = useState<{ contract_id: string; contract_number: string; client_name: string | null }[]>([]);
+  const [clientOrderOptionsLoaded, setClientOrderOptionsLoaded] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
@@ -286,6 +292,7 @@ const PurchaseOrders = () => {
   // empresa ativa muda para forçar recarga do catálogo certo.
   useEffect(() => {
     setCatalogLoaded(false);
+    setClientOrderOptionsLoaded(false);
   }, [activeCompany?.id]);
 
   useEffect(() => {
@@ -293,6 +300,29 @@ const PurchaseOrders = () => {
       loadCatalog();
     }
   }, [open, catalogLoaded, activeCompany?.id]);
+
+  // Fase 5.0F: Encomendas Clientes assinadas, para a ligação manual opcional
+  // ao criar uma encomenda nova (não relevante ao editar — ver
+  // rpc_create_purchase_order, 20261115200000). Best-effort: falha de
+  // permissão (client_contracts.view) não bloqueia a criação da encomenda,
+  // só esconde o campo.
+  useEffect(() => {
+    if (!open || editingId || clientOrderOptionsLoaded || !activeCompany?.id) return;
+    (async () => {
+      const { data, error } = await supabase.rpc('rpc_list_client_order_documents', {
+        p_organization_id: activeCompany.id,
+        p_search: null,
+        p_status_filter: null,
+        p_limit: 100,
+        p_offset: 0,
+      } as any);
+      setClientOrderOptionsLoaded(true);
+      if (error) return;
+      setClientOrderOptions(((data as any[]) || []).map((r) => ({
+        contract_id: r.contract_id, contract_number: r.contract_number, client_name: r.client_name,
+      })));
+    })();
+  }, [open, editingId, clientOrderOptionsLoaded, activeCompany?.id]);
 
   // Fase 5.0F: abre o dialog de edição/detalhe de uma encomenda específica quando
   // se navega para cá a partir de outro ecrã (ex. "Encomendas Clientes", link por
@@ -1046,6 +1076,12 @@ const PurchaseOrders = () => {
         status: formData.status,
         total_value: total,
         notes: formData.notes || null,
+        // Ligação manual a uma Encomenda Cliente (20261115200000) — só
+        // relevante na criação; rpc_update_purchase_order ignora estas 2
+        // chaves de propósito (nunca reescreve a ligação numa edição).
+        ...(!editingId && newOrderClientOrderId
+          ? { source_type: "contract", source_id: newOrderClientOrderId }
+          : {}),
       };
 
       const itemsPayload = orderItems.map(item => ({
@@ -1431,6 +1467,7 @@ const PurchaseOrders = () => {
                   departmentId: "",
                   secondaryCompanyIds: [],
                 });
+                setNewOrderClientOrderId("");
                }
              }}>
               <DialogTrigger asChild>
@@ -1463,6 +1500,35 @@ const PurchaseOrders = () => {
                     showSecondaryCompanies={false}
                     multiSelectCompanies={false}
                   />
+
+                  {/* Fase 5.0F: ligação manual opcional a uma Encomenda Cliente — só
+                      na criação, resolve o caso "sem_fornecedor" em Encomendas
+                      Clientes (produto sem fornecedor preferencial na altura da
+                      assinatura, nenhuma PO autogerada). */}
+                  {!editingId && clientOrderOptions.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="new_order_client_order">{t('purchaseOrders.form.clientOrderSource') || 'Encomenda Cliente de origem (opcional)'}</Label>
+                      <Select
+                        value={newOrderClientOrderId || "none"}
+                        onValueChange={(v) => setNewOrderClientOrderId(v === "none" ? "" : v)}
+                      >
+                        <SelectTrigger id="new_order_client_order">
+                          <SelectValue placeholder={t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'}</SelectItem>
+                          {clientOrderOptions.map((o) => (
+                            <SelectItem key={o.contract_id} value={o.contract_id}>
+                              {o.contract_number} — {o.client_name || "—"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {t('purchaseOrders.form.clientOrderSourceHint') || 'Liga esta encomenda à Encomenda Cliente que está a satisfazer — fica rastreável em "Encomendas Clientes" e o estado atualiza quando esta for recebida.'}
+                      </p>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
