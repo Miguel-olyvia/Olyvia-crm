@@ -44,6 +44,7 @@ import {
 import PainelPacks from "../components/PainelPacks";
 import PainelAutomatico from "../components/PainelAutomatico";
 import PainelTiposECustos from "../components/PainelTiposECustos";
+import PainelListas from "../components/PainelListas";
 import CampoDeMapa from "../components/CampoDeMapa";
 import { coordenadasValidas, type Coordenadas } from "../domain/mapa";
 import { Building, Check, Euro, Layers, Plus, Robo, User, X } from "../components/icons";
@@ -61,7 +62,8 @@ import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type Tipo
  *  1. Locais — onde é. Tudo pende daqui;
  *  2. Procedimentos — o que se faz lá, e o que se mede ao fazê-lo;
  *  3. Equipa — quem o faz, e quanto custa a hora;
- *  4. Tipos e custos — como se classifica o trabalho, e a que conta ele vai;
+ *  4. Tipos e custos — como se classifica o trabalho (tipos, centros de
+ *     custo, motivos de pausa, áreas), e a que conta ele vai;
  *  5. Automático — o que a aplicação faz sem ninguém carregar em nada.
  *
  * O separador fica no endereço (`?ver=equipa`), para se poder mandar um link
@@ -110,7 +112,12 @@ export default function Definicoes() {
       {ver === "locais" && <PainelLocais />}
       {ver === "procedimentos" && <PainelProcedimentos />}
       {ver === "equipa" && <PainelEquipa />}
-      {ver === "tipos" && <PainelTiposECustos />}
+      {ver === "tipos" && (
+        <div className="space-y-4">
+          <PainelTiposECustos />
+          <PainelListas />
+        </div>
+      )}
       {ver === "automatico" && <PainelAutomatico />}
     </div>
   );

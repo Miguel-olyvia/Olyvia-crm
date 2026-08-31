@@ -695,3 +695,144 @@ export async function quemTemCadaEspecialidade(
   }
   return fora;
 }
+
+/* ───────────────── Motivos de pausa, áreas e tipos ─────────────────────── */
+
+export interface MotivoDePausa {
+  id: string;
+  nome: string;
+  exige_retoma: boolean;
+}
+
+/**
+ * Os motivos que **esta** pessoa pode usar.
+ *
+ * Vem de uma RPC e não de um `select` filtrado no cliente: a lista completa
+ * inclui motivos que são decisão de quem gere, e filtrar no ecrã dava-a a
+ * quem abrisse as ferramentas do browser.
+ */
+export async function listarMotivosDePausa(orgId: string): Promise<MotivoDePausa[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_motivos_de_pausa", { _org_id: orgId });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem motivos de pausa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as MotivoDePausa[];
+}
+
+/** Todos, para o ecrã de definições — que só quem gere abre. */
+export interface MotivoDePausaCompleto extends MotivoDePausa {
+  funcoes: string[];
+  ativo: boolean;
+  posicao: number;
+}
+
+export async function listarTodosOsMotivos(orgId: string): Promise<MotivoDePausaCompleto[]> {
+  await supabase.rpc("ops_semear_listas", { _org_id: orgId });
+  const { data, error } = await supabase
+    .from("ops_motivo_pausa")
+    .select("id, nome, funcoes, exige_retoma, ativo, posicao")
+    .eq("organization_id", orgId)
+    .order("posicao");
+
+  // Numa instalação onde `db/listas-operacao.sql` ainda não correu, a tabela
+  // não existe. O separador inteiro não pode partir por causa disso — mostra
+  // a lista vazia, e enche quando o SQL correr.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem motivos de pausa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as MotivoDePausaCompleto[];
+}
+
+export async function gravarMotivoDePausa(m: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  funcoes: string[];
+  exigeRetoma?: boolean;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_motivo_pausa", {
+    p_org_id: m.orgId,
+    p_nome: m.nome,
+    p_funcoes: m.funcoes,
+    p_exige_retoma: m.exigeRetoma ?? true,
+    p_id: m.id ?? null,
+    p_ativo: m.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "motivo de pausa"));
+}
+
+export interface Area {
+  id: string;
+  nome: string;
+  ativo: boolean;
+  tipos: { id: string; nome: string; ativo: boolean }[];
+}
+
+export async function listarAreas(orgId: string): Promise<Area[]> {
+  await supabase.rpc("ops_semear_listas", { _org_id: orgId });
+
+  const [{ data: as, error: e1 }, { data: ts, error: e2 }] = await Promise.all([
+    supabase
+      .from("ops_area")
+      .select("id, nome, ativo, posicao")
+      .eq("organization_id", orgId)
+      .order("posicao"),
+    supabase
+      .from("ops_area_tipo")
+      .select("id, area_id, nome, ativo, posicao")
+      .order("posicao"),
+  ]);
+
+  if (e1 ?? e2) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem áreas:", (e1 ?? e2)?.message);
+    return [];
+  }
+
+  const porArea = new Map<string, Area["tipos"]>();
+  for (const t of (ts ?? []) as { id: string; area_id: string; nome: string; ativo: boolean }[]) {
+    const lista = porArea.get(t.area_id) ?? [];
+    lista.push({ id: t.id, nome: t.nome, ativo: t.ativo });
+    porArea.set(t.area_id, lista);
+  }
+
+  return ((as ?? []) as { id: string; nome: string; ativo: boolean }[]).map((a) => ({
+    ...a,
+    tipos: porArea.get(a.id) ?? [],
+  }));
+}
+
+export async function gravarArea(a: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_area", {
+    p_org_id: a.orgId,
+    p_nome: a.nome,
+    p_id: a.id ?? null,
+    p_ativo: a.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "área"));
+}
+
+export async function gravarTipoDeArea(t: {
+  areaId: string;
+  id?: string | null;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_area_tipo", {
+    p_area_id: t.areaId,
+    p_nome: t.nome,
+    p_id: t.id ?? null,
+    p_ativo: t.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "tipo"));
+}

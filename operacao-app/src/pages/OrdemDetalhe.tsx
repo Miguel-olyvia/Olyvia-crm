@@ -41,6 +41,7 @@ import {
   Skeleton,
   Textarea,
   Input,
+  Select,
   Field,
   cx,
 } from "../components/ui";
@@ -63,7 +64,11 @@ import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
 import PainelClassificacao from "../components/PainelClassificacao";
 import BotaoDuplicar from "../components/BotaoDuplicar";
-import { duplicarOrdem } from "../lib/config";
+import {
+  duplicarOrdem,
+  listarMotivosDePausa,
+  type MotivoDePausa,
+} from "../lib/config";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
@@ -107,6 +112,10 @@ export default function OrdemDetalhe() {
 
   const [dialogo, setDialogo] = useState<Transicao | null>(null);
   const [motivo, setMotivo] = useState("");
+  /* Os motivos que ESTA pessoa pode usar. A lista completa tem motivos que são
+     decisão de quem gere, e a base filtra-os — aqui só se desenha o que veio. */
+  const [motivos, setMotivos] = useState<MotivoDePausa[]>([]);
+  const [motivoId, setMotivoId] = useState("");
   const [retoma, setRetoma] = useState("");
   const [aGravar, setAGravar] = useState(false);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
@@ -174,6 +183,17 @@ export default function OrdemDetalhe() {
     void carregar();
   }, [carregar]);
 
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    void listarMotivosDePausa(activeOrgId).then((m) => {
+      if (vivo) setMotivos(m);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [activeOrgId]);
+
   const contexto = useMemo(
     () => ({
       funcao: funcao ?? "tecnico",
@@ -210,9 +230,32 @@ export default function OrdemDetalhe() {
   const executar = async (t: Transicao) => {
     if (!ordem || !businessUserId) return;
 
+    /* Numa pausa com lista, o texto que vai para a base é o nome do motivo
+       mais o detalhe. Assim o histórico continua a ler-se sozinho, sem ter de
+       ir buscar o nome a outra tabela. */
+    const escolhido = nomeDoMotivo(motivos, motivoId);
+    const detalhe = motivo.trim();
+    const texto =
+      t === "pausar" && escolhido
+        ? detalhe
+          ? `${escolhido} — ${detalhe}`
+          : escolhido
+        : detalhe;
+
+    if (t === "pausar" && motivos.length > 0) {
+      if (!motivoId) {
+        setErroAcao("Escolhe o motivo da pausa.");
+        return;
+      }
+      if (escolhido === "Outro" && !detalhe) {
+        setErroAcao('“Outro” sem detalhe não diz nada. Escreve o que se passa.');
+        return;
+      }
+    }
+
     const ctx = {
       ...contexto,
-      motivo: motivo.trim() || null,
+      motivo: texto || null,
       retomaPrevista: retoma ? new Date(retoma) : null,
     };
     const decisao = avaliar(ordem.estado, t, ctx);
@@ -246,8 +289,23 @@ export default function OrdemDetalhe() {
         return;
       }
 
+      /* O id do motivo grava-se à parte: não é estado, e o estado é a única
+         coisa que a base tranca. Falhar aqui não desfaz a pausa — o texto já
+         lá está, e é o que uma pessoa lê. */
+      if (t === "pausar" && motivoId) {
+        const { error: e2 } = await supabase
+          .from("ops_ordem")
+          .update({ pausa_motivo_id: motivoId })
+          .eq("id", ordem.id);
+        if (e2) {
+          // eslint-disable-next-line no-console
+          console.warn("[Operações] motivo da pausa sem id:", e2.message);
+        }
+      }
+
       setDialogo(null);
       setMotivo("");
+      setMotivoId("");
       setRetoma("");
       setRecarga((r) => r + 1);
     } catch (e) {
@@ -592,11 +650,35 @@ export default function OrdemDetalhe() {
           }
         >
           <div className="space-y-4">
+            {/* Numa pausa, o motivo vem de uma lista. Texto livre dava oito
+                maneiras de escrever "à espera de material", e nenhum relatório
+                as consegue somar. */}
+            {dialogo === "pausar" && motivos.length > 0 && (
+              <Field label="Motivo" hint="Obrigatório. Sem motivo ninguém sabe porque parou.">
+                <Select
+                  value={motivoId}
+                  onChange={(e) => setMotivoId(e.target.value)}
+                  className="w-full"
+                >
+                  <option value="">— escolhe —</option>
+                  {motivos.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nome}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+
             <Field
-              label="Motivo"
+              label={dialogo === "pausar" && motivos.length > 0 ? "Detalhe" : "Motivo"}
               hint={
                 dialogo === "pausar"
-                  ? "Obrigatório. Sem motivo ninguém sabe porque parou."
+                  ? motivos.length > 0
+                    ? nomeDoMotivo(motivos, motivoId) === "Outro"
+                      ? "Obrigatório: “Outro” sem detalhe não diz nada."
+                      : "Opcional. O que falta, ao certo."
+                    : "Obrigatório. Sem motivo ninguém sabe porque parou."
                   : "Obrigatório."
               }
             >
@@ -605,7 +687,7 @@ export default function OrdemDetalhe() {
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
                 placeholder={
-                  dialogo === "pausar" ? "Ex.: à espera de material" : "Ex.: pedido duplicado"
+                  dialogo === "pausar" ? "Ex.: falta o regulador" : "Ex.: pedido duplicado"
                 }
               />
             </Field>
@@ -631,6 +713,11 @@ export default function OrdemDetalhe() {
       )}
     </div>
   );
+}
+
+/** O nome do motivo escolhido, ou vazio se não houver lista nem escolha. */
+function nomeDoMotivo(motivos: readonly MotivoDePausa[], id: string): string {
+  return motivos.find((m) => m.id === id)?.nome ?? "";
 }
 
 const ROTULO_ACAO: Record<Transicao, string> = {
