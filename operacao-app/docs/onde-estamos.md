@@ -7,9 +7,9 @@
 
 ---
 
-> ⚠ **Escrito antes do merge.** O merge foi feito e o deploy falhou — por
-> causa do `vercel.json`, não do módulo. Já está corrigido, e o `main` voltou
-> ao normal. A história está em [`deploy-falhado.md`](deploy-falhado.md).
+> ⚠ **Escrito antes do merge.** O merge está feito e o módulo está no ar em
+> `/operacao`. O deploy que falhou pelo meio era do `vercel.json`, não do
+> módulo — ver [`deploy-falhado.md`](deploy-falhado.md).
 
 ## 1. O estado, em três linhas
 

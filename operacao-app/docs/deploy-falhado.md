@@ -122,12 +122,18 @@ sai com os caminhos certos (`/operacao/assets/...`).
 
 | | |
 |---|---|
-| `main` no GitHub | ✅ o revert foi enviado e publicou (`dpl_CSk9h3…`, Ready) |
-| O site | ✅ no ar, sem o `/operacao` |
-| O módulo | ✅ 30+ commits em `feature/operacoes`, build provado em Linux |
+| `main` no GitHub | ✅ o merge foi refeito (`90ac5bb`) e publicou |
+| O site | ✅ no ar, com o `/operacao` a responder |
+| O módulo | ✅ integrado no `main`, build provado em Linux antes de enviar |
 | Base de dados | ✅ os ficheiros SQL estão em produção |
 
-**Falta refazer o merge para `main`**, agora com a correção incluída.
+**Resolvido em 31 de agosto de 2026.** O deploy `dpl_3NUjYVJVFzysnvXxdhkvS6tYephu`
+construiu as três aplicações e `www.olyvia-ai.com/operacao` responde.
+
+Uma armadilha que apareceu no caminho, para quem tiver de a repetir: como o
+revert deixou o merge antigo na história do `main`, um `git merge` normal
+**não** trazia os ficheiros de volta — o git dava o trabalho por integrado.
+Foi preciso reverter o revert primeiro (`47207e4`), e só depois fazer o merge.
 
 ---
 

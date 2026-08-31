@@ -1,9 +1,10 @@
 # Operações — app separada
 
-> ℹ **O deploy que falhou já tem causa e correção.** O `vercel.json` recusa um
-> `buildCommand` com mais de 256 caracteres, e a cadeia com três aplicações
-> tinha 278. Passou a viver em [`tools/build-vercel.sh`](../tools/build-vercel.sh)
-> — ver [`docs/deploy-falhado.md`](docs/deploy-falhado.md).
+> ✅ **No ar em [www.olyvia-ai.com/operacao](https://www.olyvia-ai.com/operacao).**
+> O deploy que falhou era do `vercel.json`, não do módulo: o `buildCommand` não
+> pode passar de 256 caracteres e a cadeia tinha 278. Vive agora em
+> [`tools/build-vercel.sh`](../tools/build-vercel.sh) — a história está em
+> [`docs/deploy-falhado.md`](docs/deploy-falhado.md).
 
 
 Aplicação **independente** do sistema Olyvia, no mesmo molde do [`duc-app`](../duc-app).
