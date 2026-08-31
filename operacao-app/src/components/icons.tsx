@@ -88,6 +88,10 @@ export const Clock = (p: IconProps) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.2 2" /></svg>
 );
 
+export const Grafico = (p: IconProps) => (
+  <svg {...base(p)}><path d="M3 3v18h18" /><path d="M7 15v3" /><path d="M12 10v8" /><path d="M17 6v12" /></svg>
+);
+
 export const Play = (p: IconProps) => (
   <svg {...base(p)}><path d="M7 4.5v15l13-7.5z" /></svg>
 );

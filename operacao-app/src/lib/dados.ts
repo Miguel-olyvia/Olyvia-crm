@@ -9,6 +9,7 @@
 
 import { supabase } from "./supabase";
 import type { Estado, Origem, Prioridade } from "../domain/tipos";
+import type { Intervencao, Leitura, LinhaPmp } from "../domain/analises";
 
 export class ErroDeDados extends Error {}
 
@@ -951,4 +952,95 @@ export async function materializarPlanos(
     planos_vistos: number;
     ignorados: unknown[];
   };
+}
+
+/* ─────────────────────────────── Análises ─────────────────────────────── */
+/*
+ * As três vistas de `db/analises.sql`. São vistas com `security_invoker`, por
+ * isso a RLS das tabelas por baixo continua a decidir o que cada pessoa vê —
+ * não é preciso filtrar por organização aqui a não ser para reduzir o volume.
+ */
+
+/** Todas as visitas feitas a um equipamento, da mais recente para trás. */
+export async function intervencoesDoAtivo(ativoId: string): Promise<Intervencao[]> {
+  const { data, error } = await supabase
+    .from("ops_v_ativo_intervencao")
+    .select("ordem_id, codigo, origem, estado, titulo, quando, nao_conformidades, tarefas")
+    .eq("ativo_id", ativoId)
+    .order("quando", { ascending: false });
+  rebentar("carregar o histórico do equipamento", error);
+  return (data ?? []) as unknown as Intervencao[];
+}
+
+/** Todas as leituras feitas a um equipamento. A ordem final é do domínio. */
+export async function leiturasDoAtivo(ativoId: string): Promise<Leitura[]> {
+  const { data, error } = await supabase
+    .from("ops_v_ativo_leitura")
+    .select(
+      "leitura_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max, " +
+        "valor_num, valor_texto, conforme, lida_em, codigo"
+    )
+    .eq("ativo_id", ativoId)
+    .order("lida_em");
+  rebentar("carregar as leituras do equipamento", error);
+  return (data ?? []) as unknown as Leitura[];
+}
+
+/**
+ * As ordens preventivas previstas num período.
+ *
+ * O corte é pela data prometida (`agendada_para`), não pela de fecho: a
+ * pergunta é "o que estava prometido para março foi feito?", e uma ordem de
+ * março fechada em abril continua a ser de março.
+ */
+export async function pmpDoPeriodo(
+  orgId: string,
+  desde: string,
+  ate: string
+): Promise<LinhaPmp[]> {
+  const { data, error } = await supabase
+    .from("ops_v_pmp")
+    .select(
+      "ordem_id, cliente_id, codigo, titulo, estado, agendada_para, fechada_em, " +
+        "mes, cumprida, a_horas, em_atraso"
+    )
+    .eq("organization_id", orgId)
+    .gte("agendada_para", desde)
+    .lte("agendada_para", ate)
+    .order("agendada_para");
+  rebentar("carregar a manutenção preventiva", error);
+  return (data ?? []) as unknown as LinhaPmp[];
+}
+
+export interface AtivoComLocal extends AtivoRow {
+  local_nome: string;
+  cliente_id: string;
+}
+
+/**
+ * Todos os equipamentos da organização, para se poder escolher um.
+ *
+ * Traz o nome do local junto: "Extintor 3" sozinho não identifica nada quando
+ * há quarenta extintores.
+ */
+export async function listarAtivos(orgId: string): Promise<AtivoComLocal[]> {
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, criticidade, " +
+        "ops_local!inner(nome, cliente_id)"
+    )
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("codigo");
+  rebentar("carregar os equipamentos", error);
+  const linhas = (data ?? []) as unknown as Record<string, unknown>[];
+  return linhas.map((a) => {
+    const local = a.ops_local as { nome: string; cliente_id: string };
+    return {
+      ...(a as unknown as AtivoRow),
+      local_nome: local?.nome ?? "—",
+      cliente_id: local?.cliente_id ?? "",
+    };
+  });
 }

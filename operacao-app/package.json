@@ -26,6 +26,7 @@
     "supabase:planos-crud": "node tools/correr-sql.mjs db/planos-crud.sql",
     "supabase:config": "node tools/correr-sql.mjs db/config.sql",
     "supabase:custos": "node tools/correr-sql.mjs db/custos.sql",
+    "supabase:analises": "node tools/correr-sql.mjs db/analises.sql",
     "supabase:cliente-crm": "node tools/correr-sql.mjs db/cliente-crm.sql",
     "supabase:restringir": "node tools/correr-sql.mjs db/restringir-permissoes.sql",
     "supabase:pos-instalacao": "node tools/correr-sql.mjs db/pos-instalacao.sql",
@@ -41,6 +42,7 @@
     "validar-anexos": "node tools/validar-anexos.mjs",
     "validar-config": "node tools/validar-config.mjs",
     "validar-custos": "node tools/validar-custos.mjs",
+    "validar-analises": "node tools/validar-analises.mjs",
     "validar-cliente-crm": "node tools/validar-cliente-crm.mjs",
     "validar-restricao": "node tools/validar-restricao.mjs"
   },

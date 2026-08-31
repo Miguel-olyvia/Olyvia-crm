@@ -12,6 +12,7 @@ import {
   Settings,
   Euro,
   ExternalLink,
+  Grafico,
   Home,
   Layers,
   List,
@@ -28,12 +29,20 @@ function iniciais(nome: string | null, email: string | null): string {
   return fonte.slice(0, 2).toUpperCase();
 }
 
+/**
+ * O menu. `coordenacao: true` esconde a entrada a quem é técnico.
+ *
+ * Não é só permissão — é espaço. No telemóvel isto é uma barra fixa em baixo,
+ * e cada entrada a mais rouba largura às outras. Quem está no terreno não
+ * precisa do PMP de um contrato; precisa de chegar à ordem em dois toques.
+ */
 const NAVEGACAO = [
   { to: "/", rotulo: "Hoje", Icone: Home },
   { to: "/ordens", rotulo: "Ordens", Icone: List },
   { to: "/locais", rotulo: "Locais", Icone: Layers },
   { to: "/planos", rotulo: "Planos", Icone: Clock },
   { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
+  { to: "/analises", rotulo: "Análises", Icone: Grafico, coordenacao: true },
   { to: "/definicoes", rotulo: "Definições", Icone: Settings },
   { to: "/ajuda", rotulo: "Ajuda", Icone: Ajuda },
 ];
@@ -44,6 +53,13 @@ export function OperacaoLayout() {
   const [aConfirmarSaida, setAConfirmarSaida] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Enquanto a função não estiver lida, `funcao` é null e o menu mostra o
+  // conjunto reduzido. É de propósito: aparecer uma entrada e desaparecer a
+  // seguir é pior do que aparecer meio segundo depois.
+  const navegacao = NAVEGACAO.filter(
+    (n) => !n.coordenacao || funcao === "admin" || funcao === "gestor" || funcao === "operador"
+  );
 
   useEffect(() => {
     if (!menuAberto) return;
@@ -75,7 +91,7 @@ export function OperacaoLayout() {
 
           {/* Navegação principal — desktop */}
           <nav className="hidden flex-1 items-center gap-1 md:flex">
-            {NAVEGACAO.map(({ to, rotulo, Icone }) => (
+            {navegacao.map(({ to, rotulo, Icone }) => (
               <Link
                 key={to}
                 to={to}
@@ -193,7 +209,7 @@ export function OperacaoLayout() {
       {/* Navegação — mobile */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 pb-[max(0.35rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden print:hidden">
         <div className="mx-auto flex max-w-6xl items-stretch justify-around">
-          {NAVEGACAO.map(({ to, rotulo, Icone }) => (
+          {navegacao.map(({ to, rotulo, Icone }) => (
             <Link
               key={to}
               to={to}
