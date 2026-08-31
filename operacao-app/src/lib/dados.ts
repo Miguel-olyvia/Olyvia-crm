@@ -1150,3 +1150,61 @@ export async function leiturasParaExportar(
 
   return { linhas, truncado: true };
 }
+
+/* ─────────────────────────────── Agenda ─────────────────────────────── */
+
+import type { ImpedimentoDaEquipa, OrdemNaAgenda } from "../domain/agenda";
+
+/**
+ * As ordens de um dia, com a janela de visita.
+ *
+ * `listarOrdens` não serve aqui: não traz `janela_inicio`/`janela_fim`, e sem
+ * eles todas as barras teriam a mesma largura.
+ *
+ * Traz também as **pausadas**: uma ordem em pausa continua a ocupar o dia de
+ * quem a tem, e escondê-la faria a agenda parecer mais livre do que está.
+ */
+export async function ordensDoDia(orgId: string, dia: Date): Promise<OrdemNaAgenda[]> {
+  const inicio = new Date(dia);
+  inicio.setHours(0, 0, 0, 0);
+  const fim = new Date(dia);
+  fim.setHours(23, 59, 59, 999);
+
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(
+      "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
+        "agendada_para, janela_inicio, janela_fim"
+    )
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada"])
+    .gte("agendada_para", inicio.toISOString())
+    .lte("agendada_para", fim.toISOString())
+    .order("agendada_para");
+
+  rebentar("carregar a agenda do dia", error);
+  return (data ?? []) as unknown as OrdemNaAgenda[];
+}
+
+/**
+ * Férias, horários e feriados da equipa toda, num pedido só.
+ *
+ * Se `db/agenda.sql` não estiver instalado, a RPC não existe — e a agenda
+ * desenha-se na mesma, só sem as faixas de ausência. Por isso o erro é
+ * engolido aqui em vez de levar o ecrã à frente.
+ */
+export async function impedimentosDoDia(
+  orgId: string,
+  dia: Date
+): Promise<ImpedimentoDaEquipa[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_agenda_do_dia", {
+    _org_id: orgId,
+    _dia: dia.toISOString().slice(0, 10),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem disponibilidade da equipa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as ImpedimentoDaEquipa[];
+}

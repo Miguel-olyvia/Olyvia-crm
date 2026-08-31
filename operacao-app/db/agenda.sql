@@ -171,6 +171,65 @@ GRANT EXECUTE ON FUNCTION public.ops_disponibilidade(uuid, uuid, timestamptz, ti
 
 
 -- ============================================================
+-- 1b. A equipa toda, num pedido só
+-- ============================================================
+-- O ecrã de agenda precisa disto para cada pessoa da equipa. Perguntar uma a
+-- uma davam dez idas ao servidor para desenhar um dia — e no telemóvel, com
+-- rede fraca, isso vê-se.
+--
+-- Devolve `utilizador_id` para quem chama poder distribuir pelas colunas. Só
+-- quem coordena a pode chamar: um técnico não tem que saber quem está de
+-- férias na empresa toda.
+
+CREATE OR REPLACE FUNCTION public.rpc_ops_agenda_do_dia(
+  _org_id uuid,
+  _dia    date
+)
+RETURNS TABLE (utilizador_id uuid, tipo text, detalhe text, desde date, ate date)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $fn$
+DECLARE
+  v_user uuid := public.current_business_user_id();
+  v_p    record;
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Sessão inválida.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  -- Alias obrigatório: `utilizador_id` é ao mesmo tempo uma coluna desta tabela
+  -- e um parâmetro de saída do RETURNS TABLE. Sem qualificar, o plpgsql recusa
+  -- a função por referência ambígua — e só na primeira vez que é chamada.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ops_utilizador_perfil eu
+     WHERE eu.utilizador_id = v_user AND eu.organization_id = _org_id AND eu.ativo
+       AND eu.funcao IN ('admin', 'gestor', 'operador')
+  ) AND NOT public.is_system_admin_user(auth.uid()) THEN
+    RAISE EXCEPTION 'Só quem coordena vê a agenda da equipa.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  FOR v_p IN
+    SELECT up.utilizador_id
+      FROM public.ops_utilizador_perfil up
+     WHERE up.organization_id = _org_id AND up.ativo
+  LOOP
+    RETURN QUERY
+    SELECT v_p.utilizador_id, d.tipo, d.detalhe, d.desde, d.ate
+      FROM public.ops_disponibilidade(
+             v_p.utilizador_id, _org_id,
+             (_dia + time '00:00')::timestamptz,
+             (_dia + time '23:59')::timestamptz) d;
+  END LOOP;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_agenda_do_dia(uuid, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_agenda_do_dia(uuid, date)
+  TO authenticated, service_role;
+
+
+-- ============================================================
 -- 2. Prova que a ligação existe mesmo
 -- ============================================================
 -- `schedule_resources.user_id → anew_users.id` é o pressuposto todo deste

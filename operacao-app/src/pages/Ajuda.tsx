@@ -990,12 +990,12 @@ const DIFERENCAS = [
   },
   {
     titulo: "Agenda do dia, com todos lado a lado",
-    porque: "Ver a carga de uma semana ainda obriga a abrir ordem a ordem.",
+    porque: "“Quem tem espaço amanhã de manhã?” passa a ver-se num ecrã.",
     infraspeak:
-      "Existe um calendário, com os problemas acima. Não há apoio a zonas, com edifícios em Lisboa, Braga e Porto no mesmo dia.",
+      "O calendário não carrega nada até se aplicarem filtros, e depois mostra tudo empilhado às 09:00 — porque a hora é simbólica e ninguém a preenche.",
     olyvia:
-      "Falta o ecrã de agenda por dia, com a carga de cada pessoa e agrupamento por zona. Os avisos de choque e de disponibilidade já existem.",
-    feito: false,
+      "O dia com toda a equipa lado a lado, a carga de cada um em horas, quem está ausente, e as ordens marcadas que ainda não têm ninguém. Uma ordem sem hora aparece à parte, e não a fingir que é às nove.",
+    feito: true,
   },
   {
     titulo: "Configuração pré-preenchida por setor",
@@ -1009,11 +1009,6 @@ const DIFERENCAS = [
 ] as const;
 
 const POR_FAZER = [
-  {
-    o: "Ecrã de agenda por dia",
-    porque:
-      "hoje marca-se a data na ficha da ordem, e o sistema avisa de choques, férias e feriados. Falta a vista do dia com todos os técnicos lado a lado.",
-  },
   {
     o: "Assinatura do cliente no telemóvel",
     porque:

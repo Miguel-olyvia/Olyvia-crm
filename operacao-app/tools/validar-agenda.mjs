@@ -317,6 +317,44 @@ await db.exec(`
     : mau(`o evento não registou os avisos: ${JSON.stringify(ev?.depois)}`);
 }
 
+/* ── A equipa toda, num pedido só ──────────────────────────────── */
+
+console.log("\n─── a agenda do dia, para o ecrã ───────");
+{
+  // 25 de dezembro: feriado para todos, e o técnico não trabalha às sextas
+  // (2026-12-25 é uma sexta-feira).
+  const r = await como(AUTH.gestor,
+    `SELECT utilizador_id, tipo FROM public.rpc_ops_agenda_do_dia('${ORG}', '2026-12-25')`);
+
+  const doTecnico = r.filter((x) => x.utilizador_id === TECNICO).map((x) => x.tipo).sort();
+  const daGestora = r.filter((x) => x.utilizador_id === GESTOR).map((x) => x.tipo);
+
+  doTecnico.join(",") === "feriado,fora_de_horario"
+    ? ok("num pedido só vem o feriado E o fora de horário do técnico")
+    : mau(`o técnico veio com: ${doTecnico.join(", ") || "(nada)"}`);
+
+  daGestora.includes("feriado")
+    ? ok("e o feriado da gestora, que nem está na agenda do CRM")
+    : mau("a gestora não veio no resultado");
+
+  r.every((x) => x.utilizador_id)
+    ? ok("cada linha diz de quem é — sem isso não dá para desenhar colunas")
+    : mau("veio uma linha sem utilizador_id");
+}
+
+{
+  let recusou = false;
+  try {
+    await como(AUTH.tecnico, `SELECT * FROM public.rpc_ops_agenda_do_dia('${ORG}', '2026-12-25')`);
+  } catch (e) {
+    recusou = e.message.includes("Só quem coordena");
+    await db.exec("ROLLBACK").catch(() => {});
+  }
+  recusou
+    ? ok("um técnico não vê a agenda da equipa toda")
+    : mau("um técnico conseguiu ler a agenda de toda a gente");
+}
+
 /* ── Nada foi acrescentado ao CRM ──────────────────────────────────────── */
 
 console.log("\n─── o que NÃO se tocou ──────────────────");

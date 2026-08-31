@@ -201,20 +201,20 @@ db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
 db/analises.sql        4 vistas: vida do equipamento, leituras, PMP, exportar
 db/agenda.sql          férias, horários e feriados, vindos do CRM
 tools/validar-*        15 validadores contra Postgres real, sem Docker
-src/domain/            regras puras — 165 testes, sem infraestrutura
+src/domain/            regras puras — 190 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
 src/components/        layout, primitivos de UI, ícones, PainelTarefas
 src/components/diagramas.tsx  os fluxogramas da ajuda, em SVG à mão
 src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
-                       Planos · Orçamentos · Relatório · Análises
+                       Agenda · Planos · Orçamentos · Relatório · Análises
                        Definições · Ajuda
 ```
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 165 testes a correr em pouco mais de um segundo.
+haver 190 testes a correr em pouco mais de um segundo.
 
 ### As três escritas, e só três
 

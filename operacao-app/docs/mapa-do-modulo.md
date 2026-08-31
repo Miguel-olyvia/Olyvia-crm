@@ -21,6 +21,7 @@ Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, histórico. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
 | `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
+| `/agenda` · **Agenda** | O dia com a equipa toda lado a lado: carga em horas, ausências, e as ordens marcadas sem ninguém. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
@@ -150,6 +151,7 @@ uma destas.
 |---|---|
 | `rpc_ops_materializar_planos` | todos os dias, ou à mão. Cria as ordens dos próximos 120 dias |
 | `rpc_ops_avisar_atrasos` | de hora a hora pelo `pg_cron`, e ao abrir o **Hoje** |
+| `rpc_ops_agenda_do_dia` | ao abrir a **Agenda**. Férias, horários e feriados da equipa toda, num pedido só (só lê) |
 
 ### As três fechaduras
 

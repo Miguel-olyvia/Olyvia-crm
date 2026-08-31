@@ -308,7 +308,8 @@ Assumindo que o piloto corre e a equipa fica a usar:
 2. ~~**Iniciar a ordem sozinha**~~ — **feito** (31 ago). A primeira resposta inicia-a
 3. ~~**Relatório do ativo**~~ — **feito** (31 ago). `/analises` › Equipamento
 4. ~~**Agenda: férias e horários**~~ — **feito** (31 ago). Não foi preciso tabela de
-   mapa nenhuma: `schedule_resources.user_id` já aponta para `anew_users.id`
+   mapa nenhuma: `schedule_resources.user_id` já aponta para `anew_users.id`.
+   O **ecrã de agenda por dia** também ficou feito, em `/agenda`
 5. ~~**PMP cumprido**~~ — **feito** (31 ago). `/analises` › Manutenção preventiva
 6. **Assinatura do cliente no telemóvel** — troca papel por prova
 7. ~~**Exportar medições**~~ — **feito** (31 ago). `/analises` › Exportar medições
