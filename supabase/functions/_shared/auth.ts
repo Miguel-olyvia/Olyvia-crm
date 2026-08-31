@@ -38,6 +38,22 @@ export async function resolveCallerIdentity(
     return { authUid: "service_role", anewUserId: "service_role", isServiceRole: true };
   }
 
+  // Segredo dedicado a gatilhos da base de dados.
+  //
+  // Um gatilho SQL nao tem sessao de utilizador: para entregar um acontecimento
+  // a uma edge function precisa de uma credencial guardada na propria base. Usar
+  // ai a chave de servico significa guardar a chave-mestra do projecto em SQL --
+  // quem leia o Vault passa a poder fazer tudo. Este segredo faz uma coisa so:
+  // autoriza a entrega de um acontecimento ao motor de automacoes.
+  //
+  // Roda-se sem tocar em mais nada (`supabase secrets set` + o valor no Vault),
+  // e se vazar nao da acesso a dados -- so a capacidade de pedir ao motor que
+  // reavalie uma mudanca de fase que, para ter efeito, tem de estar configurada.
+  const triggerSecret = Deno.env.get("WORKFLOW_TRIGGER_SECRET");
+  if (triggerSecret && triggerSecret.length >= 32 && token === triggerSecret) {
+    return { authUid: "db_trigger", anewUserId: "db_trigger", isServiceRole: true };
+  }
+
   // Validate user JWT
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) {
