@@ -1060,3 +1060,20 @@ export async function listarAtivos(orgId: string): Promise<AtivoComLocal[]> {
     };
   });
 }
+
+/**
+ * Manda a base procurar ordens atrasadas e pausas expiradas, e avisar quem
+ * tem de saber.
+ *
+ * Existe porque essas duas falhas não geram evento nenhum — são a ausência de
+ * um. Só se descobrem a olhar para o relógio, e alguém tem de olhar.
+ *
+ * Idempotente do lado da base: o mesmo aviso não se repete enquanto o primeiro
+ * estiver por ler. Falhar aqui não é motivo para estragar um ecrã, por isso
+ * quem chama isto ignora o erro.
+ */
+export async function avisarAtrasos(): Promise<number> {
+  const { data, error } = await supabase.rpc("rpc_ops_avisar_atrasos");
+  if (error) throw new ErroDeEscrita(error.message);
+  return (data as unknown as { avisos?: number })?.avisos ?? 0;
+}

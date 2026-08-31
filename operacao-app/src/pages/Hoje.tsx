@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { ErroDeDados, listarOrdens, type LinhaOrdem } from "../lib/dados";
+import { ErroDeDados, avisarAtrasos, listarOrdens, type LinhaOrdem } from "../lib/dados";
 import { Card, ErrorState, Skeleton, cx } from "../components/ui";
 import { AlertTriangle, CheckCircle, ChevronRight, Inbox } from "../components/icons";
 import { alertasDaOrdem, type Alerta } from "../domain/alertas";
@@ -42,7 +42,7 @@ function contexto(o: LinhaOrdem) {
 }
 
 export default function Hoje() {
-  const { activeOrgId, userName } = useAuth();
+  const { activeOrgId, userName, funcao } = useAuth();
   const [ordens, setOrdens] = useState<LinhaOrdem[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
@@ -70,6 +70,33 @@ export default function Hoje() {
       vivo = false;
     };
   }, [activeOrgId, tentativa]);
+
+  // Uma ordem que passou da hora e uma pausa que expirou não geram evento —
+  // são a ausência de um, e só se descobrem a olhar para o relógio. O pg_cron
+  // faz isto de hora a hora QUANDO está ligado; nem todos os projetos Supabase
+  // o têm, e nesses os avisos nunca sairiam.
+  //
+  // Uma vez por hora por browser, e só a quem coordena — a RPC percorre as
+  // ordens todas, e não é trabalho para se pedir a cada navegação.
+  //
+  // Falhar aqui não pode estragar o ecrã: quem abre o Hoje quer ver o dia, e
+  // não um erro sobre notificações.
+  useEffect(() => {
+    if (!activeOrgId) return;
+    if (funcao !== "admin" && funcao !== "gestor" && funcao !== "operador") return;
+
+    const chave = `operacao-avisos-${activeOrgId}`;
+    try {
+      const ultima = Number(localStorage.getItem(chave) ?? 0);
+      if (Date.now() - ultima < 3600_000) return;
+      localStorage.setItem(chave, String(Date.now()));
+    } catch {
+      // Sem localStorage (janela privada, armazenamento bloqueado) corre na
+      // mesma. A base recusa o aviso repetido, por isso o pior caso é uma
+      // chamada a mais.
+    }
+    void avisarAtrasos().catch(() => {});
+  }, [activeOrgId, funcao]);
 
   const { precisamDeMim, aCorrerMal, total } = useMemo(() => {
     if (!ordens) return { precisamDeMim: [], aCorrerMal: [], total: 0 };
