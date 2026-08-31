@@ -148,6 +148,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/notificacoes.sql` | Avisar no sino do CRM: ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | **sim** — só `INSERT` em `notifications` |
 | `db/analises.sql` | Quatro vistas: histórico do equipamento, evolução das leituras, PMP cumprido, e todas as leituras para exportar | **não** |
 | `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita | **não** (só lê 4 tabelas de agenda) |
+| `db/packs.sql` | Três packs de setor prontos a instalar: Manutenção, Obras, Limpeza | **não** |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -200,7 +201,7 @@ db/medicoes.sql        responder a leituras, com o veredicto na base
 db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
 db/analises.sql        4 vistas: vida do equipamento, leituras, PMP, exportar
 db/agenda.sql          férias, horários e feriados, vindos do CRM
-tools/validar-*        15 validadores contra Postgres real, sem Docker
+tools/validar-*        16 validadores contra Postgres real, sem Docker
 src/domain/            regras puras — 190 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
@@ -271,6 +272,7 @@ npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
 npm run supabase:notificacoes   # db/notificacoes.sql (antes das RPCs)
 npm run supabase:analises       # db/analises.sql
 npm run supabase:agenda         # db/agenda.sql (antes do despacho)
+npm run supabase:packs          # db/packs.sql (depois do config)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql

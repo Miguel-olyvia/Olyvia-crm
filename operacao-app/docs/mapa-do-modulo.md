@@ -144,6 +144,7 @@ uma destas.
 | `rpc_ops_gravar_plano` | um plano preventivo |
 | `rpc_ops_experimentar_regra` | as próximas seis datas de uma regra, **antes** de gravar |
 | `rpc_ops_proximo_codigo` | o próximo código de uma sequência |
+| `rpc_ops_instalar_pack` | um pack de setor: categorias, medições e checklists já feitas. Nunca sobrepõe, e repete-se sem duplicar |
 
 ### Automáticas
 
@@ -236,7 +237,7 @@ Nenhum destes avisos impede a marcação. Quem coordena é que decide.
 
 ---
 
-## 7. Os 15 validadores
+## 7. Os 16 validadores
 
 Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`.
 
@@ -256,6 +257,7 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-config` | checklists versionadas, medições, equipa |
 | `validar-custos` | material e serviços, e que o técnico não vê custo/hora |
 | `validar-cliente-crm` | morada e contacto, sem escrever no CRM |
+| `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
 Mais **147 testes de domínio** (`npm test`), sobre funções puras — sem base de
@@ -272,7 +274,7 @@ testado, e foi a razão de um deploy falhado.
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
   → despacho.sql → orcamentos.sql → anexos.sql → planos-crud.sql
-  → config.sql → custos.sql → analises.sql → cliente-crm.sql
+  → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql
 ```
 
