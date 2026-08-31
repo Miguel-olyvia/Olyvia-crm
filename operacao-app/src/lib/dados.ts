@@ -1661,3 +1661,82 @@ export async function ordensDoAtivo(
   // Da mais recente para trás — é a ordem por que a memória se lê.
   return linhas.sort((a, b) => (b.criada_em ?? "").localeCompare(a.criada_em ?? ""));
 }
+
+/* ────────────────────────── A conversa da ordem ────────────────────────── */
+
+/**
+ * Uma mensagem escrita dentro da ordem.
+ *
+ * Não é WhatsApp nem chat com o cliente: é a conversa entre colegas sobre
+ * *este* trabalho, guardada onde o trabalho está. Ver `db/mensagens.sql` para
+ * a razão de não se poder apagar nem reescrever.
+ */
+export interface Mensagem {
+  id: string;
+  ordem_id: string;
+  autor_id: string | null;
+  texto: string;
+  criada_em: string;
+}
+
+export async function mensagensDaOrdem(ordemId: string): Promise<Mensagem[]> {
+  const { data, error } = await supabase
+    .from("ops_mensagem")
+    .select("id, ordem_id, autor_id, texto, criada_em")
+    .eq("ordem_id", ordemId)
+    .eq("canal", "interno")
+    // Do princípio para o fim, como se lê uma conversa.
+    .order("criada_em", { ascending: true });
+  rebentar("carregar as mensagens", error);
+  return (data ?? []) as unknown as Mensagem[];
+}
+
+/**
+ * Escrever uma mensagem.
+ *
+ * Passa pela RPC e não por um INSERT direto porque escrever é metade do
+ * trabalho: a outra metade é tocar o sino a quem está na ordem. Uma mensagem
+ * que ninguém lê não serve para nada.
+ */
+export async function escreverMensagem(
+  ordemId: string,
+  texto: string
+): Promise<{ ok: boolean; id: string }> {
+  const { data, error } = await supabase.rpc("rpc_ops_escrever_mensagem", {
+    p_ordem_id: ordemId,
+    p_texto: texto,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível enviar a mensagem.");
+  return data as unknown as { ok: boolean; id: string };
+}
+
+/* ─────────────────────── O relatório ao cliente ─────────────────────── */
+
+/** Para onde ia o relatório desta ordem, e se já foi algum. */
+export interface DestinoDoRelatorio {
+  email: string | null;
+  estado: string;
+  ja_enviado: string | null;
+}
+
+export async function destinoDoRelatorio(ordemId: string): Promise<DestinoDoRelatorio> {
+  const { data, error } = await supabase.rpc("rpc_ops_destino_do_relatorio", {
+    p_ordem_id: ordemId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível saber o destinatário.");
+  return data as unknown as DestinoDoRelatorio;
+}
+
+/**
+ * Mandar o relatório ao cliente agora.
+ *
+ * Não leva destinatário: vai para o email da ficha do cliente e mais nenhum.
+ * Ver `db/relatorio-manual.sql` para a razão.
+ */
+export async function enviarRelatorio(ordemId: string): Promise<{ ok: boolean; para: string }> {
+  const { data, error } = await supabase.rpc("rpc_ops_enviar_relatorio", {
+    p_ordem_id: ordemId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível enviar o relatório.");
+  return data as unknown as { ok: boolean; para: string };
+}

@@ -64,6 +64,7 @@ import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
 import PainelClassificacao from "../components/PainelClassificacao";
 import BotaoDuplicar from "../components/BotaoDuplicar";
+import BotaoRelatorio from "../components/BotaoRelatorio";
 import {
   duplicarOrdem,
   listarMotivosDePausa,
@@ -73,6 +74,7 @@ import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
 import PainelAssinatura from "../components/PainelAssinatura";
+import PainelMensagens from "../components/PainelMensagens";
 import PainelCustos from "../components/PainelCustos";
 import { comparacaoPorItem, custosDaOrdem, type ComparacaoPorItem, type LinhaDeCusto } from "../lib/custos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
@@ -414,7 +416,7 @@ export default function OrdemDetalhe() {
         {/* O relatório só faz sentido quando há trabalho feito para mostrar.
             Antes disso o botão seria uma promessa vazia. */}
         {["fechada", "confirmada"].includes(ordem.estado) && (
-          <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
             <BotaoDuplicar
               rotulo="Duplicar"
               titulo="Duplicar a ordem"
@@ -434,6 +436,12 @@ export default function OrdemDetalhe() {
             >
               Relatório para o cliente
             </Link>
+            {/* Ver o relatório e mandá-lo são a mesma decisão em dois passos:
+                por isso o botão está ao lado, e não noutro ecrã. */}
+            <BotaoRelatorio
+              ordemId={ordem.id}
+              podeMandar={funcao === "gestor" || funcao === "admin"}
+            />
           </div>
         )}
 
@@ -576,6 +584,10 @@ export default function OrdemDetalhe() {
         fechada={ordem.estado === "fechada"}
         podeAssinar={!!businessUserId}
       />
+
+      {/* A conversa. Fica a seguir à assinatura e antes das sessões: é onde
+          se explica o que os números não explicam. */}
+      <PainelMensagens ordemId={ordem.id} equipa={equipa} euId={businessUserId ?? null} />
 
       {/* Sessões — o que faz o custo de mão de obra existir */}
       <Card className="p-4 sm:p-5">

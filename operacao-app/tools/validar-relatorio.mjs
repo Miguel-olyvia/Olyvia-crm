@@ -31,6 +31,9 @@ const ORG = "11111111-1111-1111-1111-111111111111";
 const ENT = "77777777-7777-7777-7777-777777777777";
 const CLI = "22222222-2222-2222-2222-222222222222";
 const GESTOR = "33333333-3333-3333-3333-333333333333";
+const A_GESTOR = "44444444-4444-4444-4444-444444444444";
+const TECNICO = "55555555-5555-5555-5555-555555555555";
+const A_TECNICO = "66666666-6666-6666-6666-666666666666";
 
 await db.exec(STUBS_CRM);
 
@@ -67,8 +70,17 @@ await db.exec(`
   INSERT INTO public.anew_entities (id, display_name) VALUES ('${ENT}', 'Padaria Central');
   INSERT INTO public.anew_clients (id, organization_id, entity_id)
     VALUES ('${CLI}', '${ORG}', '${ENT}');
-  INSERT INTO public.anew_users (id, name, email, auth_user_id)
-    VALUES ('${GESTOR}', 'Rita Gestora', 'rita@olyvia.pt', '44444444-4444-4444-4444-444444444444');
+  INSERT INTO public.anew_users (id, name, email, auth_user_id) VALUES
+    ('${GESTOR}',  'Rita Gestora',  'rita@olyvia.pt', '${A_GESTOR}'),
+    ('${TECNICO}', 'Tino Técnico',  'tino@olyvia.pt', '${A_TECNICO}');
+  CREATE TABLE IF NOT EXISTS public.auth_to_business_user_map
+    (auth_user_id uuid, business_user_id uuid);
+  INSERT INTO public.auth_to_business_user_map (auth_user_id, business_user_id) VALUES
+    ('${A_GESTOR}', '${GESTOR}'), ('${A_TECNICO}', '${TECNICO}');
+  CREATE OR REPLACE FUNCTION public.current_business_user_id() RETURNS uuid
+    LANGUAGE sql STABLE SECURITY DEFINER AS $fn$
+    SELECT m.business_user_id FROM public.auth_to_business_user_map m
+     WHERE m.auth_user_id = auth.uid() LIMIT 1 $fn$;
 `);
 
 for (const f of ["schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql"]) {
@@ -79,10 +91,13 @@ await db.exec(ler("assinaturas.sql"));
 await db.exec(ler("relatorio-automatico.sql"));
 // Um ficheiro que não se pode voltar a correr não serve para nada.
 await db.exec(ler("relatorio-automatico.sql"));
+await db.exec(ler("relatorio-manual.sql"));
+await db.exec(ler("relatorio-manual.sql"));
 
 await db.exec(`
-  INSERT INTO public.ops_utilizador_perfil (organization_id, utilizador_id, funcao)
-  VALUES ('${ORG}', '${GESTOR}', 'gestor');
+  INSERT INTO public.ops_utilizador_perfil (organization_id, utilizador_id, funcao) VALUES
+    ('${ORG}', '${GESTOR}',  'gestor'),
+    ('${ORG}', '${TECNICO}', 'tecnico');
 `);
 
 let n = 0;
@@ -289,7 +304,84 @@ console.log("\n─── quem pode ligar isto ───────────�
   );
   conferir(
     (await um(`SELECT has_function_privilege('authenticated','public.ops_agendar_relatorio(uuid,uuid)','EXECUTE') AS p`)).p === false,
-    "ninguém chama o envio à mão — só o gatilho"
+    "o agendador automático não se chama do browser — só o gatilho lhe toca"
+  );
+}
+
+console.log("\n─── mandar à mão ────────────────────────");
+{
+  // Sem `SET LOCAL ROLE`, isto corria como dono da base e provava zero.
+  const como = async (authUid, sql, p = []) => {
+    await db.exec(
+      `BEGIN; SET LOCAL ROLE authenticated;
+       SET LOCAL request.jwt.claim.sub = '${authUid}';`
+    );
+    try {
+      return (await db.query(sql, p)).rows;
+    } finally {
+      await db.exec("COMMIT").catch(() => db.exec("ROLLBACK").catch(() => {}));
+    }
+  };
+
+  await ligar("nao"); // o botão tem de funcionar com o automático desligado
+
+  const o = await criarOrdem("Substituir vedante");
+  conferir((await naFila(o)).length === 0, "nada saiu sozinho — está desligado");
+
+  const d = (await como(A_GESTOR,
+    `SELECT public.rpc_ops_destino_do_relatorio($1) AS r`, [o]))[0].r;
+  conferir(d.email === "cliente@exemplo.pt", `diz para quem ia antes de mandar (${d.email})`);
+  conferir(d.ja_enviado === null, "e diz que ainda não foi mandado nenhum");
+
+  const r = (await como(A_GESTOR, `SELECT public.rpc_ops_enviar_relatorio($1) AS r`, [o]))[0].r;
+  conferir(r.ok === true, "quem gere manda, mesmo com o automático desligado");
+
+  const fila = await naFila(o);
+  conferir(fila.length === 1, "ficou uma carta no marco do correio");
+  conferir(fila[0].to_email === "cliente@exemplo.pt", "para o email da ficha do cliente");
+  conferir(fila[0].status === "pending", "por enviar, à espera do CRM");
+
+  // Carregar outra vez manda outra vez: quem carrega está a decidir.
+  await como(A_GESTOR, `SELECT public.rpc_ops_enviar_relatorio($1) AS r`, [o]);
+  conferir((await naFila(o)).length === 2, "carregar outra vez manda outra vez");
+
+  const ev = await todos(
+    `SELECT depois FROM public.ops_evento
+      WHERE entidade_id = $1 AND tipo = 'relatorio_enviado'`, [o]);
+  conferir(ev.length === 2, "cada envio deixa rasto no histórico");
+  conferir(ev.every((e) => e.depois.automatico === false), "e diz que foi à mão");
+
+  let tecnico = false;
+  try {
+    await como(A_TECNICO, `SELECT public.rpc_ops_enviar_relatorio($1) AS r`, [o]);
+  } catch { tecnico = true; }
+  conferir(tecnico, "o técnico não escreve ao cliente — isso é de quem gere");
+
+  // Um relatório de trabalho a meio é uma promessa, não um relatório.
+  const meio = (await um(
+    `INSERT INTO public.ops_ordem
+       (organization_id, codigo, origem, estado, cliente_id, titulo)
+     VALUES ($1, 'OT-9990', 'corretiva', 'em_curso', $2, 'A meio') RETURNING id`,
+    [ORG, CLI])).id;
+  let cedo = false;
+  try {
+    await como(A_GESTOR, `SELECT public.rpc_ops_enviar_relatorio($1) AS r`, [meio]);
+  } catch { cedo = true; }
+  conferir(cedo, "uma ordem por acabar não manda relatório");
+  conferir((await naFila(meio)).length === 0, "e nada foi para a fila");
+
+  conferir(
+    (await um(`SELECT has_function_privilege('anon','public.rpc_ops_enviar_relatorio(uuid)','EXECUTE') AS p`)).p
+      === false,
+    "quem não tem sessão não manda emails"
+  );
+
+  // Não há campo de destinatário livre: seria uma máquina de phishing com o
+  // SMTP da empresa lá dentro.
+  conferir(
+    (await um(`SELECT count(*)::int AS n FROM pg_proc
+                WHERE proname = 'rpc_ops_enviar_relatorio' AND pronargs = 1`)).n === 1,
+    "e só aceita a ordem — não há campo para escrever um email qualquer"
   );
 }
 
@@ -303,11 +395,18 @@ console.log("\n─── o módulo continua contido ─────────�
      WHERE c.contype = 'f' AND t.relname LIKE 'ops\\_%' AND f.relname NOT LIKE 'ops\\_%'`);
   conferir(fk.n === 0, "zero chaves estrangeiras de ops_* para fora");
 
-  const escreve = await um(`
-    SELECT count(*)::int AS n FROM pg_proc p
-     WHERE p.proname LIKE 'ops\\_%'
-       AND p.prosrc ILIKE '%INSERT INTO public.scheduled_emails%'`);
-  conferir(escreve.n === 1, "só uma função escreve na fila de emails");
+  const escreve = await todos(`
+    SELECT p.proname FROM pg_proc p
+     WHERE p.prosrc ILIKE '%INSERT INTO public.scheduled_emails%'
+     ORDER BY p.proname`);
+  // Duas, e só duas: o gatilho e o botão. Cada porta nova para a fila de
+  // saída é uma porta nova para mandar email em nome da empresa.
+  conferir(
+    escreve.length === 2
+      && escreve.some((f) => f.proname === "ops_agendar_relatorio")
+      && escreve.some((f) => f.proname === "rpc_ops_enviar_relatorio"),
+    `só o gatilho e o botão escrevem na fila de emails (${escreve.map((f) => f.proname).join(", ")})`
+  );
 }
 
 console.log("");

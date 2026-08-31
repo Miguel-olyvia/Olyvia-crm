@@ -193,6 +193,12 @@ export const Inbox = (p: IconProps) => (
   </svg>
 );
 
+export const Mensagens = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9Z" />
+  </svg>
+);
+
 export const Ajuda = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />
