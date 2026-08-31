@@ -61,6 +61,7 @@ import { formatarDuracao, tempoTotalSegundos, type Sessao } from "../domain/temp
 import { alertasDaOrdem } from "../domain/alertas";
 import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
+import PainelClassificacao from "../components/PainelClassificacao";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
@@ -460,6 +461,20 @@ export default function OrdemDetalhe() {
       />
 
       {/* Onde o trabalho acontece */}
+      {/* A classificação antes das tarefas: quem abre a ordem para trabalhar
+          passa por ela, e quem a abre para a arrumar não tem de a ir procurar
+          ao fim de tudo. */}
+      <PainelClassificacao
+        ordemId={ordem.id}
+        orgId={ordem.organization_id}
+        tipoTrabalhoId={ordem.tipo_trabalho_id}
+        centroCustoId={ordem.centro_custo_id}
+        fornecedorId={ordem.fornecedor_id}
+        fechaAutomatico={ordem.fecha_automatico}
+        podeEditar={funcao === "admin" || funcao === "gestor" || funcao === "operador"}
+        aoGravar={() => setRecarga((r) => r + 1)}
+      />
+
       <PainelTarefas
         ordemId={ordem.id}
         tarefas={tarefas}

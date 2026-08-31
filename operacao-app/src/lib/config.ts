@@ -465,3 +465,138 @@ export async function instalarPack(orgId: string, pack: string): Promise<Resulta
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível instalar o pack.");
   return data as unknown as ResultadoDoPack;
 }
+
+/* ─────────────────── Tipos de trabalho e centros de custo ──────────────── */
+
+export interface TipoTrabalho {
+  id: string;
+  codigo: string;
+  nome: string;
+  posicao: number;
+  fecha_automatico: boolean;
+  ativo: boolean;
+}
+
+export interface CentroCusto {
+  id: string;
+  codigo: string;
+  nome: string;
+  ativo: boolean;
+}
+
+/**
+ * Os tipos de trabalho da organização — semeando-os se ainda não houver.
+ *
+ * A sementeira é aqui e não no SQL de instalação porque as organizações não se
+ * conhecem todas no momento de instalar: aparecem à medida que alguém entra em
+ * cada uma. A função da base recusa semear duas vezes, por isso chamar isto a
+ * cada abertura não faz mal nenhum.
+ *
+ * Se a sementeira falhar (falta de permissão, por exemplo), lê-se na mesma o
+ * que houver. Uma lista vazia é pior do que um erro, mas um erro em cima de
+ * uma lista que até existia seria pior ainda.
+ */
+export async function listarTiposTrabalho(orgId: string): Promise<TipoTrabalho[]> {
+  await supabase.rpc("ops_semear_tipos_trabalho", { _org_id: orgId });
+
+  const { data, error } = await supabase
+    .from("ops_tipo_trabalho")
+    .select("id, codigo, nome, posicao, fecha_automatico, ativo")
+    .eq("organization_id", orgId)
+    .order("posicao");
+
+  rebentar("carregar os tipos de trabalho", error);
+  return (data ?? []) as unknown as TipoTrabalho[];
+}
+
+export async function gravarTipoTrabalho(t: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  codigo?: string | null;
+  fechaAutomatico?: boolean;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_tipo_trabalho", {
+    p_org_id: t.orgId,
+    p_nome: t.nome,
+    p_codigo: t.codigo ?? null,
+    p_fecha_automatico: t.fechaAutomatico ?? false,
+    p_id: t.id ?? null,
+    p_ativo: t.ativo ?? true,
+  });
+  if (error) {
+    // A unicidade dos tipos é pelo NOME, e não pelo código — o código repete-se
+    // de propósito. A mensagem tem de dizer o que a pessoa fez, não o que a
+    // base chama àquilo.
+    throw new ErroDeEscrita(
+      error.message.includes("duplicate key")
+        ? "Já existe um tipo de trabalho com esse nome."
+        : traduzir(error.message, "tipo de trabalho")
+    );
+  }
+}
+
+export async function listarCentrosCusto(orgId: string): Promise<CentroCusto[]> {
+  const { data, error } = await supabase
+    .from("ops_centro_custo")
+    .select("id, codigo, nome, ativo")
+    .eq("organization_id", orgId)
+    .order("codigo");
+
+  rebentar("carregar os centros de custo", error);
+  return (data ?? []) as unknown as CentroCusto[];
+}
+
+export async function gravarCentroCusto(c: {
+  orgId: string;
+  id?: string | null;
+  codigo: string;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_centro_custo", {
+    p_org_id: c.orgId,
+    p_codigo: c.codigo,
+    p_nome: c.nome,
+    p_id: c.id ?? null,
+    p_ativo: c.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "centro de custo"));
+}
+
+/* ────────────────────────────── Fornecedores ───────────────────────────── */
+
+export interface Fornecedor {
+  id: string;
+  nome: string;
+}
+
+/**
+ * Os fornecedores do Olyvia. **Só se leem.**
+ *
+ * Criar um fornecedor novo é no CRM — este módulo não escreve em tabelas de
+ * negócio dele. O ecrã leva lá quem precisar.
+ *
+ * A tabela pode não existir numa instalação, e por isso um erro aqui devolve
+ * lista vazia em vez de levar o formulário à frente: escolher fornecedor é
+ * opcional, e uma ordem sem fornecedor é uma ordem normal.
+ */
+export async function listarFornecedores(orgId: string): Promise<Fornecedor[]> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("id, name, organization_id")
+    .eq("organization_id", orgId)
+    .order("name")
+    .limit(500);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem fornecedores:", error.message);
+    return [];
+  }
+  return ((data ?? []) as { id: string; name: string | null }[]).map((f) => ({
+    id: f.id,
+    nome: f.name ?? "(sem nome)",
+  }));
+}

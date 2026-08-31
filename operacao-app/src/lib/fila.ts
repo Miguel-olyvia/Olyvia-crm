@@ -6,7 +6,7 @@ import {
   juntar,
   type PorEnviar,
 } from "../domain/fila";
-import { ErroDeEscrita, responderMedicao, responderTarefa } from "./dados";
+import { ErroDeEscrita, fecharSeCompleta, responderMedicao, responderTarefa } from "./dados";
 
 /**
  * As respostas que ainda não saíram do telemóvel.
@@ -192,6 +192,9 @@ export async function responderTarefaOuGuardar(
   try {
     const r = await responderTarefa(args);
     void tentarEnviar();
+    // Esta resposta pode ter sido a última que faltava. A base decide; aqui
+    // só se pergunta, e um não não é erro.
+    await fecharSeCompleta(ordemId);
     return { fim: "gravado", corretiva: r.corretiva_gerada ?? null };
   } catch (e) {
     if (especieDaFalha(e) === "recusada") {
@@ -225,6 +228,7 @@ export async function responderMedicaoOuGuardar(
   try {
     const r = await responderMedicao(args);
     void tentarEnviar();
+    await fecharSeCompleta(ordemId);
     return { fim: "gravado", corretiva: r.corretiva_gerada ?? null };
   } catch (e) {
     if (especieDaFalha(e) === "recusada") {
@@ -280,6 +284,9 @@ export async function tentarEnviar(): Promise<void> {
         }
         await apagar(item.chave);
         saidas += 1;
+        // As respostas que estavam guardadas também podem ter completado a
+        // ordem. Sem isto, quem trabalhou sem rede ficava com a ordem aberta.
+        await fecharSeCompleta(item.ordemId);
       } catch (e) {
         if (especieDaFalha(e) === "sem_rede") break;
 

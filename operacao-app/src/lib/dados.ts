@@ -99,6 +99,11 @@ export interface OrdemCompleta extends LinhaOrdem {
   pausa_motivo: string | null;
   plano_id: string | null;
   gerada_por_tarefa_id: string | null;
+  tipo_trabalho_id: string | null;
+  centro_custo_id: string | null;
+  /** → suppliers.id do CRM. Sem chave estrangeira, de propósito. */
+  fornecedor_id: string | null;
+  fecha_automatico: boolean;
 }
 
 export async function obterOrdem(codigo: string, orgId: string): Promise<OrdemCompleta | null> {
@@ -1462,4 +1467,51 @@ export async function definirDefinicao(
     p_valor: valor,
   });
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a definição.");
+}
+
+/* ─────────────────── Classificação de uma ordem ────────────────────────── */
+
+/**
+ * Tipo de trabalho, centro de custo, fornecedor e o fecho automático.
+ *
+ * Vai por UPDATE direto e não por RPC porque **não mexe no estado** — e o
+ * estado é a única coisa que a base tranca. Título, responsável e descrição
+ * seguem o mesmo caminho desde o início.
+ */
+export async function gravarClassificacao(
+  ordemId: string,
+  c: {
+    tipoTrabalhoId?: string | null;
+    centroCustoId?: string | null;
+    fornecedorId?: string | null;
+    fechaAutomatico?: boolean;
+  }
+): Promise<void> {
+  const linha: Record<string, unknown> = { atualizada_em: new Date().toISOString() };
+  if ("tipoTrabalhoId" in c) linha.tipo_trabalho_id = c.tipoTrabalhoId || null;
+  if ("centroCustoId" in c) linha.centro_custo_id = c.centroCustoId || null;
+  if ("fornecedorId" in c) linha.fornecedor_id = c.fornecedorId || null;
+  if ("fechaAutomatico" in c) linha.fecha_automatico = c.fechaAutomatico;
+
+  const { error } = await supabase.from("ops_ordem").update(linha).eq("id", ordemId);
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar.");
+}
+
+/**
+ * Fecha a ordem se ela for das que se fecham sozinhas e já não faltar nada.
+ *
+ * Chamada depois de cada resposta. Não é erro não ser altura — a base devolve
+ * o motivo e a aplicação segue. Falhar aqui nunca pode estragar uma resposta
+ * que já foi gravada, e por isso o erro é engolido.
+ */
+export async function fecharSeCompleta(ordemId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("rpc_ops_fechar_se_completa", {
+    p_ordem_id: ordemId,
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] fecho automático não correu:", error.message);
+    return false;
+  }
+  return (data as { fechou?: boolean } | null)?.fechou === true;
 }
