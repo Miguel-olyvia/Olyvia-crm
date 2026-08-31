@@ -66,6 +66,12 @@ export interface TopLevelItem {
   icon: LucideIcon;
   labelKey: string;
   permissions: string[];
+  /**
+   * Destino servido por outra aplicação no mesmo domínio (ex.: /operacao).
+   * O react-router não o conhece, por isso a navegação tem de ser um
+   * carregamento de página a sério — ver AppSidebar.handleTopLevelClick.
+   */
+  external?: boolean;
 }
 
 export const topLevelItems: TopLevelItem[] = [
@@ -75,6 +81,14 @@ export const topLevelItems: TopLevelItem[] = [
     icon: LayoutDashboard,
     labelKey: "sidebar.dashboard",
     permissions: ["dashboard.view"],
+  },
+  {
+    id: "operacao",
+    to: "/operacao",
+    icon: Wrench,
+    labelKey: "sidebar.operations",
+    permissions: ["operations.view"],
+    external: true,
   },
 ];
 
