@@ -148,6 +148,13 @@ const PurchaseOrders = () => {
   const [newOrderClientOrderId, setNewOrderClientOrderId] = useState("");
   const [clientOrderOptions, setClientOrderOptions] = useState<{ contract_id: string; contract_number: string; client_name: string | null }[]>([]);
   const [clientOrderOptionsLoaded, setClientOrderOptionsLoaded] = useState(false);
+  // Pré-preenchimento de itens (pedido do utilizador, 2026-08-31): ao
+  // escolher a Encomenda Cliente, os produtos dela ficam "pendentes" até
+  // haver fornecedor escolhido (o preço depende do fornecedor) — nesse
+  // momento são adicionados automaticamente aos "Itens da Encomenda", mesmo
+  // padrão já usado em StockMovementDialog.tsx.
+  const [pendingClientOrderLines, setPendingClientOrderLines] = useState<{ product_id: string; quantity: number }[]>([]);
+  const [clientOrderLinesLoading, setClientOrderLinesLoading] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
@@ -907,6 +914,126 @@ const PurchaseOrders = () => {
       });
   }, [services, supplierServiceRefs, formData.supplier_id]);
 
+  // Fase 5.0F (pedido do utilizador, 2026-08-31): ao escolher a Encomenda
+  // Cliente de origem, busca os produtos desse contrato e resolve o
+  // fornecedor PREFERENCIAL de cada um (item_suppliers.is_preferred) — o
+  // formulário só suporta 1 fornecedor por encomenda, por isso escolhe-se
+  // sozinho o fornecedor mais comum entre as linhas (o mesmo critério que a
+  // geração automática, Fase 5.0C, já usa por produto). Produtos sem
+  // fornecedor preferencial nenhum ficam assinalados à parte — nunca inventa
+  // fornecedor.
+  const handleNewOrderClientOrderChange = async (value: string) => {
+    const id = value === "none" ? "" : value;
+    setNewOrderClientOrderId(id);
+    setPendingClientOrderLines([]);
+    if (!id) return;
+
+    setClientOrderLinesLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('rpc_get_client_order_document', {
+        p_contract_id: id,
+      } as any);
+      if (error) throw error;
+      const doc = data as any;
+      const docLines = ((doc?.lines as any[]) || [])
+        .filter((l) => l.product_id)
+        .map((l) => ({ product_id: l.product_id as string, quantity: Number(l.quantity) || 1 }));
+      setPendingClientOrderLines(docLines);
+
+      if (docLines.length === 0) {
+        toast({ title: "Encomenda sem linhas de produto", description: "Não há produtos associados a este contrato — adiciona manualmente.", variant: "destructive" });
+        return;
+      }
+
+      const companyId = organizationSelection.companyId || activeCompany?.id;
+      const { data: prefRows, error: prefError } = await supabase
+        .from("item_suppliers")
+        .select("product_id, supplier_id, suppliers(name)")
+        .eq("organization_id", companyId)
+        .in("product_id", docLines.map((l) => l.product_id))
+        .eq("is_preferred", true)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+      if (prefError) throw prefError;
+
+      const supplierByProduct = new Map<string, string>();
+      (prefRows || []).forEach((r: any) => supplierByProduct.set(r.product_id, r.supplier_id));
+
+      const noSupplierProducts = docLines.filter((l) => !supplierByProduct.has(l.product_id));
+      if (noSupplierProducts.length > 0) {
+        toast({
+          title: "Produto(s) sem fornecedor atribuído",
+          description: `${noSupplierProducts.length} produto(s) desta Encomenda Cliente não têm fornecedor preferencial — atribui um em Produtos, ou adiciona manualmente aqui já com o fornecedor certo.`,
+          variant: "destructive",
+        });
+      }
+
+      // Fornecedor mais comum entre as linhas resolvidas — escolhido sozinho
+      // só se o campo ainda não tiver sido preenchido manualmente.
+      if (!formData.supplier_id && supplierByProduct.size > 0) {
+        const counts = new Map<string, number>();
+        supplierByProduct.forEach((supplierId) => counts.set(supplierId, (counts.get(supplierId) || 0) + 1));
+        const [dominantSupplierId] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        setFormData((prev) => ({ ...prev, supplier_id: dominantSupplierId }));
+      }
+    } catch (error: any) {
+      toast({ title: "Erro ao carregar a Encomenda Cliente", description: error.message, variant: "destructive" });
+    } finally {
+      setClientOrderLinesLoading(false);
+    }
+  };
+
+  // Preenchimento automático dos itens: só quando há fornecedor escolhido
+  // (preço depende dele) e a encomenda ainda está vazia (não sobrescreve
+  // trabalho manual já feito). Produtos do contrato que este fornecedor não
+  // vende (fora de availableProductsForSupplier) ficam de fora, com aviso —
+  // nunca inventa preço.
+  useEffect(() => {
+    if (editingId || pendingClientOrderLines.length === 0 || !formData.supplier_id || orderItems.length > 0) return;
+
+    const matched: PurchaseOrderItem[] = [];
+    const unmatched: string[] = [];
+
+    pendingClientOrderLines.forEach((line) => {
+      const product = availableProductsForSupplier.find((p) => p.id === line.product_id);
+      if (!product || !product.purchase_price || product.purchase_price <= 0) {
+        unmatched.push(line.product_id);
+        return;
+      }
+      const vatRate = product.vat_rate || 23;
+      const subtotal = product.purchase_price * line.quantity;
+      const vatAmount = subtotal * (vatRate / 100);
+      matched.push({
+        item_type: 'product',
+        product_id: product.id,
+        description: product.name,
+        sku: product.sku || undefined,
+        quantity: line.quantity,
+        unit_price: product.purchase_price,
+        vat_rate: vatRate,
+        vat_amount: vatAmount,
+        total_price: subtotal + vatAmount,
+        selected_attributes: {},
+      });
+    });
+
+    if (matched.length > 0) {
+      setOrderItems(matched);
+      toast({
+        title: "Itens preenchidos automaticamente",
+        description: `${matched.length} produto(s) da Encomenda Cliente adicionado(s).${unmatched.length > 0 ? ` ${unmatched.length} produto(s) sem preço para este fornecedor — adiciona manualmente ou escolhe outro fornecedor.` : ''}`,
+        variant: unmatched.length > 0 ? "destructive" : undefined,
+      });
+    } else if (unmatched.length > 0) {
+      toast({
+        title: "Fornecedor sem preço para estes produtos",
+        description: "Nenhum dos produtos desta Encomenda Cliente tem preço definido para o fornecedor escolhido — adiciona os itens manualmente ou escolhe outro fornecedor.",
+        variant: "destructive",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.supplier_id, pendingClientOrderLines, availableProductsForSupplier]);
+
   const getAvailableItems = () => {
     return selectedItemType === 'product' ? availableProductsForSupplier : availableServicesForSupplier;
   };
@@ -1473,6 +1600,7 @@ const PurchaseOrders = () => {
                   secondaryCompanyIds: [],
                 });
                 setNewOrderClientOrderId("");
+                setPendingClientOrderLines([]);
                }
              }}>
               <DialogTrigger asChild>
@@ -1515,7 +1643,8 @@ const PurchaseOrders = () => {
                       <Label htmlFor="new_order_client_order">{t('purchaseOrders.form.clientOrderSource') || 'Encomenda Cliente de origem (opcional)'}</Label>
                       <Select
                         value={newOrderClientOrderId || "none"}
-                        onValueChange={(v) => setNewOrderClientOrderId(v === "none" ? "" : v)}
+                        onValueChange={handleNewOrderClientOrderChange}
+                        disabled={clientOrderLinesLoading}
                       >
                         <SelectTrigger id="new_order_client_order">
                           <SelectValue placeholder={t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'} />
@@ -1530,7 +1659,11 @@ const PurchaseOrders = () => {
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
-                        {t('purchaseOrders.form.clientOrderSourceHint') || 'Liga esta encomenda à Encomenda Cliente que está a satisfazer — fica rastreável em "Encomendas Clientes" e o estado atualiza quando esta for recebida.'}
+                        {clientOrderLinesLoading
+                          ? "A carregar produtos da encomenda…"
+                          : (pendingClientOrderLines.length > 0 && !formData.supplier_id)
+                            ? "Escolhe o fornecedor abaixo para os produtos desta Encomenda Cliente serem adicionados automaticamente."
+                            : (t('purchaseOrders.form.clientOrderSourceHint') || 'Liga esta encomenda à Encomenda Cliente que está a satisfazer — os produtos preenchem-se automaticamente ao escolher o fornecedor. Fica rastreável em "Encomendas Clientes" e o estado atualiza quando esta for recebida.')}
                       </p>
                     </div>
                   )}
