@@ -63,10 +63,15 @@ falha.
 canal `cliente` das mensagens, precisamente para ninguém escrever a pensar que
 o cliente lê.
 
-**O email que não chegou.** O relatório automático pôs duas ordens em
-`scheduled_emails` com `status = 'sent'`, e o email não chegou à caixa de
-entrada. O módulo fez a parte dele (a carta está no marco do correio); o que
-falta confirmar é o lado do CRM — `email_logs` e o SMTP da organização.
+**O email que não chega.** Investigado até ao fim —
+[`email-que-nao-chega.md`](email-que-nao-chega.md). É um bug do **CRM**: a
+função que processa a fila de emails não olha para o código de estado da
+resposta, e por isso marca como entregue uma carta que voltou para trás. A
+correção são três linhas e **está por aplicar, por decisão** — é código do
+CRM. O módulo faz a parte dele corretamente.
+
+Enquanto isso não estiver resolvido, **o cliente não recebe o relatório
+sozinho** — e isso tem de ser dito a quem for ao piloto.
 
 ### Os ficheiros SQL, por ordem
 
@@ -350,4 +355,5 @@ emails diferentes. Identificar pessoas por email, nunca por nome.
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com o levantamento do que o CRM já tem |
 | [`deploy-falhado.md`](deploy-falhado.md) | o deploy que falhou, e porquê |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |
+| [`email-que-nao-chega.md`](email-que-nao-chega.md) | **o relatório que diz que foi e não foi** — investigação, causa e correção |
 | `/ajuda` na app | três portas: porquê mudar (para quem decide), como funciona (com fluxogramas), como se usa |
