@@ -205,6 +205,211 @@ serve(async (req) => {
       }
     }
 
+    // ------------------------------------------------------------------
+    // Criadores genericos da cadeia
+    // ------------------------------------------------------------------
+    // O ecra "Pipeline Comercial - Automacoes" deixa reordenar os modulos, e a
+    // accao configurada passa a ser "cria o modulo seguinte" -- seja ele qual for.
+    // Isso da 24 ordens possiveis e 18 pares origem->destino, dos quais o motor
+    // implementava 6: os outros 12 caiam num `else` que apenas registava
+    // "nao implementada", e so uma das 24 ordens funcionava de ponta a ponta.
+    //
+    // Em vez de 12 implementacoes avulsas, cinco criadores -- um por entidade da
+    // cadeia. Cada um recebe a MESMA origem normalizada, venha ela de um pedido,
+    // orcamento, proposta ou contrato. Uma correccao num criador vale para todas
+    // as ordens, e nao ha 12 sitios onde o mesmo defeito possa reaparecer.
+
+    /** O que qualquer origem da cadeia sabe dizer sobre si. */
+    interface OrigemCadeia {
+      /** modulo de origem, para os registos: deal | quote | proposal | contract */
+      tipo: string;
+      id: string;
+      organization_id: string;
+      root_organization_id?: string | null;
+      entity_id?: string | null;
+      assigned_to?: string | null;
+      created_by?: string | null;
+      /** titulo legivel, para dar nome ao que se cria */
+      titulo?: string | null;
+      valor?: number | null;
+      /** ligacoes que a origem ja tem, para nao as perder */
+      lead_id?: string | null;
+      deal_id?: string | null;
+      quote_id?: string | null;
+      proposal_id?: string | null;
+      client_id?: string | null;
+    }
+
+    const CAMPO_LIGACAO: Record<string, string> = {
+      deal: "deal_id", quote: "quote_id", proposal: "proposal_id", contract: "contract_id",
+    };
+
+    async function nomeDaEntidade(entityId?: string | null): Promise<string | null> {
+      if (!entityId) return null;
+      const { data } = await supabase.from("anew_entities").select("display_name").eq("id", entityId).maybeSingle();
+      return data?.display_name || null;
+    }
+
+    /** Guarda a ligacao da origem para o que foi criado, sem perder o resto. */
+    async function ligarACadeia(origem: OrigemCadeia, novo: Record<string, any>) {
+      const campo = CAMPO_LIGACAO[origem.tipo];
+      if (!campo) return;
+      await upsertPipelineLink(campo, origem.id, {
+        ...novo,
+        organization_id: origem.organization_id,
+        root_organization_id: origem.root_organization_id || origem.organization_id,
+      });
+    }
+
+    const baseComum = (o: OrigemCadeia) => ({
+      organization_id: o.organization_id,
+      root_organization_id: o.root_organization_id || o.organization_id,
+      created_by: internalUserId || o.created_by || null,
+      entity_id: o.entity_id || null,
+    });
+
+    async function criarPedido(o: OrigemCadeia): Promise<string> {
+      // Fase inicial dos Pedidos: "Novo" se existir, senao a de menor ordem.
+      let { data: fase } = await supabase.from("deal_stages").select("id").eq("name", "Novo").limit(1).maybeSingle();
+      if (!fase) {
+        const { data: primeira } = await supabase.from("deal_stages").select("id").order("order_index").limit(1).maybeSingle();
+        fase = primeira;
+      }
+      const nome = o.titulo || (await nomeDaEntidade(o.entity_id)) || "Pedido";
+      const { data, error } = await supabase.from("deals").insert({
+        ...baseComum(o),
+        title: "Pedido - " + nome,
+        lead_id: o.lead_id || null,
+        stage_id: fase?.id || null,
+        assigned_to: o.assigned_to || internalUserId || null,
+        value: o.valor || 0,
+      } as any).select("id").single();
+      if (error) throw error;
+      await ligarACadeia(o, { deal_id: data!.id });
+      return data!.id;
+    }
+
+    async function criarOrcamento(o: OrigemCadeia): Promise<string> {
+      const { data, error } = await supabase.from("quotes").insert({
+        ...baseComum(o),
+        deal_id: o.deal_id || (o.tipo === "deal" ? o.id : null),
+        estado: "rascunho",
+        modelo_base: "manual",
+        total: o.valor || 0,
+        subtotal: o.valor || 0,
+      } as any).select("id").single();
+      if (error) throw error;
+      await ligarACadeia(o, { quote_id: data!.id });
+      return data!.id;
+    }
+
+    async function criarProposta(o: OrigemCadeia): Promise<string> {
+      // Fase de rascunho: a da organizacao, senao a global, senao a primeira.
+      let { data: fase } = await supabase.from("proposal_workflow_stages").select("id")
+        .eq("name", "draft").eq("organization_id", o.organization_id).limit(1).maybeSingle();
+      if (!fase) {
+        const { data: g } = await supabase.from("proposal_workflow_stages").select("id")
+          .eq("name", "draft").is("organization_id", null).limit(1).maybeSingle();
+        fase = g;
+      }
+      if (!fase) {
+        const { data: qualquer } = await supabase.from("proposal_workflow_stages").select("id").limit(1).maybeSingle();
+        fase = qualquer;
+      }
+      const nome = o.titulo || (await nomeDaEntidade(o.entity_id)) || "cliente";
+      const { data, error } = await supabase.from("proposals").insert({
+        ...baseComum(o),
+        title: "Proposta para " + nome,
+        deal_id: o.deal_id || (o.tipo === "deal" ? o.id : null),
+        // `proposals` NAO tem `quote_id` -- a chave esta do outro lado, em
+        // `quotes.proposal_id`. A ligacao faz-se por `pipeline_links` (ver
+        // `ligarACadeia`) e, quando a origem e um orcamento, pelo proprio
+        // orcamento a apontar para ca, mais abaixo.
+        stage_id: fase?.id || null,
+        status: "draft",
+        value: o.valor || 0,
+        assigned_to: o.assigned_to || null,
+      } as any).select("id").single();
+      if (error) throw error;
+      await ligarACadeia(o, { proposal_id: data!.id });
+      // O lado que guarda a chave e o orcamento.
+      const orcamentoId = o.quote_id || (o.tipo === "quote" ? o.id : null);
+      if (orcamentoId) {
+        await supabase.from("quotes").update({ proposal_id: data!.id }).eq("id", orcamentoId);
+      }
+      return data!.id;
+    }
+
+    async function criarContrato(o: OrigemCadeia): Promise<string> {
+      // Uma proposta nunca deve ter dois contratos.
+      const propostaId = o.proposal_id || (o.tipo === "proposal" ? o.id : null);
+      if (propostaId) {
+        const { data: existente } = await supabase.from("client_contracts")
+          .select("id").eq("proposal_id", propostaId).is("deleted_at", null).limit(1).maybeSingle();
+        if (existente?.id) return existente.id;
+      }
+      const nome = await nomeDaEntidade(o.entity_id);
+      const inicio = new Date();
+      const fim = new Date(inicio); fim.setFullYear(fim.getFullYear() + 1);
+      const { data, error } = await supabase.from("client_contracts").insert({
+        ...baseComum(o),
+        client_id: o.client_id || null,
+        proposal_id: propostaId,
+        quote_id: o.quote_id || (o.tipo === "quote" ? o.id : null),
+        status: "draft",
+        total_value: o.valor || 0,
+        start_date: inicio.toISOString().split("T")[0],
+        end_date: fim.toISOString().split("T")[0],
+        notes: nome
+          ? "Contrato criado automaticamente pela automacao do pipeline - " + nome
+          : "Contrato criado automaticamente pela automacao do pipeline",
+      } as any).select("id").single();
+      if (error) throw error;
+      await ligarACadeia(o, { contract_id: data!.id });
+      return data!.id;
+    }
+
+    async function converterEmCliente(o: OrigemCadeia): Promise<string | null> {
+      if (!o.entity_id) return null;
+      const { data: existente } = await supabase.from("anew_clients")
+        .select("id, status").eq("entity_id", o.entity_id).eq("organization_id", o.organization_id).limit(1).maybeSingle();
+      if (existente?.id) {
+        if (existente.status !== "active") {
+          await supabase.from("anew_clients").update({ status: "active" }).eq("id", existente.id);
+        }
+        return existente.id;
+      }
+      const { data, error } = await supabase.from("anew_clients").insert({
+        ...baseComum(o),
+        status: "active",
+        assigned_to: o.assigned_to || internalUserId || null,
+      } as any).select("id").single();
+      if (error) throw error;
+      return data!.id;
+    }
+
+    /**
+     * Executa qualquer accao da cadeia a partir de qualquer origem.
+     * Devolve null quando a accao nao pertence a cadeia (ex.: create_task),
+     * para o chamador a tratar como sempre tratou.
+     */
+    async function executarAccaoDaCadeia(accao: string, o: OrigemCadeia): Promise<{ alvo: string; id: string | null } | null> {
+      switch (accao) {
+        case "create_deal":       return { alvo: "deal",     id: await criarPedido(o) };
+        case "create_quote":      return { alvo: "quote",    id: await criarOrcamento(o) };
+        case "create_proposal":   return { alvo: "proposal", id: await criarProposta(o) };
+        case "create_contract":   return { alvo: "contract", id: await criarContrato(o) };
+        case "convert_to_client": {
+          const id = await converterEmCliente(o);
+          // Sem entidade nao ha nada para converter. Dizer "cliente criado" com
+          // id nulo seria um sucesso falso -- e um registo que engana quem o le.
+          if (!id) throw new Error("Sem entidade associada: nao ha quem converter em cliente");
+          return { alvo: "client", id };
+        }
+        default: return null;
+      }
+    }
+
     async function upsertPipelineLink(field: string, fieldId: string, updates: Record<string, any>) {
       const { data: existing } = await supabase.from("pipeline_links").select("id").eq(field, fieldId).eq("status", "active").maybeSingle();
       if (existing) await supabase.from("pipeline_links").update(updates).eq("id", existing.id);
@@ -512,7 +717,17 @@ serve(async (req) => {
 
     // 2. DEAL STAGE ACTIONS
     if (source_entity === "deal" && new_stage_id && orgId) {
-      const { data: sa } = await supabase.from("deal_stage_actions").select("*").eq("organization_id", orgId).eq("stage_id", new_stage_id).eq("is_active", true).order("execution_order");
+      // Os Pedidos eram o unico modulo sem recurso as regras globais: Leads,
+      // Orcamentos e Contratos caem para `organization_id IS NULL` quando a
+      // organizacao nao tem regra propria, e este filtrava so por organizacao.
+      // Uma organizacao sem regras de Pedido ficava sem automacao nenhuma,
+      // quando nos outros modulos herdaria as globais. Assimetria sem razao
+      // aparente -- alinhado com os outros tres a 2026-08-31.
+      let { data: sa } = await supabase.from("deal_stage_actions").select("*").eq("organization_id", orgId).eq("stage_id", new_stage_id).eq("is_active", true).order("execution_order");
+      if (!sa || sa.length === 0) {
+        const { data: globalSa } = await supabase.from("deal_stage_actions").select("*").is("organization_id", null).eq("stage_id", new_stage_id).eq("is_active", true).order("execution_order");
+        if (globalSa && globalSa.length > 0) sa = globalSa;
+      }
       if (sa && sa.length > 0) {
         const { data: deal } = await supabase.from("deals").select("*").eq("id", entity_id).single();
         if (deal) {
@@ -604,6 +819,40 @@ serve(async (req) => {
                 const config = action.action_config as Record<string, string>;
                 await supabase.from("entity_interactions").insert([{ subject: config.title || "Tarefa automática", interaction_type: "task", created_by: internalUserId, assigned_to: deal.assigned_to || internalUserId, entity_id: deal.entity_id, entity_type: "deal", organization_id: deal.organization_id, notes: "Tarefa criada pelo workflow." }]);
                 results.stageActions++;
+              } else {
+                // Qualquer outra accao da cadeia (create_contract, convert_to_client)
+                // passa pelos criadores genericos -- a UI pode oferece-las assim que
+                // se reordene o pipeline, e o motor tem de as saber executar.
+                const feito = await executarAccaoDaCadeia(action.action_type, {
+                  tipo: "deal", id: deal.id,
+                  organization_id: deal.organization_id,
+                  root_organization_id: deal.root_organization_id,
+                  entity_id: deal.entity_id,
+                  assigned_to: deal.assigned_to,
+                  created_by: deal.created_by,
+                  titulo: deal.title,
+                  valor: deal.value,
+                  lead_id: deal.lead_id,
+                  deal_id: deal.id,
+                });
+                if (feito) {
+                  results.stageActions++;
+                  results.logs.push({ type: action.action_type, status: "success", message: `${feito.alvo} ${feito.id} criado a partir do pedido` });
+                  await logWorkflowExecution({
+                    ruleId: null, sourceEntity: "deal", sourceRecordId: deal.id,
+                    targetEntity: feito.alvo, targetRecordId: feito.id,
+                    actionType: `config:deal_${action.action_type}`, status: "success",
+                  });
+                } else {
+                  // Nao pertence a cadeia (ex.: send_email). Continua a ficar audivel.
+                  results.logs.push({ type: action.action_type, status: "error", message: `Accao "${action.action_type}" nao esta implementada para o modulo pedido` });
+                  await logWorkflowExecution({
+                    ruleId: null, sourceEntity: "deal", sourceRecordId: deal.id,
+                    targetEntity: null, targetRecordId: null,
+                    actionType: `unimplemented:deal_${action.action_type}`, status: "error",
+                    errorMessage: "Accao configurada na UI mas nao implementada no motor para o modulo pedido",
+                  });
+                }
               }
             } catch (e: any) { results.logs.push({ type: action.action_type, status: "error", message: e.message }); }
           }
@@ -616,10 +865,154 @@ serve(async (req) => {
       const { data: proposal } = await supabase.from("proposals").select("*").eq("id", entity_id).single();
       const { data: psi } = await supabase.from("proposal_workflow_stages").select("name, is_won, is_lost").eq("id", new_stage_id).single();
 
+      // Ate 2026-08-31 este bloco ignorava por completo `proposal_stage_actions`:
+      // a criacao do contrato dependia so da flag `is_won` da fase. O ecra
+      // "Pipeline Comercial - Automacoes" mostrava a regra e deixava desliga-la,
+      // e o motor criava o contrato na mesma. Confirmado ao vivo na nike a
+      // 2026-08-30: regra desactivada, proposta aceite, contrato criado na mesma.
+      //
+      // Passa a valer o que esta configurado, com a mesma precedencia dos outros
+      // modulos (organizacao primeiro, globais como recurso):
+      //
+      //   regra activa      -> cria
+      //   regra desactivada -> NAO cria (era este o caso que se perdia)
+      //   nenhuma regra     -> recorre a `is_won`, como antes
+      //
+      // O recurso existe para nao tirar automacao a quem nunca configurou nada:
+      // das 15 organizacoes, so a Mudelar e a nike tem regras nesta tabela. Quem
+      // nao tem continua a funcionar como funcionava, e o registo diz `fallback:`
+      // para se poder medir quantas ainda dependem disso.
+      let proposalRules: any[] | null = null;
+      {
+        const { data: orgRules } = await supabase
+          .from("proposal_stage_actions")
+          .select("stage_id, action_type, is_active")
+          .eq("organization_id", orgId);
+        if (orgRules && orgRules.length > 0) {
+          proposalRules = orgRules;
+        } else {
+          const { data: globalRules } = await supabase
+            .from("proposal_stage_actions")
+            .select("stage_id, action_type, is_active")
+            .is("organization_id", null);
+          if (globalRules && globalRules.length > 0) proposalRules = globalRules;
+        }
+      }
+      // A decisao olha para a regra DESTA fase e DESTA accao -- nao para "a
+      // organizacao tem regras nesta tabela". A primeira versao desta correcção
+      // usava o criterio largo e tinha uma regressao latente: bastava alguem
+      // acrescentar um `create_task` numa fase qualquer para a organizacao
+      // passar a contar como "configurada", nao haver `create_contract` activo
+      // nesta fase, e a criacao de contratos parar por completo -- por causa de
+      // uma alteracao sem relacao nenhuma, e sem sinal nenhum.
+      const contractRuleForStage = (proposalRules ?? []).find(
+        (r: any) => r.stage_id === new_stage_id && r.action_type === "create_contract",
+      );
+      // Quem manda e a ACCAO configurada, e so ela. A flag `is_won` diz que a
+      // proposta foi ganha -- nao diz que dai tem de nascer um contrato. Sao
+      // duas afirmacoes diferentes, e so a segunda e uma decisao de automacao.
+      //
+      // Ate 2026-08-31 isto recorria ao `is_won` quando nao havia regra, o que
+      // mantinha o mesmo defeito por outra porta: uma organizacao sem regra
+      // nenhuma via contratos a nascer sem nada nesta tabela o explicar. O
+      // recurso passa a ser a regra GLOBAL (`organization_id IS NULL`), que ja
+      // e lida acima -- configuracao, tambem, e visivel no ecra.
+      const shouldCreateContract = contractRuleForStage?.is_active === true;
+
+      // As restantes accoes da cadeia configuradas nesta fase. A criacao do
+      // contrato continua a ter o seu caminho proprio, mais abaixo, com as
+      // guardas e os registos que ja tinha; aqui tratam-se as outras -- criar
+      // Pedido, criar Orcamento, converter em Cliente -- que a UI passou a poder
+      // oferecer e que este bloco nunca lia.
+      if (proposal) {
+        const outras = (proposalRules ?? []).filter(
+          (r: any) => r.stage_id === new_stage_id && r.is_active === true && r.action_type !== "create_contract",
+        );
+        for (const r of outras) {
+          try {
+            const feito = await executarAccaoDaCadeia(r.action_type, {
+              tipo: "proposal", id: proposal.id,
+              organization_id: proposal.organization_id,
+              root_organization_id: (proposal as any).root_organization_id,
+              entity_id: proposal.entity_id,
+              assigned_to: (proposal as any).assigned_to,
+              created_by: proposal.created_by,
+              titulo: proposal.title,
+              valor: (proposal as any).value,
+              deal_id: proposal.deal_id,
+              quote_id: (proposal as any).quote_id,
+              proposal_id: proposal.id,
+            });
+            if (feito) {
+              results.stageActions++;
+              results.logs.push({ type: r.action_type, status: "success", message: `${feito.alvo} ${feito.id} criado a partir da proposta` });
+              await logWorkflowExecution({
+                ruleId: null, sourceEntity: "proposal", sourceRecordId: proposal.id,
+                targetEntity: feito.alvo, targetRecordId: feito.id,
+                actionType: `config:proposal_${r.action_type}`, status: "success",
+              });
+            } else {
+              results.logs.push({ type: r.action_type, status: "error", message: `Accao "${r.action_type}" nao esta implementada para o modulo proposta` });
+              await logWorkflowExecution({
+                ruleId: null, sourceEntity: "proposal", sourceRecordId: proposal.id,
+                targetEntity: null, targetRecordId: null,
+                actionType: `unimplemented:proposal_${r.action_type}`, status: "error",
+                errorMessage: "Accao configurada na UI mas nao implementada no motor para o modulo proposta",
+              });
+            }
+          } catch (e: any) {
+            results.logs.push({ type: r.action_type, status: "error", message: e.message });
+            await logWorkflowExecution({
+              ruleId: null, sourceEntity: "proposal", sourceRecordId: proposal.id,
+              targetEntity: null, targetRecordId: null,
+              actionType: `config:proposal_${r.action_type}`, status: "error",
+              errorMessage: e.message,
+            });
+          }
+        }
+      }
+      const contractActionType = "config:proposal_create_contract";
+
       // Detect "ganho"/"perdido" by the stage's own flag, never by its name —
       // the org can rename or recreate this stage (e.g. "aceite" vs
       // "accepted") and this must keep working without code changes.
+      // A lead NAO fica ganha por a proposta ser ganha.
+      //
+      // Uma proposta aceite ainda nao e um cliente: pode nao chegar a contrato,
+      // ou o contrato pode nao ser assinado. A lead so esta ganha quando de
+      // facto se converteu em cliente -- e essa marcacao vive no caminho da
+      // conversao (bloco do contrato assinado), onde acontece logo a seguir a
+      // criar o cliente.
+      //
+      // Ate 31/08 marcava-se aqui tambem, o que dava leads "ganhas" sem cliente
+      // nenhum do outro lado.
+      // `lid` continua a ser resolvido: o bloco do contrato, mais abaixo, precisa
+      // dele. So a marcacao como ganha e que saiu daqui.
+      let lid: string | null = null;
       if (psi?.is_won === true && proposal) {
+        lid = await resolveLeadFromPipeline("proposal", proposal.id);
+      }
+
+      // "A regra esta desligada e o motor respeitou-a" tem de ser distinguivel de
+      // "o motor nunca correu". Sem isto, as duas parecem iguais: silencio.
+      if (!shouldCreateContract && proposal && psi?.is_won === true) {
+        const porque = contractRuleForStage
+          ? "Regra create_contract desactivada para esta fase"
+          : "Nenhuma regra create_contract configurada para esta fase";
+        results.logs.push({ type: "create_contract_from_proposal", status: "skipped", message: porque });
+        await logWorkflowExecution({
+          ruleId: null,
+          sourceEntity: "proposal",
+          sourceRecordId: proposal.id,
+          targetEntity: "contract",
+          targetRecordId: null,
+          actionType: "config:proposal_create_contract_skipped",
+          status: "success",
+          errorMessage: `${porque} (stage_id=${new_stage_id})`,
+        });
+      }
+
+      if (shouldCreateContract && proposal) {
         try {
           // Duplicate-contract guard: a proposal can be re-sent into the won
           // stage more than once (retry, double click, race condition) —
@@ -743,10 +1136,6 @@ serve(async (req) => {
           // don't depend solely on the cross-entity link table.
           await supabase.from("proposals").update({ client_contract_id: contract!.id }).eq("id", proposal.id);
 
-          // Sync lead to "ganho" stage
-          const lid = await resolveLeadFromPipeline("proposal", proposal.id);
-          if (lid) await syncLeadToStage(lid, "ganho");
-
           results.stageActions++;
           results.logs.push({ type: "create_contract_from_proposal", status: "success", message: `Contract ${contract!.id} created` });
           await logWorkflowExecution({
@@ -755,20 +1144,9 @@ serve(async (req) => {
             sourceRecordId: proposal.id,
             targetEntity: "contract",
             targetRecordId: contract!.id,
-            actionType: "hardcoded:proposal_accepted_create_contract",
+            actionType: contractActionType,
             status: "success",
           });
-          if (lid) {
-            await logWorkflowExecution({
-              ruleId: null,
-              sourceEntity: "proposal",
-              sourceRecordId: proposal.id,
-              targetEntity: "lead",
-              targetRecordId: lid,
-              actionType: "hardcoded:proposal_accepted_lead_sync_ganho",
-              status: "success",
-            });
-          }
           } // end duplicate-contract guard (else branch)
         } catch (e: any) {
           results.logs.push({ type: "create_contract_from_proposal", status: "error", message: e.message });
@@ -778,7 +1156,7 @@ serve(async (req) => {
             sourceRecordId: proposal.id,
             targetEntity: "contract",
             targetRecordId: null,
-            actionType: "hardcoded:proposal_accepted_create_contract",
+            actionType: contractActionType,
             status: "error",
             errorMessage: e.message,
           });
@@ -855,6 +1233,33 @@ serve(async (req) => {
             for (const action of qsa) {
               try {
                 if (action.action_type === "create_proposal") {
+                  // Guarda de idempotencia. Este caminho e o gatilho SQL
+                  // `trg_auto_proposal_from_quote` fazem os DOIS a mesma coisa, e o
+                  // gatilho ja provocou um incidente real a 2026-08-05: proposta
+                  // duplicada e o orcamento re-parentado para longe da proposta
+                  // acabada de assinar (ver migration 20261111530000). O gatilho
+                  // ganhou entao a sua guarda; este lado nunca teve nenhuma, e
+                  // so estava protegido pela ordem por que as duas coisas correm.
+                  //
+                  // Com esta guarda, nenhuma ordem de execucao consegue produzir
+                  // duas propostas -- que e a condicao para se poder desligar o
+                  // gatilho mais tarde sem partir nada.
+                  const { data: quoteAgora } = await supabase.from("quotes").select("proposal_id").eq("id", quote.id).maybeSingle();
+                  const { data: ligacaoExistente } = await supabase.from("pipeline_links").select("proposal_id").eq("quote_id", quote.id).not("proposal_id", "is", null).limit(1).maybeSingle();
+                  const jaTemProposta = quoteAgora?.proposal_id || ligacaoExistente?.proposal_id;
+                  if (jaTemProposta) {
+                    results.logs.push({ type: "create_proposal", status: "skipped", message: `Orcamento ja tem a proposta ${jaTemProposta}` });
+                    await logWorkflowExecution({
+                      ruleId: null,
+                      sourceEntity: "quote",
+                      sourceRecordId: quote.id,
+                      targetEntity: "proposal",
+                      targetRecordId: String(jaTemProposta),
+                      actionType: "config:quote_create_proposal_skipped",
+                      status: "success",
+                      errorMessage: "Proposta ja existia -- criacao ignorada (guarda de idempotencia)",
+                    });
+                  } else {
                   // Get draft proposal stage
                   let ds: any = null;
                   const { data: d1 } = await supabase.from("proposal_workflow_stages").select("id").eq("name", "rascunho").maybeSingle(); ds = d1;
@@ -921,6 +1326,37 @@ serve(async (req) => {
 
                   results.stageActions++;
                   results.logs.push({ type: "create_proposal", status: "success", message: `Proposta criada: ${p!.id}` });
+                  } // fim da guarda de idempotencia
+                } else {
+                  const feito = await executarAccaoDaCadeia(action.action_type, {
+                    tipo: "quote", id: quote.id,
+                    organization_id: quote.organization_id,
+                    root_organization_id: (quote as any).root_organization_id,
+                    entity_id: quote.entity_id,
+                    assigned_to: (quote as any).assigned_to,
+                    created_by: quote.created_by,
+                    valor: quote.total,
+                    deal_id: quote.deal_id,
+                    quote_id: quote.id,
+                    proposal_id: (quote as any).proposal_id,
+                  });
+                  if (feito) {
+                    results.stageActions++;
+                    results.logs.push({ type: action.action_type, status: "success", message: `${feito.alvo} ${feito.id} criado a partir do orcamento` });
+                    await logWorkflowExecution({
+                      ruleId: null, sourceEntity: "quote", sourceRecordId: quote.id,
+                      targetEntity: feito.alvo, targetRecordId: feito.id,
+                      actionType: `config:quote_${action.action_type}`, status: "success",
+                    });
+                  } else {
+                    results.logs.push({ type: action.action_type, status: "error", message: `Accao "${action.action_type}" nao esta implementada para o modulo orcamento` });
+                    await logWorkflowExecution({
+                      ruleId: null, sourceEntity: "quote", sourceRecordId: quote.id,
+                      targetEntity: null, targetRecordId: null,
+                      actionType: `unimplemented:quote_${action.action_type}`, status: "error",
+                      errorMessage: "Accao configurada na UI mas nao implementada no motor para o modulo orcamento",
+                    });
+                  }
                 }
               } catch (e: any) {
                 results.logs.push({ type: action.action_type, status: "error", message: e.message });
@@ -974,6 +1410,55 @@ serve(async (req) => {
             if (globalCsa && globalCsa.length > 0) csa = globalCsa;
           }
           const hasConvertToClient = (csa || []).some((a: any) => a.action_type === "convert_to_client");
+
+          // As restantes accoes da cadeia configuradas para esta fase do contrato.
+          // A conversao em cliente continua a ter o caminho proprio abaixo; aqui
+          // tratam-se criar Pedido, criar Orcamento e criar Proposta, que a UI
+          // passou a poder oferecer e que este bloco nunca lia.
+          const outrasC = (csa || []).filter(
+            (a: any) => a.is_active !== false && a.action_type !== "convert_to_client",
+          );
+          for (const a of outrasC) {
+            try {
+              const feito = await executarAccaoDaCadeia(a.action_type, {
+                tipo: "contract", id: contract.id,
+                organization_id: contract.organization_id,
+                root_organization_id: (contract as any).root_organization_id,
+                entity_id: contract.entity_id,
+                assigned_to: (contract as any).assigned_to,
+                created_by: contract.created_by,
+                valor: (contract as any).total_value,
+                quote_id: (contract as any).quote_id,
+                proposal_id: (contract as any).proposal_id,
+                client_id: (contract as any).client_id,
+              });
+              if (feito) {
+                results.stageActions++;
+                results.logs.push({ type: a.action_type, status: "success", message: `${feito.alvo} ${feito.id} criado a partir do contrato` });
+                await logWorkflowExecution({
+                  ruleId: null, sourceEntity: "contract", sourceRecordId: contract.id,
+                  targetEntity: feito.alvo, targetRecordId: feito.id,
+                  actionType: `config:contract_${a.action_type}`, status: "success",
+                });
+              } else {
+                results.logs.push({ type: a.action_type, status: "error", message: `Accao "${a.action_type}" nao esta implementada para o modulo contrato` });
+                await logWorkflowExecution({
+                  ruleId: null, sourceEntity: "contract", sourceRecordId: contract.id,
+                  targetEntity: null, targetRecordId: null,
+                  actionType: `unimplemented:contract_${a.action_type}`, status: "error",
+                  errorMessage: "Accao configurada na UI mas nao implementada no motor para o modulo contrato",
+                });
+              }
+            } catch (e: any) {
+              results.logs.push({ type: a.action_type, status: "error", message: e.message });
+              await logWorkflowExecution({
+                ruleId: null, sourceEntity: "contract", sourceRecordId: contract.id,
+                targetEntity: null, targetRecordId: null,
+                actionType: `config:contract_${a.action_type}`, status: "error",
+                errorMessage: e.message,
+              });
+            }
+          }
 
           let eId: string | null = null; let lid: string | null = null;
           // 1. Direct entity_id on contract
