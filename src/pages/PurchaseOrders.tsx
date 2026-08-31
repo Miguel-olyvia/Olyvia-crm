@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -137,9 +138,14 @@ const PurchaseOrders = () => {
   const [receiveLines, setReceiveLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
   const [receiveLineQuantities, setReceiveLineQuantities] = useState<Record<string, number>>({});
   const [receiving, setReceiving] = useState(false);
+  // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
+  // partir de um Contrato assinado (source_type='contract'), mostra a origem
+  // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
+  const [orderSourceInfo, setOrderSourceInfo] = useState<{ contractId: string; contractNumber: string; clientName: string } | null>(null);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [formData, setFormData] = useState({
     supplier_id: "",
@@ -287,6 +293,31 @@ const PurchaseOrders = () => {
       loadCatalog();
     }
   }, [open, catalogLoaded, activeCompany?.id]);
+
+  // Fase 5.0F: abre o dialog de edição/detalhe de uma encomenda específica quando
+  // se navega para cá a partir de outro ecrã (ex. "Encomendas Clientes", link por
+  // linha em ClientOrders.tsx) com ?open=<purchase_order_id> — mesmo padrão de
+  // cross-link já usado em ClientContracts.tsx.
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (!openId) return;
+    if (loading) return;
+
+    const target = orders.find((o) => o.id === openId);
+    if (target) {
+      handleEdit(target);
+    } else {
+      toast({
+        title: t('purchaseOrders.toast.loadError'),
+        description: 'Encomenda não encontrada.',
+        variant: "destructive",
+      });
+    }
+
+    searchParams.delete("open");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, orders, loading]);
 
   const loadData = async () => {
     if (!activeCompany?.id) {
@@ -599,7 +630,27 @@ const PurchaseOrders = () => {
       status: order.status,
       notes: order.notes || "",
     });
-    
+
+    // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
+    // best-effort, nunca bloqueia a abertura do diálogo se falhar.
+    setOrderSourceInfo(null);
+    if ((order as any).source_type === "contract" && (order as any).source_id) {
+      supabase
+        .from("client_contracts")
+        .select("contract_number, entity_id, anew_entities(display_name)")
+        .eq("id", (order as any).source_id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setOrderSourceInfo({
+              contractId: (order as any).source_id,
+              contractNumber: data.contract_number || "",
+              clientName: (data as any).anew_entities?.display_name || "",
+            });
+          }
+        });
+    }
+
     // Load existing items
     const { data: items } = await supabase
       .from("purchase_order_items")
@@ -1391,6 +1442,18 @@ const PurchaseOrders = () => {
               <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
+                  {editingId && orderSourceInfo && (
+                    <p className="text-sm text-muted-foreground">
+                      {t('purchaseOrders.generatedFromContract', {
+                        contractNumber: orderSourceInfo.contractNumber,
+                        clientName: orderSourceInfo.clientName,
+                      }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.contractNumber} — Cliente ${orderSourceInfo.clientName}`}
+                      {' '}
+                      <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="underline">
+                        {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
+                      </Link>
+                    </p>
+                  )}
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-6">
                   {/* Organization Selection */}

@@ -50,7 +50,9 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     (item: MenuItem): boolean => {
       if (permissionsLoading) return true;
       if (item.permissions && item.permissions.length > 0) {
-        return hasAnyPermission(item.permissions);
+        return item.requireAll
+          ? item.permissions.every((p) => hasPermission(p))
+          : hasAnyPermission(item.permissions);
       }
       if (item.permission) {
         return hasPermission(item.permission);

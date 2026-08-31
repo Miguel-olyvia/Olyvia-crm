@@ -11,8 +11,10 @@ import { useNavigate } from "react-router-dom";
 interface ProtectedRouteProps {
   /** The permission code required to view this page (e.g., "organizations.view") */
   permission?: string;
-  /** OR-logic: user needs at least one of these permissions */
+  /** OR-logic (default) or AND-logic (with requireAll): permissions the user needs */
   permissions?: string[];
+  /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
+  requireAll?: boolean;
   /** The page component to render if access is granted */
   children: ReactNode;
 }
@@ -22,7 +24,7 @@ interface ProtectedRouteProps {
  * Wraps a page component and blocks access if the user lacks the required permission.
  * Shows a localized "Access Denied" page inside the Layout shell.
  */
-export function ProtectedRoute({ permission, permissions, children }: ProtectedRouteProps) {
+export function ProtectedRoute({ permission, permissions, requireAll = false, children }: ProtectedRouteProps) {
   const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
   const { isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
@@ -44,7 +46,9 @@ export function ProtectedRoute({ permission, permissions, children }: ProtectedR
   if (permission) {
     hasAccess = hasPermission(permission);
   } else if (permissions && permissions.length > 0) {
-    hasAccess = hasAnyPermission(permissions);
+    hasAccess = requireAll
+      ? permissions.every((p) => hasPermission(p))
+      : hasAnyPermission(permissions);
   }
 
   if (!hasAccess) {
