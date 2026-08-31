@@ -7,28 +7,64 @@
 
 ---
 
-> ⚠ **As secções 1 a 9 foram escritas a 30 de agosto, antes do merge.** O que
-> mudou desde aí está na **§0**, logo a seguir — começa por aí.
+> ⚠ **As secções 1 a 9 são de 30 de agosto.** O que é verdade hoje está na
+> **§0**, logo a seguir — começa por aí.
 
 ## 0. O que mudou a 31 de agosto
 
-O módulo está **no ar** em `/operacao`, e as cinco coisas que estavam em §5
-estão **todas feitas**:
+O módulo está **no ar** em `/operacao`, e as **nove** coisas que estavam por
+fazer estão feitas. Restava uma, e está mais abaixo.
 
-| | |
+### O que se fez
+
+| | Onde se vê |
 |---|---|
-| Notificações | no sino do CRM — ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado |
-| Iniciar a ordem | a primeira resposta inicia-a; ninguém tem de se lembrar do botão |
-| Relatório do ativo | `/analises` › Equipamento: tudo o que se lhe fez, e a evolução das leituras |
-| PMP cumprido | `/analises` › Manutenção preventiva, por cliente e por mês |
-| Agenda | marcar uma visita passa a avisar de férias, horário e feriados |
+| **Notificações** no sino do CRM — ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | o sino do Olyvia |
+| **A ordem inicia-se sozinha** à primeira resposta | ficha da ordem |
+| **Ficha do equipamento** — tudo o que se lhe fez e a evolução das leituras | `/analises` › Equipamento |
+| **PMP cumprido** por cliente e por mês | `/analises` › Manutenção preventiva |
+| **Exportar leituras** para folha de cálculo | `/analises` › Exportar medições |
+| **Agenda: férias, horários e feriados** ao marcar uma visita | ficha da ordem |
+| **Ecrã de agenda do dia** com a equipa toda lado a lado | `/agenda` |
+| **Packs de configuração** — Manutenção, Obras, Limpeza | `/definicoes` › Procedimentos |
+| **Assinatura do cliente** no telemóvel do técnico | ficha da ordem, depois de fechar |
 
-**Falta correr SQL em produção.** Sete ficheiros — a lista está no
-[`README.md`](../README.md), e os comandos em §6 aqui abaixo.
+### O que falta
 
-O que continua por fazer, por ordem: **assinatura do cliente no telemóvel**,
-**exportar medições**, e **offline** — esse só quando o piloto disser quantas
-vezes falhou por falta de rede. Ver [`a-seguir.md`](a-seguir.md).
+**Trabalhar sem rede.** É a mais cara da lista, e a recomendação continua a ser
+esperar pelo piloto — não por ser difícil, mas porque a forma de a resolver
+depende de saber ONDE a rede falha. Se for só responder a tarefas é uma coisa;
+se for tirar fotos numa cave é outra, bem mais cara.
+
+### Os ficheiros SQL, por ordem
+
+Cada um pode voltar a correr sozinho numa base já completa — isso é testado,
+e foi a razão de um deploy falhado.
+
+```
+schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
+  → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
+  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql
+  → planos-crud.sql → config.sql → packs.sql → custos.sql → analises.sql
+  → cliente-crm.sql → pos-instalacao.sql
+```
+
+### O que está verificado
+
+**17 validadores** contra Postgres a sério, **202 testes** de domínio, typecheck
+e build limpos. Zero chaves estrangeiras de `ops_*` para fora.
+
+**As duas únicas escritas fora de `ops_*`**, ambas deliberadas e testadas: uma
+linha no sino (`notifications`), e os ficheiros no balde `operacoes`.
+
+### Onde está o resto
+
+O inventário completo — ecrãs, tabelas, vistas, escritas, avisos — está em
+[`mapa-do-modulo.md`](mapa-do-modulo.md). É por aí que se começa para saber
+"o que faz este ecrã" ou "onde está isto guardado".
+
+**As secções 1 a 9 abaixo são de 30 de agosto** e ficam como registo do que se
+sabia nessa altura. O que interessa hoje está aqui em cima e no mapa.
 
 ---
 

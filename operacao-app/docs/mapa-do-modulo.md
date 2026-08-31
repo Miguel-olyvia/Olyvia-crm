@@ -26,7 +26,7 @@ Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
 | `/definicoes` · **Definições** | Equipa, locais, categorias, medições, checklists, códigos. | quem coordena |
-| `/ajuda` · **Ajuda** | Três portas: porquê mudar (para quem decide), como funciona, como se usa. | todos |
+| `/ajuda` · **Ajuda** | Três portas: **Porquê mudar** (com calculadora de valor e cinco fluxogramas), **Como funciona**, **Como se usa**. | todos |
 
 **A entrada de Análises não aparece a um técnico.** Não é só permissão: no
 telemóvel a navegação é uma barra fixa, e cada entrada a mais rouba largura às
@@ -263,7 +263,7 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **147 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **202 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em pouco mais de um segundo.
 
 ---

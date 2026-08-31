@@ -243,6 +243,16 @@ console.log("\n─── o que NÃO se tocou ───────────�
   const rls = await um(`SELECT rowsecurity FROM pg_tables
                          WHERE schemaname='public' AND tablename='ops_assinatura'`);
   rls.rowsecurity ? ok("ops_assinatura tem RLS ligada") : mau("ops_assinatura sem RLS");
+
+  // O ciclo do schema.sql que barra o `anon` corre quando o schema corre; uma
+  // tabela criada depois fica com os grants por omissao do Postgres. A RLS
+  // filtrava na mesma, mas uma tabela que responde "[]" em vez de "sem
+  // permissao" ja confirma que existe.
+  const pub = await um(`
+    SELECT has_table_privilege('anon', 'public.ops_assinatura', 'SELECT') AS pode`);
+  pub.pode === false
+    ? ok("o publico nao chega a tabela de todo")
+    : mau("o papel anon tem SELECT em ops_assinatura");
 }
 
 console.log("");

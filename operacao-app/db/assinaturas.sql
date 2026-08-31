@@ -84,6 +84,18 @@ CREATE POLICY ops_assinatura_escrever ON public.ops_assinatura
   WITH CHECK (false);
 
 
+-- O `schema.sql` tem um ciclo que faz isto a todas as tabelas `ops_*`, mas
+-- corre quando o schema corre — uma tabela criada depois fica com os grants
+-- por omissão do Postgres, que no Supabase incluem o papel `anon`.
+--
+-- A RLS filtrava tudo na mesma (sem sessão, `auth.uid()` é nulo e não volta
+-- linha nenhuma), por isso não havia fuga. Mas a garantia do módulo é que o
+-- público não chega às tabelas de todo, e uma tabela que responde “[]” em vez
+-- de “sem permissão” já confirma que existe.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.ops_assinatura TO authenticated;
+REVOKE ALL ON public.ops_assinatura FROM anon;
+
+
 -- ============================================================
 -- 2. Recolher a assinatura
 -- ============================================================

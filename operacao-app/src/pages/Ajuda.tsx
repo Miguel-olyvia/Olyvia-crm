@@ -11,6 +11,7 @@ import {
   DiagramaOrigens,
   DiagramaTempoDeTrabalho,
 } from "../components/diagramas";
+import Calculadora from "../components/Calculadora";
 
 /**
  * Esta página é lida por duas pessoas muito diferentes, e é por isso que tem
@@ -126,6 +127,8 @@ function PorqueMudar() {
         </div>
       </div>
 
+      <Calculadora />
+
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">
           O que acontece quando um técnico encontra um problema
@@ -227,6 +230,34 @@ function PorqueMudar() {
         </p>
       </Card>
 
+      {/* O ganho que não cabe numa conta: o que a empresa passa a SABER. Vem
+          depois dos números de propósito — quem ainda não acreditou nos
+          números também não vai acreditar nisto. */}
+      <Card className="p-5">
+        <h2 className="text-base font-semibold text-slate-900">
+          O que a empresa passa a saber ao fim de um ano
+        </h2>
+        <p className="mt-1.5 max-w-prose text-sm text-slate-600">
+          Este é o ganho que não cabe numa conta. Cada leitura fica gravada com data e autor
+          desde o primeiro dia — e ao fim de doze meses há perguntas que passam a ter resposta
+          em vez de opinião.
+        </p>
+        <ul className="mt-4 space-y-3">
+          {AO_FIM_DE_UM_ANO.map((x) => (
+            <li key={x.pergunta} className="border-l-2 border-brand-200 pl-3">
+              <p className="text-sm font-medium text-slate-800">{x.pergunta}</p>
+              <p className="mt-0.5 text-sm leading-relaxed text-slate-600">{x.resposta}</p>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 text-xs leading-relaxed text-slate-500">
+          Nada disto se pode recuperar para trás. O histórico que o Infraspeak tem é texto
+          escrito à mão em campos de observações, e ninguém o consegue somar. O relógio
+          começa no dia em que a equipa começar a usar isto — que é o argumento mais forte
+          para não adiar.
+        </p>
+      </Card>
+
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">O que NÃO muda</h2>
         <p className="mt-1.5 text-sm text-slate-600">
@@ -253,8 +284,9 @@ function PorqueMudar() {
           As mudanças, uma a uma
         </h2>
         <p className="mb-3 px-1 text-sm text-slate-600">
-          Catorze diferenças, cada uma com o que o Infraspeak faz, o que passa a acontecer, e a
-          prova. Carrega para abrir.
+          Dezanove diferenças, <strong>todas já construídas</strong>. Cada uma com o que o
+          Infraspeak faz, o que passa a acontecer, e a prova tirada da vossa instância.
+          Carrega para abrir.
         </p>
         <div className="space-y-3">
           {DIFERENCAS.map((d, i) => (
@@ -265,9 +297,9 @@ function PorqueMudar() {
 
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">O que ainda não está feito</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Para não haver surpresas. Nada disto impede a equipa de trabalhar; são coisas que o
-          Infraspeak tem e nós ainda não.
+        <p className="mt-2 max-w-prose text-sm text-slate-600">
+          Para não haver surpresas. Sobraram <strong>duas</strong>, e nenhuma delas impede a
+          equipa de trabalhar hoje.
         </p>
         <ul className="mt-3 space-y-2">
           {POR_FAZER.map((x) => (
@@ -411,6 +443,29 @@ const PERGUNTAS = [
     infraspeak: "Decide-se de cabeça. As leituras estão guardadas, mas espalhadas por ordens, sem ninguém as somar.",
     agora:
       "A ficha do equipamento mostra tudo o que já se lhe fez e a evolução das leituras. Três avarias em doze meses levantam a pergunta sozinhas.",
+  },
+] as const;
+
+const AO_FIM_DE_UM_ANO = [
+  {
+    pergunta: "Este cliente dá lucro?",
+    resposta:
+      "Todas as ordens dele, com o custo real de mão de obra e de material ao lado do que foi orçamentado. Hoje sabe-se o que se faturou; passa a saber-se o que custou.",
+  },
+  {
+    pergunta: "Este equipamento compensa substituir?",
+    resposta:
+      "Doze meses de leituras desenhadas, e a conta das avarias. Três num ano levantam a pergunta sozinhas — e a resposta deixa de depender de quem se lembra melhor.",
+  },
+  {
+    pergunta: "Cumprimos o contrato deste cliente?",
+    resposta:
+      "Uma percentagem por mês, com a lista do que ficou por fazer. É o número que se leva a uma renovação, em vez de se contar à mão na véspera.",
+  },
+  {
+    pergunta: "Quanto tempo demora, mesmo, uma inspeção destas?",
+    resposta:
+      "As sessões de trabalho de um ano inteiro. Passa a dar para orçamentar com o que aconteceu, e não com o que se acha.",
   },
 ] as const;
 
