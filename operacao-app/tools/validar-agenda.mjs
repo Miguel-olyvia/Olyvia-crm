@@ -355,6 +355,160 @@ console.log("\n─── a agenda do dia, para o ecrã ───────");
     : mau("um técnico conseguiu ler a agenda de toda a gente");
 }
 
+/* ── Um período, e não um instante ─────────────────────────────────────── */
+
+console.log("\n─── a semana inteira, de uma vez ────────");
+{
+  // 2026-10-05 (segunda) a 2026-10-11 (domingo). Ele trabalha de segunda a
+  // quinta, por isso sexta, sábado e domingo saem como "não trabalha".
+  const r = await como(AUTH.gestor,
+    `SELECT dia::text, tipo FROM public.rpc_ops_agenda_periodo('${ORG}','2026-10-05','2026-10-11')
+      WHERE utilizador_id = '${TECNICO}' AND tipo = 'fora_de_horario' ORDER BY dia`);
+
+  r.map((x) => x.dia).join(",") === "2026-10-09,2026-10-10,2026-10-11"
+    ? ok("sexta, sábado e domingo saem como dias em que não trabalha")
+    : mau(`vieram: ${r.map((x) => x.dia).join(", ") || "(nada)"}`);
+}
+
+{
+  const r = await como(AUTH.gestor,
+    `SELECT dia::text FROM public.rpc_ops_agenda_periodo('${ORG}','2026-09-14','2026-09-20')
+      WHERE utilizador_id = '${TECNICO}' AND tipo = 'ausente' ORDER BY dia`);
+  r.length === 7
+    ? ok("as férias aparecem em cada um dos sete dias, e não como uma linha só")
+    : mau(`${r.length} dias de ausência, esperava 7`);
+}
+
+{
+  const r = await como(AUTH.gestor,
+    `SELECT utilizador_id FROM public.rpc_ops_agenda_periodo('${ORG}','2026-12-24','2026-12-26')
+      WHERE tipo = 'feriado'`);
+  r.length >= 2
+    ? ok("o feriado sai para toda a gente da equipa")
+    : mau(`o feriado saiu para ${r.length} pessoas`);
+}
+
+await recusaPeriodo();
+async function recusaPeriodo() {
+  let recusou = false;
+  try {
+    await como(AUTH.gestor,
+      `SELECT * FROM public.rpc_ops_agenda_periodo('${ORG}','2026-01-01','2026-12-31')`);
+  } catch (e) {
+    recusou = e.message.includes("demasiado longo");
+    await db.exec("ROLLBACK").catch(() => {});
+  }
+  recusou
+    ? ok("um ano inteiro é recusado — seria uma varredura enorme")
+    : mau("aceitou varrer um ano inteiro");
+}
+
+/* ── Os compromissos do CRM ────────────────────────────────────────────── */
+
+console.log("\n─── a agenda é uma só ───────────────────");
+const ITEM = "0c0c0000-0000-0000-0000-0000000000c1";
+const ITEM_EQUIPA = "0c0c0000-0000-0000-0000-0000000000c2";
+const ITEM_FERIAS = "0c0c0000-0000-0000-0000-0000000000c3";
+const ITEM_CANCELADO = "0c0c0000-0000-0000-0000-0000000000c4";
+
+await db.exec(`
+  INSERT INTO public.schedule_items
+    (id, title, status, start_datetime, end_datetime, location, user_id, organization_id)
+  VALUES
+    ('${ITEM}', 'Visita comercial', 'confirmed',
+     '2026-10-07 10:00+00', '2026-10-07 11:30+00', 'Braga', '${TECNICO}', '${ORG}'),
+    ('${ITEM_CANCELADO}', 'Reuniao desmarcada', 'cancelled',
+     '2026-10-07 15:00+00', '2026-10-07 16:00+00', NULL, '${TECNICO}', '${ORG}');
+
+  -- Umas ferias que existem TAMBEM como compromisso. Nao podem aparecer duas
+  -- vezes na mesma linha do calendario.
+  INSERT INTO public.schedule_items
+    (id, title, status, start_datetime, end_datetime, time_off_type, user_id, organization_id)
+  VALUES
+    ('${ITEM_FERIAS}', 'Ferias', 'confirmed',
+     '2026-10-07 00:00+00', '2026-10-07 23:59+00', 'vacation', '${TECNICO}', '${ORG}');
+
+  -- Um compromisso de equipa, ligado pelo recurso e nao pelo user_id.
+  INSERT INTO public.schedule_items
+    (id, title, status, start_datetime, end_datetime, organization_id)
+  VALUES
+    ('${ITEM_EQUIPA}', 'Formacao interna', 'scheduled',
+     '2026-10-08 09:00+00', '2026-10-08 13:00+00', '${ORG}');
+  INSERT INTO public.schedule_item_assignees (item_id, resource_id)
+    VALUES ('${ITEM_EQUIPA}', '${REC_TECNICO}');
+`);
+
+{
+  const r = await como(AUTH.gestor,
+    `SELECT titulo, onde FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-07','2026-10-07')
+      WHERE utilizador_id = '${TECNICO}'`);
+
+  r.length === 1 && r[0].titulo === "Visita comercial"
+    ? ok("a visita comercial do CRM aparece na agenda de Operações")
+    : mau(`vieram ${r.length}: ${r.map((x) => x.titulo).join(", ")}`);
+  r[0]?.onde === "Braga" ? ok("com o sítio") : mau(`onde: ${r[0]?.onde}`);
+}
+
+{
+  const r = await como(AUTH.gestor,
+    `SELECT titulo FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-07','2026-10-07')`);
+  r.some((x) => x.titulo === "Ferias")
+    ? mau("as férias vieram como compromisso — ficam duplicadas com a ausência")
+    : ok("as férias NÃO vêm por aqui — já vêm como ausência");
+  r.some((x) => x.titulo === "Reuniao desmarcada")
+    ? mau("um compromisso cancelado apareceu")
+    : ok("um compromisso cancelado não ocupa o dia de ninguém");
+}
+
+{
+  const r = await como(AUTH.gestor,
+    `SELECT titulo FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-08','2026-10-08')
+      WHERE utilizador_id = '${TECNICO}'`);
+  r.length === 1 && r[0].titulo === "Formacao interna"
+    ? ok("um compromisso ligado pelo recurso também conta")
+    : mau(`pelo recurso vieram ${r.length}: ${r.map((x) => x.titulo).join(", ")}`);
+}
+
+{
+  // O mesmo compromisso ligado pelas DUAS vias não pode aparecer duas vezes.
+  await db.exec(`
+    UPDATE public.schedule_items SET user_id = '${TECNICO}' WHERE id = '${ITEM_EQUIPA}';`);
+  const r = await como(AUTH.gestor,
+    `SELECT compromisso_id FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-08','2026-10-08')
+      WHERE utilizador_id = '${TECNICO}'`);
+  r.length === 1
+    ? ok("ligado pelos dois caminhos, aparece uma vez só")
+    : mau(`${r.length} linhas para o mesmo compromisso`);
+}
+
+{
+  // O comercial tem agenda no CRM, mas não é da equipa de Operações.
+  await db.exec(`
+    INSERT INTO public.schedule_items
+      (title, status, start_datetime, end_datetime, user_id, organization_id)
+    VALUES ('Almoco com fornecedor', 'confirmed',
+            '2026-10-07 12:00+00', '2026-10-07 14:00+00', '${ESTRANHO}', '${ORG}');`);
+  const r = await como(AUTH.gestor,
+    `SELECT titulo FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-07','2026-10-07')`);
+  r.some((x) => x.titulo === "Almoco com fornecedor")
+    ? mau("a agenda de quem não faz trabalho de campo apareceu aqui")
+    : ok("a agenda de quem não é da equipa de Operações fica de fora");
+}
+
+{
+  let recusou = false;
+  try {
+    await como(AUTH.tecnico,
+      `SELECT * FROM public.rpc_ops_compromissos_crm('${ORG}','2026-10-07','2026-10-07')`);
+  } catch (e) {
+    recusou = e.message.includes("Só quem coordena");
+    await db.exec("ROLLBACK").catch(() => {});
+  }
+  recusou
+    ? ok("um técnico não vê os compromissos da equipa toda")
+    : mau("um técnico leu a agenda comercial de toda a gente");
+}
+
 /* ── Nada foi acrescentado ao CRM ──────────────────────────────────────── */
 
 console.log("\n─── o que NÃO se tocou ──────────────────");

@@ -147,7 +147,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/cliente-crm.sql` | Morada, telefone e contacto do cliente, vindos do CRM | **não** (só lê as tabelas de morada) |
 | `db/notificacoes.sql` | Avisar no sino do CRM: ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | **sim** — só `INSERT` em `notifications` |
 | `db/analises.sql` | Quatro vistas: histórico do equipamento, evolução das leituras, PMP cumprido, e todas as leituras para exportar | **não** |
-| `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita | **não** (só lê 4 tabelas de agenda) |
+| `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita, e os compromissos que já estão na agenda do CRM | **não** (só lê 6 tabelas de agenda) |
 | `db/packs.sql` | Três packs de setor prontos a instalar: Manutenção, Obras, Limpeza | **não** |
 | `db/assinaturas.sql` | A assinatura do cliente, recolhida no telemóvel do técnico | **não** (a imagem vai para o bucket que o `anexos.sql` criou) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
@@ -203,7 +203,7 @@ db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
 db/analises.sql        4 vistas: vida do equipamento, leituras, PMP, exportar
 db/agenda.sql          férias, horários e feriados, vindos do CRM
 tools/validar-*        17 validadores contra Postgres real, sem Docker
-src/domain/            regras puras — 202 testes, sem infraestrutura
+src/domain/            regras puras — 221 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
@@ -216,7 +216,7 @@ src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 202 testes a correr em pouco mais de um segundo.
+haver 221 testes a correr em pouco mais de um segundo.
 
 ### As três escritas, e só três
 

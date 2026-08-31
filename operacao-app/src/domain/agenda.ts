@@ -211,3 +211,128 @@ export function feriadoDoDia(
 ): string | null {
   return impedimentos.find((i) => i.tipo === "feriado")?.detalhe ?? null;
 }
+
+/* ───────────────────── Compromissos vindos do CRM ──────────────────────── */
+
+/**
+ * Um compromisso da agenda do CRM — uma visita comercial, uma formação.
+ *
+ * A agenda é uma só: uma pessoa com uma visita marcada às 10h não está livre
+ * às 10h, e até se cruzarem as duas agendas Operações dizia que estava.
+ */
+export interface Compromisso {
+  utilizador_id: string;
+  compromisso_id: string;
+  titulo: string;
+  inicio: string;
+  fim: string;
+  dia_inteiro: boolean;
+  onde: string | null;
+}
+
+/** Um compromisso desenha-se na mesma régua que uma ordem. */
+export function posicaoDoCompromisso(c: Compromisso, dia: Date): Posicao | null {
+  return posicaoNaRegua(
+    {
+      id: c.compromisso_id,
+      codigo: "",
+      titulo: c.titulo,
+      estado: "agendada",
+      origem: "crm",
+      prioridade: "normal",
+      responsavel_id: c.utilizador_id,
+      agendada_para: c.inicio,
+      janela_inicio: c.inicio,
+      janela_fim: c.fim,
+    },
+    dia
+  );
+}
+
+/* ─────────────────────────── Semana e mês ──────────────────────────────── */
+
+/** Segunda-feira da semana que contém este dia. Cá a semana começa à segunda. */
+export function inicioDaSemana(dia: Date): Date {
+  const d = new Date(dia);
+  d.setHours(0, 0, 0, 0);
+  // getDay(): 0 = domingo. Domingo pertence à semana que começou na segunda
+  // anterior, e não à seguinte.
+  const desvio = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - desvio);
+  return d;
+}
+
+export function diasDaSemana(dia: Date): Date[] {
+  const inicio = inicioDaSemana(dia);
+  return Array.from({ length: 7 }, (_, i) => somarDias(inicio, i));
+}
+
+/**
+ * A grelha do mês: semanas completas, com os dias vizinhos a preencher.
+ *
+ * Um calendário que começasse a meio de uma linha lê-se pior — e o dia 1 numa
+ * quinta-feira deixaria três células vazias sem explicação.
+ */
+export function grelhaDoMes(dia: Date): Date[] {
+  const primeiro = new Date(dia.getFullYear(), dia.getMonth(), 1);
+  const ultimo = new Date(dia.getFullYear(), dia.getMonth() + 1, 0);
+  const inicio = inicioDaSemana(primeiro);
+  const fim = somarDias(inicioDaSemana(ultimo), 6);
+
+  const dias: Date[] = [];
+  for (let d = inicio; d <= fim; d = somarDias(d, 1)) dias.push(d);
+  return dias;
+}
+
+/** `2026-09-16`, no fuso local — a chave por que se agrupa um calendário. */
+export function chaveDoDia(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+export function noMesDe(dia: Date, referencia: Date): boolean {
+  return dia.getMonth() === referencia.getMonth() && dia.getFullYear() === referencia.getFullYear();
+}
+
+/**
+ * Agrupa por dia o que tem data.
+ *
+ * O que não tem data fica de fora: numa vista de semana ou de mês não há sítio
+ * para o pôr sem inventar um dia, e inventar é o que se está a evitar.
+ */
+export function porDia<T>(itens: readonly T[], quando: (x: T) => string | null): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const x of itens) {
+    const iso = quando(x);
+    if (!iso) continue;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) continue;
+    const k = chaveDoDia(d);
+    const lista = m.get(k);
+    if (lista) lista.push(x);
+    else m.set(k, [x]);
+  }
+  return m;
+}
+
+/** Quantas horas ocupa um compromisso. Um dia inteiro conta como o dia útil. */
+export function horasDoCompromisso(c: Compromisso): number {
+  if (c.dia_inteiro) return 8;
+  const h = (new Date(c.fim).getTime() - new Date(c.inicio).getTime()) / 3600_000;
+  return Number.isFinite(h) && h > 0 ? h : 1;
+}
+
+/** A carga de um dia, contando também o que veio do CRM. */
+export function cargaComCompromissos(
+  ordens: readonly OrdemNaAgenda[],
+  compromissos: readonly Compromisso[]
+): CargaDoDia & { compromissos: number } {
+  const base = cargaDoDia(ordens);
+  const horas = compromissos.reduce((s, c) => s + horasDoCompromisso(c), 0);
+  return {
+    ...base,
+    compromissos: compromissos.length,
+    horas: Math.round((base.horas + horas) * 10) / 10,
+  };
+}

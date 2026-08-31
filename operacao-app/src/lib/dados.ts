@@ -1153,7 +1153,7 @@ export async function leiturasParaExportar(
 
 /* ─────────────────────────────── Agenda ─────────────────────────────── */
 
-import type { ImpedimentoDaEquipa, OrdemNaAgenda } from "../domain/agenda";
+import type { Compromisso, ImpedimentoDaEquipa, OrdemNaAgenda } from "../domain/agenda";
 
 /**
  * As ordens de um dia, com a janela de visita.
@@ -1279,4 +1279,99 @@ export async function assinarOrdem(args: {
 
   const r = data as unknown as { substituiu: boolean };
   return { ok: true, substituiu: Boolean(r?.substituiu), caminho };
+}
+
+/** Uma indisponibilidade num dia concreto, para as vistas de semana e mês. */
+export interface IndisponibilidadeNoDia {
+  utilizador_id: string;
+  dia: string;
+  tipo: "ausente" | "fora_de_horario" | "feriado";
+  detalhe: string;
+}
+
+/** As ordens de um período, para a semana e o mês. */
+export async function ordensDoPeriodo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<OrdemNaAgenda[]> {
+  const inicio = new Date(de);
+  inicio.setHours(0, 0, 0, 0);
+  const fim = new Date(ate);
+  fim.setHours(23, 59, 59, 999);
+
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(
+      "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
+        "agendada_para, janela_inicio, janela_fim"
+    )
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada"])
+    .gte("agendada_para", inicio.toISOString())
+    .lte("agendada_para", fim.toISOString())
+    .order("agendada_para");
+
+  rebentar("carregar a agenda", error);
+  return (data ?? []) as unknown as OrdemNaAgenda[];
+}
+
+/**
+ * Férias, horários e feriados de um período, por pessoa e por dia.
+ *
+ * Como `impedimentosDoDia`, o erro é engolido: sem `db/agenda.sql` a agenda
+ * desenha-se na mesma, só sem as faixas de ausência.
+ */
+export async function indisponibilidadesDoPeriodo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<IndisponibilidadeNoDia[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_agenda_periodo", {
+    _org_id: orgId,
+    _de: isoDia(de),
+    _ate: isoDia(ate),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem indisponibilidades:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as IndisponibilidadeNoDia[];
+}
+
+/**
+ * Os compromissos que já estão na agenda do CRM.
+ *
+ * A agenda é uma só: uma pessoa com uma visita comercial marcada às 10h não
+ * está livre às 10h.
+ */
+export async function compromissosDoCRM(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<Compromisso[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_compromissos_crm", {
+    _org_id: orgId,
+    _de: isoDia(de),
+    _ate: isoDia(ate),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem compromissos do CRM:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as Compromisso[];
+}
+
+/**
+ * `2026-09-16` no fuso local.
+ *
+ * `toISOString().slice(0,10)` daria o dia em UTC — e às 23h de Lisboa isso é
+ * já o dia seguinte, o que faria a agenda carregar o período errado.
+ */
+function isoDia(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
 }

@@ -21,7 +21,7 @@ Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, histórico. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
 | `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
-| `/agenda` · **Agenda** | O dia com a equipa toda lado a lado: carga em horas, ausências, e as ordens marcadas sem ninguém. | **admin, gestor, operador** |
+| `/agenda` · **Agenda** | **Dia, semana e mês.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
@@ -154,7 +154,9 @@ uma destas.
 |---|---|
 | `rpc_ops_materializar_planos` | todos os dias, ou à mão. Cria as ordens dos próximos 120 dias |
 | `rpc_ops_avisar_atrasos` | de hora a hora pelo `pg_cron`, e ao abrir o **Hoje** |
-| `rpc_ops_agenda_do_dia` | ao abrir a **Agenda**. Férias, horários e feriados da equipa toda, num pedido só (só lê) |
+| `rpc_ops_agenda_do_dia` | férias, horários e feriados de um dia, para a equipa toda (só lê) |
+| `rpc_ops_agenda_periodo` | o mesmo para um período até 62 dias, por pessoa e por dia. É o que alimenta a semana e o mês (só lê) |
+| `rpc_ops_compromissos_crm` | os compromissos que já estão na agenda do CRM — **a agenda é uma só** (só lê) |
 
 ### As três fechaduras
 
@@ -217,8 +219,18 @@ reimplementadas: `get_user_visible_org_ids()`, `has_anew_permission()`,
 
 ## 6b. A agenda do CRM
 
-Só leitura, quatro tabelas: `schedule_resources`, `resource_time_off`,
-`resource_availability_rules`, `schedule_holidays`.
+Só leitura, seis tabelas: `schedule_resources`, `resource_time_off`,
+`resource_availability_rules`, `schedule_holidays`, `schedule_items` e
+`schedule_item_assignees`.
+
+**A agenda é uma só.** Um técnico com uma visita comercial marcada às 10h não
+está livre às 10h, e até se cruzarem as duas agendas Operações dizia que
+estava. Um compromisso pertence a alguém por dois caminhos — `user_id` direto,
+ou `schedule_item_assignees` pelo recurso — e os dois contam, sem duplicar.
+
+As **ausências ficam de fora** dessa leitura: no CRM umas férias podem existir
+como linha em `resource_time_off` **e** como compromisso com `time_off_type`.
+Trazê-las pelas duas portas mostrava a mesma ausência duas vezes.
 
 **Não foi preciso tabela de mapa nenhuma.** `schedule_resources.user_id` já
 aponta para `anew_users.id`, que é o mesmo id que Operações usa.

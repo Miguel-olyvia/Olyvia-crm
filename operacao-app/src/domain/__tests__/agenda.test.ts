@@ -11,6 +11,16 @@ import {
   porPessoa,
   posicaoNaRegua,
   somarDias,
+  chaveDoDia,
+  cargaComCompromissos,
+  diasDaSemana,
+  grelhaDoMes,
+  horasDoCompromisso,
+  inicioDaSemana,
+  noMesDe,
+  porDia,
+  posicaoDoCompromisso,
+  type Compromisso,
   type ImpedimentoDaEquipa,
   type OrdemNaAgenda,
 } from "../agenda";
@@ -214,5 +224,134 @@ describe("o feriado", () => {
 
   it("sem feriado, nada", () => {
     expect(feriadoDoDia([])).toBeNull();
+  });
+});
+
+/* ─────────────────────── Semana, mês e compromissos ───────────────────── */
+
+describe("a semana", () => {
+  it("começa à segunda — domingo pertence à semana que já ia a meio", () => {
+    // 2026-09-20 é um domingo. A sua semana começou a 14, e não a 21.
+    const d = new Date(2026, 8, 20);
+    expect(inicioDaSemana(d).getDate()).toBe(14);
+  });
+
+  it("uma segunda é o próprio início", () => {
+    expect(inicioDaSemana(new Date(2026, 8, 14)).getDate()).toBe(14);
+  });
+
+  it("são sete dias seguidos", () => {
+    const dias = diasDaSemana(new Date(2026, 8, 16));
+    expect(dias).toHaveLength(7);
+    expect(dias[0].getDate()).toBe(14);
+    expect(dias[6].getDate()).toBe(20);
+  });
+
+  it("atravessa a mudança de mês sem se enganar", () => {
+    const dias = diasDaSemana(new Date(2026, 8, 30)); // quarta, 30 set
+    expect(dias[0].getDate()).toBe(28);
+    expect(dias[6].getMonth()).toBe(9); // já outubro
+  });
+});
+
+describe("a grelha do mês", () => {
+  it("são sempre semanas completas", () => {
+    const g = grelhaDoMes(new Date(2026, 8, 16));
+    expect(g.length % 7).toBe(0);
+  });
+
+  it("começa numa segunda e acaba num domingo", () => {
+    const g = grelhaDoMes(new Date(2026, 8, 16));
+    expect(g[0].getDay()).toBe(1);
+    expect(g[g.length - 1].getDay()).toBe(0);
+  });
+
+  it("inclui o primeiro e o último dia do mês", () => {
+    const g = grelhaDoMes(new Date(2026, 8, 16));
+    const chaves = g.map(chaveDoDia);
+    expect(chaves).toContain("2026-09-01");
+    expect(chaves).toContain("2026-09-30");
+  });
+
+  it("sabe distinguir os dias vizinhos dos do mês", () => {
+    const ref = new Date(2026, 8, 16);
+    const g = grelhaDoMes(ref);
+    expect(noMesDe(g[0], ref)).toBe(false); // 31 de agosto
+    expect(noMesDe(new Date(2026, 8, 1), ref)).toBe(true);
+  });
+
+  it("fevereiro de um ano bissexto tem o dia 29", () => {
+    const chaves = grelhaDoMes(new Date(2028, 1, 10)).map(chaveDoDia);
+    expect(chaves).toContain("2028-02-29");
+  });
+});
+
+describe("a chave de um dia", () => {
+  it("é a data local, e não a UTC", () => {
+    // Uma data às 23h em Lisboa é o mesmo dia; convertida para UTC podia
+    // saltar para o dia seguinte e a ordem aparecia na célula errada.
+    expect(chaveDoDia(new Date(2026, 8, 16, 23, 30))).toBe("2026-09-16");
+  });
+
+  it("mete o zero à frente", () => {
+    expect(chaveDoDia(new Date(2026, 0, 5))).toBe("2026-01-05");
+  });
+});
+
+describe("agrupar por dia", () => {
+  it("junta o que é do mesmo dia", () => {
+    const m = porDia(
+      [ordem({ id: "a" }), ordem({ id: "b", agendada_para: as(15) })],
+      (o) => o.agendada_para
+    );
+    expect(m.get("2026-09-16")).toHaveLength(2);
+  });
+
+  it("o que não tem data fica de fora — não se inventa um dia", () => {
+    const m = porDia([ordem({ agendada_para: null })], (o) => o.agendada_para);
+    expect(m.size).toBe(0);
+  });
+
+  it("uma data impossível também", () => {
+    const m = porDia([ordem({ agendada_para: "ontem" })], (o) => o.agendada_para);
+    expect(m.size).toBe(0);
+  });
+});
+
+const compromisso = (p: Partial<Compromisso> = {}): Compromisso => ({
+  utilizador_id: "p1",
+  compromisso_id: "c1",
+  titulo: "Visita comercial",
+  inicio: as(10),
+  fim: as(11, 30),
+  dia_inteiro: false,
+  onde: "Braga",
+  ...p,
+});
+
+describe("os compromissos do CRM", () => {
+  it("ocupam a régua como uma ordem", () => {
+    const p = posicaoDoCompromisso(compromisso(), DIA)!;
+    expect(Math.round(p.esquerda)).toBe(Math.round((3 / 13) * 100));
+    expect(p.largura).toBeGreaterThan(0);
+  });
+
+  it("contam para a carga do dia", () => {
+    const c = cargaComCompromissos([ordem()], [compromisso()]);
+    expect(c.ordens).toBe(1);
+    expect(c.compromissos).toBe(1);
+    expect(c.horas).toBe(2.5); // 1 h da ordem + 1,5 h da visita
+  });
+
+  it("um compromisso de dia inteiro vale o dia de trabalho", () => {
+    expect(horasDoCompromisso(compromisso({ dia_inteiro: true }))).toBe(8);
+  });
+
+  it("um compromisso com fim antes do início vale uma hora, e não menos zero", () => {
+    expect(horasDoCompromisso(compromisso({ inicio: as(15), fim: as(11) }))).toBe(1);
+  });
+
+  it("sem compromissos, a carga é a das ordens", () => {
+    expect(cargaComCompromissos([ordem()], []).horas).toBe(1);
   });
 });

@@ -230,6 +230,201 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_agenda_do_dia(uuid, date)
 
 
 -- ============================================================
+-- 1c. Indisponibilidade ao longo de um período
+-- ============================================================
+-- A `ops_disponibilidade` responde sobre um INSTANTE — é o que o aviso de
+-- agendamento precisa ("às 10h de quarta esta pessoa está livre?").
+--
+-- Uma vista de semana ou de mês faz outra pergunta: que DIAS é que esta pessoa
+-- não tem. Aí não há hora nenhuma, e "fora do horário" passa a querer dizer
+-- "não trabalha neste dia da semana" — que é igualmente verdade, e mais útil
+-- num calendário.
+--
+-- Uma linha por (pessoa, dia, motivo). Dias sem nada não aparecem.
+
+CREATE OR REPLACE FUNCTION public.rpc_ops_agenda_periodo(
+  _org_id uuid,
+  _de     date,
+  _ate    date
+)
+RETURNS TABLE (utilizador_id uuid, dia date, tipo text, detalhe text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $fn$
+DECLARE
+  v_user uuid := public.current_business_user_id();
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Sessão inválida.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ops_utilizador_perfil eu
+     WHERE eu.utilizador_id = v_user AND eu.organization_id = _org_id AND eu.ativo
+       AND eu.funcao IN ('admin', 'gestor', 'operador')
+  ) AND NOT public.is_system_admin_user(auth.uid()) THEN
+    RAISE EXCEPTION 'Só quem coordena vê a agenda da equipa.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  -- Um período aberto podia ser uma varredura enorme. Um mês mais folga chega.
+  IF _ate - _de > 62 THEN
+    RAISE EXCEPTION 'Período demasiado longo: % dias. O máximo são 62.', _ate - _de;
+  END IF;
+
+  IF to_regclass('public.schedule_resources') IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  WITH equipa AS (
+    SELECT up.utilizador_id, sr.id AS recurso_id
+      FROM public.ops_utilizador_perfil up
+      LEFT JOIN public.schedule_resources sr
+        ON sr.user_id = up.utilizador_id
+       AND (sr.organization_id = _org_id OR sr.organization_id IS NULL)
+       AND COALESCE(sr.is_active, true)
+     WHERE up.organization_id = _org_id AND up.ativo
+  ),
+  dias AS (SELECT d::date AS dia FROM generate_series(_de, _ate, interval '1 day') d)
+
+  -- Feriados: de toda a gente, mesmo de quem ainda não está na agenda do CRM.
+  SELECT e.utilizador_id, h.holiday_date, 'feriado'::text, h.name::text
+    FROM equipa e
+    JOIN public.schedule_holidays h
+      ON h.holiday_date BETWEEN _de AND _ate
+     AND (h.organization_id = _org_id OR h.organization_id IS NULL)
+
+  UNION ALL
+
+  -- Ausências aprovadas. Ver a nota de privacidade no topo: só datas.
+  SELECT e.utilizador_id, d.dia, 'ausente'::text, 'Ausência marcada e aprovada'::text
+    FROM equipa e
+    JOIN public.resource_time_off t ON t.resource_id = e.recurso_id
+    JOIN dias d ON d.dia BETWEEN t.start_date AND t.end_date
+   WHERE COALESCE(t.approved, false)
+
+  UNION ALL
+
+  -- Dias da semana em que a pessoa não trabalha. Só para quem TEM horário
+  -- declarado — sem regras nenhumas, o silêncio quer dizer "não sabemos".
+  SELECT e.utilizador_id, d.dia, 'fora_de_horario'::text,
+         'Não trabalha neste dia'::text
+    FROM equipa e
+    CROSS JOIN dias d
+   WHERE EXISTS (SELECT 1 FROM public.resource_availability_rules r
+                  WHERE r.resource_id = e.recurso_id AND COALESCE(r.is_available, true))
+     AND NOT EXISTS (
+       SELECT 1 FROM public.resource_availability_rules r
+        WHERE r.resource_id = e.recurso_id
+          AND COALESCE(r.is_available, true)
+          AND r.day_of_week = EXTRACT(dow FROM d.dia)::int
+          AND (r.valid_from  IS NULL OR r.valid_from  <= d.dia)
+          AND (r.valid_until IS NULL OR r.valid_until >= d.dia));
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_agenda_periodo(uuid, date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_agenda_periodo(uuid, date, date)
+  TO authenticated, service_role;
+
+
+-- ============================================================
+-- 1d. Os compromissos que já estão na agenda do CRM
+-- ============================================================
+-- A agenda é uma só. Um técnico com uma visita comercial marcada às 10h não
+-- está livre às 10h, e até aqui Operações dizia que estava.
+--
+-- Duas maneiras de um compromisso pertencer a alguém, e as duas contam:
+--
+--   · `schedule_items.user_id` — aponta direto para `anew_users.id`;
+--   · `schedule_item_assignees` — várias pessoas no mesmo compromisso, ligadas
+--     pelo recurso de agenda.
+--
+-- **As ausências ficam de fora.** No CRM, umas férias podem existir das duas
+-- maneiras: como linha em `resource_time_off` E como compromisso com
+-- `time_off_type` preenchido. Trazê-las por aqui mostrava a mesma ausência
+-- duas vezes na mesma linha do calendário.
+
+CREATE OR REPLACE FUNCTION public.rpc_ops_compromissos_crm(
+  _org_id uuid,
+  _de     date,
+  _ate    date
+)
+RETURNS TABLE (
+  utilizador_id  uuid,
+  compromisso_id uuid,
+  titulo         text,
+  inicio         timestamptz,
+  fim            timestamptz,
+  dia_inteiro    boolean,
+  onde           text
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $fn$
+DECLARE
+  v_user uuid := public.current_business_user_id();
+BEGIN
+  IF v_user IS NULL THEN
+    RAISE EXCEPTION 'Sessão inválida.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.ops_utilizador_perfil eu
+     WHERE eu.utilizador_id = v_user AND eu.organization_id = _org_id AND eu.ativo
+       AND eu.funcao IN ('admin', 'gestor', 'operador')
+  ) AND NOT public.is_system_admin_user(auth.uid()) THEN
+    RAISE EXCEPTION 'Só quem coordena vê a agenda da equipa.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF _ate - _de > 62 THEN
+    RAISE EXCEPTION 'Período demasiado longo: % dias. O máximo são 62.', _ate - _de;
+  END IF;
+
+  IF to_regclass('public.schedule_items') IS NULL THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT DISTINCT ON (dono.utilizador_id, si.id)
+         dono.utilizador_id, si.id, si.title::text,
+         si.start_datetime, si.end_datetime,
+         COALESCE(si.all_day, false), si.location::text
+    FROM public.schedule_items si
+    -- Os dois caminhos numa lista só. `DISTINCT ON` evita duplicar quem
+    -- estiver ligado pelos dois ao mesmo tempo.
+    CROSS JOIN LATERAL (
+      SELECT si.user_id AS utilizador_id
+      UNION
+      SELECT sr.user_id
+        FROM public.schedule_item_assignees sia
+        JOIN public.schedule_resources sr ON sr.id = sia.resource_id
+       WHERE sia.item_id = si.id
+    ) AS dono
+   WHERE dono.utilizador_id IS NOT NULL
+     AND si.organization_id = _org_id
+     AND si.status NOT IN ('cancelled', 'rescheduled')
+     -- Ausências vêm pela outra porta. Ver a nota acima.
+     AND si.time_off_type IS NULL
+     AND si.vacation_id IS NULL
+     AND si.start_datetime < (_ate + 1)::timestamptz
+     AND si.end_datetime   >= _de::timestamptz
+     -- E só de quem é da equipa de Operações: a agenda comercial de quem não
+     -- faz trabalho de campo não tem que aparecer aqui.
+     AND EXISTS (SELECT 1 FROM public.ops_utilizador_perfil up
+                  WHERE up.utilizador_id = dono.utilizador_id
+                    AND up.organization_id = _org_id AND up.ativo);
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_compromissos_crm(uuid, date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_compromissos_crm(uuid, date, date)
+  TO authenticated, service_role;
+
+
+-- ============================================================
 -- 2. Prova que a ligação existe mesmo
 -- ============================================================
 -- `schedule_resources.user_id → anew_users.id` é o pressuposto todo deste

@@ -260,6 +260,33 @@ CREATE TABLE public.schedule_holidays (
   is_recurring boolean NOT NULL DEFAULT false,
   is_custom boolean NOT NULL DEFAULT false);
 
+-- Os compromissos do CRM. Duas colunas importam para o cruzamento com a
+-- agenda de Operações: user_id, que aponta direto para anew_users, e o
+-- time_off_type, que marca um compromisso que na verdade e uma ausencia —
+-- essas vem por resource_time_off, e traze-las tambem por aqui duplicava-as.
+CREATE TABLE public.schedule_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  board_id uuid,
+  title text NOT NULL,
+  status text NOT NULL DEFAULT 'scheduled',
+  origin text NOT NULL DEFAULT 'manual',
+  start_datetime timestamptz NOT NULL,
+  end_datetime timestamptz NOT NULL,
+  all_day boolean DEFAULT false,
+  location text,
+  location_lat numeric(10,8),
+  location_lng numeric(11,8),
+  time_off_type text,
+  vacation_id uuid,
+  user_id uuid,
+  organization_id uuid);
+
+CREATE TABLE public.schedule_item_assignees (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL,
+  resource_id uuid NOT NULL,
+  role text DEFAULT 'assignee');
+
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.products (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
