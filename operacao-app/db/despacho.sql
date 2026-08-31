@@ -385,6 +385,27 @@ BEGIN
      jsonb_build_object('responsavel_id', p_responsavel_id,
                         'equipa', to_jsonb(v_equipa)));
 
+  -- Só quando o responsável MUDA, e nunca para quem carregou no botão. Quem
+  -- se atribui a si próprio já sabe; quem reatribui à mesma pessoa não mudou
+  -- nada. Sem estas duas condições, o sino toca por tudo e deixa de contar.
+  IF p_responsavel_id IS NOT NULL
+     AND p_responsavel_id IS DISTINCT FROM v_antes
+     AND p_responsavel_id IS DISTINCT FROM v_user
+     AND to_regprocedure('public.ops_notificar(uuid,uuid,text,text,text,text,uuid,text)')
+         IS NOT NULL THEN
+    PERFORM public.ops_notificar(
+      v_o.organization_id, p_responsavel_id, 'operacoes_ordem_atribuida',
+      v_o.codigo || ' é tua',
+      v_o.titulo
+        || CASE WHEN v_o.agendada_para IS NOT NULL
+                THEN ' · ' || to_char(v_o.agendada_para, 'DD/MM às HH24:MI')
+                ELSE '' END,
+      '/operacao/ordens/' || v_o.codigo, p_ordem_id,
+      CASE v_o.prioridade WHEN 'urgente' THEN 'urgent'
+                          WHEN 'alta'    THEN 'high'
+                          ELSE 'medium' END);
+  END IF;
+
   RETURN jsonb_build_object(
     'ok', true,
     'responsavel_id', p_responsavel_id,

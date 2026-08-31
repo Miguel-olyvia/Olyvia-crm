@@ -34,6 +34,30 @@ export const appendTimestamp = (route: string) => {
   return `${route}${separator}_t=${Date.now()}`;
 };
 
+/**
+ * Destinos servidos por outra aplicação no mesmo domínio (/operacao, /duc-app).
+ * O react-router não conhece estas rotas: navigate() caía no NotFound.
+ */
+const APPS_SEPARADAS = /^\/(operacao|duc-app)(\/|\?|$)/;
+
+/**
+ * Abre o destino de uma notificação.
+ *
+ * Uma app separada precisa de um carregamento de página a sério, e sem o
+ * `_t=` — esse parâmetro existe para forçar o SPA a recarregar a mesma rota,
+ * e num carregamento novo não serve para nada.
+ */
+export const abrirNotificacao = (
+  route: string,
+  navigate: (to: string, options?: { replace?: boolean }) => void
+) => {
+  if (APPS_SEPARADAS.test(route)) {
+    window.location.assign(route);
+    return;
+  }
+  navigate(appendTimestamp(route), { replace: true });
+};
+
 export const getNotificationRoute = async (notification: NotificationLike): Promise<string | null> => {
   if (notification.link) return notification.link;
 

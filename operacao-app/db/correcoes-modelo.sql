@@ -575,6 +575,23 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
       v_ignorados := v_ignorados || jsonb_build_object(
         'plano', v_plano.codigo, 'regra', v_plano.regra_recorrencia, 'erro', SQLERRM);
+
+      -- Um plano que falha em silêncio é a pior falha desta aplicação: as
+      -- ordens preventivas deixam de nascer, e só se dá por isso quando o
+      -- cliente pergunta pela manutenção que não foi feita.
+      --
+      -- O `entity_id` vai NULL de propósito — isto não é sobre uma ordem. O
+      -- guarda de duplicados usa (tipo, entity_id, pessoa), por isso só se
+      -- repete depois de alguém ler o primeiro aviso.
+      IF to_regprocedure('public.ops_notificar_coordenacao(uuid,text,text,text,text,uuid,text,uuid)')
+         IS NOT NULL THEN
+        PERFORM public.ops_notificar_coordenacao(
+          v_plano.organization_id, 'operacoes_plano_falhou',
+          'O plano ' || v_plano.codigo || ' não gerou ordens',
+          'A regra de repetição foi recusada: ' || SQLERRM
+            || ' Enquanto não for corrigida, este plano não cria trabalho.',
+          '/operacao/planos', NULL, 'urgent');
+      END IF;
     END;
   END LOOP;
 

@@ -192,6 +192,33 @@ CREATE TABLE public.anew_entity_emails (
   is_primary boolean DEFAULT false,
   created_at timestamptz DEFAULT now());
 
+-- O sino do CRM. Copiada do baseline com as colunas que nos interessam, e com
+-- os mesmos defaults — sobretudo kind, que por omissão é 'alert' e NÃO é o
+-- que o sino mostra. Um teste com o default errado passaria à mesma; é por
+-- isso que ele está aqui.
+CREATE TABLE public.notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  type text NOT NULL,
+  title text NOT NULL,
+  message text NOT NULL,
+  link text,
+  data jsonb,
+  is_read boolean DEFAULT false,
+  read_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  organization_id uuid,
+  entity_type varchar,
+  entity_id uuid,
+  priority varchar DEFAULT 'low',
+  action_type varchar,
+  action_config jsonb,
+  is_dismissed boolean NOT NULL DEFAULT false,
+  is_resolved boolean NOT NULL DEFAULT false,
+  resolved_at timestamptz,
+  resolved_reason varchar,
+  kind text NOT NULL DEFAULT 'alert');
+
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.products (id uuid PRIMARY KEY DEFAULT gen_random_uuid());

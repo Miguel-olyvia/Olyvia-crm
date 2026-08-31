@@ -145,6 +145,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/config.sql` | Montar a operação: códigos, checklists versionadas, medições, equipa | **não** |
 | `db/custos.sql` | Lançar material e serviços, do catálogo ou de uma compra | **não** (só lê `catalog_items` e `purchase_order_items`) |
 | `db/cliente-crm.sql` | Morada, telefone e contacto do cliente, vindos do CRM | **não** (só lê as tabelas de morada) |
+| `db/notificacoes.sql` | Avisar no sino do CRM: ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | **sim** — só `INSERT` em `notifications` |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -194,8 +195,9 @@ privilégios de quem a criou e ignoraria a RLS que o CRM já tem em `anew_client
 db/schema.sql          19 tabelas ops_*, RLS, permissões, as duas vistas
 db/correcoes-modelo    +7 tabelas: especialidades, horários, medições
 db/medicoes.sql        responder a leituras, com o veredicto na base
-tools/validar-*        6 validadores contra Postgres real, sem Docker
-src/domain/            regras puras — 93 testes, sem infraestrutura
+db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
+tools/validar-*        13 validadores contra Postgres real, sem Docker
+src/domain/            regras puras — 127 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
@@ -206,7 +208,7 @@ src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 93 testes a correr em pouco mais de um segundo.
+haver 127 testes a correr em pouco mais de um segundo.
 
 ### As três escritas, e só três
 
@@ -260,6 +262,7 @@ npm run supabase:rpcs-tarefas   # db/rpcs-tarefas.sql
 npm run supabase:planos         # db/planos.sql
 npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
+npm run supabase:notificacoes   # db/notificacoes.sql (antes das RPCs)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql

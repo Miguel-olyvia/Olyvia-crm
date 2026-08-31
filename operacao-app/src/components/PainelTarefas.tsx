@@ -166,6 +166,15 @@ export default function PainelTarefas({
         </p>
       )}
 
+      {/* Numa ordem agendada, responder inicia-a. Dizer isto antes evita a
+          surpresa de ver o estado mudar sozinho — automatizar um passo não é
+          esconder que ele acontece. */}
+      {permissao.pode && permissao.aviso && (
+        <p className="mt-3 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          {permissao.aviso}
+        </p>
+      )}
+
       {permissao.pode && prog.obrigatoriasPorResponder > 0 && (
         <p className="mt-3 text-xs text-slate-500">
           {prog.obrigatoriasPorResponder === 1

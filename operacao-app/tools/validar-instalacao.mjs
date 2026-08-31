@@ -1,7 +1,8 @@
 /**
  * Corre a SEQUÊNCIA DE INSTALAÇÃO inteira contra um Postgres limpo:
  *
- *     schema.sql → permissoes.sql → rpcs.sql → rpcs-tarefas.sql
+ *     schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql
+ *                 → rpcs-tarefas.sql
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
  *                 → despacho.sql → orcamentos.sql → anexos.sql
  *                 → planos-crud.sql → config.sql → custos.sql → cliente-crm.sql
@@ -96,6 +97,12 @@ await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
 
 await passo("db/permissoes.sql", ler("permissoes.sql"));
 await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
+
+// Antes das RPCs, porque são elas que chamam ops_notificar(). A chamada está
+// atrás de um to_regprocedure, por isso a ordem não parte nada — mas fora de
+// ordem os avisos ficam por enviar, e isso não dá erro nenhum.
+await passo("db/notificacoes.sql", ler("notificacoes.sql"));
+await passo("db/notificacoes.sql outra vez (idempotência)", ler("notificacoes.sql"));
 
 // A lógica na base: RPCs, triggers, planos, e as correções ao modelo.
 // A ordem importa — correcoes-modelo.sql substitui funções que planos.sql cria.
