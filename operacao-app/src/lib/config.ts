@@ -91,6 +91,7 @@ export async function gravarAtivo(a: {
   modelo?: string | null;
   numeroSerie?: string | null;
   criticidade?: string;
+  centroCustoId?: string | null;
 }): Promise<void> {
   const linha = {
     organization_id: a.orgId,
@@ -102,6 +103,8 @@ export async function gravarAtivo(a: {
     modelo: a.modelo ?? null,
     num_serie: a.numeroSerie ?? null,
     criticidade: a.criticidade ?? "normal",
+    // O centro de custo do equipamento é o que as ordens dele herdam.
+    centro_custo_id: a.centroCustoId ?? null,
   };
   const { error } = a.id
     ? await supabase.from("ops_ativo").update(linha).eq("id", a.id)

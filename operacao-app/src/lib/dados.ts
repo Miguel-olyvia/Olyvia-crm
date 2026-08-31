@@ -291,13 +291,20 @@ export interface AtivoRow {
   nome: string;
   marca: string | null;
   modelo: string | null;
+  num_serie: string | null;
   criticidade: string;
+  centro_custo_id: string | null;
+  data_instalacao: string | null;
+  garantia_ate: string | null;
 }
 
 export async function ativosDoLocal(localId: string): Promise<AtivoRow[]> {
   const { data, error } = await supabase
     .from("ops_ativo")
-    .select("id, local_id, categoria_id, codigo, nome, marca, modelo, criticidade")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
     .eq("local_id", localId)
     .eq("ativo", true)
     .order("codigo");
@@ -1514,4 +1521,48 @@ export async function fecharSeCompleta(ordemId: string): Promise<boolean> {
     return false;
   }
   return (data as { fechou?: boolean } | null)?.fechou === true;
+}
+
+/* ────────────────────────── Um local em detalhe ────────────────────────── */
+
+/** As ordens que passaram por um sítio. É a memória dele. */
+export async function ordensDoLocal(
+  orgId: string,
+  localId: string,
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(COLUNAS_ORDEM)
+    .eq("organization_id", orgId)
+    .eq("local_id", localId)
+    .order("criada_em", { ascending: false })
+    .limit(limite);
+
+  rebentar("carregar as ordens do local", error);
+  return (data ?? []) as unknown as LinhaOrdem[];
+}
+
+/**
+ * O caminho desde a raiz até este local: Cliente › Torre › Piso › Espaço.
+ *
+ * Pura, e a partir da lista que a página já tem — não vale um pedido à base
+ * para subir três níveis. Pára a subir se encontrar um ciclo: dados errados
+ * não podem pendurar o ecrã.
+ */
+export function caminhoAteLocal(
+  locais: readonly LocalRow[],
+  localId: string
+): LocalRow[] {
+  const porId = new Map(locais.map((l) => [l.id, l]));
+  const caminho: LocalRow[] = [];
+  const vistos = new Set<string>();
+
+  let atual = porId.get(localId);
+  while (atual && !vistos.has(atual.id)) {
+    vistos.add(atual.id);
+    caminho.unshift(atual);
+    atual = atual.parent_id ? porId.get(atual.parent_id) : undefined;
+  }
+  return caminho;
 }

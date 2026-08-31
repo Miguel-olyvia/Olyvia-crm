@@ -80,14 +80,12 @@ console.log("\n─── os tipos de trabalho ───────────�
       WHERE organization_id = $1 AND codigo = 'PMP'`, [ORG]);
   conferir(pmp.n === 3, "o código PMP repete-se em três tipos, como na realidade");
 
-  const rot = await um(
-    `SELECT fecha_automatico FROM public.ops_tipo_trabalho
-      WHERE organization_id = $1 AND nome = 'Rotina'`, [ORG]);
-  conferir(rot.fecha_automatico === true, "a Rotina fecha-se sozinha");
-  const obra = await um(
-    `SELECT fecha_automatico FROM public.ops_tipo_trabalho
-      WHERE organization_id = $1 AND nome = 'Obra'`, [ORG]);
-  conferir(obra.fecha_automatico === false, "a Obra não");
+  // Nenhum fecha sozinho à nascença. Um palpite meu a fechar ordens de onze
+  // empresas seria pior do que um interruptor por ligar.
+  const auto = await um(
+    `SELECT count(*)::int AS n FROM public.ops_tipo_trabalho
+      WHERE organization_id = $1 AND fecha_automatico`, [ORG]);
+  conferir(auto.n === 0, "nenhum tipo fecha ordens sozinho sem alguém o ter decidido");
 }
 
 console.log("\n─── os campos na ordem ──────────────────");

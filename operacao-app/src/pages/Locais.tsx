@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import {
   ErroDeDados,
@@ -293,7 +294,17 @@ function PainelLocal({
       <p className="text-[11px] uppercase tracking-wider text-slate-400">
         {clientes.get(local.cliente_id) ?? "—"}
       </p>
-      <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-900">{local.nome}</h2>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-900">{local.nome}</h2>
+        {/* Este painel é para consultar de relance. Quem quiser trabalhar no
+            sítio — acrescentar equipamentos, ver o histórico — abre a ficha. */}
+        <Link
+          to={`/locais/${local.codigo}`}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+        >
+          Abrir ficha <ChevronRight width={12} height={12} />
+        </Link>
+      </div>
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs tabular text-slate-500">{local.codigo}</span>
         <Badge>{local.tipo}</Badge>

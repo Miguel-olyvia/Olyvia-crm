@@ -11,6 +11,7 @@ import Ordens from "./pages/Ordens";
 // arranque leve para quem abre a app no telemóvel, em obra.
 const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
+const LocalDetalhe = lazy(() => import("./pages/LocalDetalhe"));
 const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 const Orcamentos = lazy(() => import("./pages/Orcamentos"));
 const Relatorio = lazy(() => import("./pages/Relatorio"));
@@ -111,6 +112,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar os locais…" />}>
               <Locais />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/locais/:codigo"
+          element={
+            <Suspense fallback={<Spinner label="A carregar o local…" />}>
+              <LocalDetalhe />
             </Suspense>
           }
         />

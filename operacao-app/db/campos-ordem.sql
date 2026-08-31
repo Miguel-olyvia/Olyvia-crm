@@ -163,10 +163,14 @@ BEGIN
   INSERT INTO public.ops_tipo_trabalho
     (organization_id, codigo, nome, posicao, fecha_automatico)
   VALUES
-    -- `fecha_automatico` ligado só onde o trabalho é repetitivo e curto: uma
-    -- rotina cumprida é uma rotina fechada. Uma obra não.
+    -- Nenhum fecha sozinho à nascença, de propósito.
+    --
+    -- Cheguei a semear a Rotina com o fecho ligado, por palpite. Quem conhece
+    -- a operação disse que não sabia qual devia ser — e um palpite meu a
+    -- fechar ordens de onze empresas é pior do que um interruptor por ligar.
+    -- Liga-se em Definições › Tipos e custos, por tipo, quando se souber.
     (_org_id, 'PMP',       'Preventiva',             1, false),
-    (_org_id, 'ROT',       'Rotina',                 2, true),
+    (_org_id, 'ROT',       'Rotina',                 2, false),
     (_org_id, 'PMP',       'Ponto zero',             3, false),
     (_org_id, 'AUDIT',     'Auditoria',              4, false),
     (_org_id, 'MELHORIA',  'Melhoria',               5, false),
