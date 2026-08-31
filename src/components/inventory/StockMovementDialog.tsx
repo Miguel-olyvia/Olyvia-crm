@@ -70,6 +70,10 @@ interface MovementLine {
   itemSuppliers: ItemSupplierOption[];
   itemSuppliersLoaded: boolean;
   error?: string;
+  // Estado da linha na Encomenda Cliente de origem, quando a linha foi
+  // pré-preenchida a partir de lá — só para mostrar aviso, não bloqueia nada
+  // (o utilizador pode sempre confirmar/editar/remover manualmente).
+  sourceLineStatus?: "servido_por_stock" | "recebido" | "a_aguardar_encomenda" | "sem_fornecedor";
 }
 
 const makeEmptyLine = (productId = ""): MovementLine => ({
@@ -136,6 +140,7 @@ export default function StockMovementDialog({
   const [clientOrderId, setClientOrderId] = useState("");
   const [clientOrders, setClientOrders] = useState<ClientOrderOption[]>([]);
   const [clientOrdersLoaded, setClientOrdersLoaded] = useState(false);
+  const [clientOrderLoading, setClientOrderLoading] = useState(false);
 
   const isProductLocked = Boolean(defaultProductId);
   const isWarehouseLocked = Boolean(defaultWarehouseId) && movementType !== "transferencia";
@@ -205,6 +210,52 @@ export default function StockMovementDialog({
     })();
   }, [open, movementType, organizationId, clientOrdersLoaded]);
 
+  // Pré-preenchimento (pedido do utilizador, 2026-08-31): ao escolher a
+  // Encomenda Cliente, as linhas de produto passam a preencher-se sozinhas a
+  // partir do documento (rpc_get_client_order_document, Fase 5.0F) — em vez
+  // de o profissional ter de escolher produto a produto. Continua totalmente
+  // editável a seguir (adicionar/remover/mudar quantidade) — proteção para
+  // quando o preenchimento automático não é o que se quer, ou falha.
+  const handleClientOrderChange = async (value: string) => {
+    const id = value === "none" ? "" : value;
+    setClientOrderId(id);
+    if (!id) return;
+
+    setClientOrderLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('rpc_get_client_order_document', {
+        p_contract_id: id,
+      } as any);
+      if (error) throw error;
+
+      const doc = data as any;
+      const docLines = (doc?.lines as any[]) || [];
+      if (docLines.length === 0) {
+        toast({ title: "Encomenda sem linhas de produto", description: "Não há produtos associados a este contrato — adiciona manualmente.", variant: "destructive" });
+        return;
+      }
+
+      setLines(docLines.map((l) => ({
+        ...makeEmptyLine(l.product_id),
+        quantity: String(l.quantity ?? ""),
+        sourceLineStatus: l.line_status,
+      })));
+
+      const alreadyServed = docLines.filter((l) => l.line_status === "servido_por_stock" || l.line_status === "recebido").length;
+      if (alreadyServed > 0) {
+        toast({
+          title: "Atenção — possível duplicação",
+          description: `${alreadyServed} produto(s) desta encomenda já consta(m) como servido(s)/recebido(s). Confirma antes de registar, para não descontar stock a dobrar.`,
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({ title: "Erro ao carregar a Encomenda Cliente", description: error.message, variant: "destructive" });
+    } finally {
+      setClientOrderLoading(false);
+    }
+  };
+
   // Fornecedores de uma linha concreta — carregado sob-demanda, quando o
   // produto dessa linha muda ou quando o tipo de movimento passa a precisar
   // de fornecedor (entrada/devolução).
@@ -233,7 +284,7 @@ export default function StockMovementDialog({
   };
 
   const handleProductChange = (lineKey: string, productId: string) => {
-    updateLine(lineKey, { productId, itemSuppliers: [], itemSuppliersLoaded: false, itemSupplierId: "" });
+    updateLine(lineKey, { productId, itemSuppliers: [], itemSuppliersLoaded: false, itemSupplierId: "", sourceLineStatus: undefined });
     if (needsSupplier && productId) {
       loadSuppliersForLine(lineKey, productId);
     }
@@ -476,7 +527,7 @@ export default function StockMovementDialog({
           {movementType === "saida" && (
             <div>
               <Label>Encomenda Cliente de origem (opcional)</Label>
-              <Select value={clientOrderId || "none"} onValueChange={(v) => setClientOrderId(v === "none" ? "" : v)}>
+              <Select value={clientOrderId || "none"} onValueChange={handleClientOrderChange} disabled={clientOrderLoading}>
                 <SelectTrigger><SelectValue placeholder="Nenhuma — saída sem ligação a um contrato" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhuma — saída sem ligação a um contrato</SelectItem>
@@ -488,7 +539,9 @@ export default function StockMovementDialog({
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground mt-1">
-                Liga esta saída à Encomenda Cliente que está a satisfazer — fica rastreável em "Encomendas Clientes" como prova, e o documento pode ser visto/gerado em PDF a partir de lá.
+                {clientOrderLoading
+                  ? "A carregar produtos da encomenda…"
+                  : "Liga esta saída à Encomenda Cliente que está a satisfazer — os produtos preenchem-se automaticamente abaixo (continua editável). Fica rastreável em \"Encomendas Clientes\" como prova."}
               </p>
             </div>
           )}
@@ -588,6 +641,13 @@ export default function StockMovementDialog({
                       onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
                     />
                   </div>
+                )}
+
+                {(line.sourceLineStatus === "servido_por_stock" || line.sourceLineStatus === "recebido") && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    Esta linha já consta como {line.sourceLineStatus === "servido_por_stock" ? "servida por stock" : "recebida"} na Encomenda Cliente — confirma que não é duplicação antes de registar.
+                  </p>
                 )}
 
                 {line.error && (
