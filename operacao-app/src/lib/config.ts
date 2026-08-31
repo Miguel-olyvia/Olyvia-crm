@@ -58,6 +58,8 @@ export async function gravarLocal(l: {
   tipo: string;
   parentId?: string | null;
   morada?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }): Promise<void> {
   const linha = {
     organization_id: l.orgId,
@@ -67,6 +69,10 @@ export async function gravarLocal(l: {
     tipo: l.tipo,
     parent_id: l.parentId ?? null,
     morada: l.morada ?? null,
+    // Meia coordenada não é um sítio: ou vão as duas, ou vai nulo nas duas.
+    // A base tem a mesma regra em `ops_local_coordenadas_validas`.
+    latitude: l.latitude ?? null,
+    longitude: l.longitude ?? null,
   };
   const { error } = l.id
     ? await supabase.from("ops_local").update(linha).eq("id", l.id)

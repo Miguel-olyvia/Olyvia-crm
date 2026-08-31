@@ -42,6 +42,8 @@ import {
   cx,
 } from "../components/ui";
 import PainelPacks from "../components/PainelPacks";
+import CampoDeMapa from "../components/CampoDeMapa";
+import { coordenadasValidas, type Coordenadas } from "../domain/mapa";
 import { Building, Check, Layers, Plus, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
 import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
@@ -324,6 +326,12 @@ function FormLocal({
   const [tipo, setTipo] = useState(local?.tipo ?? "espaco");
   const [clienteId, setClienteId] = useState(local?.cliente_id ?? "");
   const [parentId, setParentId] = useState(local?.parent_id ?? "");
+  const [morada, setMorada] = useState(local?.morada ?? "");
+  const [coords, setCoords] = useState<Coordenadas | null>(
+    local && coordenadasValidas(local.latitude, local.longitude)
+      ? { latitude: local.latitude as number, longitude: local.longitude as number }
+      : null
+  );
   const { aGravar, erro, gravar } = useGravar();
 
   // O código gera-se sozinho para quem cria. Obrigar alguém a inventar um
@@ -353,6 +361,9 @@ function FormLocal({
                     nome: nome.trim(),
                     tipo,
                     parentId: parentId || null,
+                    morada: morada.trim() || null,
+                    latitude: coords?.latitude ?? null,
+                    longitude: coords?.longitude ?? null,
                   }),
                 aoGravar
               )
@@ -408,6 +419,13 @@ function FormLocal({
             />
           </Field>
         </div>
+
+        <CampoDeMapa
+          valor={coords}
+          aoMudar={setCoords}
+          morada={morada}
+          aoMudarMorada={setMorada}
+        />
 
         {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
       </div>

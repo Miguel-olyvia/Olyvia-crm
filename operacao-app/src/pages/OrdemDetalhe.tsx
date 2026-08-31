@@ -5,6 +5,8 @@ import { supabase } from "../lib/supabase";
 import {
   ErroDeDados,
   alvosDaOrdem,
+  localDaOrdem,
+  type LocalRow,
   listarClientes,
   listarEquipa,
   medicoesDaOrdem,
@@ -42,6 +44,7 @@ import {
   Field,
   cx,
 } from "../components/ui";
+import { linkParaIr, temSitio } from "../domain/mapa";
 import {
   AlertTriangle,
   Check,
@@ -82,6 +85,7 @@ export default function OrdemDetalhe() {
 
   const [ordem, setOrdem] = useState<OrdemCompleta | null>(null);
   const [alvos, setAlvos] = useState<AlvoDaOrdem[]>([]);
+  const [local, setLocal] = useState<LocalRow | null>(null);
   const [tarefas, setTarefas] = useState<TarefaDaOrdem[]>([]);
   const [sessoes, setSessoes] = useState<SessaoDaOrdem[]>([]);
   const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
@@ -115,8 +119,9 @@ export default function OrdemDetalhe() {
         setOrdem(null);
         return;
       }
-      const [als, tfs, sss, eq, cls, pes] = await Promise.all([
+      const [als, loc, tfs, sss, eq, cls, pes] = await Promise.all([
         alvosDaOrdem(o.id),
+        localDaOrdem(o.local_id),
         tarefasDaOrdem(o.id),
         sessoesDaOrdem(o.id),
         listarEquipa(activeOrgId),
@@ -142,6 +147,7 @@ export default function OrdemDetalhe() {
 
       setOrdem(o);
       setAlvos(als);
+      setLocal(loc);
       setTarefas(tfs);
       setSessoes(sss);
       setMedicoes(meds);
@@ -365,6 +371,30 @@ export default function OrdemDetalhe() {
       {/* Contexto — campos próprios, não texto solto nas observações */}
       <Card className="divide-y divide-slate-100">
         <Linha rotulo="Cliente" valor={cliente ?? "—"} />
+        {/* Onde é, e o botão que o técnico carrega no carro: abre a navegação
+            já apontada. Usa o ponto no mapa quando o local o tem — uma morada
+            escrita à mão tem gralhas e ruas com o mesmo nome noutra cidade. */}
+        {local && temSitio(local) && (
+          <div className="flex items-start gap-3 px-4 py-2.5 sm:px-5">
+            <span className="w-36 shrink-0 text-xs uppercase tracking-wide text-slate-400">
+              Onde é
+            </span>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="min-w-0 text-sm text-slate-700">
+                {local.morada?.trim() || local.nome}
+              </span>
+              <a
+                href={linkParaIr(local) ?? "#"}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+              >
+                <MapPin width={13} height={13} />
+                Como lá chegar
+              </a>
+            </div>
+          </div>
+        )}
         {responsavel && (
           <Linha
             rotulo="Responsável"

@@ -239,19 +239,43 @@ export interface LocalRow {
   codigo: string;
   nome: string;
   tipo: string;
+  morada: string | null;
   cidade: string | null;
   zona: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * As coordenadas como número, venham elas como vierem.
+ *
+ * Na base são `numeric`, e um `numeric` chega aqui como número — mas há
+ * versões do PostgREST que o mandam como texto, para não perder casas. Se isso
+ * acontecesse, o botão de navegação desaparecia sem nada explicar: as guardas
+ * em `domain/mapa.ts` exigem número, e exigem bem. Normaliza-se à entrada, uma
+ * vez, e o resto do código deixa de ter de saber disto.
+ */
+function comCoordenadas(l: LocalRow): LocalRow {
+  const n = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : null;
+  };
+  return { ...l, latitude: n(l.latitude), longitude: n(l.longitude) };
 }
 
 export async function listarLocais(orgId: string): Promise<LocalRow[]> {
   const { data, error } = await supabase
     .from("ops_local")
-    .select("id, parent_id, cliente_id, codigo, nome, tipo, cidade, zona")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, " +
+        "latitude, longitude"
+    )
     .eq("organization_id", orgId)
     .eq("ativo", true)
     .order("nome");
   rebentar("carregar os locais", error);
-  return (data ?? []) as unknown as LocalRow[];
+  return ((data ?? []) as unknown as LocalRow[]).map(comCoordenadas);
 }
 
 export interface AtivoRow {
@@ -1374,4 +1398,27 @@ function isoDia(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
     d.getDate()
   ).padStart(2, "0")}`;
+}
+
+/**
+ * O local de uma ordem, com a morada e o ponto no mapa.
+ *
+ * Só isto — a ficha da ordem não precisa da árvore toda de locais para
+ * desenhar um botão de navegação.
+ */
+export async function localDaOrdem(localId: string | null): Promise<LocalRow | null> {
+  if (!localId) return null;
+  const { data, error } = await supabase
+    .from("ops_local")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, latitude, longitude"
+    )
+    .eq("id", localId)
+    .maybeSingle();
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem o local da ordem:", error.message);
+    return null;
+  }
+  return data ? comCoordenadas(data as unknown as LocalRow) : null;
 }

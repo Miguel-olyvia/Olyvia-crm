@@ -52,7 +52,7 @@ fora do módulo**. Há um teste que falha se alguém criar uma.
 
 | Tabela | O que guarda |
 |---|---|
-| `ops_local` | **auto-referencial**: morada › edifício › piso › espaço, tantos níveis quantos fizerem falta |
+| `ops_local` | **auto-referencial**: morada › edifício › piso › espaço, tantos níveis quantos fizerem falta. Pode ter coordenadas (`mapa.sql`) — e então o técnico abre a navegação a partir da ordem |
 | `ops_categoria_ativo` | tipos de equipamento (Extintor, AVAC, Elevador) |
 | `ops_ativo` | os equipamentos, com marca, modelo, série, criticidade |
 
@@ -272,10 +272,11 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-custos` | material e serviços, e que o técnico não vê custo/hora |
 | `validar-cliente-crm` | morada e contacto, sem escrever no CRM |
 | `validar-assinaturas` | uma assinatura só se recolhe onde e por quem devia |
+| `validar-mapa` | a base só aceita coordenadas que são um sítio no mapa |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **202 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **243 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em pouco mais de um segundo.
 
 ---
@@ -288,7 +289,8 @@ testado, e foi a razão de um deploy falhado.
 ```
 schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
-  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → planos-crud.sql
+  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
+  → planos-crud.sql
   → config.sql → packs.sql → custos.sql → analises.sql → cliente-crm.sql
   → pos-instalacao.sql
 ```

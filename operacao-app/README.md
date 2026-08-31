@@ -150,6 +150,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita, e os compromissos que já estão na agenda do CRM | **não** (só lê 6 tabelas de agenda) |
 | `db/packs.sql` | Três packs de setor prontos a instalar: Manutenção, Obras, Limpeza | **não** |
 | `db/assinaturas.sql` | A assinatura do cliente, recolhida no telemóvel do técnico | **não** (a imagem vai para o bucket que o `anexos.sql` criou) |
+| `db/mapa.sql` | Onde fica o local, no mapa — para o técnico abrir a navegação e ir | **não** (duas colunas em `ops_local`, e mais nada) |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
@@ -275,6 +276,7 @@ npm run supabase:analises       # db/analises.sql
 npm run supabase:agenda         # db/agenda.sql (antes do despacho)
 npm run supabase:packs          # db/packs.sql (depois do config)
 npm run supabase:assinaturas    # db/assinaturas.sql (depois dos anexos)
+npm run supabase:mapa           # db/mapa.sql (coordenadas dos locais)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
