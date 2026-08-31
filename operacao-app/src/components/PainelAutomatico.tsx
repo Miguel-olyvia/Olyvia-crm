@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { Button, Card, ErrorState, Skeleton, cx } from "./ui";
+import { Button, Card, ErrorState, Skeleton } from "./ui";
 import { AlertTriangle, Check, Clock, Mail } from "./icons";
 import { ErroDeDados, definirDefinicao, lerDefinicoes } from "../lib/dados";
 
@@ -16,12 +16,17 @@ import { ErroDeDados, definirDefinicao, lerDefinicoes } from "../lib/dados";
  * e o ecrã diz por extenso o que acontece quando se liga.
  */
 export default function PainelAutomatico() {
-  const { activeOrgId, funcao } = useAuth();
+  const { activeOrgId, funcao, orgs } = useAuth();
   const [ligado, setLigado] = useState<boolean | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [aGravar, setAGravar] = useState(false);
 
   const podeMudar = funcao === "admin" || funcao === "gestor";
+
+  // Isto é por organização, e quem tem várias liga numa a pensar que ligou em
+  // todas — aconteceu na primeira vez que alguém usou este ecrã. O nome fica
+  // à vista, sempre, mesmo quando só há uma empresa.
+  const nomeDaOrg = orgs.find((o) => o.id === activeOrgId)?.name ?? null;
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -66,6 +71,13 @@ export default function PainelAutomatico() {
               <Mail width={15} height={15} className="text-slate-400" />
               Mandar o relatório ao cliente
             </h2>
+            {nomeDaOrg && (
+              <p className="mt-0.5 text-xs text-slate-500">
+                {ligado ? "Ligado" : "Desligado"} em{" "}
+                <strong className="font-semibold text-slate-700">{nomeDaOrg}</strong>. Cada empresa
+                tem o seu interruptor — ligar aqui não liga nas outras.
+              </p>
+            )}
             <p className="mt-1 text-sm leading-relaxed text-slate-600">
               Quando uma ordem é <strong className="font-medium">confirmada</strong>, o cliente
               recebe por email o que foi feito — sem ninguém se lembrar de o mandar.
@@ -73,14 +85,6 @@ export default function PainelAutomatico() {
           </div>
 
           <div className="flex shrink-0 items-center gap-3">
-            <span
-              className={cx(
-                "text-xs font-medium",
-                ligado ? "text-emerald-700" : "text-slate-400"
-              )}
-            >
-              {ligado ? "Ligado" : "Desligado"}
-            </span>
             <Button
               variant={ligado ? "secondary" : "primary"}
               size="sm"
