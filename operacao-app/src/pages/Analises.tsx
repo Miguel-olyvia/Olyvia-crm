@@ -11,6 +11,7 @@ import {
   type AtivoComLocal,
   type Cliente,
 } from "../lib/dados";
+import PainelExportar from "../components/PainelExportar";
 import {
   Badge,
   Barra,
@@ -57,7 +58,7 @@ import {
  * percentagem sozinha nunca responde à pergunta seguinte — "quais falharam?".
  */
 
-type Aba = "pmp" | "ativo";
+type Aba = "pmp" | "ativo" | "medicoes";
 
 /** Os últimos 12 meses, que é o período de que um contrato fala. */
 function periodoPorOmissao(): { desde: string; ate: string } {
@@ -97,6 +98,7 @@ export default function Analises() {
         {([
           ["pmp", "Manutenção preventiva"],
           ["ativo", "Equipamento"],
+          ["medicoes", "Exportar medições"],
         ] as const).map(([id, rotulo]) => (
           <button
             key={id}
@@ -115,7 +117,9 @@ export default function Analises() {
         ))}
       </nav>
 
-      {aba === "pmp" ? <PainelPmp orgId={activeOrgId} /> : <PainelAtivo orgId={activeOrgId} />}
+      {aba === "pmp" && <PainelPmp orgId={activeOrgId} />}
+      {aba === "ativo" && <PainelAtivo orgId={activeOrgId} />}
+      {aba === "medicoes" && <PainelExportar orgId={activeOrgId} />}
     </div>
   );
 }

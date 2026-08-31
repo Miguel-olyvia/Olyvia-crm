@@ -311,7 +311,7 @@ Assumindo que o piloto corre e a equipa fica a usar:
    mapa nenhuma: `schedule_resources.user_id` já aponta para `anew_users.id`
 5. ~~**PMP cumprido**~~ — **feito** (31 ago). `/analises` › Manutenção preventiva
 6. **Assinatura do cliente no telemóvel** — troca papel por prova
-7. **Exportar medições** — para quem tem de entregar dados a uma entidade reguladora
+7. ~~**Exportar medições**~~ — **feito** (31 ago). `/analises` › Exportar medições
 8. **Offline** — quando o piloto disser quantas vezes falhou por falta de rede
 
 E, em paralelo, o **formulário público mandado por WhatsApp** — como teste

@@ -1020,11 +1020,6 @@ const POR_FAZER = [
       "o relatório tem uma linha para assinar à caneta. O Olyvia já sabe recolher assinaturas com validade legal — falta ligar as duas coisas.",
   },
   {
-    o: "Exportar medições para folha de cálculo",
-    porque:
-      "para quem tem de entregar leituras a uma entidade reguladora. Os dados estão todos gravados.",
-  },
-  {
     o: "Packs de configuração por setor",
     porque: "hoje monta-se tudo à mão em Definições. Funciona, mas dá trabalho no primeiro dia.",
   },

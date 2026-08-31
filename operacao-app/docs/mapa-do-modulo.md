@@ -23,7 +23,7 @@ Dez ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
-| `/analises` · **Análises** | PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras. | **admin, gestor, operador** |
+| `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
 | `/definicoes` · **Definições** | Equipa, locais, categorias, medições, checklists, códigos. | quem coordena |
 | `/ajuda` · **Ajuda** | Três portas: porquê mudar (para quem decide), como funciona, como se usa. | todos |
 
@@ -104,6 +104,7 @@ gente — sem dar erro, só com mais linhas.
 | `ops_v_ativo_intervencao` | todas as visitas a um equipamento |
 | `ops_v_ativo_leitura` | todas as leituras feitas a um equipamento |
 | `ops_v_pmp` | uma linha por ordem preventiva prevista, com `cumprida` · `a_horas` · `em_atraso` |
+| `ops_v_leitura` | **todas** as leituras com o contexto numa linha, para exportar. Não exige equipamento — uma medição a um local conta na mesma |
 
 ---
 

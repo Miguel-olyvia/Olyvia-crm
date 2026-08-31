@@ -1077,3 +1077,76 @@ export async function avisarAtrasos(): Promise<number> {
   if (error) throw new ErroDeEscrita(error.message);
   return (data as unknown as { avisos?: number })?.avisos ?? 0;
 }
+
+/* ────────────────────── Exportar leituras ────────────────────── */
+
+/** Uma leitura com o contexto todo, como sai de `ops_v_leitura`. */
+export interface LeituraExportavel {
+  leitura_id: string;
+  ordem: string;
+  cliente_id: string;
+  medicao_def_id: string;
+  nome: string;
+  tipo: string;
+  unidade: string | null;
+  limite_min: number | null;
+  limite_max: number | null;
+  valor_num: number | null;
+  valor_texto: string | null;
+  conforme: boolean | null;
+  lida_em: string;
+  lida_por: string | null;
+  tarefa: string | null;
+  local: string | null;
+  local_codigo: string | null;
+  ativo: string | null;
+  ativo_codigo: string | null;
+}
+
+/** O PostgREST devolve no máximo 1000 linhas de cada vez. */
+const PAGINA = 1000;
+
+/**
+ * Todas as leituras que satisfazem os filtros — **todas**, não as primeiras mil.
+ *
+ * Sem a paginação, uma exportação de dois anos de leituras vinha cortada nas
+ * 1000 primeiras linhas sem erro nenhum, e quem a entregasse a um regulador não
+ * dava por isso. É por isso que o `while` existe.
+ *
+ * `limite` existe para o caso patológico: se alguém pedir dez anos de tudo, é
+ * melhor parar e dizer que é demais do que ficar a puxar páginas para sempre.
+ */
+export async function leiturasParaExportar(
+  orgId: string,
+  filtros: { defId?: string | null; clienteId?: string | null; desde: string; ate: string },
+  limite = 50_000
+): Promise<{ linhas: LeituraExportavel[]; truncado: boolean }> {
+  const linhas: LeituraExportavel[] = [];
+
+  for (let inicio = 0; inicio < limite; inicio += PAGINA) {
+    let q = supabase
+      .from("ops_v_leitura")
+      .select(
+        "leitura_id, ordem, cliente_id, medicao_def_id, nome, tipo, unidade, " +
+          "limite_min, limite_max, valor_num, valor_texto, conforme, lida_em, " +
+          "lida_por, tarefa, local, local_codigo, ativo, ativo_codigo"
+      )
+      .eq("organization_id", orgId)
+      .gte("lida_em", filtros.desde)
+      .lte("lida_em", filtros.ate)
+      .order("lida_em")
+      .range(inicio, inicio + PAGINA - 1);
+
+    if (filtros.defId) q = q.eq("medicao_def_id", filtros.defId);
+    if (filtros.clienteId) q = q.eq("cliente_id", filtros.clienteId);
+
+    const { data, error } = await q;
+    rebentar("carregar as leituras", error);
+
+    const pagina = (data ?? []) as unknown as LeituraExportavel[];
+    linhas.push(...pagina);
+    if (pagina.length < PAGINA) return { linhas, truncado: false };
+  }
+
+  return { linhas, truncado: true };
+}

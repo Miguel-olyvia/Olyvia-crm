@@ -146,6 +146,56 @@ WHERE o.origem = 'preventiva'
 
 
 -- ============================================================
+-- 3b. Todas as leituras, para quem tem de as entregar a alguém
+-- ============================================================
+-- Um extintor tem uma inspeção obrigatória; uma caldeira tem um registo que a
+-- seguradora pede. Quem faz manutenção tem, mais vezes do que se pensa, de
+-- entregar leituras a uma entidade de fora.
+--
+-- Ao contrário de `ops_v_ativo_leitura`, esta não exige que a leitura esteja
+-- ligada a um equipamento: uma medição feita a um local — a temperatura de uma
+-- câmara frigorífica, o caudal de uma conduta — conta na mesma. Filtrar por
+-- ativo deixaria essas de fora, e é exatamente para essas que o regulador
+-- costuma escrever.
+--
+-- Traz o contexto todo numa linha, porque uma folha de cálculo não faz joins:
+-- quando, onde, o quê, quanto, e quem leu.
+
+CREATE OR REPLACE VIEW public.ops_v_leitura
+WITH (security_invoker = true) AS
+SELECT
+  m.id             AS leitura_id,
+  o.organization_id,
+  o.cliente_id,
+  o.id             AS ordem_id,
+  o.codigo         AS ordem,
+  m.medicao_def_id,
+  m.nome,
+  m.tipo,
+  m.unidade,
+  m.limite_min,
+  m.limite_max,
+  m.valor_num,
+  m.valor_texto,
+  m.conforme,
+  m.lida_em,
+  m.lida_por,
+  t.nome           AS tarefa,
+  l.nome           AS local,
+  l.codigo         AS local_codigo,
+  a.nome           AS ativo,
+  a.codigo         AS ativo_codigo
+FROM public.ops_ordem_tarefa_medicao m
+JOIN public.ops_ordem_tarefa t ON t.id = m.ordem_tarefa_id
+JOIN public.ops_ordem o        ON o.id = t.ordem_id
+LEFT JOIN public.ops_ordem_alvo oa ON oa.id = t.ordem_alvo_id
+LEFT JOIN public.ops_ativo a       ON a.id = oa.ativo_id
+LEFT JOIN public.ops_local l       ON l.id = COALESCE(oa.local_id, o.local_id)
+WHERE m.lida_em IS NOT NULL
+  AND o.estado <> 'cancelada';
+
+
+-- ============================================================
 -- 4. As vistas ficam legíveis a quem tem sessão
 -- ============================================================
 -- A RLS das tabelas por baixo é que decide o que cada pessoa vê. Estas
@@ -154,10 +204,12 @@ WHERE o.origem = 'preventiva'
 GRANT SELECT ON public.ops_v_ativo_intervencao TO authenticated;
 GRANT SELECT ON public.ops_v_ativo_leitura     TO authenticated;
 GRANT SELECT ON public.ops_v_pmp               TO authenticated;
+GRANT SELECT ON public.ops_v_leitura           TO authenticated;
 
 REVOKE ALL ON public.ops_v_ativo_intervencao FROM anon;
 REVOKE ALL ON public.ops_v_ativo_leitura     FROM anon;
 REVOKE ALL ON public.ops_v_pmp               FROM anon;
+REVOKE ALL ON public.ops_v_leitura           FROM anon;
 
 
 -- ============================================================
@@ -173,13 +225,14 @@ DECLARE
 BEGIN
   SELECT count(*) INTO v
     FROM pg_class
-   WHERE relname IN ('ops_v_ativo_intervencao', 'ops_v_ativo_leitura', 'ops_v_pmp')
+   WHERE relname IN ('ops_v_ativo_intervencao', 'ops_v_ativo_leitura',
+                     'ops_v_pmp', 'ops_v_leitura')
      AND relkind = 'v'
      AND 'security_invoker=true' = ANY (reloptions);
 
-  IF v <> 3 THEN
+  IF v <> 4 THEN
     RAISE EXCEPTION
-      'Só % das 3 vistas de análise têm security_invoker — as outras mostrariam dados de outras organizações.', v;
+      'Só % das 4 vistas de análise têm security_invoker — as outras mostrariam dados de outras organizações.', v;
   END IF;
 
   RAISE NOTICE 'Operações: análises prontas (histórico do ativo, leituras, PMP).';
