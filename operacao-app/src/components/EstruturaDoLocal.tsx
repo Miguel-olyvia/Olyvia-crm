@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   removerAtivo,
   removerLocal,
@@ -7,14 +6,18 @@ import {
   type CentroCusto,
 } from "../lib/config";
 import { ErroDeEscrita, type AtivoRow, type Cliente, type LocalRow } from "../lib/dados";
+import { arvoreDe, type ComFilhos } from "../domain/arvore-de-locais";
+import { Button, Card, ConfirmDialog, Input, cx } from "./ui";
 import {
-  Button,
-  Card,
-  ConfirmDialog,
-  Input,
-  cx,
-} from "./ui";
-import { Building, ChevronRight, Layers, MapPin, Plus, Search, X } from "./icons";
+  Building,
+  ChevronDown,
+  ChevronRight,
+  Layers,
+  MapPin,
+  Plus,
+  Search,
+  X,
+} from "./icons";
 import { IconeDoAtivo } from "./IconeDeLinha";
 import FormAtivoDoLocal from "./FormAtivoDoLocal";
 import FormLocal from "./FormLocal";
@@ -22,30 +25,33 @@ import EtiquetasQR from "./EtiquetasQR";
 import HistoricoDoAtivo from "./Historico";
 
 /**
- * O que está dentro de um sítio, com os degraus à vista.
+ * A morada inteira, num ecrã só.
  *
- * Antes eram dois cartões que não se falavam: uma grelha de "sítios lá
- * dentro" e, por baixo, uma lista de equipamentos só do próprio sítio. Para
- * saber o que havia na garagem era preciso ir à ficha da garagem — e para
- * comparar dois pisos, duas viagens.
+ * ⚠ **Um espaço não tem página própria, e é de propósito.** Quem usou isto
+ * disse-o assim: "não faz sentido cada sítio e cada espaço ter a sua página".
+ * Tinha razão — para meter um extintor na box 12 da garagem eram três cliques
+ * e três carregamentos de página, e a meio já ninguém sabia onde estava.
  *
- * Agora é uma árvore de dois degraus, que é a forma como as pessoas falam do
- * assunto:
+ * Agora abre-se a morada e vê-se tudo, a qualquer profundidade:
  *
- *     Torre A
- *       ├── os equipamentos da própria Torre A
- *       ├── Garagem −1
- *       │     └── os equipamentos da garagem
- *       └── Piso 3
- *             └── os equipamentos do piso 3
+ *     ▼ Torre A                        [+ Equipamento] [+ Espaço]
+ *         EXT-0001 · Extintor da entrada
+ *       ▼ Garagem −1                   [+ Equipamento] [+ Espaço] [editar] [✕]
+ *           EXT-0004 · Extintor da rampa
+ *         ▸ Box 12
+ *       ▸ Piso 3
  *
- * Mais fundo do que isto não se desenha aqui: abre-se a ficha do espaço, e
- * ele mostra os dele. Um ecrã que tenta mostrar sete níveis não mostra
- * nenhum.
+ * Cada degrau gere-se onde está: acrescentar um equipamento, abrir um espaço
+ * lá dentro, mudar o nome, remover. Sem mudar de página, e sem perder de vista
+ * onde se está.
  *
- * ⚠ **Remover nunca apaga.** Põe `ativo = false` e o item sai das listas. As
- * ordens que apontam para ele ficam intactas — e há uma gaveta "removidos"
- * em baixo para o trazer de volta. Ver `removerAtivo` em `lib/config.ts`.
+ * Duas decisões que vale a pena saber:
+ *
+ *  - **Remover nunca apaga.** Põe `ativo = false` e o item sai das listas. As
+ *    ordens que apontam para ele ficam intactas — um `DELETE` ia em cascata
+ *    pelo histórico. Há uma gaveta em baixo para repor.
+ *  - **Um espaço com coisas lá dentro não se remove.** O diálogo deixa de ser
+ *    um botão vermelho e passa a dizer o que fazer primeiro.
  */
 
 const COR_CRITICIDADE: Record<string, string> = {
@@ -59,9 +65,14 @@ type APedirConfirmacao =
   | { tipo: "ativo"; id: string; nome: string }
   | { tipo: "espaco"; id: string; nome: string; quantos: number };
 
+/** Um espaço com coisas lá dentro não se remove: ficariam sem casa. */
+function naoDaParaRemover(o: APedirConfirmacao): boolean {
+  return o.tipo === "espaco" && o.quantos > 0;
+}
+
 export default function EstruturaDoLocal({
-  local,
-  filhos,
+  raiz,
+  daArvore,
   ativos,
   removidos,
   espacosRemovidos,
@@ -70,12 +81,16 @@ export default function EstruturaDoLocal({
   clientes,
   podeEditar,
   orgId,
+  emFoco,
+  abertos,
+  alternar,
   aoGravar,
 }: {
-  local: LocalRow;
-  /** Os espaços diretamente lá dentro. */
-  filhos: readonly LocalRow[];
-  /** Os equipamentos do sítio **e** dos espaços, todos juntos. */
+  /** A morada. É a única coisa que tem página. */
+  raiz: LocalRow;
+  /** A morada e tudo o que pende dela, em lista plana. */
+  daArvore: readonly LocalRow[];
+  /** Os equipamentos de toda a árvore. */
   ativos: readonly AtivoRow[];
   removidos: readonly AtivoRow[];
   espacosRemovidos: readonly LocalRow[];
@@ -84,13 +99,18 @@ export default function EstruturaDoLocal({
   clientes: readonly Cliente[];
   podeEditar: boolean;
   orgId: string;
+  /** O espaço a que alguém chegou por link direto, para se destacar. */
+  emFoco: string | null;
+  abertos: ReadonlySet<string>;
+  alternar: (id: string) => void;
   aoGravar: () => void;
 }) {
   const [novoEm, setNovoEm] = useState<string | null>(null);
+  const [espacoEm, setEspacoEm] = useState<LocalRow | null>(null);
+  const [aEditarLocal, setAEditarLocal] = useState<LocalRow | null>(null);
   const [aEditar, setAEditar] = useState<string | null>(null);
   const [comHistorico, setComHistorico] = useState<string | null>(null);
   const [comEtiquetas, setComEtiquetas] = useState(false);
-  const [novoEspaco, setNovoEspaco] = useState(false);
   const [procura, setProcura] = useState("");
   const [aConfirmar, setAConfirmar] = useState<APedirConfirmacao | null>(null);
   const [verRemovidos, setVerRemovidos] = useState(false);
@@ -101,20 +121,29 @@ export default function EstruturaDoLocal({
     [categorias]
   );
 
-  // Uma torre tem dezenas de equipamentos por piso. A caixa de procura só
-  // aparece quando começa a fazer falta, e procura na árvore toda.
+  const arvore = useMemo(
+    () => arvoreDe(daArvore, raiz.id, (a, b) => a.nome.localeCompare(b.nome, "pt")),
+    [daArvore, raiz.id]
+  );
+
+  // A procura corre a árvore toda e abre os degraus onde encontra alguma
+  // coisa — procurar e depois ter de abrir sete gavetas à mão não é procurar.
+  const q = procura.trim().toLowerCase();
   const filtrados = useMemo(() => {
-    const q = procura.trim().toLowerCase();
     if (!q) return ativos;
     return ativos.filter((a) =>
       [a.codigo, a.nome, a.marca, a.modelo, a.num_serie, porCategoria.get(a.categoria_id ?? "")]
         .filter(Boolean)
         .some((x) => String(x).toLowerCase().includes(q))
     );
-  }, [ativos, procura, porCategoria]);
+  }, [ativos, q, porCategoria]);
 
   const daqui = (id: string) => filtrados.filter((a) => a.local_id === id);
-  const quantosNoEspaco = (id: string) => ativos.filter((a) => a.local_id === id).length;
+  const quantosNo = (id: string) => ativos.filter((a) => a.local_id === id).length;
+
+  /** Quantos equipamentos há aqui e em tudo o que pende daqui. */
+  const totalEm = (no: ComFilhos<LocalRow>): number =>
+    daqui(no.id).length + no.filhos.reduce((n, f) => n + totalEm(f), 0);
 
   const remover = async (o: APedirConfirmacao) => {
     setErro(null);
@@ -140,9 +169,9 @@ export default function EstruturaDoLocal({
     }
   };
 
-  const linhaDeAtivo = (a: AtivoRow, dono: LocalRow) =>
+  const linhaDeAtivo = (a: AtivoRow, dono: LocalRow, recuo: number) =>
     aEditar === a.id ? (
-      <li key={a.id} className="py-1">
+      <li key={a.id} className="py-1" style={{ paddingLeft: `${recuo}px` }}>
         <FormAtivoDoLocal
           orgId={orgId}
           localId={dono.id}
@@ -157,7 +186,11 @@ export default function EstruturaDoLocal({
         />
       </li>
     ) : (
-      <li key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5">
+      <li
+        key={a.id}
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 py-2 first:border-t-0"
+        style={{ paddingLeft: `${recuo}px` }}
+      >
         <IconeDoAtivo criticidade={a.criticidade} />
         <span className="w-24 shrink-0 truncate font-mono text-[11px] text-slate-400">
           {a.codigo}
@@ -221,86 +254,118 @@ export default function EstruturaDoLocal({
       </li>
     );
 
-  /** Um degrau: o cabeçalho do sítio ou do espaço, e o que está lá dentro. */
-  const bloco = (dono: LocalRow, eOProprio: boolean) => {
-    const seus = daqui(dono.id);
+  /** Um degrau da árvore, e por baixo o que ele tem. */
+  const degrau = (no: ComFilhos<LocalRow>, nivel: number) => {
+    const eRaiz = no.id === raiz.id;
+    const seus = daqui(no.id);
+    // A procura manda: um degrau com resultados abre-se sozinho.
+    const aberto = eRaiz || abertos.has(no.id) || (q !== "" && totalEm(no) > 0);
+    const daParaAbrir = no.filhos.length > 0 || seus.length > 0;
+    const recuo = nivel * 16;
+
     return (
-      <div
-        key={dono.id}
-        className={cx(
-          "rounded-lg",
-          eOProprio ? "bg-white" : "border border-slate-200 bg-slate-50/50 p-3"
-        )}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2">
-            {eOProprio ? (
-              <MapPin width={14} height={14} className="shrink-0 text-slate-400" />
+      <div key={no.id}>
+        <div
+          className={cx(
+            "flex flex-wrap items-center justify-between gap-2 rounded-lg py-1.5 pr-1 transition-colors",
+            emFoco === no.id ? "bg-brand-50 ring-1 ring-brand-200" : "hover:bg-slate-50"
+          )}
+          style={{ paddingLeft: `${recuo}px` }}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            {daParaAbrir && !eRaiz ? (
+              <button
+                type="button"
+                onClick={() => alternar(no.id)}
+                aria-label={aberto ? `Fechar ${no.nome}` : `Abrir ${no.nome}`}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:text-slate-700"
+              >
+                {aberto ? (
+                  <ChevronDown width={14} height={14} />
+                ) : (
+                  <ChevronRight width={14} height={14} />
+                )}
+              </button>
+            ) : (
+              <span className="h-6 w-6 shrink-0" />
+            )}
+
+            {eRaiz ? (
+              <MapPin width={14} height={14} className="shrink-0 text-brand" />
             ) : (
               <Building width={14} height={14} className="shrink-0 text-slate-400" />
             )}
-            {eOProprio ? (
-              <span className="text-sm font-medium text-slate-800">Neste sítio</span>
-            ) : (
-              <Link
-                to={`/locais/${dono.codigo}`}
-                className="group flex min-w-0 items-center gap-1 text-sm font-medium text-slate-800 hover:text-brand-800"
-              >
-                <span className="truncate">{dono.nome}</span>
-                <ChevronRight
-                  width={12}
-                  height={12}
-                  className="shrink-0 text-slate-300 group-hover:text-brand-700"
-                />
-              </Link>
-            )}
+
+            <span
+              className={cx(
+                "min-w-0 truncate text-sm",
+                eRaiz ? "font-semibold text-slate-900" : "font-medium text-slate-800"
+              )}
+            >
+              {no.nome}
+            </span>
+
             <span className="shrink-0 text-xs text-slate-400">
-              {seus.length === 0
-                ? "vazio"
-                : seus.length === 1
-                  ? "1 equipamento"
-                  : `${seus.length} equipamentos`}
+              {contagem(seus.length, totalEm(no))}
             </span>
           </div>
 
           {podeEditar && (
-            <div className="flex shrink-0 items-center gap-1.5">
+            <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
                 onClick={() => {
-                  setNovoEm(novoEm === dono.id ? null : dono.id);
+                  setNovoEm(novoEm === no.id ? null : no.id);
                   setAEditar(null);
                 }}
-                className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                title={`Novo equipamento em ${no.nome}`}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
               >
                 <Plus width={12} height={12} /> Equipamento
               </button>
-              {!eOProprio && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setAConfirmar({
-                      tipo: "espaco",
-                      id: dono.id,
-                      nome: dono.nome,
-                      quantos: quantosNoEspaco(dono.id),
-                    })
-                  }
-                  aria-label={`Remover ${dono.nome}`}
-                  className="flex h-6 w-6 items-center justify-center rounded text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
-                >
-                  <X width={13} height={13} />
-                </button>
+              <button
+                type="button"
+                onClick={() => setEspacoEm(no)}
+                title={`Novo espaço dentro de ${no.nome}`}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800"
+              >
+                <Plus width={12} height={12} /> Espaço
+              </button>
+              {!eRaiz && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setAEditarLocal(no)}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  >
+                    editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAConfirmar({
+                        tipo: "espaco",
+                        id: no.id,
+                        nome: no.nome,
+                        quantos: quantosNo(no.id) + no.filhos.length,
+                      })
+                    }
+                    aria-label={`Remover ${no.nome}`}
+                    className="flex h-6 w-6 items-center justify-center rounded text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
+                  >
+                    <X width={13} height={13} />
+                  </button>
+                </>
               )}
             </div>
           )}
         </div>
 
-        {novoEm === dono.id && (
-          <div className="mt-2">
+        {novoEm === no.id && (
+          <div className="py-1.5" style={{ paddingLeft: `${recuo + 24}px` }}>
             <FormAtivoDoLocal
               orgId={orgId}
-              localId={dono.id}
+              localId={no.id}
               categorias={categorias}
               centros={centros}
               aoFechar={() => setNovoEm(null)}
@@ -312,35 +377,35 @@ export default function EstruturaDoLocal({
           </div>
         )}
 
-        {seus.length > 0 ? (
-          <ul className="mt-1 divide-y divide-slate-100">
-            {seus.map((a) => linhaDeAtivo(a, dono))}
-          </ul>
-        ) : (
-          novoEm !== dono.id && (
-            <p className="mt-1.5 text-xs text-slate-400">
-              {procura.trim()
-                ? "Nada com esse nome aqui."
-                : eOProprio
-                  ? "Nada registado diretamente neste sítio. Nem tudo o que se mantém é um equipamento — o trabalho pode aplicar-se ao próprio sítio."
-                  : "Sem equipamentos."}
-            </p>
-          )
+        {aberto && (
+          <>
+            {seus.length > 0 && <ul>{seus.map((a) => linhaDeAtivo(a, no, recuo + 24))}</ul>}
+            {seus.length === 0 && novoEm !== no.id && no.filhos.length === 0 && (
+              <p
+                className="py-1.5 text-xs text-slate-400"
+                style={{ paddingLeft: `${recuo + 24}px` }}
+              >
+                {q ? "Nada com esse nome aqui." : "Sem equipamentos."}
+              </p>
+            )}
+            {no.filhos.map((f) => degrau(f, nivel + 1))}
+          </>
         )}
       </div>
     );
   };
 
-  // Um espaço com equipamentos lá dentro não se remove: ficariam sem casa.
-  const naoDaParaRemover =
-    aConfirmar?.tipo === "espaco" && aConfirmar.quantos > 0;
-
   return (
     <Card className="p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+        <h2 className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
           <Layers width={15} height={15} className="text-slate-400" />
           O que está aqui dentro
+          {daArvore.length > 1 && (
+            <span className="font-normal text-slate-400">
+              · {daArvore.length - 1} {daArvore.length === 2 ? "espaço" : "espaços"}
+            </span>
+          )}
         </h2>
         <div className="flex flex-wrap items-center gap-2">
           {ativos.length > 6 && (
@@ -353,19 +418,14 @@ export default function EstruturaDoLocal({
               <Input
                 value={procura}
                 onChange={(e) => setProcura(e.target.value)}
-                placeholder="Procurar…"
-                className="w-40 pl-8 sm:w-52"
+                placeholder="Procurar em tudo…"
+                className="w-40 pl-8 sm:w-56"
               />
             </div>
           )}
           {ativos.length > 0 && (
             <Button size="sm" variant="secondary" onClick={() => setComEtiquetas(true)}>
               Etiquetas QR
-            </Button>
-          )}
-          {podeEditar && (
-            <Button size="sm" onClick={() => setNovoEspaco(true)}>
-              <Plus width={14} height={14} /> Espaço
             </Button>
           )}
         </div>
@@ -375,10 +435,7 @@ export default function EstruturaDoLocal({
         <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>
       )}
 
-      <div className="mt-3 space-y-2">
-        {bloco(local, true)}
-        {filhos.map((f) => bloco(f, false))}
-      </div>
+      <div className="mt-3">{arvore && degrau(arvore, 0)}</div>
 
       {/* A gaveta. Fechada, porque o que foi removido não é para estar à
           frente de quem trabalha — mas tem de existir, senão remover é uma
@@ -402,9 +459,7 @@ export default function EstruturaDoLocal({
                   className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2"
                 >
                   <Building width={13} height={13} className="shrink-0 text-slate-400" />
-                  <span className="min-w-0 flex-1 truncate text-sm text-slate-500">
-                    {l.nome}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-slate-500">{l.nome}</span>
                   <span className="shrink-0 text-[11px] text-slate-400">espaço</span>
                   {podeEditar && (
                     <button
@@ -425,9 +480,7 @@ export default function EstruturaDoLocal({
                   <span className="w-24 shrink-0 truncate font-mono text-[11px] text-slate-400">
                     {a.codigo}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-sm text-slate-500">
-                    {a.nome}
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-slate-500">{a.nome}</span>
                   {podeEditar && (
                     <button
                       type="button"
@@ -445,16 +498,28 @@ export default function EstruturaDoLocal({
       )}
 
       {comEtiquetas && (
-        <EtiquetasQR local={local} ativos={ativos} aoFechar={() => setComEtiquetas(false)} />
+        <EtiquetasQR local={raiz} ativos={ativos} aoFechar={() => setComEtiquetas(false)} />
       )}
 
-      {novoEspaco && (
+      {espacoEm && (
         <FormLocal
-          dentroDe={local}
+          dentroDe={espacoEm}
           clientes={clientes}
-          aoFechar={() => setNovoEspaco(false)}
+          aoFechar={() => setEspacoEm(null)}
           aoGravar={() => {
-            setNovoEspaco(false);
+            setEspacoEm(null);
+            aoGravar();
+          }}
+        />
+      )}
+
+      {aEditarLocal && (
+        <FormLocal
+          local={aEditarLocal}
+          clientes={clientes}
+          aoFechar={() => setAEditarLocal(null)}
+          aoGravar={() => {
+            setAEditarLocal(null);
             aoGravar();
           }}
         />
@@ -469,32 +534,26 @@ export default function EstruturaDoLocal({
           }
           // Um espaço cheio não se remove. Em vez de um botão vermelho que não
           // faz nada, o diálogo passa a ser um aviso e diz o que fazer.
-          tone={naoDaParaRemover ? "brand" : "danger"}
-          confirmLabel={naoDaParaRemover ? "Entendido" : "Remover"}
+          tone={naoDaParaRemover(aConfirmar) ? "brand" : "danger"}
+          confirmLabel={naoDaParaRemover(aConfirmar) ? "Entendido" : "Remover"}
           message={
-            aConfirmar.tipo === "espaco" && aConfirmar.quantos > 0 ? (
+            naoDaParaRemover(aConfirmar) ? (
               <>
-                Este espaço ainda tem{" "}
-                <strong>
-                  {aConfirmar.quantos}{" "}
-                  {aConfirmar.quantos === 1 ? "equipamento" : "equipamentos"}
-                </strong>{" "}
-                lá dentro. Tira-os primeiro, ou muda-os de sítio — assim
-                ficariam sem casa e ninguém os encontrava.
+                Este espaço ainda tem coisas lá dentro. Tira-as primeiro, ou
+                muda-as de sítio — assim ficariam sem casa e ninguém as
+                encontrava.
               </>
             ) : (
               <>
-                Sai das listas, mas <strong>não se apaga</strong>: as ordens que
-                já passaram por aqui ficam como estão, e podes repô-lo a
-                qualquer momento na gaveta &ldquo;o que foi removido&rdquo;.
+                Sai das listas, mas <strong>não se apaga</strong>: as ordens que já
+                passaram por aqui ficam como estão, e podes repô-lo a qualquer
+                momento na gaveta &ldquo;o que foi removido&rdquo;.
               </>
             )
           }
           onCancel={() => setAConfirmar(null)}
           onConfirm={() => {
-            // Um espaço com coisas lá dentro não se remove: o botão fica só a
-            // explicar porquê, e fecha.
-            if (aConfirmar.tipo === "espaco" && aConfirmar.quantos > 0) {
+            if (naoDaParaRemover(aConfirmar)) {
               setAConfirmar(null);
               return;
             }
@@ -504,4 +563,14 @@ export default function EstruturaDoLocal({
       )}
     </Card>
   );
+}
+
+/**
+ * &ldquo;3&rdquo; quando é tudo aqui, &ldquo;1 · 12 ao todo&rdquo; quando há
+ * mais lá dentro. Um número só, num degrau que esconde doze, mente.
+ */
+function contagem(proprios: number, tudo: number): string {
+  if (tudo === 0) return "vazio";
+  if (proprios === tudo) return String(proprios);
+  return `${proprios} · ${tudo} ao todo`;
 }

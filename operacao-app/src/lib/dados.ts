@@ -356,15 +356,16 @@ export async function ativosRemovidosDe(localIds: readonly string[]): Promise<At
   return (data ?? []) as unknown as AtivoRow[];
 }
 
-/** Os espaços que foram tirados de vista dentro de um sítio. */
-export async function locaisRemovidosDe(paiId: string): Promise<LocalRow[]> {
+/** Os espaços que foram tirados de vista, em qualquer degrau da árvore. */
+export async function locaisRemovidosDe(paiIds: readonly string[]): Promise<LocalRow[]> {
+  if (paiIds.length === 0) return [];
   const { data, error } = await supabase
     .from("ops_local")
     .select(
       "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, " +
         "latitude, longitude"
     )
-    .eq("parent_id", paiId)
+    .in("parent_id", paiIds)
     .eq("ativo", false)
     .order("nome");
   rebentar("carregar os espaços removidos", error);
@@ -1597,6 +1598,32 @@ export async function ordensDoLocal(
     .select(COLUNAS_ORDEM)
     .eq("organization_id", orgId)
     .eq("local_id", localId)
+    .order("criada_em", { ascending: false })
+    .limit(limite);
+
+  rebentar("carregar as ordens do local", error);
+  return (data ?? []) as unknown as LinhaOrdem[];
+}
+
+/**
+ * As ordens de um sítio **e** de todos os espaços lá dentro.
+ *
+ * A ficha de uma morada passou a ser uma página só, e a pergunta que se faz a
+ * olhar para ela — "esta torre tem dado problemas?" — não distingue o piso 3
+ * da garagem. Perguntar só pelo nó de cima dava sempre uma lista vazia, porque
+ * o trabalho acontece nos espaços.
+ */
+export async function ordensDeLocais(
+  orgId: string,
+  localIds: readonly string[],
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(COLUNAS_ORDEM)
+    .eq("organization_id", orgId)
+    .in("local_id", localIds)
     .order("criada_em", { ascending: false })
     .limit(limite);
 

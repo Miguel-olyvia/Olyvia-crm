@@ -389,7 +389,11 @@ function PainelLocal({
             to={`/locais/${local.codigo}`}
             className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
           >
-            Abrir ficha <ChevronRight width={12} height={12} />
+            {/* Um espaço não tem ficha própria: o link abre a da morada dele,
+                com a árvore aberta até aqui. Dizer "abrir ficha" prometia uma
+                página que não existe. */}
+            {local.parent_id ? "Abrir a morada" : "Abrir ficha"}{" "}
+            <ChevronRight width={12} height={12} />
           </Link>
         </div>
       </div>

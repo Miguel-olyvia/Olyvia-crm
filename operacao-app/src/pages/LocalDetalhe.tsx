@@ -9,7 +9,7 @@ import {
   locaisRemovidosDe,
   listarClientes,
   listarLocais,
-  ordensDoLocal,
+  ordensDeLocais,
   type AtivoRow,
   type Cliente,
   type LinhaOrdem,
@@ -31,23 +31,29 @@ import {
 } from "../components/ui";
 import { Building, ChevronRight, MapPin } from "../components/icons";
 import { linkParaIr, temSitio } from "../domain/mapa";
+import { comTudoLaDentro, raizDe, ramoAte } from "../domain/arvore-de-locais";
 import EstruturaDoLocal from "../components/EstruturaDoLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
 import { IconeDaOrdem } from "../components/IconeDeLinha";
 import { duplicarLocal } from "../lib/config";
 
 /**
- * A ficha de um sítio: o que ele é, o que está lá dentro, e o que já lá se fez.
+ * A ficha de uma morada: o que ela é, tudo o que está lá dentro, e o que já
+ * lá se fez.
  *
- * Existe porque a lista de Definições não aguenta a realidade. Na instância
- * observada há **3120 equipamentos**, e só uma torre tem sete pisos, cada um
- * com extintor, carretéis, iluminação. Uma linha por local com um botão
- * &ldquo;+ Equipamento&rdquo; serve para montar a operação; não serve para a
- * consultar.
+ * ⚠ **Uma morada, uma página. Um espaço não tem página.** Foi a correção
+ * mais importante que este ecrã levou, e veio de quem o usou: cada sítio e
+ * cada espaço com página própria dava três carregamentos para meter um
+ * extintor numa box de garagem, e a meio ninguém sabia onde estava.
+ *
+ * Por isso o endereço de um espaço (`/locais/LOC-0042`) abre a página da
+ * **morada dele**, com a árvore aberta até lá e o espaço destacado. Os links
+ * antigos continuam a funcionar e ninguém fica sem saber onde aterrou.
  *
  * Junta num sítio só o que estava em três: a árvore, os equipamentos, e o
- * histórico de trabalho — que é a pergunta que se faz a olhar para um sítio
- * ("este piso tem dado problemas?").
+ * histórico de trabalho — que é a pergunta que se faz a olhar para uma
+ * morada ("esta torre tem dado problemas?"), e que por isso conta as ordens
+ * de todos os espaços, não só as do nó de cima.
  */
 export default function LocalDetalhe() {
   const { activeOrgId, funcao } = useAuth();
@@ -65,6 +71,15 @@ export default function LocalDetalhe() {
   const [espacosRemovidos, setEspacosRemovidos] = useState<LocalRow[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
+  const [abertos, setAbertos] = useState<Set<string>>(new Set());
+
+  const alternar = (id: string) =>
+    setAbertos((s) => {
+      const novo = new Set(s);
+      if (novo.has(id)) novo.delete(id);
+      else novo.add(id);
+      return novo;
+    });
 
   const podeEditar = funcao === "admin" || funcao === "gestor" || funcao === "operador";
 
@@ -84,15 +99,19 @@ export default function LocalDetalhe() {
       setCentros(ccs);
 
       const eu = ls.find((l) => l.codigo === codigo);
-      if (eu) {
-        // Os equipamentos deste sítio **e** os de cada espaço lá dentro, numa
-        // ida só. É o que faz a lista ter degraus em vez de ser plana.
-        const meus = [eu.id, ...ls.filter((l) => l.parent_id === eu.id).map((l) => l.id)];
+      // A página é sempre a da morada, mesmo quando se chega por um link a um
+      // espaço lá no fundo. É a decisão toda desta página: um espaço não tem
+      // página, tem um degrau.
+      const aRaiz = eu ? raizDe(ls, eu.id) : null;
+      if (aRaiz) {
+        // A morada e tudo o que pende dela, numa ida só. Sete idas à base para
+        // uma torre de sete pisos montavam o ecrã aos bocados.
+        const meus = comTudoLaDentro(ls, aRaiz.id).map((l) => l.id);
         const [as, os, rem, esp] = await Promise.all([
           ativosDeLocais(meus),
-          ordensDoLocal(activeOrgId, eu.id).catch(() => [] as LinhaOrdem[]),
+          ordensDeLocais(activeOrgId, meus).catch(() => [] as LinhaOrdem[]),
           ativosRemovidosDe(meus).catch(() => [] as AtivoRow[]),
-          locaisRemovidosDe(eu.id).catch(() => [] as LocalRow[]),
+          locaisRemovidosDe(meus).catch(() => [] as LocalRow[]),
         ]);
         setAtivos(as);
         setOrdens(os);
@@ -109,19 +128,34 @@ export default function LocalDetalhe() {
     void carregar();
   }, [carregar, recarga]);
 
-  const local = useMemo(
+  /** O que veio no endereço — pode ser a morada ou um espaço dela. */
+  const pedido = useMemo(
     () => locais?.find((l) => l.codigo === codigo) ?? null,
     [locais, codigo]
   );
-  const caminho = useMemo(
-    () => (locais && local ? caminhoAteLocal(locais, local.id) : []),
+  /** A morada. É esta que a página mostra. */
+  const local = useMemo(
+    () => (locais && pedido ? raizDe(locais, pedido.id) : null),
+    [locais, pedido]
+  );
+  const daArvore = useMemo(
+    () => (locais && local ? comTudoLaDentro(locais, local.id) : []),
     [locais, local]
   );
-  const filhos = useMemo(
-    () => (locais && local ? locais.filter((l) => l.parent_id === local.id) : []),
-    [locais, local]
+  /** O caminho até ao espaço pedido, quando não é a própria morada. */
+  const caminho = useMemo(
+    () => (locais && pedido ? caminhoAteLocal(locais, pedido.id) : []),
+    [locais, pedido]
   );
   const cliente = clientes.find((c) => c.id === local?.cliente_id)?.nome ?? null;
+
+  // Chegar por um link a um espaço lá no fundo abre a árvore até lá, e
+  // destaca-o. Senão o link levava a uma página onde o sítio pedido estava
+  // escondido dentro de uma gaveta fechada.
+  useEffect(() => {
+    if (!locais || !pedido) return;
+    setAbertos(new Set([...ramoAte(locais, pedido.id), pedido.id]));
+  }, [locais, pedido]);
 
   if (erro && locais === null) return <ErrorState message={erro} onRetry={() => void carregar()} />;
   if (locais === null) return <Skeleton className="h-72 w-full" />;
@@ -138,24 +172,25 @@ export default function LocalDetalhe() {
 
   return (
     <div className="space-y-4">
-      {/* O caminho até aqui. Num sítio a cinco níveis de fundo, saber onde se
-          está vale mais do que o nome do sítio. */}
+      {/*
+        O caminho é só até à morada, porque a página é a morada. Quando se
+        chega por um link a um espaço lá no fundo, o resto do caminho aparece
+        a seguir como aviso — e o espaço vem destacado na árvore. Um caminho
+        que promete uma página que não existe é pior do que caminho nenhum.
+      */}
       <nav className="flex flex-wrap items-center gap-1 text-xs text-slate-500">
         <Link to="/locais" className="hover:text-slate-800 hover:underline">
           Locais
         </Link>
-        {caminho.map((c) => (
-          <span key={c.id} className="flex items-center gap-1">
-            <ChevronRight width={12} height={12} className="text-slate-300" />
-            {c.id === local.id ? (
-              <span className="font-medium text-slate-700">{c.nome}</span>
-            ) : (
-              <Link to={`/locais/${c.codigo}`} className="hover:text-slate-800 hover:underline">
-                {c.nome}
-              </Link>
-            )}
-          </span>
-        ))}
+        <ChevronRight width={12} height={12} className="text-slate-300" />
+        <span className="font-medium text-slate-700">{local.nome}</span>
+        {caminho.length > 1 &&
+          caminho.slice(1).map((c) => (
+            <span key={c.id} className="flex items-center gap-1 text-slate-400">
+              <ChevronRight width={12} height={12} className="text-slate-300" />
+              {c.nome}
+            </span>
+          ))}
       </nav>
 
       <Card className="p-4 sm:p-5">
@@ -212,8 +247,11 @@ export default function LocalDetalhe() {
       </Card>
 
       <EstruturaDoLocal
-        local={local}
-        filhos={filhos}
+        raiz={local}
+        daArvore={daArvore}
+        emFoco={pedido && pedido.id !== local.id ? pedido.id : null}
+        abertos={abertos}
+        alternar={alternar}
         ativos={ativos}
         removidos={removidos}
         espacosRemovidos={espacosRemovidos}
@@ -237,7 +275,9 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
     return (
       <Card className="p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-slate-800">O que já se fez aqui</h2>
-        <p className="mt-2 text-sm text-slate-500">Ainda não passou nenhuma ordem por este sítio.</p>
+        <p className="mt-2 text-sm text-slate-500">
+          Ainda não passou nenhuma ordem por aqui, nem por nenhum espaço lá dentro.
+        </p>
       </Card>
     );
   }
@@ -246,7 +286,8 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
     <Card className="p-4 sm:p-5">
       <h2 className="text-sm font-semibold text-slate-800">O que já se fez aqui</h2>
       <p className="mt-0.5 text-xs text-slate-500">
-        As {ordens.length === 1 ? "última ordem" : `últimas ${ordens.length} ordens`} deste sítio.
+        As {ordens.length === 1 ? "última ordem" : `últimas ${ordens.length} ordens`} desta
+        morada e dos espaços dela.
       </p>
       <ul className="mt-3 divide-y divide-slate-100">
         {ordens.map((o) => (
