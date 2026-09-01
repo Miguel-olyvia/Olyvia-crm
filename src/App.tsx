@@ -67,6 +67,7 @@ const ServiceFees = lazy(() => import("./pages/ServiceFees"));
 const TeamHub = lazy(() => import("./pages/TeamHub"));
 const TechnicalSettings = lazy(() => import("./pages/TechnicalSettings"));
 const Scheduling = lazy(() => import("./pages/Scheduling"));
+const Atividades = lazy(() => import("./pages/Atividades"));
 const ContractTemplates = lazy(() => import("./pages/ContractTemplates"));
 const ClientContracts = lazy(() => import("./pages/ClientContracts"));
 const Countries = lazy(() => import("./pages/Countries"));
@@ -196,6 +197,7 @@ const App = () => (
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
+                      <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />

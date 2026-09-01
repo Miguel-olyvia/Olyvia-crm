@@ -34,6 +34,7 @@ import {
   Trash2,
   FileDown,
   ShieldAlert,
+  ListChecks,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -81,6 +82,15 @@ export const topLevelItems: TopLevelItem[] = [
     icon: LayoutDashboard,
     labelKey: "sidebar.dashboard",
     permissions: ["dashboard.view"],
+  },
+  {
+    // Destino diário de um comercial: item plano no rail, como o Dashboard,
+    // e não um submenu.
+    id: "atividades",
+    to: "/atividades",
+    icon: ListChecks,
+    labelKey: "sidebar.activities",
+    permissions: ["scheduling.items.view"],
   },
   {
     id: "operacao",
