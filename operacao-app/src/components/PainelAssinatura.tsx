@@ -82,18 +82,33 @@ export default function PainelAssinatura({
   // dizer "fecha a ordem" a quem já a confirmou é mandar fazer o impossível.
   const tardeDemais = ["confirmada", "cancelada"].includes(estado);
   const aindaNao = !fechada && !tardeDemais && podeAssinar && !assinatura;
+  /** É agora: a ordem está fechada e ninguém assinou ainda. */
+  const eOPassoSeguinte = fechada && podeAssinar && !assinatura;
 
   return (
-    <Card className="p-4 sm:p-5">
+    <Card
+      className={cx(
+        "p-4 sm:p-5",
+        // Só se destaca enquanto é o passo seguinte. Um cartão que grita
+        // sempre deixa de se ouvir.
+        eOPassoSeguinte && "border-brand-200 bg-brand-50/40"
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-slate-800">Assinatura do cliente</h2>
           <p className="mt-0.5 text-xs text-slate-500">
-            Prova de que alguém esteve no local e aceitou o trabalho. Sai no relatório.
+            {eOPassoSeguinte
+              ? "A ordem está fechada. Falta o cliente aceitar o trabalho — e isso sai no relatório."
+              : "Prova de que alguém esteve no local e aceitou o trabalho. Sai no relatório."}
           </p>
         </div>
         {fechada && podeAssinar && (
-          <Button variant="secondary" size="sm" onClick={() => setAAssinar(true)}>
+          <Button
+            variant={eOPassoSeguinte ? "primary" : "secondary"}
+            size="sm"
+            onClick={() => setAAssinar(true)}
+          >
             {assinatura ? "Assinar outra vez" : "Recolher assinatura"}
           </Button>
         )}

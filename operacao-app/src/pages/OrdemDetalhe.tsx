@@ -515,6 +515,27 @@ export default function OrdemDetalhe() {
         )}
       </Card>
 
+      {/*
+        A assinatura de quem recebeu o trabalho.
+
+        ⚠ **Muda de sítio conforme o estado, e é de propósito.** Só se recolhe
+        entre fechar e confirmar — antes disso o trabalho não acabou, depois
+        disso a confirmação já disse o mesmo. Nessa janela **é o passo
+        seguinte**, e um passo seguinte a nove cartões de distância é um passo
+        que ninguém dá: sobe para o topo, a seguir ao cabeçalho.
+
+        Fora dessa janela volta ao meio, entre os anexos e a conversa, onde é
+        só mais uma coisa da ficha.
+      */}
+      {ordem.estado === "fechada" && (
+        <PainelAssinatura
+          ordemId={ordem.id}
+          organizationId={activeOrgId ?? ""}
+          estado={ordem.estado}
+          podeAssinar={!!businessUserId}
+        />
+      )}
+
       {/* Orçamentado contra gasto — só aparece se houve orçamento */}
       <PainelCusto custo={custo} previsto={previsto} porItem={porItem} />
 
@@ -576,16 +597,15 @@ export default function OrdemDetalhe() {
         aoMudar={() => setRecarga((r) => r + 1)}
       />
 
-      {/* A assinatura de quem recebeu o trabalho. Só se recolhe entre fechar e
-          confirmar — antes disso o trabalho não acabou, e depois disso a
-          confirmação já disse o mesmo. O cartão aparece sempre e explica em
-          que ponto está: escondido, ninguém descobre que existe. */}
-      <PainelAssinatura
-        ordemId={ordem.id}
-        organizationId={activeOrgId ?? ""}
-        estado={ordem.estado}
-        podeAssinar={!!businessUserId}
-      />
+      {/* A assinatura, quando NÃO é o passo seguinte — ver a nota lá em cima. */}
+      {ordem.estado !== "fechada" && (
+        <PainelAssinatura
+          ordemId={ordem.id}
+          organizationId={activeOrgId ?? ""}
+          estado={ordem.estado}
+          podeAssinar={!!businessUserId}
+        />
+      )}
 
       {/* A conversa. Fica a seguir à assinatura e antes das sessões: é onde
           se explica o que os números não explicam. */}
