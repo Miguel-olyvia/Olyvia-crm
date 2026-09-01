@@ -13,8 +13,24 @@ setup('autenticar utilizador', async ({ page }) => {
   await page.goto('/auth', { waitUntil: 'domcontentloaded' })
   await page.locator('input[type="email"]').waitFor({ timeout: 60000 })
 
-  await page.locator('input[type="email"]').fill(process.env.TEST_EMAIL || 'carvalhomiguel319@gmail.com')
-  await page.locator('input[type="password"]').fill(process.env.TEST_PASSWORD || 'Migasdela007#')
+  // Sem credenciais por omissao: a versao anterior trazia um email e uma
+  // palavra-passe REAIS escritos aqui, e foram parar ao repositorio e ao main.
+  // Uma credencial num ficheiro versionado deixa de ser um segredo no momento
+  // em que e commitada -- fica no historico mesmo depois de apagada da versao
+  // actual, e qualquer pessoa com acesso ao repositorio a le.
+  //
+  // Passam a vir do ambiente, e falha alto se nao estiverem la.
+  const email = process.env.TEST_EMAIL
+  const password = process.env.TEST_PASSWORD
+  if (!email || !password) {
+    throw new Error(
+      'Faltam as credenciais dos testes. Define TEST_EMAIL e TEST_PASSWORD no ambiente ' +
+      'antes de correr a suite -- por exemplo num .env.local, que o git ignora.',
+    )
+  }
+
+  await page.locator('input[type="email"]').fill(email)
+  await page.locator('input[type="password"]').fill(password)
   await page.locator('button[type="submit"]').click()
 
   await page.waitForURL(url => !url.toString().includes('/auth'), { timeout: 15000 })

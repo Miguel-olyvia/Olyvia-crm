@@ -3,6 +3,28 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { readFileSync } from 'fs'
 import pg from 'pg'
 
+
+/**
+ * Credenciais dos testes, vindas do ambiente.
+ *
+ * Antes estavam escritas aqui em texto simples -- um email e uma palavra-passe
+ * REAIS, em oito ficheiros versionados, ja no main. Uma credencial commitada
+ * deixa de ser um segredo nesse instante: fica no historico mesmo depois de
+ * apagada, e le-a quem tiver acesso ao repositorio.
+ *
+ * Falha alto se faltarem, em vez de tentar entrar com algo por omissao.
+ */
+function credenciaisDosTestes(): { email: string; password: string } {
+  const email = process.env.TEST_EMAIL
+  const password = process.env.TEST_PASSWORD
+  if (!email || !password) {
+    throw new Error(
+      'Faltam as credenciais dos testes. Define TEST_EMAIL e TEST_PASSWORD no ' +
+      'ambiente antes de correr a suite -- por exemplo num .env.local, ignorado pelo git.',
+    )
+  }
+  return { email, password }
+}
 /**
  * Prova permanente: aceitar uma proposta PELO PORTAL DO CLIENTE grava a
  * evidencia legal completa — IP real detectado do lado do servidor, data,
@@ -232,8 +254,8 @@ test.beforeAll(async () => {
   const env = readEnv()
   sb = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_PUBLISHABLE_KEY)
   const { data: auth, error: loginError } = await sb.auth.signInWithPassword({
-    email: process.env.TEST_EMAIL || 'carvalhomiguel319@gmail.com',
-    password: process.env.TEST_PASSWORD || 'Migasdela007#',
+    email: credenciaisDosTestes().email,
+    password: credenciaisDosTestes().password,
   })
   expect(loginError, 'login do utilizador do CRM').toBeNull()
 
