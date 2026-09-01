@@ -73,6 +73,18 @@ CRM. O módulo faz a parte dele corretamente.
 Enquanto isso não estiver resolvido, **o cliente não recebe o relatório
 sozinho** — e isso tem de ser dito a quem for ao piloto.
 
+### Como testar antes do merge
+
+O PR #12 espera. Entretanto, o Vercel constrói **todos** os ramos: o
+`feature/operacoes` tem um endereço próprio, com o CRM e o `/operacao` na
+versão nova, sem tocar na produção.
+
+O caminho completo — do menu do CRM até ao relatório no cliente — está em
+[`teste-de-ponta-a-ponta.md`](teste-de-ponta-a-ponta.md), em lista para picar.
+
+⚠ **A base de dados é a de verdade.** O endereço é novo, o Supabase é o mesmo.
+O documento explica as duas regras do teste.
+
 ### Os ficheiros SQL, por ordem
 
 Cada um pode voltar a correr sozinho numa base já completa — isso é testado,
