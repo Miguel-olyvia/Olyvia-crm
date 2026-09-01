@@ -80,6 +80,14 @@ verify_jwt = false
 [functions.process-scheduled-emails]
 verify_jwt = false
 
+# Chamada por pg_cron (job 15) com a service_role key do Vault, que não é um
+# JWT — com verify_jwt o gateway rejeita-a com UNAUTHORIZED_INVALID_JWT_FORMAT
+# antes de a função sequer arrancar. A função autentica-se sozinha via
+# requireServiceRole(). Sem esta entrada o deploy assume o default (true) e
+# deixa o cron KO, como aconteceu a 31/08.
+[functions.generate-notifications]
+verify_jwt = false
+
 [functions.trigger-email-template]
 verify_jwt = false
 
