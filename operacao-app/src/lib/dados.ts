@@ -1361,6 +1361,7 @@ export async function leiturasParaExportar(
 /* ─────────────────────────────── Agenda ─────────────────────────────── */
 
 import type { Compromisso, ImpedimentoDaEquipa, OrdemNaAgenda } from "../domain/agenda";
+import type { OrdemDoPeriodo } from "../domain/resumo-do-periodo";
 
 /**
  * As ordens de um dia, com a janela de visita.
@@ -1713,6 +1714,57 @@ export async function ordensDoLocal(
 
   rebentar("carregar as ordens do local", error);
   return (data ?? []) as unknown as LinhaOrdem[];
+}
+
+/**
+ * As ordens que entram no resumo de um período, nas Análises.
+ *
+ * ⚠ Não confundir com `ordensDoPeriodo`, mais acima: essa serve a agenda e
+ * traz o que está **marcado** para um intervalo. Esta traz o que **aconteceu**
+ * nele. São perguntas diferentes e as respostas raramente coincidem.
+ *
+ * Traz as que **nasceram** ou **fecharam** dentro do período, mais todas as
+ * que continuam por fechar — essas contam sempre, tenham nascido quando
+ * tiverem. Um resumo que ignora uma ordem de março ainda aberta em setembro
+ * está a esconder precisamente o que interessa.
+ *
+ * Sem SQL novo: as colunas já existem desde o `schema.sql`. O que faltava era
+ * somá-las — e isso faz-se em `domain/resumo-do-periodo.ts`, sem base de
+ * dados pelo meio.
+ */
+export async function ordensParaResumo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<OrdemDoPeriodo[]> {
+  const colunas =
+    "id, codigo, estado, origem, prioridade, cliente_id, local_id, " +
+    "responsavel_id, criada_em, agendada_para, iniciada_em, fechada_em";
+
+  const porFechar = ["por_aprovar", "agendada", "em_curso", "pausada"];
+
+  const [nascidas, fechadas, abertas] = await Promise.all([
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .gte("criada_em", de.toISOString()).lte("criada_em", ate.toISOString()),
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .gte("fechada_em", de.toISOString()).lte("fechada_em", ate.toISOString()),
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .in("estado", porFechar),
+  ]);
+
+  for (const r of [nascidas, fechadas, abertas]) {
+    rebentar("carregar as ordens do período", r.error);
+  }
+
+  // Três consultas, uma lista: a mesma ordem pode vir em duas delas, e contada
+  // duas vezes qualquer média sai errada.
+  const porId = new Map<string, OrdemDoPeriodo>();
+  for (const r of [nascidas, fechadas, abertas]) {
+    for (const linha of (r.data ?? []) as unknown as OrdemDoPeriodo[]) {
+      porId.set(linha.id, linha);
+    }
+  }
+  return [...porId.values()];
 }
 
 /**

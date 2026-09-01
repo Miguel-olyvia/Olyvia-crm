@@ -16,7 +16,7 @@ Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | Rota | O que faz | Quem vê |
 |---|---|---|
 | `/` · **Hoje** | O que espera por mim e o que está a correr mal. Nada de filtros antes de mostrar. Ao abrir, quem coordena dispara a verificação de atrasos. | todos |
-| `/ordens` · **Ordens** | A lista, com filtros por estado, origem e pessoa. | todos (só as suas, se técnico) |
+| `/ordens` · **Ordens** | A lista, com seis vistas guardadas **e uma gaveta de filtros**: quem (incluindo &ldquo;sem ninguém&rdquo;), cliente, prioridade e natureza. Ordena por data, prioridade ou mais recentes. Cada linha diz **onde** é e **de quem** é. A procura apanha código, título e **nome do cliente**. | todos (só as suas, se técnico) |
 | `/ordens/nova` · **Nova ordem** | Quatro campos obrigatórios; o resto atrás de um clique. | todos (técnico → fica `por_aprovar`) |
 | `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. **Acrescentar tarefas e leituras ali mesmo**, sem passar por Definições. Uma tarefa respondida fecha-se e deixa só um &ldquo;alterar&rdquo;. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
@@ -26,7 +26,7 @@ Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/agenda` · **Agenda** | **Dia, semana, mês e mapa.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. O mês mostra **os nomes das ordens**, não só quantas. Carregar numa ordem, em qualquer vista, abre um **painel ao lado** com o quando, o cliente, o onde, o quem e o mapa — sem mudar de página. Filtros por cliente, tipo de trabalho, pessoa, especialidade e fornecedor. Na vista de dia, o dia pela estrada. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
-| `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
+| `/analises` · **Análises** | Quatro separadores. **O período** — quanto entrou, quanto saiu, o que está por fechar e atrasado, pontualidade, tempo até começar e até fechar, e onde o trabalho se concentrou (cliente, local, pessoa); PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
 | `/definicoes` · **Definições** | **Cinco** separadores: **procedimentos** (categorias de equipamento com catálogo de 47 sugestões, medições, checklists, packs), equipa, **tipos e custos**, **vocabulário** (o nome que a empresa dá às listas do código, e as especialidades), **automático**. ⚠ **Os locais não estão aqui** — um local não é uma definição; criam-se em `/locais` e dentro da própria ordem. | quem coordena |
 | `/ajuda` · **Ajuda** | Quatro portas: **Porquê mudar** (calculadora de valor e cinco fluxogramas), **O funil** (um trabalho do princípio ao fim, com o que acontece sozinho em cada passo), **Como funciona**, **Como se usa**. | todos |
 
@@ -298,10 +298,13 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `npm test` › `rotulos` | renomear não parte nada, e esconder não apaga o passado |
 | `npm test` › `arvore-de-locais` | uma página aberta em qualquer degrau sabe qual é a morada; um pai em falta ou um ciclo não penduram o ecrã |
 | `npm test` › `categorias-sugeridas` | o catálogo não tem códigos repetidos, e não oferece o que a empresa já tem |
+| `npm test` › `filtros-de-ordens` | cada condição estreita só o que devia, &ldquo;sem dono&rdquo; é uma resposta, e a lista nunca salta de ordem |
+| `npm test` › `resumo-do-periodo` | os números somam o que dizem somar, e &ldquo;não há dados&rdquo; não vira zero |
+| `validar-demo-orcamento` | a demo do orçamento corre, repete-se, dá os números que promete, e sai sem deixar rasto |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **357 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **392 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em poucos segundos.
 
 ---

@@ -30,7 +30,9 @@
 | [11](#11-a-agenda-diz-o-quê) | Nomes das ordens na vista de mês | não |
 | [12](#12-espreitar-sem-sair-da-agenda) | Painel lateral em vez de mudar de página | não |
 | [13](#13-mapa-onde-a-pergunta-se-faz) | Mapa na ficha do local e no painel da ordem | não |
-| [14](#14-o-que-não-mudou-e-porquê) | O que se decidiu **não** mudar | — |
+| [14](#14-a-lista-de-ordens-ganha-filtros) | A lista de ordens ganha filtros, ordenação e contexto | não |
+| [15](#15-as-análises-passam-a-responder-à-primeira-pergunta) | As Análises passam a responder à primeira pergunta | não |
+| [16](#16-o-que-não-mudou-e-porquê) | O que se decidiu **não** mudar | — |
 
 **Dois ficheiros SQL para correr**, por esta ordem:
 
@@ -453,7 +455,94 @@ aparece na mesma. São duas perguntas diferentes com duas respostas diferentes.
 
 ---
 
-## 14. O que NÃO mudou, e porquê
+## 14. A lista de ordens ganha filtros
+
+**O problema.** A lista tinha seis vistas guardadas e mais nada. Com setenta
+ordens abertas isso chega; com setecentas, &ldquo;Abertas&rdquo; é o mesmo que
+não ter filtro nenhum.
+
+E as perguntas que se fazem em frente a essa lista são sempre as mesmas
+quatro: *o que é meu?*, *o que é deste cliente?*, *o que é urgente?*, *o que
+são avarias e não preventivas?* A **agenda** já tinha estes filtros. A lista,
+que é onde se passa mais tempo, não tinha nenhum.
+
+**O que se fez.**
+
+| | |
+|---|---|
+| **Filtros** | quem, cliente, prioridade, natureza — numa gaveta fechada por omissão |
+| **&ldquo;Sem ninguém&rdquo;** | é uma resposta no filtro de quem, e não a ausência de filtro |
+| **Ordenação** | por data, por prioridade, ou mais recentes |
+| **Contagem** | quantas estão à vista, ao lado da ordenação |
+| **A procura** | passa a apanhar também o **nome do cliente** — é o que toda a gente tenta primeiro |
+| **Cada linha** | passa a dizer **onde** é o trabalho e **de quem** é |
+
+Três decisões que valem a pena:
+
+**A gaveta está fechada.** Quatro caixas sempre abertas ocupam meio ecrã de
+telemóvel antes de se ver uma única ordem. O botão diz **quantas condições
+estão ligadas**, para ninguém ficar a olhar para uma lista curta sem perceber
+que ela está estreitada.
+
+**Sem dono é informação, não ausência dela.** Uma ordem marcada para amanhã e
+sem ninguém é um problema de hoje, e a linha di-lo em âmbar.
+
+**A lista nunca salta.** O desempate final é sempre o código. Sem isso, duas
+ordens com a mesma data trocam de lugar entre visitas — e uma lista que salta
+é uma lista que ninguém segue com os olhos.
+
+`src/domain/filtros-de-ordens.ts` (puro, 18 testes)
+
+---
+
+## 15. As Análises passam a responder à primeira pergunta
+
+**O problema.** As Análises respondiam a duas perguntas — o PMP cumprido e a
+história de um equipamento — e a nenhuma das que se faz **primeiro**. Quem
+abre um ecrã de análises no dia 1 do mês quer saber, por esta ordem:
+
+> quanto trabalho entrou e quanto saiu? · ficou alguma coisa por fazer que devia
+> estar feita? · quanto tempo demorámos? · onde é que o trabalho se concentrou?
+
+**O que se fez.** Um separador novo, **&ldquo;O período&rdquo;**, e passou a ser
+o primeiro:
+
+| | |
+|---|---|
+| **Entraram · Saíram · Por fechar · Atrasadas** | quatro números, e os dois últimos levam à lista que os compõe |
+| **Pontualidade** | das que fecharam **e tinham data marcada** |
+| **Tempos** | até começar (a resposta) e até fechar (o trabalho) |
+| **O que entrou** | por natureza, mais o aviso das marcadas sem ninguém |
+| **Onde se concentrou** | os cinco maiores por cliente, por local e por pessoa |
+
+⚠ **Nada disto precisou de SQL novo.** As ordens já sabiam quando nasceram,
+quando foram marcadas, quando começaram e quando fecharam desde o
+`schema.sql`. O que faltava era **somar** — e somar faz-se em funções puras,
+sem base de dados pelo meio.
+
+Três regras de leitura, e as três são a mesma regra:
+
+**Um número sozinho não responde à pergunta seguinte.** &ldquo;12
+atrasadas&rdquo; sem saber quais obriga a ir procurá-las à mão, e ninguém vai.
+Por isso cada contagem que dê para investigar leva um link para a lista.
+
+**&ldquo;Não há dados&rdquo; não é zero.** Uma pontualidade sem nada com data
+marcada mostra um travessão, e não **0 %**. Zero por cento é uma acusação.
+
+**Nada aqui prevê nada.** São contagens e médias sobre o que **já aconteceu**.
+Um ecrã de análises que adivinha é um ecrã em que ninguém acredita à segunda
+vez.
+
+E uma decisão sobre o período: **as que continuam por fechar contam sempre**,
+tenham nascido quando tiverem. Um resumo que ignora uma ordem de março ainda
+aberta em setembro esconde precisamente o que interessa.
+
+`src/domain/resumo-do-periodo.ts` (puro, 17 testes) ·
+`src/components/PainelResumo.tsx`
+
+---
+
+## 16. O que NÃO mudou, e porquê
 
 ### A notificação ao atribuir a ordem a si próprio
 
@@ -490,7 +579,7 @@ Continua por resolver, e continua a ser um bug do CRM —
 
 | | |
 |---|---|
-| Testes de domínio | **357** (36 novos hoje) |
+| Testes de domínio | **392** (71 novos hoje) |
 | Validadores contra Postgres | todos verdes, incluindo a sequência de instalação de ponta a ponta |
 | Typecheck · lint · build | limpos |
 | Escritas fora de `ops_*` | continuam a ser **três**, e todas deliberadas |

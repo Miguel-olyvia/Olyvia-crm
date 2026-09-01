@@ -12,6 +12,7 @@ import {
   type Cliente,
 } from "../lib/dados";
 import PainelExportar from "../components/PainelExportar";
+import PainelResumo from "../components/PainelResumo";
 import {
   Badge,
   Barra,
@@ -58,7 +59,7 @@ import {
  * percentagem sozinha nunca responde à pergunta seguinte — "quais falharam?".
  */
 
-type Aba = "pmp" | "ativo" | "medicoes";
+type Aba = "resumo" | "pmp" | "ativo" | "medicoes";
 
 /** Os últimos 12 meses, que é o período de que um contrato fala. */
 function periodoPorOmissao(): { desde: string; ate: string } {
@@ -83,7 +84,7 @@ function mesEmPortugues(iso: string): string {
 
 export default function Analises() {
   const { activeOrgId } = useAuth();
-  const [aba, setAba] = useState<Aba>("pmp");
+  const [aba, setAba] = useState<Aba>("resumo");
 
   return (
     <div className="mx-auto max-w-5xl p-4 sm:p-6">
@@ -96,6 +97,7 @@ export default function Analises() {
 
       <nav className="mb-5 flex gap-1 rounded-lg bg-slate-100 p-1" role="tablist">
         {([
+          ["resumo", "O período"],
           ["pmp", "Manutenção preventiva"],
           ["ativo", "Equipamento"],
           ["medicoes", "Exportar medições"],
@@ -117,6 +119,7 @@ export default function Analises() {
         ))}
       </nav>
 
+      {aba === "resumo" && <PainelResumo orgId={activeOrgId} />}
       {aba === "pmp" && <PainelPmp orgId={activeOrgId} />}
       {aba === "ativo" && <PainelAtivo orgId={activeOrgId} />}
       {aba === "medicoes" && <PainelExportar orgId={activeOrgId} />}

@@ -34,6 +34,8 @@ O registo completo, com a queixa que originou cada uma, está em
 | **A agenda diz o quê** | nomes das ordens na vista de mês |
 | **Espreitar sem sair** | painel ao lado em vez de mudar de página |
 | **Mapa** | na ficha do local e no painel da ordem |
+| **Filtros nas ordens** | quem, cliente, prioridade, natureza — e ordenação |
+| **Análises: &ldquo;O período&rdquo;** | entrou, saiu, atrasadas, pontualidade, tempos, e onde se concentrou |
 
 **Dois ficheiros SQL para correr:** `db/duplicar.sql` (outra vez — a função
 ganhou um argumento) e `db/tarefas-na-ordem.sql` (novo).

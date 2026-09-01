@@ -4,24 +4,41 @@ import { useAuth } from "../auth/AuthProvider";
 import {
   ErroDeDados,
   listarClientes,
+  listarLocais,
   listarOrdens,
   type Cliente,
   type LinhaOrdem,
+  type LocalRow,
 } from "../lib/dados";
+import { listarPessoas, type Pessoa } from "../lib/config";
 import {
   Badge,
   Barra,
   Card,
+  Combobox,
   EmptyState,
   ErrorState,
   EstadoOrdem,
+  Field,
   Input,
   OrigemOrdem,
   PrioridadeOrdem,
+  Select,
   Skeleton,
   cx,
 } from "../components/ui";
-import { AlertTriangle, Inbox, Plus, Search } from "../components/icons";
+import { useRotulos } from "../auth/Rotulos";
+import {
+  FILTRO_VAZIO,
+  ORDENACOES,
+  aplicarFiltro,
+  ordenar,
+  quantosFiltros,
+  temFiltro,
+  type Filtro,
+  type Ordenacao,
+} from "../domain/filtros-de-ordens";
+import { AlertTriangle, Inbox, Listar, MapPin, Plus, Search } from "../components/icons";
 import { IconeDaOrdem, IconeDoEstado } from "../components/IconeDeLinha";
 import { alertasDaOrdem, severidadeMaxima } from "../domain/alertas";
 import type { Estado } from "../domain/tipos";
@@ -74,6 +91,7 @@ function quando(iso: string | null, agora: Date): string {
 
 export default function Ordens() {
   const { activeOrgId } = useAuth();
+  const rotulos = useRotulos();
   const [params, setParams] = useSearchParams();
   const vistaAtual = params.get("vista") ?? "abertas";
   const vista = VISTAS.find((v) => v.chave === vistaAtual) ?? VISTAS[0];
@@ -81,8 +99,22 @@ export default function Ordens() {
   const [pesquisa, setPesquisa] = useState(params.get("q") ?? "");
   const [ordens, setOrdens] = useState<LinhaOrdem[] | null>(null);
   const [clientes, setClientes] = useState<Map<string, string>>(new Map());
+  const [listaClientes, setListaClientes] = useState<Cliente[]>([]);
+  const [pessoas, setPessoas] = useState<Pessoa[]>([]);
+  const [locais, setLocais] = useState<Map<string, string>>(new Map());
   const [erro, setErro] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
+
+  /**
+   * As quatro perguntas que se fazem em frente a esta lista.
+   *
+   * A agenda já tinha filtros; a lista, que é onde se passa mais tempo, não
+   * tinha nenhum. Com setenta ordens abertas as vistas guardadas chegam; com
+   * setecentas, "Abertas" é o mesmo que não ter filtro.
+   */
+  const [filtro, setFiltro] = useState<Filtro>(FILTRO_VAZIO);
+  const [comFiltros, setComFiltros] = useState(false);
+  const [como, setComo] = useState<Ordenacao>("data");
 
   const agora = useMemo(() => new Date(), [ordens]);
 
@@ -94,16 +126,21 @@ export default function Ordens() {
 
     (async () => {
       try {
-        const [linhas, cls] = await Promise.all([
+        const [linhas, cls, ps, ls] = await Promise.all([
           listarOrdens(activeOrgId, {
             estados: vista.estados,
             pesquisa: pesquisa.trim() || undefined,
           }),
           listarClientes(activeOrgId),
+          listarPessoas(activeOrgId).catch(() => [] as Pessoa[]),
+          listarLocais(activeOrgId).catch(() => [] as LocalRow[]),
         ]);
         if (!vivo) return;
         setOrdens(linhas);
         setClientes(new Map(cls.map((c: Cliente) => [c.id, c.nome])));
+        setListaClientes(cls);
+        setPessoas(ps.filter((x) => x.em_operacoes));
+        setLocais(new Map(ls.map((l) => [l.id, l.nome])));
       } catch (e) {
         if (!vivo) return;
         setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar as ordens.");
@@ -136,6 +173,17 @@ export default function Ordens() {
       return alertas.some((a) => a.chave === "atrasada");
     });
   }, [ordens, vista.soAtrasadas, agora]);
+
+  const nomeCliente = useMemo(
+    () => (id: string) => clientes.get(id) ?? null,
+    [clientes]
+  );
+
+  const listadas = useMemo(() => {
+    if (!visiveis) return null;
+    return ordenar(aplicarFiltro(visiveis, filtro, nomeCliente), como);
+  }, [visiveis, filtro, nomeCliente, como]);
+
 
   const mudarVista = (chave: string) => {
     const p = new URLSearchParams(params);
@@ -192,9 +240,128 @@ export default function Ordens() {
         ))}
       </div>
 
+      {/*
+        Os filtros vivem numa gaveta, fechada por omissão.
+
+        Uma barra de quatro caixas sempre aberta ocupa meio ecrã de telemóvel
+        antes de se ver uma única ordem. O botão diz quantas condições estão
+        ligadas, para ninguém ficar a olhar para uma lista curta sem perceber
+        que ela está estreitada.
+      */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setComFiltros((v) => !v)}
+            className={cx(
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1 transition-colors",
+              quantosFiltros(filtro) > 0
+                ? "bg-brand-50 text-brand-800 ring-brand-200"
+                : "bg-white text-slate-600 ring-slate-200 hover:ring-slate-300"
+            )}
+          >
+            <Listar width={13} height={13} />
+            Filtros
+            {quantosFiltros(filtro) > 0 && (
+              <span className="rounded bg-brand px-1.5 text-[10px] text-white">
+                {quantosFiltros(filtro)}
+              </span>
+            )}
+          </button>
+
+          {temFiltro(filtro) && (
+            <button
+              type="button"
+              onClick={() => setFiltro(FILTRO_VAZIO)}
+              className="text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+            >
+              limpar
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {listadas && (
+            <span className="text-xs tabular-nums text-slate-400">
+              {listadas.length} {listadas.length === 1 ? "ordem" : "ordens"}
+            </span>
+          )}
+          <Select
+            value={como}
+            onChange={(e) => setComo(e.target.value as Ordenacao)}
+            className="w-auto text-xs"
+            aria-label="Ordenar por"
+          >
+            {ORDENACOES.map((x) => (
+              <option key={x.valor} value={x.valor}>
+                {x.nome}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      {comFiltros && (
+        <Card className="p-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Quem">
+              <Combobox
+                value={filtro.responsavelId ?? ""}
+                onChange={(v) => setFiltro((f) => ({ ...f, responsavelId: v || null }))}
+                options={[
+                  { value: "ninguem", label: "— sem ninguém —" },
+                  ...pessoas.map((x) => ({ value: x.utilizador_id, label: x.nome })),
+                ]}
+                placeholder="Qualquer pessoa"
+                className="w-full"
+              />
+            </Field>
+            <Field label="Cliente">
+              <Combobox
+                value={filtro.clienteId ?? ""}
+                onChange={(v) => setFiltro((f) => ({ ...f, clienteId: v || null }))}
+                options={listaClientes.map((c) => ({ value: c.id, label: c.nome }))}
+                placeholder="Qualquer cliente"
+                className="w-full"
+              />
+            </Field>
+            <Field label="Prioridade">
+              <Select
+                value={filtro.prioridade ?? ""}
+                onChange={(e) =>
+                  setFiltro((f) => ({ ...f, prioridade: e.target.value || null }))
+                }
+                className="w-full"
+              >
+                <option value="">Qualquer</option>
+                {rotulos.opcoes("prioridade").map((x) => (
+                  <option key={x.valor} value={x.valor}>
+                    {x.nome}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Natureza">
+              <Select
+                value={filtro.origem ?? ""}
+                onChange={(e) => setFiltro((f) => ({ ...f, origem: e.target.value || null }))}
+                className="w-full"
+              >
+                <option value="">Qualquer</option>
+                {rotulos.opcoes("origem").map((x) => (
+                  <option key={x.valor} value={x.valor}>
+                    {x.nome}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </Card>
+      )}
+
       {erro && <ErrorState message={erro} onRetry={() => setTentativa((t) => t + 1)} />}
 
-      {visiveis === null && !erro && (
+      {listadas === null && !erro && (
         <div className="space-y-2">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-[68px] w-full rounded-xl" />
@@ -202,7 +369,7 @@ export default function Ordens() {
         </div>
       )}
 
-      {visiveis?.length === 0 && !erro && (
+      {listadas?.length === 0 && !erro && (
         <Card>
           <EmptyState
             icon={<Inbox width={22} height={22} />}
@@ -210,19 +377,27 @@ export default function Ordens() {
             description={
               pesquisa.trim()
                 ? "Nenhuma ordem corresponde à pesquisa."
-                : "Quando houver trabalho aqui, aparece nesta lista."
+                : temFiltro(filtro)
+                  ? "Nenhuma ordem passa nos filtros que estão ligados."
+                  : "Quando houver trabalho aqui, aparece nesta lista."
             }
           />
         </Card>
       )}
 
-      {visiveis && visiveis.length > 0 && (
+      {listadas && listadas.length > 0 && (
         <div className="space-y-2">
-          {visiveis.map((o) => (
+          {listadas.map((o) => (
             <LinhaDeOrdem
               key={o.id}
               ordem={o}
               cliente={clientes.get(o.cliente_id) ?? null}
+              local={o.local_id ? locais.get(o.local_id) ?? null : null}
+              quem={
+                o.responsavel_id
+                  ? pessoas.find((x) => x.utilizador_id === o.responsavel_id)?.nome ?? null
+                  : null
+              }
               agora={agora}
             />
           ))}
@@ -235,10 +410,16 @@ export default function Ordens() {
 function LinhaDeOrdem({
   ordem,
   cliente,
+  local,
+  quem,
   agora,
 }: {
   ordem: LinhaOrdem;
   cliente: string | null;
+  /** Onde é o trabalho. Sem isto, duas ordens do mesmo cliente são iguais. */
+  local: string | null;
+  /** De quem é. Saber que não é de ninguém é metade da informação. */
+  quem: string | null;
   agora: Date;
 }) {
   const alertas = alertasDaOrdem(
@@ -285,6 +466,19 @@ function LinhaDeOrdem({
 
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-400">
               {cliente && <span className="truncate">{cliente}</span>}
+              {local && (
+                <span className="inline-flex items-center gap-1 truncate">
+                  <MapPin width={11} height={11} />
+                  {local}
+                </span>
+              )}
+              {/* Sem dono é informação, e não ausência dela: uma ordem marcada
+                  para amanhã sem ninguém é um problema de hoje. */}
+              {quem ? (
+                <span className="truncate">{quem}</span>
+              ) : (
+                <Badge className="bg-amber-50 text-amber-800 ring-amber-200">sem ninguém</Badge>
+              )}
               {alertas.map((a) => (
                 <Badge
                   key={a.chave}

@@ -240,3 +240,10 @@ export const Sino = (p: IconProps) => (
     <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
   </svg>
 );
+
+/** O funil dos filtros. Três traços que estreitam — a forma que toda a gente já conhece. */
+export const Listar = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 5h18M6 12h12M10 19h4" />
+  </svg>
+);
