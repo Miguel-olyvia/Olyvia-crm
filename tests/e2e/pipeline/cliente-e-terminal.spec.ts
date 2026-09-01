@@ -93,4 +93,24 @@ test.describe('Pipeline de aquisição — o Cliente é terminal', () => {
     const dialogos = await page.locator('[role="dialog"]').count()
     expect(dialogos, 'não devia ter aberto confirmação nenhuma').toBe(1)
   })
+
+  test('na lista "Módulos do Pipeline", só o Cliente não tem pega', async ({ page }) => {
+    // A tira do fluxo e esta lista são DOIS sítios para o mesmo gesto. A pega
+    // do Cliente foi tirada da tira e esquecida aqui: a linha continuava a
+    // convidar ao arrasto, e o utilizador via-a voltar ao sítio sem explicação.
+    const painel = await abrirPainel(page)
+    const lista = painel.locator('text=Módulos do Pipeline').locator('..')
+    await lista.waitFor({ timeout: 10_000 })
+
+    for (const nome of ['Pedido', 'Orçamento', 'Proposta', 'Contrato', 'Cliente']) {
+      const linha = lista.locator('div').filter({ hasText: new RegExp(`^${nome}`) }).first()
+      if ((await linha.count()) === 0) continue
+      const pegas = await linha.locator('[class*="cursor-grab"]').count()
+      if (nome === 'Cliente') {
+        expect(pegas, 'o Cliente não devia ter pega na lista').toBe(0)
+      } else {
+        expect(pegas, `${nome} devia ter pega na lista`).toBeGreaterThan(0)
+      }
+    }
+  })
 })
