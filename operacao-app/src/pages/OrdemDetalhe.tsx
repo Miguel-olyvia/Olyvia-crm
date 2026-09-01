@@ -576,12 +576,14 @@ export default function OrdemDetalhe() {
         aoMudar={() => setRecarga((r) => r + 1)}
       />
 
-      {/* A assinatura de quem recebeu o trabalho. Só aparece depois de fechar:
-          antes disso o trabalho não acabou, e uma assinatura a meio prova o quê? */}
+      {/* A assinatura de quem recebeu o trabalho. Só se recolhe entre fechar e
+          confirmar — antes disso o trabalho não acabou, e depois disso a
+          confirmação já disse o mesmo. O cartão aparece sempre e explica em
+          que ponto está: escondido, ninguém descobre que existe. */}
       <PainelAssinatura
         ordemId={ordem.id}
         organizationId={activeOrgId ?? ""}
-        fechada={ordem.estado === "fechada"}
+        estado={ordem.estado}
         podeAssinar={!!businessUserId}
       />
 

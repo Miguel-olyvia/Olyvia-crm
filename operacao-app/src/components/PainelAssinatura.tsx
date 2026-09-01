@@ -24,13 +24,14 @@ import { Button, Card, Field, Input, Modal, cx } from "./ui";
 export default function PainelAssinatura({
   ordemId,
   organizationId,
-  fechada,
+  estado,
   podeAssinar,
 }: {
   ordemId: string;
   organizationId: string;
   /** Só se assina depois de o trabalho acabar. */
-  fechada: boolean;
+  /** O estado da ordem. É ele que decide o que se pode dizer aqui. */
+  estado: string;
   podeAssinar: boolean;
 }) {
   const [assinatura, setAssinatura] = useState<Assinatura | null>(null);
@@ -76,7 +77,11 @@ export default function PainelAssinatura({
     ensina que a funcionalidade não existe. Agora o cartão aparece sempre, e
     quando ainda não dá diz **porquê** e **o que falta fazer**.
   */
-  const aindaNao = !fechada && podeAssinar && !assinatura;
+  const fechada = estado === "fechada";
+  // Depois de confirmada já não dá: a RPC recusa (`db/assinaturas.sql`), e
+  // dizer "fecha a ordem" a quem já a confirmou é mandar fazer o impossível.
+  const tardeDemais = ["confirmada", "cancelada"].includes(estado);
+  const aindaNao = !fechada && !tardeDemais && podeAssinar && !assinatura;
 
   return (
     <Card className="p-4 sm:p-5">
@@ -100,6 +105,16 @@ export default function PainelAssinatura({
           assinatura recolhe-se <strong>depois de fechar a ordem</strong> — é o que
           o cliente está a aceitar que tem de estar escrito primeiro. Fecha a
           ordem aqui em cima e o botão aparece neste cartão.
+        </p>
+      )}
+
+      {tardeDemais && !assinatura && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <strong className="font-medium">Esta ordem já foi {estado}.</strong> A
+          assinatura recolhe-se entre <strong>fechar</strong> e{" "}
+          <strong>confirmar</strong>, e essa janela já passou — confirmar é dizer
+          que o trabalho está aceite, e uma assinatura depois disso não prova
+          nada que a confirmação já não tenha dito.
         </p>
       )}
 
