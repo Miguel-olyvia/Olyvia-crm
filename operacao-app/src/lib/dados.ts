@@ -373,6 +373,53 @@ export async function locaisRemovidosDe(paiIds: readonly string[]): Promise<Loca
 }
 
 
+/* ────────────── Acrescentar trabalho na própria ordem ───────────── */
+
+/**
+ * Uma tarefa a mais, só nesta ordem.
+ *
+ * O caminho longo — medição, checklist, publicar, escolher — continua a ser
+ * o certo para o que se repete. Isto é para o que não se repete: o técnico
+ * que chega ao local e encontra mais uma coisa. Ou regista ali, ou não
+ * regista.
+ *
+ * Com limites, a tarefa passa a ser uma leitura com veredicto — sem precisar
+ * de definição de medição nenhuma. Ver `db/tarefas-na-ordem.sql`.
+ */
+export async function acrescentarTarefa(t: {
+  ordemId: string;
+  nome: string;
+  tipo?: string;
+  obrigatoria?: boolean;
+  unidade?: string | null;
+  limiteMin?: number | null;
+  limiteMax?: number | null;
+  observacoes?: string | null;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("rpc_ops_acrescentar_tarefa", {
+    p_ordem_id: t.ordemId,
+    p_nome: t.nome,
+    p_tipo: t.tipo ?? "inspecao",
+    p_obrigatoria: t.obrigatoria ?? true,
+    p_unidade: t.unidade ?? null,
+    p_limite_min: t.limiteMin ?? null,
+    p_limite_max: t.limiteMax ?? null,
+    p_observacoes: t.observacoes ?? null,
+  });
+  if (error)
+    throw new ErroDeEscrita(error.message || "Não foi possível acrescentar a tarefa.");
+  return String((data as { id?: string } | null)?.id ?? "");
+}
+
+/** Tirar uma tarefa acrescentada por engano. Só por responder. */
+export async function removerTarefa(tarefaId: string): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_remover_tarefa", {
+    p_tarefa_id: tarefaId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível remover a tarefa.");
+}
+
+
 /* ─────────────────────── O sino, deste lado ───────────────────── */
 
 /**
