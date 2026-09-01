@@ -123,6 +123,33 @@ export async function gravarAtivo(a: {
   if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
 }
 
+/**
+ * Tirar de vista, ou repor.
+ *
+ * ⚠ **Nunca apaga.** Põe `ativo = false`, e as listas todas já filtram por
+ * esse campo — o equipamento desaparece do ecrã e o histórico fica intacto.
+ * Um `DELETE` a sério ia em cascata pelas ordens que apontam para ele
+ * (`ops_ordem_alvo`), e um engano numa lista passaria a custar dois anos de
+ * trabalho. Por isso a palavra no botão é &ldquo;remover&rdquo; e não
+ * &ldquo;apagar&rdquo;: é o que realmente acontece.
+ */
+export async function removerAtivo(id: string, remover: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("ops_ativo")
+    .update({ ativo: !remover })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
+}
+
+/** O mesmo para um espaço. Quem chama garante que está vazio. */
+export async function removerLocal(id: string, remover: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("ops_local")
+    .update({ ativo: !remover })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
+}
+
 export interface CategoriaAtivo {
   id: string;
   codigo: string;

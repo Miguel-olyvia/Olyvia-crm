@@ -312,6 +312,66 @@ export async function ativosDoLocal(localId: string): Promise<AtivoRow[]> {
   return (data ?? []) as unknown as AtivoRow[];
 }
 
+/**
+ * Os equipamentos de vários sítios de uma vez.
+ *
+ * A ficha de um sítio mostra o que está nele **e** o que está em cada espaço
+ * lá dentro. Uma chamada por espaço davam sete idas à base para uma torre de
+ * sete pisos, e o ecrã montava-se aos bocados à frente de quem olhava.
+ */
+export async function ativosDeLocais(localIds: readonly string[]): Promise<AtivoRow[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .in("local_id", localIds)
+    .eq("ativo", true)
+    .order("codigo");
+  rebentar("carregar os ativos", error);
+  return (data ?? []) as unknown as AtivoRow[];
+}
+
+/**
+ * O que foi tirado de vista, para se poder repor.
+ *
+ * Remover aqui nunca apaga: põe `ativo = false`. Apagar a sério levaria
+ * atrás o histórico — as ordens apontam para o equipamento, e a chave é em
+ * cascata. Um engano numa lista não pode custar dois anos de trabalho.
+ */
+export async function ativosRemovidosDe(localIds: readonly string[]): Promise<AtivoRow[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .in("local_id", localIds)
+    .eq("ativo", false)
+    .order("codigo");
+  rebentar("carregar os equipamentos removidos", error);
+  return (data ?? []) as unknown as AtivoRow[];
+}
+
+/** Os espaços que foram tirados de vista dentro de um sítio. */
+export async function locaisRemovidosDe(paiId: string): Promise<LocalRow[]> {
+  const { data, error } = await supabase
+    .from("ops_local")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, " +
+        "latitude, longitude"
+    )
+    .eq("parent_id", paiId)
+    .eq("ativo", false)
+    .order("nome");
+  rebentar("carregar os espaços removidos", error);
+  return ((data ?? []) as unknown as LocalRow[]).map(comCoordenadas);
+}
+
+
 /* ─────────────────────────── Árvore de locais ─────────────────────────── */
 
 export interface NoLocal extends LocalRow {
