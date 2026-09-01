@@ -61,7 +61,7 @@ export async function gravarLocal(l: {
   morada?: string | null;
   latitude?: number | null;
   longitude?: number | null;
-}): Promise<void> {
+}): Promise<string | null> {
   const linha = {
     organization_id: l.orgId,
     cliente_id: l.clienteId,
@@ -75,10 +75,20 @@ export async function gravarLocal(l: {
     latitude: l.latitude ?? null,
     longitude: l.longitude ?? null,
   };
-  const { error } = l.id
-    ? await supabase.from("ops_local").update(linha).eq("id", l.id)
-    : await supabase.from("ops_local").insert(linha);
+  // Devolve o id de quem acabou de nascer: quem cria um espaco a meio de
+  // abrir uma ordem tem de o poder escolher a seguir, sem recarregar nada.
+  if (l.id) {
+    const { error } = await supabase.from("ops_local").update(linha).eq("id", l.id);
+    if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
+    return null;
+  }
+  const { data, error } = await supabase
+    .from("ops_local")
+    .insert(linha)
+    .select("id")
+    .single();
   if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
+  return (data as { id: string } | null)?.id ?? null;
 }
 
 export async function gravarAtivo(a: {

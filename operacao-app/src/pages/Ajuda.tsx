@@ -1525,12 +1525,20 @@ const MONTAR = [
     dica: "O custo por hora é o que faz o custo real de mão de obra existir. Sem ele, o gasto de uma ordem fica sempre incompleto — foi exatamente isso que aconteceu no Infraspeak, onde o campo existe e nunca foi preenchido.",
   },
   {
-    titulo: "Criar os sítios",
-    onde: "Definições › Locais",
-    href: "/definicoes?ver=locais",
+    titulo: "Escolher as categorias de equipamento",
+    onde: "Definições › Procedimentos",
+    href: "/definicoes?ver=procedimentos",
     texto:
-      "Um local é uma morada, um edifício, um piso ou um espaço — e pode estar dentro de outro. Depois metem-se os equipamentos lá dentro.",
-    dica: "Cria primeiro as categorias de equipamento (Extintor, AVAC, Elevador). É por elas que as medições sabem a que equipamentos se aplicam.",
+      "O que um equipamento é: extintor, elevador, quadro elétrico. Há um catálogo por ofício — escolhem-se várias de uma vez, e cria-se à mão o que faltar.",
+    dica: "Vem antes dos sítios porque as medições penduram-se nas categorias. Sem elas, uma medição não sabe a que equipamentos se aplica.",
+  },
+  {
+    titulo: "Criar os sítios",
+    onde: "Locais",
+    href: "/locais",
+    texto:
+      "Um sítio é a morada, e tem cliente e ponto no mapa. Os espaços — garagem, piso 3, cozinha — vivem dentro dele: é o sinal + de cada linha da árvore. Os equipamentos metem-se depois, na ficha de cada sítio.",
+    dica: "Isto saíu das Definições de propósito. Um sítio não é uma definição — e também se cria a meio de abrir uma ordem, sem sair de lá: se o cliente tiver a morada na ficha do CRM, é um toque.",
   },
   {
     titulo: "Definir as medições",

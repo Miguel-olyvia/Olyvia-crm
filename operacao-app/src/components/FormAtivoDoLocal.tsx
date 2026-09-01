@@ -100,7 +100,7 @@ export default function FormAtivoDoLocal({
           label="Categoria"
           hint={
             categorias.length === 0
-              ? "Ainda não há. Criam-se em Definições › Locais e equipamentos."
+              ? "Ainda não há. Criam-se em Definições › Procedimentos."
               : undefined
           }
         >

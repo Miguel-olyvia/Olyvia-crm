@@ -10,6 +10,7 @@ import { Check, ChevronRight, Search, X } from "./icons";
 import type { Estado, EstadoTarefa, Origem, Prioridade } from "../domain/tipos";
 import { ROTULO_ESTADO, ROTULO_ESTADO_TAREFA } from "../domain/tipos";
 import { useRotulos } from "../auth/Rotulos";
+import { ErroDeEscrita } from "../lib/dados";
 
 export function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
@@ -558,5 +559,67 @@ export function ConfirmDialog({
     >
       <div className="text-sm text-slate-600">{message}</div>
     </Modal>
+  );
+}
+
+/* ------------------------------------------------- Peças de formulário -- */
+
+/**
+ * Gravar, com o erro do servidor à vista.
+ *
+ * As RPCs escrevem mensagens para serem lidas por pessoas ("Uma gama sem
+ * limites nunca dá veredicto nenhum"). Trocá-las por uma genérica seria deitar
+ * fora a parte útil.
+ *
+ * Vive aqui, e não em Definições, desde que os formulários de local e de
+ * categoria saíram de lá para o sítio onde se usam.
+ */
+export function useGravar() {
+  const [aGravar, setAGravar] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const gravar = async (fn: () => Promise<unknown>, aoAcabar: () => void) => {
+    setAGravar(true);
+    setErro(null);
+    try {
+      await fn();
+      aoAcabar();
+    } catch (e) {
+      setErro(
+        e instanceof ErroDeEscrita
+          ? e.message
+          : "Não foi possível falar com o servidor. Tenta outra vez."
+      );
+    } finally {
+      setAGravar(false);
+    }
+  };
+
+  return { aGravar, erro, gravar };
+}
+
+/** Um botão de escolha única, para quando são poucas e cabem numa linha. */
+export function Escolha({
+  ligado,
+  onClick,
+  children,
+}: {
+  ligado: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1 transition-all active:scale-[0.98]",
+        ligado
+          ? "bg-brand text-white ring-brand"
+          : "bg-white text-slate-600 ring-slate-200 hover:ring-slate-300"
+      )}
+    >
+      {children}
+    </button>
   );
 }

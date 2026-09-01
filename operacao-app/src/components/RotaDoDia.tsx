@@ -142,7 +142,7 @@ export default function RotaDoDia({
           {paragens.length === 0
             ? "Nenhuma ordem deste dia tem um ponto no mapa."
             : "Só uma ordem deste dia tem ponto no mapa — não há caminho para comparar."}{" "}
-          Um local ganha ponto em <strong className="font-medium">Definições › Locais</strong>, com
+          Um local ganha ponto na ficha dele, em <strong className="font-medium">Locais</strong>, com
           o GPS do telemóvel ou colando um link do Google Maps.
         </p>
       ) : (

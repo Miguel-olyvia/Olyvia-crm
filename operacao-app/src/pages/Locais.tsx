@@ -9,11 +9,13 @@ import {
   montarArvore,
   type AtivoRow,
   type Cliente,
+  type LocalRow,
   type NoLocal,
 } from "../lib/dados";
-import { Badge, Card, EmptyState, ErrorState, Input, Skeleton, cx } from "../components/ui";
-import { ChevronDown, ChevronRight, Layers, MapPin, Search } from "../components/icons";
+import { Badge, Button, Card, EmptyState, ErrorState, Input, Skeleton, cx } from "../components/ui";
+import { ChevronDown, ChevronRight, Layers, MapPin, Plus, Search } from "../components/icons";
 import { IconeDoLocal } from "../components/IconeDeLinha";
+import FormLocal from "../components/FormLocal";
 
 /**
  * Locais e ativos, num só navegador.
@@ -26,12 +28,24 @@ import { IconeDoLocal } from "../components/IconeDeLinha";
  * O conceito "Edifício" não existe aqui de propósito — na instância observada
  * havia centenas de "edifícios" que eram apartamentos particulares, porque era
  * o único sítio onde cabia uma morada.
+ *
+ * ⚠ **É aqui que os sítios nascem, e já não em Definições.** Havia lá uma
+ * lista plana com uma caixa "Dentro de" opcional, e quem a usou disse o que
+ * havia a dizer: "não existe distinção entre locais e espaços". Aqui a
+ * distinção é a própria árvore — o **+** de cada linha cria um espaço
+ * *dentro* dela, e o botão do topo cria um sítio novo.
  */
 
 export default function Locais() {
   const { activeOrgId } = useAuth();
   const [arvore, setArvore] = useState<NoLocal[] | null>(null);
   const [clientes, setClientes] = useState<Map<string, string>>(new Map());
+  // A lista inteira, e não só o mapa de nomes: criar um sítio precisa de
+  // escolher o dono, e o mapa não dá para preencher uma caixa de escolha.
+  const [listaClientes, setListaClientes] = useState<Cliente[]>([]);
+  const [formLocal, setFormLocal] = useState<
+    { local?: LocalRow | null; dentroDe?: LocalRow | null } | null
+  >(null);
   const [erro, setErro] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
   const [pesquisa, setPesquisa] = useState("");
@@ -54,6 +68,7 @@ export default function Locais() {
         const a = montarArvore(locais);
         setArvore(a);
         setClientes(new Map(cls.map((c: Cliente) => [c.id, c.nome])));
+        setListaClientes(cls);
         // Abre o primeiro nível, para o ecrã não abrir fechado sobre si mesmo.
         setAbertos(new Set(a.map((n) => n.id)));
       } catch (e) {
@@ -98,18 +113,23 @@ export default function Locais() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Locais e ativos</h1>
-        <div className="relative w-full sm:w-72">
-          <Search
-            width={15}
-            height={15}
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-          />
-          <Input
-            value={pesquisa}
-            onChange={(e) => setPesquisa(e.target.value)}
-            placeholder="Nome ou código…"
-            className="pl-9"
-          />
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:w-72 sm:flex-none">
+            <Search
+              width={15}
+              height={15}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+            />
+            <Input
+              value={pesquisa}
+              onChange={(e) => setPesquisa(e.target.value)}
+              placeholder="Nome ou código…"
+              className="pl-9"
+            />
+          </div>
+          <Button className="shrink-0" onClick={() => setFormLocal({})}>
+            <Plus width={14} height={14} /> Sítio
+          </Button>
         </div>
       </div>
 
@@ -125,7 +145,12 @@ export default function Locais() {
             description={
               pesquisa.trim()
                 ? "Nenhum local corresponde à pesquisa."
-                : "Os locais são a árvore onde o trabalho acontece: uma morada, ou um edifício com pisos e espaços."
+                : "Os locais são a árvore onde o trabalho acontece: uma morada, e os espaços dentro dela."
+            }
+            action={
+              pesquisa.trim() ? undefined : (
+                <Button onClick={() => setFormLocal({})}>Criar o primeiro sítio</Button>
+              )
             }
           />
         </Card>
@@ -145,13 +170,36 @@ export default function Locais() {
                   selecionado={selecionado}
                   selecionar={setSelecionado}
                   clientes={clientes}
+                  aoAcrescentar={(pai) => setFormLocal({ dentroDe: pai })}
                 />
               ))}
             </ul>
           </Card>
 
-          <PainelLocal local={selecionado} clientes={clientes} />
+          <PainelLocal
+            local={selecionado}
+            clientes={clientes}
+            aoEditar={(l) => setFormLocal({ local: l })}
+            aoAcrescentar={(pai) => setFormLocal({ dentroDe: pai })}
+          />
         </div>
+      )}
+
+      {formLocal && (
+        <FormLocal
+          local={formLocal.local}
+          dentroDe={formLocal.dentroDe}
+          clientes={listaClientes}
+          aoFechar={() => setFormLocal(null)}
+          aoGravar={() => {
+            // O pai fica aberto: quem acabou de criar um espaço quer vê-lo,
+            // e não ter de voltar a abrir o ramo onde estava.
+            const pai = formLocal.dentroDe;
+            if (pai) setAbertos((a) => new Set(a).add(pai.id));
+            setFormLocal(null);
+            setTentativa((t) => t + 1);
+          }}
+        />
       )}
     </div>
   );
@@ -165,6 +213,7 @@ function NoDaArvore({
   selecionado,
   selecionar,
   clientes,
+  aoAcrescentar,
 }: {
   no: NoLocal;
   nivel: number;
@@ -173,6 +222,7 @@ function NoDaArvore({
   selecionado: NoLocal | null;
   selecionar: (n: NoLocal) => void;
   clientes: Map<string, string>;
+  aoAcrescentar: (pai: NoLocal) => void;
 }) {
   const temFilhos = no.filhos.length > 0;
   const aberto = abertos.has(no.id);
@@ -224,6 +274,21 @@ function NoDaArvore({
             </span>
           )}
         </button>
+
+        {/*
+          O + está na linha e não num menu porque a pergunta que se faz em
+          frente a um sítio é sempre a mesma: "e o que é que há lá dentro?".
+          Fica sempre visível — num telemóvel não há rato para passar por cima.
+        */}
+        <button
+          type="button"
+          onClick={() => aoAcrescentar(no)}
+          title={`Novo espaço em ${no.nome}`}
+          aria-label={`Novo espaço em ${no.nome}`}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-white hover:text-brand"
+        >
+          <Plus width={14} height={14} />
+        </button>
       </div>
 
       {temFilhos && aberto && (
@@ -238,6 +303,7 @@ function NoDaArvore({
               selecionado={selecionado}
               selecionar={selecionar}
               clientes={clientes}
+              aoAcrescentar={aoAcrescentar}
             />
           ))}
         </ul>
@@ -249,9 +315,13 @@ function NoDaArvore({
 function PainelLocal({
   local,
   clientes,
+  aoEditar,
+  aoAcrescentar,
 }: {
   local: NoLocal | null;
   clientes: Map<string, string>;
+  aoEditar: (l: NoLocal) => void;
+  aoAcrescentar: (pai: NoLocal) => void;
 }) {
   const [ativos, setAtivos] = useState<AtivoRow[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -300,12 +370,28 @@ function PainelLocal({
         <h2 className="mt-0.5 text-lg font-semibold tracking-tight text-slate-900">{local.nome}</h2>
         {/* Este painel é para consultar de relance. Quem quiser trabalhar no
             sítio — acrescentar equipamentos, ver o histórico — abre a ficha. */}
-        <Link
-          to={`/locais/${local.codigo}`}
-          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
-        >
-          Abrir ficha <ChevronRight width={12} height={12} />
-        </Link>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => aoEditar(local)}
+            className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          >
+            Editar
+          </button>
+          <button
+            type="button"
+            onClick={() => aoAcrescentar(local)}
+            className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+          >
+            <Plus width={12} height={12} /> Espaço
+          </button>
+          <Link
+            to={`/locais/${local.codigo}`}
+            className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+          >
+            Abrir ficha <ChevronRight width={12} height={12} />
+          </Link>
+        </div>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs tabular text-slate-500">{local.codigo}</span>

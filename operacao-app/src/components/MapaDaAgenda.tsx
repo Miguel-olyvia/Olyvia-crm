@@ -170,7 +170,7 @@ export default function MapaDaAgenda({
             title="Nada para mostrar no mapa"
             description={
               semPonto > 0
-                ? `Há ${semPonto} ${semPonto === 1 ? "ordem" : "ordens"} neste período, mas o local delas não tem ponto marcado. Marca-se em Definições › Locais, com o GPS ou colando um link do Google Maps.`
+                ? `Há ${semPonto} ${semPonto === 1 ? "ordem" : "ordens"} neste período, mas o local delas não tem ponto marcado. Marca-se na ficha do sítio, em Locais, com o GPS ou colando um link do Google Maps.`
                 : "Não há ordens neste período."
             }
           />
