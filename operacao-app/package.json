@@ -29,6 +29,7 @@
     "supabase:relatorio": "node tools/correr-sql.mjs db/relatorio-automatico.sql",
     "supabase:campos": "node tools/correr-sql.mjs db/campos-ordem.sql",
     "supabase:duplicar": "node tools/correr-sql.mjs db/duplicar.sql",
+    "supabase:tarefas-na-ordem": "node tools/correr-sql.mjs db/tarefas-na-ordem.sql",
     "supabase:documentos": "node tools/correr-sql.mjs db/documentos-e-ativos.sql",
     "supabase:listas": "node tools/correr-sql.mjs db/listas-operacao.sql",
     "supabase:configuraveis": "node tools/correr-sql.mjs db/listas-configuraveis.sql",

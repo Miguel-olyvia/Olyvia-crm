@@ -18,16 +18,16 @@ Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 | `/` · **Hoje** | O que espera por mim e o que está a correr mal. Nada de filtros antes de mostrar. Ao abrir, quem coordena dispara a verificação de atrasos. | todos |
 | `/ordens` · **Ordens** | A lista, com filtros por estado, origem e pessoa. | todos (só as suas, se técnico) |
 | `/ordens/nova` · **Nova ordem** | Quatro campos obrigatórios; o resto atrás de um clique. | todos (técnico → fica `por_aprovar`) |
-| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
+| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. **Acrescentar tarefas e leituras ali mesmo**, sem passar por Definições. Uma tarefa respondida fecha-se e deixa só um &ldquo;alterar&rdquo;. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
-| `/locais` · **Locais** | A árvore de sítios e os equipamentos lá dentro. | todos |
-| `/locais/:codigo` · **Ficha do local** | O caminho até ao sítio, os sítios lá dentro, os equipamentos (criar, editar, histórico), e as últimas ordens que por lá passaram. Duplicar o local; imprimir as **etiquetas QR** dos equipamentos. | todos; editar é de quem coordena |
+| `/locais` · **Locais** | A árvore de locais e os equipamentos lá dentro. **É aqui que os locais nascem** — o botão do topo cria um local, o **+** de cada linha cria um espaço dentro dela. | todos; criar é de quem coordena |
+| `/locais/:codigo` · **Ficha do local** | **A morada inteira num ecrã só.** A árvore a qualquer profundidade, com os equipamentos de cada degrau; criar, editar, duplicar e remover espaços e equipamentos onde eles estão; **mover equipamentos** arrastando (ou pelo botão, no telemóvel); a gaveta do que foi removido, com **repor**; o mapa; as **etiquetas QR**; e as últimas ordens da morada **e dos espaços dela**, cada uma a dizer onde foi. ⚠ **Um espaço não tem página própria** — o endereço dele abre a página da morada, com a árvore aberta até lá. | todos; editar é de quem coordena |
 | `/ativos/:codigo` · **Ficha do equipamento** | Onde a etiqueta QR aterra. O que é, o que já lhe fizeram, e o botão para abrir uma ordem ali mesmo. | todos |
-| `/agenda` · **Agenda** | **Dia, semana, mês e mapa.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. Filtros por cliente, tipo de trabalho, pessoa, especialidade e fornecedor. Na vista de dia, o dia pela estrada. | **admin, gestor, operador** |
+| `/agenda` · **Agenda** | **Dia, semana, mês e mapa.** A equipa lado a lado, com a carga em horas, ausências, e os compromissos que já estavam na agenda do CRM. O mês mostra **os nomes das ordens**, não só quantas. Carregar numa ordem, em qualquer vista, abre um **painel ao lado** com o quando, o cliente, o onde, o quem e o mapa — sem mudar de página. Filtros por cliente, tipo de trabalho, pessoa, especialidade e fornecedor. Na vista de dia, o dia pela estrada. | **admin, gestor, operador** |
 | `/planos` · **Planos** | Os planos preventivos, com a regra em português e as próximas seis datas. | quem coordena |
 | `/orcamentos` · **Orçamentos** | Os orçamentos aceites no CRM, prontos a virar obra. | quem coordena |
 | `/analises` · **Análises** | Três separadores: PMP cumprido por cliente e por mês; ficha de um equipamento com a evolução das leituras; exportar leituras para folha de cálculo. | **admin, gestor, operador** |
-| `/definicoes` · **Definições** | Seis separadores: locais e equipamentos, procedimentos, equipa, **tipos e custos**, **vocabulário** (o nome que a empresa dá às listas do código, e as especialidades), **automático**. | quem coordena |
+| `/definicoes` · **Definições** | **Cinco** separadores: **procedimentos** (categorias de equipamento com catálogo de 47 sugestões, medições, checklists, packs), equipa, **tipos e custos**, **vocabulário** (o nome que a empresa dá às listas do código, e as especialidades), **automático**. ⚠ **Os locais não estão aqui** — um local não é uma definição; criam-se em `/locais` e dentro da própria ordem. | quem coordena |
 | `/ajuda` · **Ajuda** | Quatro portas: **Porquê mudar** (calculadora de valor e cinco fluxogramas), **O funil** (um trabalho do princípio ao fim, com o que acontece sozinho em cada passo), **Como funciona**, **Como se usa**. | todos |
 
 **A entrada de Análises não aparece a um técnico.** Não é só permissão: no
@@ -115,10 +115,16 @@ gente — sem dar erro, só com mais linhas.
 
 ---
 
-## 4. As 20 operações de escrita
+## 4. As 22 operações de escrita
 
-A aplicação **não faz `INSERT` nem `UPDATE` em tabela nenhuma**. Tudo passa por
-uma destas.
+Quase tudo passa por uma destas RPCs, com a fechadura do lado da base.
+
+⚠ **Três exceções, e são escritas diretas em tabelas do próprio módulo**,
+protegidas só pela RLS: gravar um local ou um equipamento (`gravarLocal`,
+`gravarAtivo`), tirá-los de vista (`removerAtivo`, `removerLocal` — põem
+`ativo = false`), e mudar um equipamento de local (`moverAtivo`). Não têm
+fechadura porque não têm máquina de estados a proteger: o que as guarda é a
+mesma RLS que guarda a leitura.
 
 ### O trabalho
 
@@ -130,6 +136,8 @@ uma destas.
 | `rpc_ops_transitar_ordem` | o estado, a sessão de trabalho, o custo de mão de obra | `ops_ordem_guarda_estado` |
 | `rpc_ops_responder_tarefa` | o estado de uma tarefa, e a corretiva que daí nasce | `ops_tarefa_guarda_estado` |
 | `rpc_ops_responder_medicao` | uma leitura, o veredicto, e a tarefa que se acerta | `ops_medicao_guarda` |
+| `rpc_ops_acrescentar_tarefa` | uma tarefa a mais, **só nesta ordem**. Com limites, é uma leitura com veredicto — sem definição de medição nenhuma | recusa numa ordem fechada |
+| `rpc_ops_remover_tarefa` | tira uma tarefa acrescentada por engano. **Só por responder** — trabalho feito não se apaga | recusa se já respondida |
 
 ### Custos e anexos
 
@@ -144,7 +152,7 @@ uma destas.
 
 | Operação | O que muda |
 |---|---|
-| `rpc_ops_criar_local` | um sítio novo, criado onde se precisa dele |
+| `rpc_ops_criar_local` | um local novo, criado onde se precisa dele — incluindo a meio de abrir uma ordem, a partir da morada que o cliente já tem no CRM |
 | `rpc_ops_gravar_perfil` | quem entra em Operações, e com que função |
 | `rpc_ops_gravar_checklist` | checklists e tarefas. Publicar cria a versão seguinte |
 | `rpc_ops_gravar_medicao` | medições e as suas opções |
@@ -152,6 +160,9 @@ uma destas.
 | `rpc_ops_experimentar_regra` | as próximas seis datas de uma regra, **antes** de gravar |
 | `rpc_ops_proximo_codigo` | o próximo código de uma sequência |
 | `rpc_ops_instalar_pack` | um pack de setor: categorias, medições e checklists já feitas. Nunca sobrepõe, e repete-se sem duplicar |
+| `rpc_ops_duplicar_local` | uma cópia do local **com a árvore toda**: espaços, espaços dos espaços, e os equipamentos de cada um. Num espaço, dá um irmão dentro do mesmo local. Nunca leva coordenadas, números de série nem ordens |
+| `rpc_ops_gravar_rotulo` · `rpc_ops_repor_rotulos` | o nome que a empresa dá a cada lista fixa |
+| `rpc_ops_gravar_skill` | as especialidades da equipa |
 
 ### Automáticas
 
@@ -213,7 +224,7 @@ Tudo **só leitura**, exceto as duas exceções da linha de baixo.
 | Catálogo de material | `catalog_items` | lançar custos sem inventar preços |
 | Compras a fornecedores | `purchase_orders` · `purchase_order_items` | o material que se comprou para aquela obra |
 | Férias, horários, feriados | `schedule_resources` · `resource_time_off` · `resource_availability_rules` · `schedule_holidays` | avisar antes de marcar uma visita a quem não está |
-| **Notificações** | `notifications` | **ESCREVE** — uma linha por aviso, só `INSERT` |
+| **Notificações** | `notifications` | **ESCREVE** — uma linha por aviso, só `INSERT`. E **lê**: o sino dentro de Operações mostra as do próprio módulo e marca-as como lidas, com as políticas que o CRM já tinha (`user_id = auth.uid()`). Não é um segundo sino — é o mesmo, mostrado onde a pessoa está |
 | **Ficheiros** | `storage` | **ESCREVE** — num balde próprio, `operacoes` |
 
 E também três funções de autorização do CRM, reutilizadas em vez de
@@ -280,16 +291,18 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `validar-mapa` | a base só aceita coordenadas que são um sítio no mapa |
 | `validar-relatorio` | o email ao cliente só sai quando devia, e para quem devia |
 | `validar-campos` | a ordem só fecha sozinha quando devia — sobretudo, quando NÃO fecha |
-| `validar-duplicar` | uma cópia leva o molde e nunca o que aconteceu |
+| `validar-duplicar` | uma cópia leva o molde e nunca o que aconteceu — e, num local, **leva a árvore toda**: os espaços a qualquer profundidade e os equipamentos de cada um |
 | `validar-documentos` | os tipos de ficheiro aceites, e a memória do equipamento |
 | `validar-listas` | motivos de pausa por função, áreas e tipos |
 | `validar-mensagens` | a conversa existe, avisa quem tem de saber, e não se reescreve |
 | `npm test` › `rotulos` | renomear não parte nada, e esconder não apaga o passado |
+| `npm test` › `arvore-de-locais` | uma página aberta em qualquer degrau sabe qual é a morada; um pai em falta ou um ciclo não penduram o ecrã |
+| `npm test` › `categorias-sugeridas` | o catálogo não tem códigos repetidos, e não oferece o que a empresa já tem |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **306 testes de domínio** (`npm test`), sobre funções puras — sem base de
-dados, a correr em pouco mais de um segundo.
+Mais **357 testes de domínio** (`npm test`), sobre funções puras — sem base de
+dados, a correr em poucos segundos.
 
 ---
 
@@ -303,7 +316,7 @@ schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
   → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
   → relatorio-automatico.sql → relatorio-manual.sql
-  → campos-ordem.sql → duplicar.sql
+  → campos-ordem.sql → duplicar.sql → tarefas-na-ordem.sql
   → documentos-e-ativos.sql → listas-operacao.sql
   → listas-configuraveis.sql → mensagens.sql
   → planos-crud.sql
@@ -323,7 +336,10 @@ avisos.
 |---|---|
 | [`../README.md`](../README.md) | instalação, comandos, a autorização em três camadas |
 | [`onde-estamos.md`](onde-estamos.md) | o estado, e o que custou a descobrir |
+| [`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md) | **o dia em que isto foi usado a sério pela primeira vez** — catorze correções ao desenho, cada uma com a queixa que a originou |
+| [`teste-de-ponta-a-ponta.md`](teste-de-ponta-a-ponta.md) | como validar tudo, do CRM até ao relatório, sem fazer merge |
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com custo e evidência |
 | [`deploy-falhado.md`](deploy-falhado.md) | o deploy que falhou, e porquê |
+| [`email-que-nao-chega.md`](email-que-nao-chega.md) | o bug do CRM que faz o relatório dizer que foi e não ir |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |
 | `/ajuda` na app | o mesmo, para quem decide e para quem usa — com fluxogramas |

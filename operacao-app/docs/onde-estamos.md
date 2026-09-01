@@ -10,6 +10,36 @@
 > ⚠ **As secções 1 a 9 são de 30 de agosto.** O que é verdade hoje está na
 > **§0**, logo a seguir — começa por aí.
 
+## 0b. O que mudou a 1 de setembro — o primeiro dia de uso a sério
+
+Catorze correções ao desenho, quase todas vindas da mesma frase: *"isto está
+muito difícil"*. Quem montou a operação passo a passo encontrou em duas horas o
+que meses de código não tinham encontrado.
+
+O registo completo, com a queixa que originou cada uma, está em
+[`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md). Em resumo:
+
+| | |
+|---|---|
+| **Categorias** | catálogo de 47 sugestões por ofício, escolhidas de uma vez |
+| **Os locais saíram das Definições** | criam-se em `/locais` e dentro da própria ordem |
+| **Uma morada, uma página** | a árvore inteira num ecrã só; um espaço não tem página própria |
+| **Mover equipamentos** | arrastando, ou por botão no telemóvel |
+| **Remover nunca apaga** | põe `ativo = false`, com gaveta para repor |
+| **"Sítio" passa a "Local"** | em todo o lado que se lê |
+| **Duplicar leva a árvore toda** | espaços e equipamentos, a qualquer profundidade |
+| **Tarefas na própria ordem** | e leituras com limites, sem passar por Definições |
+| **Tarefa respondida fecha-se** | só um "alterar" pequeno |
+| **O sino em Operações** | o do CRM, mostrado onde a pessoa está |
+| **A agenda diz o quê** | nomes das ordens na vista de mês |
+| **Espreitar sem sair** | painel ao lado em vez de mudar de página |
+| **Mapa** | na ficha do local e no painel da ordem |
+
+**Dois ficheiros SQL para correr:** `db/duplicar.sql` (outra vez — a função
+ganhou um argumento) e `db/tarefas-na-ordem.sql` (novo).
+
+---
+
 ## 0. O que mudou a 31 de agosto
 
 O módulo está **no ar** em `/operacao`, e as **nove** coisas que estavam por
@@ -95,7 +125,7 @@ schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas
   → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
   → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
   → relatorio-automatico.sql → relatorio-manual.sql
-  → campos-ordem.sql → duplicar.sql
+  → campos-ordem.sql → duplicar.sql → tarefas-na-ordem.sql
   → documentos-e-ativos.sql → listas-operacao.sql → mensagens.sql
   → planos-crud.sql → config.sql → packs.sql → custos.sql → analises.sql
   → cliente-crm.sql → pos-instalacao.sql

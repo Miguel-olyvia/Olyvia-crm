@@ -153,7 +153,8 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/mapa.sql` | Onde fica o local, no mapa — para o técnico abrir a navegação e ir | **não** (duas colunas em `ops_local`, e mais nada) |
 | `db/relatorio-automatico.sql` | Ao confirmar uma ordem, o relatório vai ao cliente por email. **Desligado até alguém o ligar** | **sim** — uma linha em `scheduled_emails`, a fila de saída que o CRM já processa |
 | `db/campos-ordem.sql` | Tipo de trabalho (os 9 do Infraspeak), centro de custo, fornecedor, e o fecho automático por tipo | **não** (o fornecedor é só um id, sem chave estrangeira) |
-| `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu | **não** |
+| `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu. Um local leva **a árvore toda**: espaços, espaços dos espaços, e os equipamentos de cada um | **não** |
+| `db/tarefas-na-ordem.sql` | Acrescentar e tirar tarefas na própria ordem, sem passar por Definições. Com limites, a tarefa é uma leitura com veredicto — sem precisar de definição de medição nenhuma | **não** |
 | `db/documentos-e-ativos.sql` | Word, Excel e CSV nos anexos, e o histórico do equipamento | **não** (mexe no bucket `operacoes`, que é do módulo) |
 | `db/listas-operacao.sql` | Motivos de pausa por função, áreas e tipos de área | **não** |
 | `db/listas-configuraveis.sql` | O nome que cada empresa dá a prioridade, criticidade, natureza da tarefa, nível do local e origem — e as especialidades, que nunca tiveram por onde se criar | **não** |
@@ -304,6 +305,7 @@ npm run supabase:mapa           # db/mapa.sql (coordenadas dos locais)
 npm run supabase:relatorio      # db/relatorio-automatico.sql (depois das assinaturas)
 npm run supabase:campos         # db/campos-ordem.sql
 npm run supabase:duplicar       # db/duplicar.sql (depois do campos-ordem)
+npm run supabase:tarefas-na-ordem # db/tarefas-na-ordem.sql (depois do duplicar)
 npm run supabase:documentos     # db/documentos-e-ativos.sql
 npm run supabase:listas         # db/listas-operacao.sql (pausas, áreas)
 npm run supabase:configuraveis  # db/listas-configuraveis.sql (vocabulário)
@@ -416,7 +418,10 @@ salta, em vez de escorregar para o mês seguinte.
 | | |
 |---|---|
 | [`docs/deploy-falhado.md`](docs/deploy-falhado.md) | O deploy que falhou: porquê, como se descobriu, e o que ficou diferente para não voltar a acontecer. |
-| [`docs/mapa-do-modulo.md`](docs/mapa-do-modulo.md) | **O inventário.** Os 11 ecrãs, as 27 tabelas, as 13 vistas, as 20 operações de escrita, os avisos, e a ordem de instalação. |
+| [`docs/mapa-do-modulo.md`](docs/mapa-do-modulo.md) | **O inventário.** Os ecrãs, as tabelas, as vistas, as operações de escrita, os avisos, e a ordem de instalação. |
+| [`docs/o-que-mudou-a-1-de-setembro.md`](docs/o-que-mudou-a-1-de-setembro.md) | **O primeiro dia de uso a sério.** Catorze correções ao desenho, cada uma com a queixa que a originou. É o ficheiro que explica porque é que os ecrãs estão como estão. |
+| [`docs/teste-de-ponta-a-ponta.md`](docs/teste-de-ponta-a-ponta.md) | Como validar tudo, do menu do CRM até ao relatório, **sem fazer merge** — pelo deploy de preview do Vercel. |
+| [`docs/email-que-nao-chega.md`](docs/email-que-nao-chega.md) | O relatório que a fila diz ter enviado e não enviou. Bug do CRM, investigado até ao fim, correção por aplicar. |
 | [`docs/onde-estamos.md`](docs/onde-estamos.md) | **Começa por aqui.** O estado, o que ficou por confirmar, por onde continuar, e as coisas que custaram a descobrir. |
 | [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
 | [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |

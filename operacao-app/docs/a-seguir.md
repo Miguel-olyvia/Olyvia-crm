@@ -7,6 +7,15 @@
 > que falta, e quanto custa. As que não valem a pena estão marcadas como tal —
 > uma lista só de boas ideias não ajuda a decidir.
 >
+> ⚠ **Este ficheiro é de agosto, e uma boa parte já foi feita.** As
+> notificações, a agenda, os contactos e o catálogo estão construídos; o sino
+> passou a estar também dentro de Operações a 1 de setembro. O que continua
+> por fazer é o portal do cliente, o WhatsApp, e o offline completo.
+>
+> Para o estado de hoje, ver [`onde-estamos.md`](onde-estamos.md); para o que
+> mudou no primeiro dia de uso a sério,
+> [`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md).
+>
 > Ver também [`portal-do-cliente.md`](portal-do-cliente.md).
 
 ---
