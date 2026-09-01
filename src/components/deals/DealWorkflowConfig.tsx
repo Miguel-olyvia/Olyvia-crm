@@ -137,7 +137,27 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
   const [pendingReorder, setPendingReorder] = useState<{ modules: any[]; writes: EdgeWrites } | null>(null);
   const [applying, setApplying] = useState(false);
 
-  const activeModules = pipelineConfig.activeModules;
+  /**
+   * A ordem que o ecra MOSTRA enquanto ha uma alteracao por confirmar.
+   *
+   * Sem isto, arrastar um modulo tinha um corte no meio: largava-se, a peca
+   * saltava de volta ao sitio de origem, e so DEPOIS aparecia a confirmacao --
+   * porque `proporAlteracao` guarda a nova ordem em `pendingReorder` e nao toca
+   * em `pipelineConfig.modules`. O gesto parecia ter falhado, e o dialogo
+   * parecia vir do nada.
+   *
+   * Agora a peca fica onde foi largada e a confirmacao explica o que isso muda
+   * na automacao. Cancelar limpa `pendingReorder` e a ordem volta sozinha ao que
+   * esta guardado -- nao ha estado a sincronizar a mao.
+   *
+   * O que se ESCREVE continua a vir de `pendingReorder.writes`, derivado antes
+   * de mostrar o dialogo. Isto e so o que se ve.
+   */
+  const modulosEmVista = pendingReorder?.modules ?? pipelineConfig.modules;
+  const activeModules = useMemo(
+    () => modulosEmVista.filter((m: any) => m.enabled),
+    [modulosEmVista],
+  );
 
   // Load all stage actions across modules and derive the real flow
   const loadFlowFromActions = useCallback(async () => {
@@ -357,10 +377,21 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
               currentTemplateId={pipelineConfig.config?.template_id || null}
               onApply={pipelineConfig.applyTemplate}
             />
+            {/*
+              `onReorder` aponta para `proporAlteracao`, o mesmo caminho da tira
+              do fluxo -- e nao para `pipelineConfig.reorderModules`.
+
+              Como estava, arrastar AQUI gravava a nova ordem e nao mexia numa
+              unica regra: o motor nao le a configuracao de modulos, so as
+              tabelas de accoes. O desenho passava a dizer uma coisa e a
+              automacao continuava a fazer outra, sem aviso. Arrastar na tira,
+              logo acima, ja fazia o correcto -- eram dois caminhos para o mesmo
+              gesto, e so um estava certo.
+            */}
             <PipelineModuleToggle
-              modules={pipelineConfig.modules}
+              modules={modulosEmVista}
               onToggle={handleToggleModule}
-              onReorder={pipelineConfig.reorderModules}
+              onReorder={(novos) => { void proporAlteracao(novos); }}
               onUpdateLabel={pipelineConfig.updateModuleLabel}
             />
           </TabsContent>
