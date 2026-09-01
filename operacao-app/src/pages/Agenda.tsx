@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import {
   ErroDeDados,
@@ -20,6 +19,7 @@ import SeletorDeData from "../components/SeletorDeData";
 import RotaDoDia from "../components/RotaDoDia";
 import FiltrosDaAgenda from "../components/FiltrosDaAgenda";
 import MapaDaAgenda from "../components/MapaDaAgenda";
+import PainelDaOrdem from "../components/PainelDaOrdem";
 import {
   listarEspecialidades,
   listarFornecedores,
@@ -118,7 +118,6 @@ function periodoDaVista(vista: Vista, dia: Date): [Date, Date] {
 
 export default function Agenda() {
   const { activeOrgId, funcao } = useAuth();
-  const navegar = useNavigate();
   const [vista, setVista] = useState<Vista>("dia");
   const [dia, setDia] = useState(() => {
     const d = new Date();
@@ -139,8 +138,25 @@ export default function Agenda() {
   const [filtro, setFiltro] = useState<FiltroDaAgenda>(FILTRO_VAZIO);
   const [erro, setErro] = useState<string | null>(null);
   const [aCarregar, setACarregar] = useState(true);
+  /**
+   * A ordem espreitada, sem sair da agenda.
+   *
+   * Um gestor a marcar o dia abre seis ordens a seguir umas às outras. Com
+   * navegação, cada espreitadela custava duas viagens e o botão de voltar
+   * trazia-o para o topo da lista, e não para onde estava.
+   */
+  const [espreitada, setEspreitada] = useState<OrdemNaAgenda | null>(null);
 
   const [de, ate] = useMemo(() => periodoDaVista(vista, dia), [vista, dia]);
+
+  useEffect(() => {
+    if (!espreitada) return;
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setEspreitada(null);
+    };
+    document.addEventListener("keydown", esc);
+    return () => document.removeEventListener("keydown", esc);
+  }, [espreitada]);
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -295,6 +311,7 @@ export default function Agenda() {
               indisp={indisp}
               compromissos={compromissos}
               locais={locais}
+              aoEspreitar={setEspreitada}
             />
           )}
           {vista === "semana" && (
@@ -311,7 +328,11 @@ export default function Agenda() {
             <MapaDaAgenda
               ordens={ordensVisiveis}
               locais={locais}
-              aoEscolher={(codigo) => navegar(`/ordens/${codigo}`)}
+              // No mapa também se espreita: carregar num pino e ser atirado
+              // para outra página perdia o mapa que se estava a ler.
+              aoEscolher={(codigo) =>
+                setEspreitada(ordensVisiveis.find((o) => o.codigo === codigo) ?? null)
+              }
             />
           )}
           {vista === "mes" && (
@@ -321,9 +342,22 @@ export default function Agenda() {
               indisp={indisp}
               compromissos={compromissos}
               aoEscolherDia={irParaODia}
+              aoEspreitar={setEspreitada}
             />
           )}
         </>
+      )}
+
+      {espreitada && (
+        <PainelDaOrdem
+          ordem={espreitada}
+          local={locais.find((l) => l.id === espreitada.local_id) ?? null}
+          cliente={clientes.find((c) => c.id === espreitada.cliente_id) ?? null}
+          responsavel={
+            equipa.find((m) => m.utilizador_id === espreitada.responsavel_id)?.nome ?? null
+          }
+          aoFechar={() => setEspreitada(null)}
+        />
       )}
     </div>
   );
@@ -332,6 +366,7 @@ export default function Agenda() {
 /* ─────────────────────────────── Dia ──────────────────────────────────── */
 
 function VistaDoDia({
+  aoEspreitar,
   dia,
   equipa,
   ordens,
@@ -339,6 +374,8 @@ function VistaDoDia({
   compromissos,
   locais,
 }: {
+  /** Abre o painel ao lado, em vez de mudar de página. */
+  aoEspreitar: (o: OrdemNaAgenda) => void;
   dia: Date;
   equipa: readonly MembroEquipa[];
   ordens: readonly OrdemNaAgenda[];
@@ -369,7 +406,7 @@ function VistaDoDia({
         {feriado && <span className="ml-1 text-amber-700">Feriado: {feriado}.</span>}
       </p>
 
-      {semDono.length > 0 && <SemDono ordens={semDono} />}
+      {semDono.length > 0 && <SemDono ordens={semDono} aoEspreitar={aoEspreitar} />}
 
       <Card className="overflow-hidden p-0">
         <Regua />
@@ -413,6 +450,7 @@ function VistaDoDia({
                       compromissos={meus}
                       dia={dia}
                       foraDeHorario={foraDeHorario}
+                      aoEspreitar={aoEspreitar}
                     />
                   )}
                 </div>
@@ -429,7 +467,13 @@ function VistaDoDia({
   );
 }
 
-function SemDono({ ordens }: { ordens: readonly OrdemNaAgenda[] }) {
+function SemDono({
+  ordens,
+  aoEspreitar,
+}: {
+  ordens: readonly OrdemNaAgenda[];
+  aoEspreitar: (o: OrdemNaAgenda) => void;
+}) {
   return (
     <Card className="border-amber-200 bg-amber-50/50 p-4 sm:p-5">
       <h2 className="flex items-center gap-2 text-sm font-medium text-amber-900">
@@ -441,13 +485,14 @@ function SemDono({ ordens }: { ordens: readonly OrdemNaAgenda[] }) {
       <ul className="mt-2 flex flex-wrap gap-2">
         {ordens.map((o) => (
           <li key={o.id}>
-            <Link
-              to={`/ordens/${o.codigo}`}
+            <button
+              type="button"
+              onClick={() => aoEspreitar(o)}
               className="inline-flex items-center gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs ring-1 ring-amber-200 transition-colors hover:ring-amber-300"
             >
               <span className="font-mono text-slate-500">{o.codigo}</span>
               <span className="max-w-[14rem] truncate text-slate-800">{o.titulo}</span>
-            </Link>
+            </button>
           </li>
         ))}
       </ul>
@@ -503,11 +548,13 @@ function BarraDoDia({
   compromissos,
   dia,
   foraDeHorario,
+  aoEspreitar,
 }: {
   ordens: readonly OrdemNaAgenda[];
   compromissos: readonly Compromisso[];
   dia: Date;
   foraDeHorario: boolean;
+  aoEspreitar: (o: OrdemNaAgenda) => void;
 }) {
   const comHora = ordens
     .map((o) => ({ o, p: posicaoNaRegua(o, dia) }))
@@ -555,9 +602,10 @@ function BarraDoDia({
         ))}
 
         {comHora.map(({ o, p }) => (
-          <Link
+          <button
             key={o.id}
-            to={`/ordens/${o.codigo}`}
+            type="button"
+            onClick={() => aoEspreitar(o)}
             title={`${o.codigo} · ${o.titulo}`}
             style={{ left: `${p.esquerda}%`, width: `${p.largura}%` }}
             className={cx(
@@ -567,7 +615,7 @@ function BarraDoDia({
             )}
           >
             <span className="truncate">{o.titulo}</span>
-          </Link>
+          </button>
         ))}
       </div>
 
@@ -575,13 +623,14 @@ function BarraDoDia({
         <ul className="mt-1.5 flex flex-wrap gap-1.5">
           {semHora.map((o) => (
             <li key={o.id}>
-              <Link
-                to={`/ordens/${o.codigo}`}
+              <button
+                type="button"
+                onClick={() => aoEspreitar(o)}
                 className="inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-[11px] ring-1 ring-slate-200 transition-colors hover:ring-slate-300"
               >
                 <Badge className="bg-slate-100 text-slate-500 ring-slate-200">sem hora</Badge>
                 <span className="max-w-[12rem] truncate text-slate-700">{o.titulo}</span>
-              </Link>
+              </button>
             </li>
           ))}
         </ul>
@@ -745,12 +794,14 @@ function VistaDoMes({
   indisp,
   compromissos,
   aoEscolherDia,
+  aoEspreitar,
 }: {
   dia: Date;
   ordens: readonly OrdemNaAgenda[];
   indisp: readonly IndisponibilidadeNoDia[];
   compromissos: readonly Compromisso[];
   aoEscolherDia: (d: Date) => void;
+  aoEspreitar: (o: OrdemNaAgenda) => void;
 }) {
   const grelha = useMemo(() => grelhaDoMes(dia), [dia]);
   const hoje = new Date();
@@ -788,18 +839,26 @@ function VistaDoMes({
           const desteMes = noMesDe(d, dia);
           const eHoje = mesmoDia(d, hoje);
 
+          // Três cabem sem espremer a célula. A partir daí a conta diz o
+          // resto — e o dia inteiro está a um toque no número.
+          const mostrar = doDia.slice(0, 3);
+          const restantes = doDia.length - mostrar.length;
+
           return (
-            <button
+            <div
               key={k}
-              type="button"
-              onClick={() => aoEscolherDia(d)}
               className={cx(
-                "flex h-24 flex-col rounded-lg border p-1.5 text-left transition-colors",
-                eHoje ? "border-brand-200 bg-brand-50/40" : "border-slate-100 hover:bg-slate-50",
+                "flex min-h-28 flex-col rounded-lg border p-1.5 text-left transition-colors",
+                eHoje ? "border-brand-200 bg-brand-50/40" : "border-slate-100",
                 !desteMes && "opacity-45"
               )}
             >
-              <span className="flex items-baseline justify-between">
+              <button
+                type="button"
+                onClick={() => aoEscolherDia(d)}
+                title="Abrir este dia"
+                className="flex items-baseline justify-between rounded px-0.5 hover:bg-white/70"
+              >
                 <span
                   className={cx(
                     "text-xs tabular-nums",
@@ -808,40 +867,82 @@ function VistaDoMes({
                 >
                   {d.getDate()}
                 </span>
-                {crm.length > 0 && (
-                  <span className="text-[10px] text-slate-400" title="Compromissos vindos do Olyvia">
-                    +{crm.length}
-                  </span>
-                )}
-              </span>
+                <span className="flex items-baseline gap-1">
+                  {doDia.length > 0 && (
+                    <span className="text-[10px] font-semibold tabular-nums text-slate-500">
+                      {doDia.length}
+                    </span>
+                  )}
+                  {crm.length > 0 && (
+                    <span
+                      className="text-[10px] text-slate-400"
+                      title="Compromissos vindos do Olyvia"
+                    >
+                      +{crm.length}
+                    </span>
+                  )}
+                </span>
+              </button>
 
               {feriado && (
-                <span className="mt-0.5 truncate text-[10px] text-amber-700">{feriado}</span>
+                <span className="mt-0.5 truncate px-0.5 text-[10px] text-amber-700">
+                  {feriado}
+                </span>
               )}
 
+              {/*
+                O nome da ordem, e não só quantas.
+
+                Quem estava a usar disse-o assim: "na agenda na visão de mês
+                não aparece o nome da ordem". Um número responde a "tenho
+                muito?"; o mês também serve para "quando é que fizemos a
+                inspeção dos extintores?", e para isso um 4 não serve de nada.
+              */}
+              <div className="mt-1 flex min-w-0 flex-col gap-0.5">
+                {mostrar.map((o) => (
+                  <button
+                    key={o.id}
+                    type="button"
+                    onClick={() => aoEspreitar(o)}
+                    title={`${o.codigo} · ${o.titulo}`}
+                    className={cx(
+                      "truncate rounded px-1 py-0.5 text-left text-[10px] leading-tight ring-1 ring-inset transition-colors",
+                      CORES_ORIGEM[o.origem] ?? "bg-slate-100 text-slate-700 ring-slate-200"
+                    )}
+                  >
+                    {o.titulo}
+                  </button>
+                ))}
+                {restantes > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => aoEscolherDia(d)}
+                    className="px-1 text-left text-[10px] text-slate-400 hover:text-slate-600 hover:underline"
+                  >
+                    + {restantes} {restantes === 1 ? "outra" : "outras"}
+                  </button>
+                )}
+              </div>
+
               {doDia.length > 0 && (
-                <>
-                  <span className="mt-auto text-sm font-semibold tabular-nums text-slate-800">
-                    {doDia.length}
-                  </span>
-                  {/* Uma barra relativa ao dia mais cheio do mês. Dá a forma do
-                      mês num relance, sem se ler número a número. */}
-                  <span className="mt-1 block h-1 w-full overflow-hidden rounded-full bg-slate-100">
-                    <span
-                      className="block h-full rounded-full bg-brand"
-                      style={{ width: `${(doDia.length / maximo) * 100}%` }}
-                    />
-                  </span>
-                </>
+                /* Uma barra relativa ao dia mais cheio do mês. Dá a forma do
+                   mês num relance, sem se ler nome a nome. */
+                <span className="mt-auto block h-1 w-full overflow-hidden rounded-full bg-slate-100">
+                  <span
+                    className="block h-full rounded-full bg-brand"
+                    style={{ width: `${(doDia.length / maximo) * 100}%` }}
+                  />
+                </span>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
 
       <p className="mt-3 text-xs text-slate-500">
-        O número é de ordens de Operações. O <span className="text-slate-400">+n</span> em cima são
-        compromissos que já estavam na agenda do Olyvia. Carrega num dia para o abrir.
+        Carrega numa ordem para a espreitar, ou no dia para o abrir. O{" "}
+        <span className="text-slate-400">+n</span> em cima são compromissos que já estavam na
+        agenda do Olyvia.
       </p>
     </Card>
   );

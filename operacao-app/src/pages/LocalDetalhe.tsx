@@ -33,6 +33,7 @@ import { Building, ChevronRight, MapPin } from "../components/icons";
 import { linkParaIr, temSitio } from "../domain/mapa";
 import { comTudoLaDentro, ondeFoi, raizDe, ramoAte } from "../domain/arvore-de-locais";
 import EstruturaDoLocal from "../components/EstruturaDoLocal";
+import MapaPequeno from "../components/MapaPequeno";
 import BotaoDuplicar from "../components/BotaoDuplicar";
 import { IconeDaOrdem } from "../components/IconeDeLinha";
 import { duplicarLocal } from "../lib/config";
@@ -241,10 +242,16 @@ export default function LocalDetalhe() {
           </div>
         </div>
 
-        {(local.morada || local.cidade || local.zona) && (
-          <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-600">
-            {[local.morada, local.cidade, local.zona].filter(Boolean).join(" · ")}
-          </p>
+        {(local.morada || local.cidade || local.zona || temSitio(local)) && (
+          <div className="mt-3 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-[1fr_260px]">
+            <p className="text-sm text-slate-600">
+              {[local.morada, local.cidade, local.zona].filter(Boolean).join(" · ") ||
+                "Sem morada escrita."}
+            </p>
+            {/* Uma morada é uma coisa que se lê; um mapa é uma coisa que se
+                reconhece. Antes de sair para um sítio, reconhecer vale mais. */}
+            <MapaPequeno sitio={local} nome={local.nome} altura={140} />
+          </div>
         )}
       </Card>
 
