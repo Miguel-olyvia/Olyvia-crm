@@ -259,32 +259,51 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_duplicar_plano(uuid, text, uuid) TO aut
 -- Trinta apartamentos iguais numa torre. `p_com_ativos` leva os equipamentos
 -- com ele — que é quase sempre o que se quer, porque é o que dá trabalho.
 
+-- Duplicar um local leva **tudo o que está lá dentro**: os espaços, os espaços
+-- dos espaços, e os equipamentos de cada um. Antes copiava só o nó e os
+-- equipamentos dele, e a cópia de uma torre de sete pisos vinha vazia — que
+-- é precisamente o caso em que duplicar valia a pena.
+--
+-- Duplicar um espaço continua a dar um espaço irmão, dentro do mesmo local:
+-- o `parent_id` copia-se. É o que se quer — a box 13 nasce ao lado da box 12,
+-- e não como uma morada nova.
+
 CREATE OR REPLACE FUNCTION public.rpc_ops_duplicar_local(
-  p_local_id   uuid,
-  p_nome       text,
-  p_com_ativos boolean DEFAULT true
+  p_local_id    uuid,
+  p_nome        text,
+  p_com_ativos  boolean DEFAULT true,
+  p_com_espacos boolean DEFAULT true
 )
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  v_o      record;
-  v_user   uuid;
-  v_novo   uuid;
-  v_codigo text;
-  v_n      integer := 0;
-  r        record;
+  v_o        record;
+  v_user     uuid;
+  v_novo     uuid;
+  v_codigo   text;
+  v_ativos   integer := 0;
+  v_espacos  integer := 0;
+  -- id antigo -> id novo. Um espaço só se pode criar depois do pai dele, e
+  -- é daqui que se sabe qual é o pai novo.
+  v_mapa     jsonb := '{}'::jsonb;
+  v_pai      uuid;
+  v_id       uuid;
+  r          record;
 BEGIN
   SELECT * INTO v_o FROM public.ops_local WHERE id = p_local_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Esse local não existe.'; END IF;
   IF nullif(btrim(coalesce(p_nome, '')), '') IS NULL THEN
-    RAISE EXCEPTION 'A cópia precisa de um nome — senão ficam dois sítios iguais na árvore.';
+    RAISE EXCEPTION 'A cópia precisa de um nome — senão ficam dois locais iguais na árvore.';
   END IF;
 
   v_user   := public.ops_exige_criacao(v_o.organization_id);
   v_codigo := public.ops_proximo_codigo_interno(v_o.organization_id, 'LOC');
 
+  -- ── 1. O próprio ────────────────────────────────────────────
+  -- O `parent_id` copia-se: a cópia de um espaço nasce dentro do mesmo local,
+  -- e a cópia de uma morada nasce como morada.
   INSERT INTO public.ops_local
     (organization_id, parent_id, cliente_id, codigo, nome, tipo, morada,
      cidade, zona, latitude, longitude)
@@ -297,22 +316,67 @@ BEGIN
      NULL, NULL)
   RETURNING id INTO v_novo;
 
+  v_mapa := jsonb_build_object(p_local_id::text, v_novo::text);
+
+  -- ── 2. Os espaços, de cima para baixo ─────────────────────────────
+  -- Por nível, porque um filho precisa do pai já criado. O limite de 20 níveis
+  -- é um travão contra dados em ciclo: uma árvore que qualquer pessoa edita
+  -- acaba por ter um nó pendurado em si próprio, e isso não pode pendurar a
+  -- base.
+  IF p_com_espacos THEN
+    FOR r IN
+      WITH RECURSIVE descendentes AS (
+        SELECT l.*, 1 AS nivel
+          FROM public.ops_local l
+         WHERE l.parent_id = p_local_id AND l.ativo
+        UNION ALL
+        SELECT f.*, d.nivel + 1
+          FROM public.ops_local f
+          JOIN descendentes d ON f.parent_id = d.id
+         WHERE f.ativo AND d.nivel < 20
+      )
+      SELECT * FROM descendentes ORDER BY nivel, nome
+    LOOP
+      v_pai := (v_mapa ->> r.parent_id::text)::uuid;
+      -- Sem pai copiado não há onde pendurar. Não devia acontecer; se
+      -- acontecer, salta-se este ramo em vez de rebentar a cópia toda.
+      CONTINUE WHEN v_pai IS NULL;
+
+      INSERT INTO public.ops_local
+        (organization_id, parent_id, cliente_id, codigo, nome, tipo, morada,
+         cidade, zona, latitude, longitude)
+      VALUES
+        (v_o.organization_id, v_pai, r.cliente_id,
+         public.ops_proximo_codigo_interno(v_o.organization_id, 'LOC'),
+         r.nome, r.tipo, r.morada, r.cidade, r.zona, NULL, NULL)
+      RETURNING id INTO v_id;
+
+      v_mapa   := v_mapa || jsonb_build_object(r.id::text, v_id::text);
+      v_espacos := v_espacos + 1;
+    END LOOP;
+  END IF;
+
+  -- ── 3. Os equipamentos, de todos os locais copiados ─────────────────
   IF p_com_ativos THEN
     FOR r IN
-      SELECT * FROM public.ops_ativo
-       WHERE local_id = p_local_id AND ativo
-       ORDER BY codigo
+      SELECT a.*
+        FROM public.ops_ativo a
+       WHERE a.ativo
+         -- `->> ... IS NOT NULL` e não o operador `?`: há clientes de SQL
+         -- que tratam o ponto de interrogação como marcador de parâmetro.
+         AND (v_mapa ->> a.local_id::text) IS NOT NULL
+       ORDER BY a.codigo
     LOOP
       INSERT INTO public.ops_ativo
         (organization_id, local_id, categoria_id, codigo, nome, descricao,
          marca, modelo, criticidade, centro_custo_id)
       VALUES
-        (v_o.organization_id, v_novo, r.categoria_id,
+        (v_o.organization_id, (v_mapa ->> r.local_id::text)::uuid, r.categoria_id,
          public.ops_proximo_codigo_interno(v_o.organization_id, 'AT'),
          r.nome, r.descricao, r.marca, r.modelo, r.criticidade, r.centro_custo_id);
       -- O número de série NÃO se copia: é único de cada máquina, e duas com o
       -- mesmo número tornam o histórico inútil.
-      v_n := v_n + 1;
+      v_ativos := v_ativos + 1;
     END LOOP;
   END IF;
 
@@ -322,15 +386,21 @@ BEGIN
     (v_o.organization_id, 'local', v_novo, 'duplicado',
      'Cópia de ' || v_o.codigo || ' — ' || v_o.nome, v_user,
      jsonb_build_object('de', p_local_id, 'codigo', v_o.codigo),
-     jsonb_build_object('codigo', v_codigo, 'equipamentos', v_n));
+     jsonb_build_object('codigo', v_codigo, 'equipamentos', v_ativos,
+                        'espacos', v_espacos));
 
   RETURN jsonb_build_object('ok', true, 'id', v_novo, 'codigo', v_codigo,
-                            'equipamentos', v_n);
+                            'equipamentos', v_ativos, 'espacos', v_espacos);
 END
 $$;
 
-REVOKE ALL ON FUNCTION public.rpc_ops_duplicar_local(uuid, text, boolean) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_ops_duplicar_local(uuid, text, boolean) TO authenticated;
+-- A assinatura mudou (ganhou `p_com_espacos`). Sem largar a antiga ficavam
+-- duas funções com o mesmo nome, e a chamada de três argumentos continuava a
+-- correr a versão velha — que copia o nó e deixa os espaços para trás.
+DROP FUNCTION IF EXISTS public.rpc_ops_duplicar_local(uuid, text, boolean);
+
+REVOKE ALL ON FUNCTION public.rpc_ops_duplicar_local(uuid, text, boolean, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_duplicar_local(uuid, text, boolean, boolean) TO authenticated;
 
 
 -- ============================================================
@@ -427,7 +497,7 @@ BEGIN
     'public.ops_exige_criacao(uuid)',
     'public.rpc_ops_duplicar_checklist(uuid,text)',
     'public.rpc_ops_duplicar_plano(uuid,text,uuid)',
-    'public.rpc_ops_duplicar_local(uuid,text,boolean)',
+    'public.rpc_ops_duplicar_local(uuid,text,boolean,boolean)',
     'public.rpc_ops_duplicar_ordem(uuid,text)'
   ] LOOP
     IF to_regprocedure(v_f) IS NULL THEN v_falta := v_falta || v_f; END IF;

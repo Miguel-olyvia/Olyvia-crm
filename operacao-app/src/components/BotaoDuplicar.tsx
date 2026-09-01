@@ -25,6 +25,8 @@ export default function BotaoDuplicar({
   duplicar,
   paraOnde,
   comAtivos,
+  discreto = false,
+  aoAcabar,
 }: {
   rotulo?: string;
   /** O que aparece no cabeçalho da janela. Ex.: "Duplicar o plano". */
@@ -38,6 +40,10 @@ export default function BotaoDuplicar({
   paraOnde?: (r: ResultadoDaCopia) => string;
   /** Só os locais têm esta pergunta. */
   comAtivos?: { rotulo: string; hint: string };
+  /** Discreto: para uma linha de lista, onde um botão a sério faria barulho. */
+  discreto?: boolean;
+  /** Para quem fica na mesma página e só precisa de a recarregar. */
+  aoAcabar?: () => void;
 }) {
   const navegar = useNavigate();
   const [aberto, setAberto] = useState(false);
@@ -60,6 +66,7 @@ export default function BotaoDuplicar({
       const r = await duplicar(nome.trim(), levarAtivos);
       setAberto(false);
       if (paraOnde) navegar(paraOnde(r));
+      aoAcabar?.();
     } catch (e) {
       setErro(e instanceof ErroDeEscrita ? e.message : "Não foi possível duplicar.");
     } finally {
@@ -69,10 +76,20 @@ export default function BotaoDuplicar({
 
   return (
     <>
-      <Button variant="secondary" size="sm" onClick={abrir}>
-        <Copiar width={14} height={14} />
-        {rotulo}
-      </Button>
+      {discreto ? (
+        <button
+          type="button"
+          onClick={abrir}
+          className="rounded-lg px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+        >
+          {rotulo}
+        </button>
+      ) : (
+        <Button variant="secondary" size="sm" onClick={abrir}>
+          <Copiar width={14} height={14} />
+          {rotulo}
+        </Button>
+      )}
 
       {aberto && (
         <Modal title={titulo} onClose={() => setAberto(false)}>

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import {
+  duplicarLocal,
+  moverAtivo,
   removerAtivo,
   removerLocal,
   type CategoriaAtivo,
@@ -7,7 +9,7 @@ import {
 } from "../lib/config";
 import { ErroDeEscrita, type AtivoRow, type Cliente, type LocalRow } from "../lib/dados";
 import { arvoreDe, type ComFilhos } from "../domain/arvore-de-locais";
-import { Button, Card, ConfirmDialog, Input, cx } from "./ui";
+import { Button, Card, ConfirmDialog, Input, Modal, cx } from "./ui";
 import {
   Building,
   ChevronDown,
@@ -20,6 +22,7 @@ import {
 } from "./icons";
 import { IconeDoAtivo } from "./IconeDeLinha";
 import FormAtivoDoLocal from "./FormAtivoDoLocal";
+import BotaoDuplicar from "./BotaoDuplicar";
 import FormLocal from "./FormLocal";
 import EtiquetasQR from "./EtiquetasQR";
 import HistoricoDoAtivo from "./Historico";
@@ -115,6 +118,13 @@ export default function EstruturaDoLocal({
   const [aConfirmar, setAConfirmar] = useState<APedirConfirmacao | null>(null);
   const [verRemovidos, setVerRemovidos] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Arrastar: o que vai na mão, e por cima de que degrau está.
+  const [aArrastar, setAArrastar] = useState<AtivoRow | null>(null);
+  const [porCima, setPorCima] = useState<string | null>(null);
+  // O caminho para telemóvel: arrastar não funciona com o dedo, e um
+  // equipamento que só se pode mudar de local no computador é um equipamento
+  // que fica onde está.
+  const [aMover, setAMover] = useState<AtivoRow | null>(null);
 
   const porCategoria = useMemo(
     () => new Map(categorias.map((c) => [c.id, c.nome])),
@@ -158,6 +168,26 @@ export default function EstruturaDoLocal({
     }
   };
 
+  /**
+   * Largar um equipamento noutro degrau.
+   *
+   * A mudança fica no histórico do equipamento sozinha — há um gatilho na
+   * base que escreve "Mudou de local". É por isso que se muda em vez de se
+   * apagar e criar outro: o histórico é metade da razão de ele existir.
+   */
+  const largar = async (a: AtivoRow, destino: string) => {
+    setPorCima(null);
+    setAArrastar(null);
+    if (a.local_id === destino) return;
+    setErro(null);
+    try {
+      await moverAtivo(a.id, destino);
+      aoGravar();
+    } catch (e) {
+      setErro(e instanceof ErroDeEscrita ? e.message : "Não foi possível mover.");
+    }
+  };
+
   const repor = async (tipo: "ativo" | "espaco", id: string) => {
     setErro(null);
     try {
@@ -188,7 +218,26 @@ export default function EstruturaDoLocal({
     ) : (
       <li
         key={a.id}
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 py-2 first:border-t-0"
+        // Arrastar para outro degrau muda o equipamento de local. Só para
+        // quem pode editar: arrastar e ver a coisa voltar ao lugar seria pior
+        // do que não arrastar de todo.
+        draggable={podeEditar}
+        onDragStart={(e) => {
+          setAArrastar(a);
+          e.dataTransfer.effectAllowed = "move";
+          // Alguns browsers recusam o arrasto sem dados; o id serve também
+          // para o caso de o estado se perder pelo caminho.
+          e.dataTransfer.setData("text/plain", a.id);
+        }}
+        onDragEnd={() => {
+          setAArrastar(null);
+          setPorCima(null);
+        }}
+        className={cx(
+          "flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 py-2 first:border-t-0",
+          podeEditar && "cursor-grab active:cursor-grabbing",
+          aArrastar?.id === a.id && "opacity-40"
+        )}
         style={{ paddingLeft: `${recuo}px` }}
       >
         <IconeDoAtivo criticidade={a.criticidade} />
@@ -238,6 +287,13 @@ export default function EstruturaDoLocal({
             </button>
             <button
               type="button"
+              onClick={() => setAMover(a)}
+              className="shrink-0 text-xs text-slate-400 underline-offset-2 hover:text-slate-700 hover:underline"
+            >
+              mover
+            </button>
+            <button
+              type="button"
               onClick={() => setAConfirmar({ tipo: "ativo", id: a.id, nome: a.nome })}
               aria-label={`Remover ${a.nome}`}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-300 transition-colors hover:bg-red-50 hover:text-red-600"
@@ -263,12 +319,35 @@ export default function EstruturaDoLocal({
     const daParaAbrir = no.filhos.length > 0 || seus.length > 0;
     const recuo = nivel * 16;
 
+    // Não se larga em cima de onde já se está: o degrau de origem não se
+    // acende, senão toda a árvore parece um destino válido.
+    const podeReceber =
+      podeEditar && aArrastar !== null && aArrastar.local_id !== no.id;
+
     return (
       <div key={no.id}>
         <div
+          onDragOver={(e) => {
+            if (!podeReceber) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setPorCima(no.id);
+          }}
+          onDragLeave={() => setPorCima((p) => (p === no.id ? null : p))}
+          onDrop={(e) => {
+            if (!podeReceber || !aArrastar) return;
+            e.preventDefault();
+            void largar(aArrastar, no.id);
+          }}
           className={cx(
             "flex flex-wrap items-center justify-between gap-2 rounded-lg py-1.5 pr-1 transition-colors",
-            emFoco === no.id ? "bg-brand-50 ring-1 ring-brand-200" : "hover:bg-slate-50"
+            porCima === no.id && podeReceber
+              ? "bg-brand-100 ring-2 ring-brand ring-offset-1"
+              : podeReceber
+                ? "bg-brand-50/40 ring-1 ring-dashed ring-brand-200"
+                : emFoco === no.id
+                  ? "bg-brand-50 ring-1 ring-brand-200"
+                  : "hover:bg-slate-50"
           )}
           style={{ paddingLeft: `${recuo}px` }}
         >
@@ -340,6 +419,28 @@ export default function EstruturaDoLocal({
                   >
                     editar
                   </button>
+                  {/*
+                    Trinta boxes iguais numa garagem eram trinta formulários.
+                    A cópia nasce ao lado desta — mesmo pai — e leva o que
+                    está cá dentro.
+                  */}
+                  <BotaoDuplicar
+                    discreto
+                    rotulo="duplicar"
+                    titulo={`Duplicar ${no.nome}`}
+                    nomeSugerido={`${no.nome} (cópia)`}
+                    exigeNome
+                    oQueNaoLeva={[
+                      "os números de série dos equipamentos",
+                      "as ordens e o histórico",
+                    ]}
+                    comAtivos={{
+                      rotulo: "Levar o que está cá dentro",
+                      hint: "Os espaços e os equipamentos, com códigos novos.",
+                    }}
+                    duplicar={(nome, levar) => duplicarLocal(no.id, nome, levar, levar)}
+                    aoAcabar={aoGravar}
+                  />
                   <button
                     type="button"
                     onClick={() =>
@@ -435,6 +536,14 @@ export default function EstruturaDoLocal({
         <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>
       )}
 
+      {podeEditar && daArvore.length > 1 && (
+        <p className="mt-2 text-xs text-slate-400">
+          Arrasta um equipamento para outro degrau para o mudar de local — ou
+          carrega em <span className="font-medium">mover</span>, que é o que
+          funciona no telemóvel.
+        </p>
+      )}
+
       <div className="mt-3">{arvore && degrau(arvore, 0)}</div>
 
       {/* A gaveta. Fechada, porque o que foi removido não é para estar à
@@ -499,6 +608,47 @@ export default function EstruturaDoLocal({
 
       {comEtiquetas && (
         <EtiquetasQR local={raiz} ativos={ativos} aoFechar={() => setComEtiquetas(false)} />
+      )}
+
+      {aMover && (
+        <Modal title={`Mover ${aMover.nome}`} onClose={() => setAMover(null)} size="sm">
+          <p className="text-sm text-slate-500">
+            Para onde vai? A mudança fica no histórico do equipamento.
+          </p>
+          <ul className="mt-3 space-y-1">
+            {daArvore.map((l) => {
+              const aqui = l.id === aMover.local_id;
+              return (
+                <li key={l.id}>
+                  <button
+                    type="button"
+                    disabled={aqui}
+                    onClick={() => {
+                      const oQue = aMover;
+                      setAMover(null);
+                      void largar(oQue, l.id);
+                    }}
+                    className={cx(
+                      "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm",
+                      "ring-1 transition-all",
+                      aqui
+                        ? "cursor-default bg-slate-50 text-slate-400 ring-slate-200"
+                        : "bg-white text-slate-700 ring-slate-200 hover:ring-brand/40 active:scale-[0.99]"
+                    )}
+                  >
+                    {l.id === raiz.id ? (
+                      <MapPin width={13} height={13} className="shrink-0 text-brand" />
+                    ) : (
+                      <Building width={13} height={13} className="shrink-0 text-slate-400" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{l.nome}</span>
+                    {aqui && <span className="shrink-0 text-xs">está aqui</span>}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Modal>
       )}
 
       {espacoEm && (

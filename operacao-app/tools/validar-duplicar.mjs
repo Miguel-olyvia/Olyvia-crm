@@ -184,13 +184,67 @@ console.log("\n─── duplicar um local ────────────�
 
   const semAtivos = (await comoRita(
     `SELECT public.rpc_ops_duplicar_local($1,'Apartamento 3C',false) AS r`, [loc])).r;
-  conferir(semAtivos.equipamentos === 0, "e dá para copiar só o sítio, sem nada dentro");
+  conferir(semAtivos.equipamentos === 0, "e dá para copiar só o local, sem nada dentro");
 
   let recusou = false;
   try {
     await comoRita(`SELECT public.rpc_ops_duplicar_local($1,'   ') AS r`, [loc]);
   } catch { recusou = true; }
-  conferir(recusou, "sem nome, recusa — senão ficavam dois sítios iguais na árvore");
+  conferir(recusou, "sem nome, recusa — senão ficavam dois locais iguais na árvore");
+}
+
+console.log("\n─── duplicar um local com espaços ─────────");
+{
+  // Uma torre a sério: dois pisos, uma box dentro de um deles, e equipamentos
+  // espalhados. Era exatamente este caso que vinha vazio — a cópia copiava o
+  // nó de cima e deixava tudo para trás.
+  const torre = (await um(
+    `INSERT INTO public.ops_local (organization_id, cliente_id, codigo, nome, tipo, morada)
+     VALUES ($1,$2,'T-1','Torre A','morada','Rua Y 1') RETURNING id`, [ORG, CLI])).id;
+  const gar = (await um(
+    `INSERT INTO public.ops_local (organization_id, cliente_id, parent_id, codigo, nome, tipo)
+     VALUES ($1,$2,$3,'T-2','Garagem','espaco') RETURNING id`, [ORG, CLI, torre])).id;
+  const box = (await um(
+    `INSERT INTO public.ops_local (organization_id, cliente_id, parent_id, codigo, nome, tipo)
+     VALUES ($1,$2,$3,'T-3','Box 12','espaco') RETURNING id`, [ORG, CLI, gar])).id;
+  const piso = (await um(
+    `INSERT INTO public.ops_local (organization_id, cliente_id, parent_id, codigo, nome, tipo)
+     VALUES ($1,$2,$3,'T-4','Piso 3','espaco') RETURNING id`, [ORG, CLI, torre])).id;
+
+  await db.query(
+    `INSERT INTO public.ops_ativo (organization_id, local_id, codigo, nome)
+     VALUES ($1,$2,'T-A1','Quadro geral'),
+            ($1,$3,'T-A2','Extintor da rampa'),
+            ($1,$4,'T-A3','Detetor da box'),
+            ($1,$5,'T-A4','Split do piso 3')`, [ORG, torre, gar, box, piso]);
+
+  const c = (await comoRita(
+    `SELECT public.rpc_ops_duplicar_local($1,'Torre B') AS r`, [torre])).r;
+  conferir(c.espacos === 3, "leva os espaços todos, a qualquer profundidade");
+  conferir(c.equipamentos === 4, "e os equipamentos de cada um");
+
+  const copia = await todos(
+    `WITH RECURSIVE d AS (
+       SELECT l.id, l.nome, l.parent_id, 0 AS nivel FROM public.ops_local l WHERE l.id = $1
+       UNION ALL
+       SELECT f.id, f.nome, f.parent_id, d.nivel + 1
+         FROM public.ops_local f JOIN d ON f.parent_id = d.id)
+     SELECT nome, nivel FROM d ORDER BY nivel, nome`, [c.id]);
+  conferir(copia.length === 4, "a árvore copiada tem os mesmos quatro degraus");
+  conferir(copia.find((x) => x.nome === "Box 12").nivel === 2,
+    "e a box continua dentro da garagem, e não pendurada na raiz");
+
+  // É o que se quer: a box 13 nasce ao lado da box 12, e não como morada nova.
+  const irma = (await comoRita(
+    `SELECT public.rpc_ops_duplicar_local($1,'Box 13') AS r`, [box])).r;
+  const linha = await um(`SELECT parent_id, tipo FROM public.ops_local WHERE id = $1`, [irma.id]);
+  conferir(linha.parent_id === gar, "duplicar um espaço dá um irmão dentro do mesmo local");
+  conferir(linha.tipo === "espaco", "e continua a ser um espaço, não uma morada");
+
+  const soEle = (await comoRita(
+    `SELECT public.rpc_ops_duplicar_local($1,'Torre C',true,false) AS r`, [torre])).r;
+  conferir(soEle.espacos === 0, "e dá para copiar sem os espaços, se for isso que se quer");
+  conferir(soEle.equipamentos === 1, "levando só os equipamentos do próprio");
 }
 
 console.log("\n─── duplicar uma ordem ──────────────────");
@@ -261,7 +315,7 @@ console.log("\n─── quem pode duplicar ────────────
   for (const f of [
     "public.rpc_ops_duplicar_checklist(uuid,text)",
     "public.rpc_ops_duplicar_plano(uuid,text,uuid)",
-    "public.rpc_ops_duplicar_local(uuid,text,boolean)",
+    "public.rpc_ops_duplicar_local(uuid,text,boolean,boolean)",
     "public.rpc_ops_duplicar_ordem(uuid,text)",
   ]) {
     const p = await um(`SELECT has_function_privilege('anon',$1,'EXECUTE') AS p`, [f]);

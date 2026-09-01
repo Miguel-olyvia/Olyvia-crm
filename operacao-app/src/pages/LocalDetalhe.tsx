@@ -218,10 +218,12 @@ export default function LocalDetalhe() {
                 "as ordens e o histórico",
               ]}
               comAtivos={{
-                rotulo: "Levar os equipamentos",
-                hint: "Copia os que estão aqui, com códigos novos. É quase sempre o que se quer.",
+                rotulo: "Levar os espaços e os equipamentos",
+                hint: "A cópia leva a árvore toda — pisos, espaços e o que está em cada um, com códigos novos. É quase sempre o que se quer.",
               }}
-              duplicar={(nome, levar) => duplicarLocal(local.id, nome, levar)}
+              // O mesmo interruptor decide as duas coisas: “leva o que está cá
+              // dentro” é uma pergunta só para quem está a copiar.
+              duplicar={(nome, levar) => duplicarLocal(local.id, nome, levar, levar)}
               paraOnde={(r) => `/locais/${r.codigo}`}
             />
           )}

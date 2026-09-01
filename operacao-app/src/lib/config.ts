@@ -141,6 +141,24 @@ export async function removerAtivo(id: string, remover: boolean): Promise<void> 
   if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
 }
 
+/**
+ * Mudar um equipamento de local.
+ *
+ * O extintor que estava “na torre” e afinal está na garagem. Antes só se
+ * resolvia apagando e criando outro — e aí perdia-se o histórico dele, que
+ * é exatamente a razão de o equipamento existir na base.
+ *
+ * A mudança fica registada sozinha: há um gatilho em `documentos-e-ativos.sql`
+ * que escreve &ldquo;Mudou de local&rdquo; no histórico, com o antes e o depois.
+ */
+export async function moverAtivo(id: string, localId: string): Promise<void> {
+  const { error } = await supabase
+    .from("ops_ativo")
+    .update({ local_id: localId })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
+}
+
 /** O mesmo para um espaço. Quem chama garante que está vazio. */
 export async function removerLocal(id: string, remover: boolean): Promise<void> {
   const { error } = await supabase
@@ -677,11 +695,22 @@ export const duplicarPlano = (id: string, nome?: string | null, clienteId?: stri
     p_cliente_id: clienteId ?? null,
   });
 
-export const duplicarLocal = (id: string, nome: string, comAtivos = true) =>
+/**
+ * A cópia leva a árvore toda: os espaços, os espaços dos espaços, e os
+ * equipamentos de cada um. Duplicar um espaço dá um irmão dentro do mesmo
+ * local — a box 13 nasce ao lado da box 12, e não como morada nova.
+ */
+export const duplicarLocal = (
+  id: string,
+  nome: string,
+  comAtivos = true,
+  comEspacos = true
+) =>
   duplicar("rpc_ops_duplicar_local", {
     p_local_id: id,
     p_nome: nome,
     p_com_ativos: comAtivos,
+    p_com_espacos: comEspacos,
   });
 
 export const duplicarOrdem = (id: string, titulo?: string | null) =>
