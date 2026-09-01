@@ -214,7 +214,7 @@ export default function AtivoDetalhe() {
       <Card className="p-4 sm:p-5">
         <h2 className="text-sm font-semibold text-slate-800">A ficha, ao longo do tempo</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          Mudanças de sítio, de categoria, de criticidade.
+          Mudanças de local, de categoria, de criticidade.
         </p>
         <div className="mt-3">
           <Historico entidade="ativo" entidadeId={ativo.id} />

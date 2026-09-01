@@ -211,7 +211,7 @@ export default function PainelAnexos({
 
       {anexos.length === 0 ? (
         <p className="mt-3 text-sm text-slate-400">
-          Sem fotos nem ficheiros. Uma foto do sítio antes de mexer poupa muita discussão
+          Sem fotos nem ficheiros. Uma foto do local antes de mexer poupa muita discussão
           depois.
         </p>
       ) : (

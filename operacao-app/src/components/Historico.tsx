@@ -19,7 +19,7 @@ const ROTULO: Record<string, string> = {
   alterado: "Alterado",
   desativado: "Desativado",
   reativado: "Reativado",
-  mudou_de_sitio: "Mudou de sítio",
+  mudou_de_sitio: "Mudou de local",
   duplicado: "Duplicado",
   duplicada: "Duplicada",
 };
@@ -30,7 +30,7 @@ const CAMPO: Record<string, string> = {
   categoria_id: "categoria",
   num_serie: "número de série",
   criticidade: "criticidade",
-  local_id: "sítio",
+  local_id: "local",
   ativo: "em uso",
   centro_custo_id: "centro de custo",
 };

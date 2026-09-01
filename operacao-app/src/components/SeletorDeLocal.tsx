@@ -128,7 +128,7 @@ export default function SeletorDeLocal({
         label="Local"
         hint={
           doCliente.length === 0 && porUsar.length === 0
-            ? "Este cliente ainda não tem sítios. Cria um aqui mesmo."
+            ? "Este cliente ainda não tem locais. Cria um aqui mesmo."
             : undefined
         }
       >
@@ -149,7 +149,7 @@ export default function SeletorDeLocal({
             onClick={() => setACriar("novo")}
             className="shrink-0"
           >
-            <Plus width={14} height={14} /> Sítio
+            <Plus width={14} height={14} /> Local
           </Button>
         </div>
       </Field>
@@ -176,7 +176,7 @@ export default function SeletorDeLocal({
       */}
       {!aProcurar && moradas.length === 0 && (
         <p className="text-xs text-slate-400">
-          Este cliente não tem morada na ficha do CRM. Cria o sítio no botão acima.
+          Este cliente não tem morada na ficha do CRM. Cria o local no botão acima.
         </p>
       )}
 
@@ -230,7 +230,7 @@ export default function SeletorDeLocal({
             ))}
           </ul>
           <p className="mt-1.5 text-[11px] text-brand-800/70">
-            Um toque cria o sítio com a morada já preenchida.
+            Um toque cria o local com a morada já preenchida.
           </p>
         </div>
       )}
@@ -310,7 +310,7 @@ function FormLocalRapido({
     <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 text-[13px] font-medium text-slate-700">
-          {dentroDe ? `Novo espaço em ${dentroDe.nome}` : "Sítio novo"}
+          {dentroDe ? `Novo espaço em ${dentroDe.nome}` : "Local novo"}
         </span>
         <button
           type="button"

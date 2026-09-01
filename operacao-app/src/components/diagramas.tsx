@@ -305,7 +305,7 @@ export function DiagramaNaoConformidade() {
         tom="bom"
       />
       <text x={720} y={230} textAnchor="end" fontSize="10.5" fill={TINTA.verde}>
-        no mesmo minuto, já com cliente, sítio e equipamento
+        no mesmo minuto, já com cliente, local e equipamento
       </text>
     </Quadro>
   );

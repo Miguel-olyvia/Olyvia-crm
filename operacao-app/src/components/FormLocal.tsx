@@ -91,7 +91,7 @@ export default function FormLocal({
     ? `Editar ${local.codigo}`
     : dentroDe
       ? `Novo espaço em ${dentroDe.nome}`
-      : "Novo sítio";
+      : "Novo local";
 
   return (
     <Modal

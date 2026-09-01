@@ -133,3 +133,56 @@ export function ramoAte<T extends ComPai>(todos: readonly T[], id: string): stri
   }
   return ramo;
 }
+
+/**
+ * Onde é que isto foi, dito a partir do local que se está a ver.
+ *
+ * A ficha de um local mostra as ordens dele **e** as de todos os espaços lá
+ * dentro. Sem dizer onde, a lista fica a mentir por omissão: doze ordens
+ * seguidas, todas parecendo do mesmo lugar, quando três foram na garagem e
+ * duas na box 12.
+ *
+ * Não repete o nome do local em cada linha — isso já está no topo da página.
+ * Diz só o degrau, ou o caminho dentro dele quando há mais do que um:
+ *
+ *     a ordem foi no próprio local  →  "Torre A"
+ *     a ordem foi na garagem        →  "Garagem −1"
+ *     a ordem foi na box da garagem →  "Garagem −1 › Box 12"
+ *
+ * Sem `nomeDe` não há como saber o nome de nada, por isso a função recebe a
+ * lista e não um mapa: é a mesma que a página já tem.
+ */
+export function ondeFoi<T extends ComPai & { nome: string }>(
+  daArvore: readonly T[],
+  raizId: string,
+  localId: string | null
+): string | null {
+  if (!localId) return null;
+
+  const porId = new Map(daArvore.map((l) => [l.id, l]));
+  const eu = porId.get(localId);
+  // Uma ordem de um local que não pertence a esta árvore não se anuncia como
+  // se pertencesse. Acontece quando alguém muda um espaço de casa.
+  if (!eu) return null;
+  if (eu.id === raizId) return porId.get(raizId)?.nome ?? null;
+
+  const degraus: string[] = [];
+  const vistos = new Set<string>();
+  let atual: T | undefined = eu;
+  let chegou = false;
+
+  while (atual && !vistos.has(atual.id)) {
+    if (atual.id === raizId) {
+      chegou = true;
+      break;
+    }
+    vistos.add(atual.id);
+    degraus.unshift(atual.nome);
+    atual = atual.parent_id ? porId.get(atual.parent_id) : undefined;
+  }
+
+  // Subir até ao fim sem passar pela raiz quer dizer que este local pende de
+  // outra árvore. Devolver o nome dele seria anunciar como "aqui" uma ordem
+  // que foi noutro sítio qualquer.
+  return chegou ? degraus.join(" › ") : null;
+}

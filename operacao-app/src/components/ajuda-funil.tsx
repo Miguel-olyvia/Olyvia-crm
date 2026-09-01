@@ -204,7 +204,7 @@ const VANTAGENS: { titulo: string; texto: string }[] = [
   {
     titulo: "Tudo fica registado",
     texto:
-      "Criar, atribuir, iniciar, pausar, fechar, confirmar, lançar custo, anexar, assinar, mudar um equipamento de sítio, ligar o envio ao cliente. Com quem, quando, e o antes e o depois.",
+      "Criar, atribuir, iniciar, pausar, fechar, confirmar, lançar custo, anexar, assinar, mudar um equipamento de local, ligar o envio ao cliente. Com quem, quando, e o antes e o depois.",
   },
 ];
 
@@ -228,7 +228,7 @@ const NOVO: { o: string; onde: string; href?: string; texto: string }[] = [
     o: "Ficha do local",
     onde: "Locais › Abrir ficha",
     href: "/locais",
-    texto: "Os equipamentos daquele sítio, o que já lá se fez, e como lá chegar.",
+    texto: "Os equipamentos daquele local, o que já lá se fez, e como lá chegar.",
   },
   {
     o: "Duplicar",

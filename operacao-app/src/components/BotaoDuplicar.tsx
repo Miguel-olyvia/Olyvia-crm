@@ -90,7 +90,7 @@ export default function BotaoDuplicar({
               />
               <p className="mt-1 text-xs text-slate-400">
                 {exigeNome
-                  ? "Obrigatório. Dois sítios com o mesmo nome na árvore não se distinguem."
+                  ? "Obrigatório. Dois locais com o mesmo nome na árvore não se distinguem."
                   : "Muda-o depois, se quiseres."}
               </p>
             </div>

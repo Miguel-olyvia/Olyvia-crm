@@ -188,7 +188,7 @@ export default function PainelExportar({ orgId }: { orgId: string | null }) {
         <h2 className="text-sm font-medium text-slate-700">O que levar</h2>
         <p className="mt-1 text-xs text-slate-500">
           Sai um ficheiro <strong>.csv</strong> que abre no Excel — uma linha por leitura, com o
-          sítio, o equipamento e a ordem onde foi feita.
+          local, o equipamento e a ordem onde foi feita.
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2">

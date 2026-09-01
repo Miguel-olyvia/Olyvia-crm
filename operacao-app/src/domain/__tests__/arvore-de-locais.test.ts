@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   arvoreDe,
   comTudoLaDentro,
+  ondeFoi,
   raizDe,
   ramoAte,
 } from "../arvore-de-locais";
@@ -127,5 +128,31 @@ describe("o ramo até um espaço", () => {
   it("com um ciclo, não fica preso", () => {
     const ciclo = [l("a", "b"), l("b", "a")];
     expect(ramoAte(ciclo, "a").length).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("onde é que a ordem foi", () => {
+  const T = TORRE;
+
+  it("no próprio local, é o nome dele", () => {
+    expect(ondeFoi(T, "torre", "torre")).toBe("Torre A");
+  });
+
+  it("num espaço, é o nome do espaço — sem repetir o local", () => {
+    expect(ondeFoi(T, "torre", "garagem")).toBe("Garagem −1");
+  });
+
+  // "Box 12" sozinho não diz de que garagem é.
+  it("num espaço mais fundo, é o caminho lá dentro", () => {
+    expect(ondeFoi(T, "torre", "box")).toBe("Garagem −1 › Box 12");
+  });
+
+  it("sem local, não diz nada", () => {
+    expect(ondeFoi(T, "torre", null)).toBeNull();
+  });
+
+  // Acontece quando alguém muda um espaço de casa.
+  it("de um local de fora desta árvore, não diz nada", () => {
+    expect(ondeFoi(T, "torre", "armazem")).toBeNull();
   });
 });

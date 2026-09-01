@@ -113,7 +113,7 @@ export default function EtiquetasQR({
           <p className="py-8 text-center text-sm text-slate-400">A desenhar as etiquetas…</p>
         ) : etiquetas.length === 0 ? (
           <p className="py-8 text-center text-sm text-slate-500">
-            Este sítio ainda não tem equipamentos.
+            Este local ainda não tem equipamentos.
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 print:grid-cols-4 print:gap-2">

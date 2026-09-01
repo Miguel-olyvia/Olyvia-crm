@@ -92,7 +92,7 @@ export const PARA_QUE_SERVE: Record<Lista, string> = {
   prioridade: "Ordena a lista de trabalho. O que está em cima é o que se faz primeiro.",
   criticidade: "Diz que equipamentos não podem parar. Sobe as ordens deles na lista.",
   tipo_tarefa: "O que se está a fazer — não o formato da resposta.",
-  tipo_local: "Os degraus da árvore de sítios, do mais largo ao mais estreito.",
+  tipo_local: "Os degraus da árvore de locais, do mais largo ao mais estreito.",
   origem: "De onde veio o trabalho. Escolhe o ícone e o caminho que a ordem segue.",
 };
 

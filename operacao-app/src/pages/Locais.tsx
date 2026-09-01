@@ -128,7 +128,7 @@ export default function Locais() {
             />
           </div>
           <Button className="shrink-0" onClick={() => setFormLocal({})}>
-            <Plus width={14} height={14} /> Sítio
+            <Plus width={14} height={14} /> Local
           </Button>
         </div>
       </div>
@@ -149,7 +149,7 @@ export default function Locais() {
             }
             action={
               pesquisa.trim() ? undefined : (
-                <Button onClick={() => setFormLocal({})}>Criar o primeiro sítio</Button>
+                <Button onClick={() => setFormLocal({})}>Criar o primeiro local</Button>
               )
             }
           />
@@ -355,7 +355,7 @@ function PainelLocal({
         <EmptyState
           icon={<MapPin width={22} height={22} />}
           title="Escolhe um local"
-          description="Os ativos e o contexto desse sítio aparecem aqui."
+          description="Os equipamentos e o contexto desse local aparecem aqui."
         />
       </Card>
     );
@@ -392,7 +392,7 @@ function PainelLocal({
             {/* Um espaço não tem ficha própria: o link abre a da morada dele,
                 com a árvore aberta até aqui. Dizer "abrir ficha" prometia uma
                 página que não existe. */}
-            {local.parent_id ? "Abrir a morada" : "Abrir ficha"}{" "}
+            {local.parent_id ? "Abrir o local" : "Abrir ficha"}{" "}
             <ChevronRight width={12} height={12} />
           </Link>
         </div>

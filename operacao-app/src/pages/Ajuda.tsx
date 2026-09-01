@@ -710,7 +710,7 @@ const PERGUNTAS = [
     pergunta: "Aquela avaria que o técnico reportou já foi resolvida?",
     infraspeak: "O relato fica escrito no histórico do equipamento e morre lá. Alguém tem de se lembrar dele.",
     agora:
-      "Uma tarefa não conforme abre uma ordem de reparação sozinha, já com o cliente, o sítio, o equipamento e o que o técnico escreveu. E as duas ficam ligadas.",
+      "Uma tarefa não conforme abre uma ordem de reparação sozinha, já com o cliente, o local, o equipamento e o que o técnico escreveu. E as duas ficam ligadas.",
   },
   {
     pergunta: "Este equipamento compensa reparar outra vez, ou substituir?",
@@ -1186,14 +1186,14 @@ const DIFERENCAS = [
     feito: true,
   },
   {
-    titulo: "O sítio é uma árvore, não quatro caixas fixas",
+    titulo: "O local é uma árvore, não quatro caixas fixas",
     porque: "O mesmo modelo serve um prédio de escritórios e um apartamento.",
     infraspeak:
       "Cliente → Edifício → Local → Ativo, sempre. Faz sentido em manutenção de edifícios; não faz nenhum numa remodelação de casa de banho.",
     olyvia:
       "Um local pode estar dentro de outro, tantas vezes quantas fizerem falta. Duas para uma obra num apartamento, quatro para uma torre com pisos e garagens.",
     evidencia:
-      "há centenas de “edifícios” na instância que são apartamentos de clientes particulares. O conceito já tinha degenerado em “o sítio onde vamos trabalhar”.",
+      "há centenas de “edifícios” na instância que são apartamentos de clientes particulares. O conceito já tinha degenerado em “o local onde vamos trabalhar”.",
     feito: true,
   },
   {
@@ -1202,7 +1202,7 @@ const DIFERENCAS = [
     infraspeak:
       "A ordem quer um ativo. Para limpar um piso, alguém teve de inventar um equipamento chamado “Piso”.",
     olyvia:
-      "Uma ordem pode apontar só ao sítio. Sem inventar equipamentos que não existem.",
+      "Uma ordem pode apontar só ao local. Sem inventar equipamentos que não existem.",
     evidencia:
       "existem ativos na instância cuja categoria é literalmente “BM24 PISO”. E o próprio Infraspeak teve de criar um conceito à parte, “Manutenção em Locais”, para o mesmo efeito.",
     feito: true,
@@ -1244,7 +1244,7 @@ const DIFERENCAS = [
     infraspeak:
       "Marca-se uma tarefa como não conforme e não acontece nada. O relato fica no histórico do equipamento, e morre lá.",
     olyvia:
-      "Uma tarefa não conforme abre uma ordem corretiva sozinha, já com o cliente, o sítio, o equipamento, o valor lido e o que o técnico escreveu. E as duas ficam ligadas.",
+      "Uma tarefa não conforme abre uma ordem corretiva sozinha, já com o cliente, o local, o equipamento, o valor lido e o que o técnico escreveu. E as duas ficam ligadas.",
     evidencia:
       "o histórico dos ativos está cheio de relatos escritos por técnicos — portões avariados, geradores que não arrancam — que nunca viraram ordem nenhuma. A informação existia; faltava o mecanismo. Na opção “Não Conforme” do extintor, a caixa que abriria a corretiva está desligada.",
     feito: true,
@@ -1530,15 +1530,15 @@ const MONTAR = [
     href: "/definicoes?ver=procedimentos",
     texto:
       "O que um equipamento é: extintor, elevador, quadro elétrico. Há um catálogo por ofício — escolhem-se várias de uma vez, e cria-se à mão o que faltar.",
-    dica: "Vem antes dos sítios porque as medições penduram-se nas categorias. Sem elas, uma medição não sabe a que equipamentos se aplica.",
+    dica: "Vem antes dos locais porque as medições penduram-se nas categorias. Sem elas, uma medição não sabe a que equipamentos se aplica.",
   },
   {
-    titulo: "Criar os sítios",
+    titulo: "Criar os locais",
     onde: "Locais",
     href: "/locais",
     texto:
-      "Um sítio é a morada, e tem cliente e ponto no mapa. Os espaços — garagem, piso 3, cozinha — vivem dentro dele: é o sinal + de cada linha da árvore. Os equipamentos metem-se depois, na ficha de cada sítio.",
-    dica: "Isto saíu das Definições de propósito. Um sítio não é uma definição — e também se cria a meio de abrir uma ordem, sem sair de lá: se o cliente tiver a morada na ficha do CRM, é um toque.",
+      "Um local é a morada, e tem cliente e ponto no mapa. Os espaços — garagem, piso 3, cozinha — vivem dentro dele: é o sinal + de cada linha da árvore. Os equipamentos metem-se depois, na ficha de cada local.",
+    dica: "Isto saiu das Definições de propósito. Um local não é uma definição — e também se cria a meio de abrir uma ordem, sem sair de lá: se o cliente tiver a morada na ficha do CRM, é um toque.",
   },
   {
     titulo: "Definir as medições",
@@ -1601,7 +1601,7 @@ const DIA_A_DIA = [
     titulo: "Tirar fotos",
     onde: "Na ficha da ordem",
     texto:
-      "Uma foto do sítio antes de mexer poupa muita discussão depois. No telemóvel, o botão abre a câmara direto.",
+      "Uma foto do local antes de mexer poupa muita discussão depois. No telemóvel, o botão abre a câmara direto.",
     dica: "Liga “só para nós” nas fotos internas — essas não saem no relatório do cliente.",
   },
   {

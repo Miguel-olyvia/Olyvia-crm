@@ -31,7 +31,7 @@ import {
 } from "../components/ui";
 import { Building, ChevronRight, MapPin } from "../components/icons";
 import { linkParaIr, temSitio } from "../domain/mapa";
-import { comTudoLaDentro, raizDe, ramoAte } from "../domain/arvore-de-locais";
+import { comTudoLaDentro, ondeFoi, raizDe, ramoAte } from "../domain/arvore-de-locais";
 import EstruturaDoLocal from "../components/EstruturaDoLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
 import { IconeDaOrdem } from "../components/IconeDeLinha";
@@ -213,7 +213,7 @@ export default function LocalDetalhe() {
               nomeSugerido={`${local.nome} (cópia)`}
               exigeNome
               oQueNaoLeva={[
-                "o ponto no mapa — dois sítios não estão no mesmo lugar",
+                "o ponto no mapa — dois locais não estão no mesmo lugar",
                 "os números de série dos equipamentos",
                 "as ordens e o histórico",
               ]}
@@ -263,14 +263,22 @@ export default function LocalDetalhe() {
         aoGravar={() => setRecarga((r) => r + 1)}
       />
 
-      <HistoricoDeOrdens ordens={ordens} />
+      <HistoricoDeOrdens ordens={ordens} daArvore={daArvore} raizId={local.id} />
     </div>
   );
 }
 
 /* ───────────────────────────── Histórico ───────────────────────────────── */
 
-function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
+function HistoricoDeOrdens({
+  ordens,
+  daArvore,
+  raizId,
+}: {
+  ordens: readonly LinhaOrdem[];
+  daArvore: readonly LocalRow[];
+  raizId: string;
+}) {
   if (ordens.length === 0) {
     return (
       <Card className="p-4 sm:p-5">
@@ -286,11 +294,13 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
     <Card className="p-4 sm:p-5">
       <h2 className="text-sm font-semibold text-slate-800">O que já se fez aqui</h2>
       <p className="mt-0.5 text-xs text-slate-500">
-        As {ordens.length === 1 ? "última ordem" : `últimas ${ordens.length} ordens`} desta
-        morada e dos espaços dela.
+        As {ordens.length === 1 ? "última ordem" : `últimas ${ordens.length} ordens`} deste
+        local e dos espaços dele.
       </p>
       <ul className="mt-3 divide-y divide-slate-100">
-        {ordens.map((o) => (
+        {ordens.map((o) => {
+          const onde = ondeFoi(daArvore, raizId, o.local_id);
+          return (
           <li key={o.id}>
             <Link
               to={`/ordens/${o.codigo}`}
@@ -300,7 +310,16 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
               <span className="w-32 shrink-0 font-mono text-[11px] text-slate-400">
                 {o.codigo}
               </span>
+              {/*
+                Onde foi, antes do que foi. Doze ordens seguidas sem isto
+                parecem todas do mesmo lugar — e três foram na garagem.
+              */}
               <span className="min-w-0 flex-1 truncate text-sm text-slate-800 group-hover:text-brand-800">
+                {onde && (
+                  <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
+                    {onde}
+                  </span>
+                )}
                 {o.titulo}
               </span>
               <EstadoOrdem estado={o.estado} />
@@ -311,7 +330,8 @@ function HistoricoDeOrdens({ ordens }: { ordens: readonly LinhaOrdem[] }) {
               />
             </Link>
           </li>
-        ))}
+          );
+        })}
       </ul>
     </Card>
   );
