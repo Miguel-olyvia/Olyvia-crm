@@ -166,6 +166,7 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/copiar-acessos.sql` | replica as organizações de outra pessoa | sim — `anew_memberships` |
 | `db/restringir-permissoes.sql` | estreita um alargamento acidental | sim — `anew_role_permissions` |
 | `db/demo.sql` · `demo-remover.sql` | dados de demonstração | não |
+| `db/demo-orcamento.sql` · `demo-orcamento-remover.sql` | **uma obra vinda de um orçamento**, com o previsto congelado e o gasto real por cima — para ver o cartão &ldquo;orçamentado contra gasto&rdquo; sem esperar por uma obra a sério | **não** — só `ops_*`, nem toca em `quotes` |
 | `db/diagnostico-*.sql` · `verificar-acesso.sql` | só leem | não |
 
 A coluna da direita é a que interessa quando alguém pergunta se isto mexe no CRM. Os
