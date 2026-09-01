@@ -24,7 +24,7 @@
   ],
   "headers": [
     {
-      "source": "/((?!form$|form/|lead-form/|booking/).*)",
+      "source": "/((?!form$|form/|lead-form/|campaign/|booking/).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -53,11 +53,11 @@
       ]
     },
     {
-      "source": "/(form|lead-form)/:path*",
+      "source": "/(form|lead-form|campaign)/:path*",
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://*.google-analytics.com https://*.analytics.google.com https://www.google.com https://*.doubleclick.net https://www.googletagmanager.com https://*.facebook.com https://analytics.tiktok.com https://px.ads.linkedin.com https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src https://www.googletagmanager.com https://td.doubleclick.net https://*.facebook.com; object-src 'none'; base-uri 'self'; frame-ancestors https://www.mudelar.pt https://mudelar.pt;"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://*.google-analytics.com https://*.analytics.google.com https://www.google.com https://*.doubleclick.net https://www.googletagmanager.com https://*.facebook.com https://analytics.tiktok.com https://px.ads.linkedin.com https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src https://www.googletagmanager.com https://td.doubleclick.net https://*.facebook.com; object-src 'none'; base-uri 'self'; frame-ancestors *;"
         },
         {
           "key": "X-Content-Type-Options",
@@ -82,7 +82,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://*.google-analytics.com https://*.analytics.google.com https://www.google.com https://*.doubleclick.net https://www.googletagmanager.com https://*.facebook.com https://analytics.tiktok.com https://px.ads.linkedin.com https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src https://www.googletagmanager.com https://td.doubleclick.net https://*.facebook.com; object-src 'none'; base-uri 'self'; frame-ancestors https://www.mudelar.pt https://mudelar.pt;"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co https://*.supabase.net https://*.google-analytics.com https://*.analytics.google.com https://www.google.com https://*.doubleclick.net https://www.googletagmanager.com https://*.facebook.com https://analytics.tiktok.com https://px.ads.linkedin.com https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src https://www.googletagmanager.com https://td.doubleclick.net https://*.facebook.com; object-src 'none'; base-uri 'self'; frame-ancestors *;"
         },
         {
           "key": "X-Content-Type-Options",
