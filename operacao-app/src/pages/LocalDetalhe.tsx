@@ -23,6 +23,7 @@ import {
 } from "../lib/config";
 import {
   Badge,
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -30,10 +31,11 @@ import {
   Skeleton,
 } from "../components/ui";
 import { Building, ChevronRight, MapPin } from "../components/icons";
-import { linkParaIr, temSitio } from "../domain/mapa";
+import { coordenadasValidas, linkParaIr, temSitio } from "../domain/mapa";
 import { comTudoLaDentro, ondeFoi, raizDe, ramoAte } from "../domain/arvore-de-locais";
 import EstruturaDoLocal from "../components/EstruturaDoLocal";
 import MapaPequeno from "../components/MapaPequeno";
+import FormLocal from "../components/FormLocal";
 import BotaoDuplicar from "../components/BotaoDuplicar";
 import { IconeDaOrdem } from "../components/IconeDeLinha";
 import { duplicarLocal } from "../lib/config";
@@ -73,6 +75,9 @@ export default function LocalDetalhe() {
   const [erro, setErro] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
   const [abertos, setAbertos] = useState<Set<string>>(new Set());
+  // Editar a própria morada. Os espaços já se editavam na árvore; a raiz não
+  // tinha por onde — e é ela que tem a morada e o ponto no mapa.
+  const [aEditar, setAEditar] = useState(false);
 
   const alternar = (id: string) =>
     setAbertos((s) => {
@@ -209,6 +214,11 @@ export default function LocalDetalhe() {
 
           <div className="flex shrink-0 flex-wrap items-center gap-2">
           {podeEditar && (
+            <Button variant="secondary" size="sm" onClick={() => setAEditar(true)}>
+              Editar
+            </Button>
+          )}
+          {podeEditar && (
             <BotaoDuplicar
               titulo="Duplicar o local"
               nomeSugerido={`${local.nome} (cópia)`}
@@ -249,8 +259,32 @@ export default function LocalDetalhe() {
                 "Sem morada escrita."}
             </p>
             {/* Uma morada é uma coisa que se lê; um mapa é uma coisa que se
-                reconhece. Antes de sair para um sítio, reconhecer vale mais. */}
-            <MapaPequeno sitio={local} nome={local.nome} altura={140} />
+                reconhece. Antes de sair para um sítio, reconhecer vale mais.
+
+                Sem coordenadas não há mapa para desenhar — e o ecrã ficava
+                simplesmente vazio, sem dizer que faltava marcar o ponto. */}
+            {coordenadasValidas(local.latitude, local.longitude) ? (
+              <MapaPequeno sitio={local} nome={local.nome} altura={140} />
+            ) : (
+              <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500 ring-1 ring-slate-200">
+                <p className="flex items-center gap-1.5 font-medium text-slate-700">
+                  <MapPin width={13} height={13} /> Sem ponto no mapa
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  A morada acerta quase sempre — mas um ponto não tem gralhas nem
+                  ruas com o mesmo nome noutra cidade.
+                </p>
+                {podeEditar && (
+                  <button
+                    type="button"
+                    onClick={() => setAEditar(true)}
+                    className="mt-1.5 font-medium text-brand hover:underline"
+                  >
+                    Marcar agora
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>
@@ -273,6 +307,18 @@ export default function LocalDetalhe() {
       />
 
       <HistoricoDeOrdens ordens={ordens} daArvore={daArvore} raizId={local.id} />
+
+      {aEditar && (
+        <FormLocal
+          local={local}
+          clientes={clientes}
+          aoFechar={() => setAEditar(false)}
+          aoGravar={() => {
+            setAEditar(false);
+            setRecarga((r) => r + 1);
+          }}
+        />
+      )}
     </div>
   );
 }

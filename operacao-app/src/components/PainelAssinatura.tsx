@@ -63,8 +63,20 @@ export default function PainelAssinatura({
     };
   }, [ordemId]);
 
-  // Sem assinatura e sem poder recolher uma, não há nada para mostrar.
-  if (!assinatura && (!fechada || !podeAssinar)) return null;
+  // Quem não pode assinar nem tem assinatura para ver não precisa do cartão.
+  if (!assinatura && !podeAssinar) return null;
+
+  /*
+    ⚠ Antes o cartão **não aparecia de todo** enquanto a ordem não estivesse
+    fechada, e quem o procurou disse o que havia a dizer: "não sei fazer a
+    assinatura, ela não parece estar a funcionar".
+
+    Não estava avariada — estava invisível. Um ecrã que esconde uma
+    funcionalidade até ao momento certo não ensina o momento certo a ninguém:
+    ensina que a funcionalidade não existe. Agora o cartão aparece sempre, e
+    quando ainda não dá diz **porquê** e **o que falta fazer**.
+  */
+  const aindaNao = !fechada && podeAssinar && !assinatura;
 
   return (
     <Card className="p-4 sm:p-5">
@@ -81,6 +93,15 @@ export default function PainelAssinatura({
           </Button>
         )}
       </div>
+
+      {aindaNao && (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+          <strong className="font-medium text-slate-800">Ainda não.</strong> A
+          assinatura recolhe-se <strong>depois de fechar a ordem</strong> — é o que
+          o cliente está a aceitar que tem de estar escrito primeiro. Fecha a
+          ordem aqui em cima e o botão aparece neste cartão.
+        </p>
+      )}
 
       {assinatura && (
         <div className="mt-4 flex flex-wrap items-end gap-4">

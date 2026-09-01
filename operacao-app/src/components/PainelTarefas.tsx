@@ -129,11 +129,25 @@ export default function PainelTarefas({
     tarefas.map((t) => ({ estado: t.estado as EstadoTarefa, obrigatoria: t.obrigatoria }))
   );
 
-  // A primeira tarefa por responder abre-se sozinha. Quem chega ao local quer
-  // começar, não escolher por onde começar.
+  /**
+   * A primeira tarefa abre-se sozinha — mas **só numa ordem por começar**.
+   *
+   * Quem chega ao local quer começar, não escolher por onde começar. Mas
+   * depois de a primeira resposta estar dada, isto passa a atrapalhar: cada
+   * resposta recarregava a ordem, o painel voltava a montar-se, e a tarefa
+   * seguinte abria-se sozinha — a desfazer o fecho que se tinha acabado de
+   * ver. O `useRef` não chegava, porque um `ref` novo nasce a cada montagem.
+   *
+   * A condição certa não é "é a primeira vez que isto corre": é "ainda
+   * ninguém respondeu a nada".
+   */
   const jaAbriu = useRef(false);
   useEffect(() => {
     if (jaAbriu.current || !permissao.pode) return;
+    if (tarefas.some((t) => t.estado !== "pendente")) {
+      jaAbriu.current = true;
+      return;
+    }
     const primeira = tarefas.find((t) => t.estado === "pendente");
     if (primeira) {
       setAberta(primeira.id);

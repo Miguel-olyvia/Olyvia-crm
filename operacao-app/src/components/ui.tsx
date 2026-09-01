@@ -342,6 +342,25 @@ export function Spinner({ label }: { label?: string }) {
   );
 }
 
+/**
+ * A roda pequena, para dentro de um botão.
+ *
+ * O `Spinner` é um bloco de ecrã inteiro (`py-12`): posto dentro de um botão,
+ * empurrava-o e o botão saltava de tamanho durante o envio. São duas coisas
+ * diferentes e passaram a ter dois nomes.
+ */
+export function Rodinha({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cx(
+        "inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current align-[-2px]",
+        className
+      )}
+    />
+  );
+}
+
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cx("animate-pulse rounded-md bg-slate-100", className)} />;
 }

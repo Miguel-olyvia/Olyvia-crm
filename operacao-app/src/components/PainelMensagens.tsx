@@ -6,7 +6,7 @@ import {
   type MembroEquipa,
   type Mensagem,
 } from "../lib/dados";
-import { Button, Card, Spinner } from "./ui";
+import { Button, Card, Rodinha, Spinner } from "./ui";
 import { Mensagens as IconeMensagens } from "./icons";
 import { dataHora } from "../lib/formatar";
 
@@ -166,9 +166,21 @@ export default function PainelMensagens({
           <p className="text-[11px] leading-relaxed text-slate-400">
             Enter envia · Shift+Enter muda de linha. Quem está na ordem recebe aviso no sino.
           </p>
-          <Button size="sm" onClick={() => void enviar()} disabled={!texto.trim() || aEnviar}>
-            {aEnviar ? <Spinner /> : null}
-            Enviar
+          {/*
+            O botão não muda de tamanho enquanto envia.
+
+            Antes o `Spinner` entrava **ao lado** da palavra e empurrava o
+            botão: num envio rápido isso lia-se como um salto de um milésimo de
+            segundo, mesmo debaixo do dedo. Agora a roda ocupa o lugar da
+            palavra, e a largura está fixa.
+          */}
+          <Button
+            size="sm"
+            onClick={() => void enviar()}
+            disabled={!texto.trim() || aEnviar}
+            className="min-w-[5.5rem] justify-center"
+          >
+            {aEnviar ? <Rodinha /> : "Enviar"}
           </Button>
         </div>
       </div>
