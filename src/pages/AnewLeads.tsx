@@ -8,6 +8,7 @@ import {
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
 import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
+import { isBaseFieldCoveredByCampaignFields, stripCampaignCoveredBaseValues } from "@/lib/leads/campaignFieldCoverage";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
@@ -2975,11 +2976,23 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
       return;
     }
-    // Merge base + extra campaign fields for validation
-    const allFieldDefs = [...createLeadFieldDefs, ...extraCampaignFieldDefs];
+    // Merge base + extra campaign fields for validation. Os campos base que a
+    // campanha cobre não são desenhados no diálogo, por isso também não entram
+    // na validação — exigi-los obrigaria a preencher uma caixa invisível.
+    const visibleBaseFieldDefs = createLeadFieldDefs.filter(
+      baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs)
+    );
+    const allFieldDefs = [...visibleBaseFieldDefs, ...extraCampaignFieldDefs];
+    // Descarta os valores dos campos base que a campanha já cobre. O diálogo
+    // esconde-os quando a campanha é escolhida, mas o que a pessoa (ou o
+    // preenchimento automático do browser) escreveu ANTES dessa escolha ficava
+    // em memória e era gravado na mesma — foi assim que uma lead ficou com o
+    // email/telefone de outra cliente ao lado do po_email/po_telefone certos.
+    // A partir daqui trabalha-se só com leadValues, nunca com newLeadValues.
+    const leadValues = stripCampaignCoveredBaseValues(newLeadValues, createLeadFieldDefs, extraCampaignFieldDefs);
     // "Required" means valid, not merely non-empty: a lone "-" used to satisfy
     // every required text field, producing leads with po_codigo_postal = "-".
-    const fieldErrors = validateLeadFieldValues(allFieldDefs as any, newLeadValues);
+    const fieldErrors = validateLeadFieldValues(allFieldDefs as any, leadValues);
 
     if (fieldErrors.length > 0) {
       toast({
@@ -3057,7 +3070,7 @@ export default function AnewLeads() {
         let vatValue = '';
 
         for (const fieldDef of allFieldDefs) {
-          const val = newLeadValues[fieldDef.field_key];
+          const val = leadValues[fieldDef.field_key];
           if (!val) continue;
 
           const mapping = (fieldDef as any).contact_field_mapping;
@@ -3259,8 +3272,8 @@ export default function AnewLeads() {
             setDuplicateMatches(allMatches);
             setPendingLeadData({
               entityId: null,
-              fieldValues: newLeadValues,
-              assignedTo: newLeadValues._assigned_to || null,
+              fieldValues: leadValues,
+              assignedTo: leadValues._assigned_to || null,
               resolvedRootOrgId,
               createdBy: createdByResolved,
               displayName,
@@ -3277,14 +3290,14 @@ export default function AnewLeads() {
           const firstName = (() => {
             for (const fd of allFieldDefs) {
               const m = (fd as any).contact_field_mapping;
-              if (m === 'first_name' && newLeadValues[fd.field_key]) return String(newLeadValues[fd.field_key]);
+              if (m === 'first_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
             }
             return displayName.trim().split(' ')[0] || null;
           })();
           const lastName = (() => {
             for (const fd of allFieldDefs) {
               const m = (fd as any).contact_field_mapping;
-              if (m === 'last_name' && newLeadValues[fd.field_key]) return String(newLeadValues[fd.field_key]);
+              if (m === 'last_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
             }
             const parts = displayName.trim().split(' ');
             return parts.length > 1 ? parts.slice(1).join(' ') : null;
@@ -3490,8 +3503,8 @@ export default function AnewLeads() {
           setDuplicateMatches(allMatches);
           setPendingLeadData({
             entityId,
-            fieldValues: newLeadValues,
-            assignedTo: newLeadValues._assigned_to || null,
+            fieldValues: leadValues,
+            assignedTo: leadValues._assigned_to || null,
             resolvedRootOrgId,
             createdBy: createdByResolved,
             displayName,
@@ -3504,8 +3517,8 @@ export default function AnewLeads() {
         }
 
         // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
-        const assignedTo = newLeadValues._assigned_to || null;
-        const { _assigned_to, ...cleanFieldValues } = newLeadValues;
+        const assignedTo = leadValues._assigned_to || null;
+        const { _assigned_to, ...cleanFieldValues } = leadValues;
         const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
           ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
           : "manual";
@@ -3548,8 +3561,8 @@ export default function AnewLeads() {
           const nameUpdate: Record<string, any> = { display_name: displayName.trim() };
           for (const fd of allFieldDefs) {
             const m = (fd as any).contact_field_mapping;
-            if (m === 'first_name' && newLeadValues[fd.field_key]) nameUpdate.first_name = String(newLeadValues[fd.field_key]);
-            if (m === 'last_name' && newLeadValues[fd.field_key]) nameUpdate.last_name = String(newLeadValues[fd.field_key]);
+            if (m === 'first_name' && leadValues[fd.field_key]) nameUpdate.first_name = String(leadValues[fd.field_key]);
+            if (m === 'last_name' && leadValues[fd.field_key]) nameUpdate.last_name = String(leadValues[fd.field_key]);
           }
           entityRenamePayloadForPostCommit = nameUpdate;
         }
@@ -3572,7 +3585,7 @@ export default function AnewLeads() {
           supabase,
           entityId: entityIdForPostCommit,
           organizationId: activeCompanyId,
-          fieldValues: newLeadValues,
+          fieldValues: leadValues,
           actorId: createdByResolved,
           allowOverwriteValid: false,
         });
@@ -6817,17 +6830,11 @@ export default function AnewLeads() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {createLeadFieldDefs
-                .filter(baseField => {
-                  // Hide base fields that are already covered by a mapped form/campaign field
-                  if (extraCampaignFieldDefs.length === 0) return true;
-                  const baseKey = baseField.field_key.toLowerCase();
-                  return !extraCampaignFieldDefs.some(ef => {
-                    const cm = (ef.contact_field_mapping || '').toLowerCase();
-                    const clm = (ef.client_field_mapping || '').toLowerCase();
-                    const efKey = (ef.field_key || '').toLowerCase();
-                    return cm === baseKey || clm === baseKey || efKey === baseKey;
-                  });
-                })
+                // Esconde os campos base que a campanha/formulário já recolhe.
+                // Mesma regra usada em handleCreateLead ao montar field_values:
+                // esconder sem descartar deixava passar o valor escrito antes de
+                // a campanha ser escolhida.
+                .filter(baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs))
                 .map(field => (
                 <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                   <DynamicFormField
