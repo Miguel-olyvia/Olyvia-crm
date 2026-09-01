@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Sino from "./Sino";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Combobox, ConfirmDialog, cx } from "./ui";
@@ -126,6 +127,9 @@ export function OperacaoLayout() {
               <ChevronLeft width={15} height={15} className="text-slate-400" />
               <span className="hidden sm:inline">CRM</span>
             </a>
+
+            {/* O sino. É o do CRM, mostrado aqui — ver `Sino.tsx`. */}
+            <Sino />
 
             {/* Organização — só aparece se houver mais do que uma */}
             {orgs.length > 1 && (

@@ -373,6 +373,69 @@ export async function locaisRemovidosDe(paiIds: readonly string[]): Promise<Loca
 }
 
 
+/* ─────────────────────── O sino, deste lado ───────────────────── */
+
+/**
+ * As notificações do módulo, lidas do sino do CRM.
+ *
+ * ⚠ Isto lê uma tabela do CRM — `public.notifications`. É leitura, como
+ * fornecedores e clientes, e não precisou de uma única linha de SQL: o CRM já
+ * tem, desde sempre, uma política que deixa cada pessoa ver e marcar as
+ * **suas** notificações (`user_id = auth.uid()`). O módulo usa exatamente a
+ * mesma porta que o sino do CRM usa.
+ *
+ * Não é um segundo sino: é o mesmo, mostrado onde a pessoa está. Marcar como
+ * lida aqui apaga-a lá, e ao contrário também — que era a razão pela qual o
+ * módulo tinha nascido sem sino nenhum.
+ *
+ * Filtra por `data->>'modulo' = 'operacoes'`: o que é do CRM lê-se no CRM.
+ */
+export interface AvisoDoSino {
+  id: string;
+  tipo: string;
+  titulo: string;
+  mensagem: string | null;
+  link: string | null;
+  prioridade: string | null;
+  criado_em: string;
+  lido: boolean;
+}
+
+export async function avisosDeOperacoes(limite = 20): Promise<AvisoDoSino[]> {
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, type, title, message, link, priority, created_at, is_read")
+    .eq("kind", "notification")
+    .contains("data", { modulo: "operacoes" })
+    .eq("is_dismissed", false)
+    .order("created_at", { ascending: false })
+    .limit(limite);
+
+  // Um sino avariado não pode deitar abaixo o cabeçalho. Se a leitura falhar
+  // — tabela em falta numa base antiga, política mudada — fica sem avisos.
+  if (error) return [];
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    tipo: String(r.type ?? ""),
+    titulo: String(r.title ?? ""),
+    mensagem: (r.message as string | null) ?? null,
+    link: (r.link as string | null) ?? null,
+    prioridade: (r.priority as string | null) ?? null,
+    criado_em: String(r.created_at ?? ""),
+    lido: r.is_read === true,
+  }));
+}
+
+/** Marcar como lida. A política do CRM já limita isto às próprias. */
+export async function marcarAvisoLido(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await supabase
+    .from("notifications")
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .in("id", ids as string[]);
+}
+
+
 /* ─────────────────────────── Árvore de locais ─────────────────────────── */
 
 export interface NoLocal extends LocalRow {
