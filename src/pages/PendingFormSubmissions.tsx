@@ -550,7 +550,7 @@ export default function PendingFormSubmissions() {
                             onClick={() => setPendingAction({ submission: row, action: "merge" })}
                           >
                             <Link2 className="h-3.5 w-3.5 mr-1" />
-                            Copiar os dados para a ficha
+                            Registar na ficha como nota
                           </Button>
                         )}
                         <Button
@@ -559,7 +559,7 @@ export default function PendingFormSubmissions() {
                           onClick={() => setPendingAction({ submission: row, action: "new_lead" })}
                         >
                           <UserPlus className="h-3.5 w-3.5 mr-1" />
-                          Não é a mesma pessoa — criar lead nova
+                          Abrir lead nova para esta pessoa
                         </Button>
                       </div>
                     )}
@@ -575,12 +575,14 @@ export default function PendingFormSubmissions() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingAction?.action === "merge" ? "Associar ao registo existente" : "Criar como lead nova"}
+              {pendingAction?.action === "merge"
+                ? "Registar na ficha como nota"
+                : "Abrir lead nova para esta pessoa"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingAction?.action === "merge"
-                ? `Os valores submetidos serão registados como uma nota no registo de ${pendingAction?.submission.targetName}. A submissão deixa de aparecer nesta lista.`
-                : "Será criada uma nova lead com os valores submetidos, independente do registo existente. A submissão deixa de aparecer nesta lista."}
+                ? `Os valores submetidos ficam como nota na ficha de ${pendingAction?.submission.targetName}. Não são gravados nos campos da ficha — quem quiser alterar o email ou o telefone tem de o fazer à mão. A submissão deixa de aparecer nesta lista.`
+                : `Nasce uma lead nova com os valores submetidos, na MESMA pessoa (${pendingAction?.submission.targetName}) — não numa pessoa nova. Fica com duas leads abertas, e é isso que se pretende evitar: use isto só quando esta submissão for mesmo um negócio à parte. A submissão deixa de aparecer nesta lista.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
