@@ -107,6 +107,8 @@ const ALERT_MODULES: ModuleDef[] = [
       { type: "stock_low", label: "Stock baixo", description: "Avisa quando o stock de um produto num armazém desce até ao ponto de reencomenda.", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "purchase_order_overdue", label: "Encomenda em atraso", description: "Avisa quando a data de entrega esperada de uma encomenda é ultrapassada sem ter sido recebida.", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "supplier_price_change", label: "Aumento de preço de fornecedor", description: "Avisa quando o preço de compra de um fornecedor sobe acima da percentagem definida (valor abaixo em %).", hasDays: true, defaultDays: 10, defaultActive: true, daysUnit: "%" },
+      { type: "inventory_discrepancy_unresolved", label: "Contagem com diferenças aceites sem ajuste", description: "Avisa quando uma contagem de inventário é finalizada com pelo menos 1 linha aceite sem ajuste ao stock.", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "inventory_count_stale", label: "Contagem parada", description: "Avisa quando uma contagem de inventário está em curso há X dias sem atualização.", hasDays: true, defaultDays: 5, defaultActive: true },
     ],
   },
 ];

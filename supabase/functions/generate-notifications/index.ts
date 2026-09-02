@@ -37,6 +37,8 @@ const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> =
   stock_low: { days: null, active: true },
   purchase_order_overdue: { days: null, active: true },
   supplier_price_change: { days: 10, active: true }, // days_threshold reaproveitado como percentagem (10 = 10%)
+  inventory_discrepancy_unresolved: { days: null, active: true },
+  inventory_count_stale: { days: 5, active: true }, // dias sem atualização (updated_at) em status em_contagem
 };
 
 interface LegacySettings {
@@ -273,6 +275,7 @@ Deno.serve(async (req) => {
         "contract_draft_stale", "contract_expiring", "contract_expiring_urgent", "contract_expired",
         "quote_stale", "quote_no_value",
         "stock_low", "purchase_order_overdue", "supplier_price_change",
+        "inventory_discrepancy_unresolved", "inventory_count_stale",
       ]);
 
       const stillPending: typeof pendingNotifications = [];
@@ -1070,6 +1073,101 @@ Deno.serve(async (req) => {
             priority: "medium",
             action_config: { item_supplier_id: row.item_supplier_id },
             link: "/suppliers",
+          });
+        }
+      }
+
+      // ── INVENTORY DISCREPANCY UNRESOLVED (destinatários: utilizadores com permissão inventory.view) ──
+      // Dispara quando uma sessão de contagem (inventory_counts) é finalizada
+      // com pelo menos 1 linha aceite_sem_ajuste (Fase 5.4). Mesmo padrão de
+      // stock_low/purchase_order_overdue: 1 query batch + filtro em JS, sem
+      // N+1 por sessão.
+      const finalizedInventoryCounts = await fetchAll<any>(
+        supabase,
+        "inventory_counts",
+        (q) => q.eq("status", "finalizada"),
+        "id, document_number, organization_id",
+      );
+
+      if (finalizedInventoryCounts.length > 0) {
+        const finalizedCountIds = finalizedInventoryCounts.map((c: any) => c.id);
+        const acceptedWithoutAdjustmentLines = await chunkedFetch<any>(
+          supabase,
+          "inventory_count_lines",
+          finalizedCountIds,
+          "id, inventory_count_id",
+          (q, chunk) => q.in("inventory_count_id", chunk).eq("discrepancy_resolution", "aceite_sem_ajuste"),
+        );
+        const acceptedLineCountByCount = new Map<string, number>();
+        for (const line of acceptedWithoutAdjustmentLines || []) {
+          acceptedLineCountByCount.set(
+            line.inventory_count_id,
+            (acceptedLineCountByCount.get(line.inventory_count_id) || 0) + 1,
+          );
+        }
+
+        for (const ic of finalizedInventoryCounts) {
+          const orgId = ic.organization_id;
+          if (!orgId) continue;
+          const cfg = getAlertConfig(orgId, "inventory_discrepancy_unresolved");
+          if (!cfg.is_active) continue;
+
+          const acceptedLineCount = acceptedLineCountByCount.get(ic.id) || 0;
+          if (acceptedLineCount === 0) continue;
+
+          const recipients = getUsersWithPermission(orgId, "inventory.view");
+          for (const userId of recipients) {
+            if (shouldSkip(ic.id, "inventory_discrepancy_unresolved", userId)) continue;
+            queueNotification({
+              user_id: userId, organization_id: orgId, kind: "alert",
+              type: "inventory_discrepancy_unresolved", entity_type: "inventory_count", entity_id: ic.id,
+              title: "Contagem finalizada com diferenças aceites sem ajuste",
+              message: `A contagem ${ic.document_number} foi finalizada com ${acceptedLineCount} linha${acceptedLineCount === 1 ? "" : "s"} aceite${acceptedLineCount === 1 ? "" : "s"} sem ajuste ao stock.`,
+              priority: "medium",
+              action_config: { inventory_count_id: ic.id },
+              link: "/stock-counts",
+            });
+          }
+        }
+      }
+
+      // ── INVENTORY COUNT STALE (destinatários: utilizadores com permissão inventory.view) ──
+      // Dispara quando uma sessão em em_contagem está há mais de N dias sem
+      // atualização (updated_at). N é configurável via alert_settings
+      // (days_threshold), mesmo mecanismo de proposal_draft_stale/
+      // contract_draft_stale — purchase_order_overdue não serviu de modelo
+      // direto aqui porque o seu "atraso" vem de uma data própria da entidade
+      // (expected_delivery) e não tem days_threshold configurável
+      // (ALERT_DEFAULTS tem days:null, só o is_active é lido de alert_settings);
+      // inventory_counts não tem uma data de "previsão" equivalente, por isso
+      // o padrão com days_threshold real (default 5) é o que se aplica aqui.
+      const staleInventoryCounts = await fetchAll<any>(
+        supabase,
+        "inventory_counts",
+        (q) => q.eq("status", "em_contagem"),
+        "id, document_number, organization_id, updated_at",
+      );
+
+      for (const ic of staleInventoryCounts || []) {
+        const orgId = ic.organization_id;
+        if (!orgId || !ic.updated_at) continue;
+        const cfg = getAlertConfig(orgId, "inventory_count_stale");
+        if (!cfg.is_active || !cfg.days_threshold) continue;
+
+        const daysSinceUpdate = Math.floor((now.getTime() - new Date(ic.updated_at).getTime()) / 86400000);
+        if (daysSinceUpdate < cfg.days_threshold) continue;
+
+        const recipients = getUsersWithPermission(orgId, "inventory.view");
+        for (const userId of recipients) {
+          if (shouldSkip(ic.id, "inventory_count_stale", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "inventory_count_stale", entity_type: "inventory_count", entity_id: ic.id,
+            title: `Contagem parada há ${daysSinceUpdate} dias`,
+            message: `A contagem ${ic.document_number} está em curso há ${daysSinceUpdate} dias sem atualização.`,
+            priority: "medium",
+            action_config: { inventory_count_id: ic.id },
+            link: "/stock-counts",
           });
         }
       }
