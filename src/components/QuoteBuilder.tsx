@@ -27,7 +27,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
@@ -3649,9 +3649,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     value={formData.pdf_template_id || "__default__"}
                     onValueChange={(v) => setFormData({ ...formData, pdf_template_id: v === "__default__" ? "" : v })}
                   >
-                    <SelectTrigger><SelectValue placeholder="Layout padrão" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Escolher layout" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__default__">Layout padrão</SelectItem>
+                      <SelectItem value="__default__">Nenhum</SelectItem>
                       {pdfTemplates.map((tpl: any) => (
                         <SelectItem key={tpl.id} value={tpl.id}>
                           {tpl.name}{tpl.template_type === "quote" ? " · Orçamento" : tpl.template_type === "proposal" ? " · Proposta" : ""}
@@ -3659,7 +3659,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">Aplicado no preview e no PDF gerado</p>
+                  {formData.pdf_template_id ? (
+                    <p className="text-xs text-muted-foreground">Aplicado no preview e no PDF gerado</p>
+                  ) : (
+                    <p className="text-xs text-amber-600 flex items-start gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>Nenhum layout escolhido. Não há layout por omissão — o PDF é desenhado com o primeiro template activo da organização, por ordem alfabética.</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
