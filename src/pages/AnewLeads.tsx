@@ -139,56 +139,15 @@ import {
 } from "./anewLeadsHelpers";
 
 
-interface Lead {
-  id: string;
-  organization_id: string;
-  campaign_id: string | null;
-  field_values: Record<string, any> | null;
-  status: string;
-  source: string | null;
-  notes: string | null;
-  tags: string[] | null;
-  created_at: string;
-  created_by: string | null;
-  converted_to_contact_id: string | null;
-  converted_at: string | null;
-  assigned_to: string | null;
-  entity_id?: string | null;
-  campaigns?: { id: string; name: string } | null;
-  last_contact_result?: string;
-  last_contact_at?: string | null;
-  converted_to_client_id?: string | null;
-  callback_scheduled_at?: string | null;
-  callback_notes?: string | null;
-  profiles?: { name: string | null } | null;
-  assigned_user?: { id: string; name: string | null } | null;
-  [key: string]: any;
-}
+// Lead e FieldDefinition vivem em @/types/leads. Leia o cabecalho desse
+// ficheiro antes de lhes tocar: ambos terminam em `[key: string]: any`.
+import type { Lead, FieldDefinition } from "@/types/leads";
 
 interface ContactResultConfig {
   id: string;
   name: string;
   icon: string;
   color: string;
-}
-
-interface FieldDefinition {
-  id: string;
-  campaign_id: string | null;
-  organization_id?: string | null;
-  field_key: string;
-  field_label: string;
-  field_type: string;
-  is_required: boolean;
-  is_unique: boolean;
-  options: any;
-  sort_order: number;
-  contact_field_mapping: string | null;
-  client_field_mapping: string | null;
-  placeholder?: string;
-  help_text?: string;
-  display_style?: string;
-  [key: string]: any;
 }
 
 interface ClientOption {
