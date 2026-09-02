@@ -6,11 +6,13 @@ import {
   atribuirOrdem,
   type AvisoDeAgenda,
   type Conflito,
+  type LocalRow,
   type MembroEquipa,
 } from "../lib/dados";
-import { Badge, Button, Card, Combobox, Field, Input, cx } from "./ui";
+import { Badge, Button, Card, Combobox, Field, Input, Seccao, cx } from "./ui";
 import { AlertTriangle, Check, Clock, User } from "./icons";
 import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
+import SugerirTecnico from "./SugerirTecnico";
 
 /**
  * Quem vai, e quando.
@@ -27,6 +29,8 @@ import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
 
 export default function PainelDespacho({
   ordemId,
+  orgId,
+  local,
   estado,
   responsavelId,
   equipaDaOrdem,
@@ -38,6 +42,9 @@ export default function PainelDespacho({
   aoGravar,
 }: {
   ordemId: string;
+  orgId: string;
+  /** Onde é o trabalho — é daqui que sai a distância na sugestão. */
+  local: LocalRow | null;
   estado: string;
   responsavelId: string | null;
   equipaDaOrdem: readonly string[];
@@ -112,9 +119,47 @@ export default function PainelDespacho({
     label: `${m.nome} · ${ROTULO_FUNCAO[m.funcao as Funcao] ?? m.funcao}`,
   }));
 
+  /**
+   * O que a sugestão deixa nos campos.
+   *
+   * Não grava nada: preenche, e quem coordena confirma com os botões que já lá
+   * estavam. Uma sugestão que gravasse sozinha seria uma decisão tomada por um
+   * botão chamado "sugerir".
+   *
+   * Com dia proposto, a hora vai a 09:00. É a única hora inventada em toda a
+   * aplicação, e só existe porque um campo de data-e-hora não aceita metade —
+   * fica num input à espera de confirmação, e não numa agenda a fingir que
+   * alguém marcou aquilo.
+   */
+  const aplicarSugestao = (utilizadorId: string, dia: Date | null) => {
+    setResp(utilizadorId);
+    setExtra((xs) => xs.filter((x) => x !== utilizadorId));
+    if (dia) {
+      const d = new Date(dia);
+      d.setHours(9, 0, 0, 0);
+      setQuando(paraInput(d.toISOString()));
+    }
+  };
+
   return (
     <Card className="p-4 sm:p-5">
-      <h2 className="text-sm font-semibold text-slate-800">Quem vai, e quando</h2>
+      <Seccao
+        icone={<User width={15} height={15} />}
+        titulo="Quem vai, e quando"
+        acao={
+          ativo ? (
+            <SugerirTecnico
+              ordemId={ordemId}
+              orgId={orgId}
+              local={local}
+              agendadaPara={agendadaPara}
+              equipa={equipa}
+              aoEscolher={aplicarSugestao}
+              desativado={aGravar !== null}
+            />
+          ) : undefined
+        }
+      />
 
       {!podeDespachar && (
         <p className="mt-2 text-sm text-slate-400">

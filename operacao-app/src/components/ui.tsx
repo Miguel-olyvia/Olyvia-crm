@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -67,17 +67,26 @@ export function IconButton({
 
 /* --------------------------------------------------------------- Inputs --- */
 
-export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={cx(
-        "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20",
-        className
-      )}
-      {...props}
-    />
-  );
-}
+/**
+ * Passa a `ref` para o `<input>` real.
+ *
+ * Sem isto não há como pôr o cursor num campo a partir de fora — e é disso que
+ * vive o atalho `/` da lista de ordens, que sem ref não teria onde pegar.
+ */
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className, ...props }, ref) {
+    return (
+      <input
+        ref={ref}
+        className={cx(
+          "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition-colors placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20",
+          className
+        )}
+        {...props}
+      />
+    );
+  }
+);
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
@@ -312,18 +321,102 @@ export function Card({
   children,
   className,
   onClick,
+  id,
 }: {
   children: ReactNode;
   className?: string;
   onClick?: () => void;
+  /** Para se poder apontar um link a esta secção — ver `/ajuda#sugerir`. */
+  id?: string;
 }) {
   return (
     <div
+      id={id}
       onClick={onClick}
       className={cx("rounded-xl border border-slate-200/80 bg-white shadow-card", className)}
     >
       {children}
     </div>
+  );
+}
+
+/**
+ * O cabeçalho de um cartão: ícone, título, e o que se pode fazer ali.
+ *
+ * Antes disto cada painel desenhava o seu — quinze `<h2>` com quinze conjuntos
+ * de classes parecidas mas não iguais, e por isso quinze alturas de linha
+ * ligeiramente diferentes numa página que os empilha todos. Uma ficha de ordem
+ * com dez cartões desalinhados lê-se como dez coisas soltas em vez de uma.
+ *
+ * O ícone não é decoração: numa página comprida é por ele que se volta a
+ * encontrar a secção depois de se ter descido.
+ */
+export function Seccao({
+  icone,
+  titulo,
+  contagem,
+  acao,
+  children,
+  className,
+}: {
+  icone?: ReactNode;
+  titulo: string;
+  /** Quantos itens tem. Zero mostra-se: "0 anexos" é informação. */
+  contagem?: number | string;
+  acao?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx("flex min-w-0 items-center justify-between gap-3", className)}>
+      <h2 className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-800">
+        {icone && <span className="shrink-0 text-slate-400">{icone}</span>}
+        <span className="min-w-0 truncate">{titulo}</span>
+        {contagem !== undefined && (
+          <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-slate-500">
+            {contagem}
+          </span>
+        )}
+        {children}
+      </h2>
+      {acao && <div className="flex shrink-0 items-center gap-1.5">{acao}</div>}
+    </div>
+  );
+}
+
+/**
+ * Uma condição ligada, com a porta para a desligar.
+ *
+ * Um contador que diz "3 filtros" obriga a abrir a gaveta para saber quais.
+ * As pastilhas dizem-no sem se abrir nada, e cada uma tira-se onde está — que
+ * é o gesto que se quer fazer quando a lista sai curta de mais.
+ */
+export function Chip({
+  children,
+  onRemover,
+  titulo,
+}: {
+  children: ReactNode;
+  onRemover?: () => void;
+  titulo?: string;
+}) {
+  return (
+    <span
+      title={titulo}
+      className="inline-flex max-w-[14rem] items-center gap-1 rounded-full bg-brand-50 py-1 pl-2.5 pr-1 text-xs font-medium text-brand-800 ring-1 ring-inset ring-brand-100"
+    >
+      <span className="min-w-0 truncate">{children}</span>
+      {onRemover && (
+        <button
+          type="button"
+          onClick={onRemover}
+          aria-label="Tirar este filtro"
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-brand-600 transition-colors hover:bg-brand-100 hover:text-brand-900"
+        >
+          <X width={11} height={11} />
+        </button>
+      )}
+    </span>
   );
 }
 

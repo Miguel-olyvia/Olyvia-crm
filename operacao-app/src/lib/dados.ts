@@ -82,6 +82,42 @@ export async function listarOrdens(
   return (data ?? []) as unknown as LinhaOrdem[];
 }
 
+/** O mínimo para contar uma ordem sem a carregar inteira. */
+export interface OrdemParaContar {
+  estado: Estado;
+  agendada_para: string | null;
+}
+
+/**
+ * O suficiente para pôr um número em cada vista da lista.
+ *
+ * Sem os números, saber que há quatro ordens atrasadas obriga a carregar em
+ * "Atrasadas" — e ninguém carrega num separador só para descobrir que está
+ * vazio. Com eles, a lista diz onde é que está o problema antes de se lhe
+ * tocar.
+ *
+ * Duas colunas, e mais nada: o pedido é pequeno mesmo com setecentas ordens
+ * abertas. O histórico fica de fora de propósito — cresce para sempre, e um
+ * número que diz "4318" não ajuda ninguém a decidir nada.
+ */
+export async function ordensParaContar(orgId: string): Promise<OrdemParaContar[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select("estado, agendada_para")
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada", "fechada"])
+    .limit(2000);
+
+  if (error) {
+    // Um número em falta num separador é um contratempo; um ecrã em branco
+    // por causa dele é um problema. Por isso este erro não rebenta.
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem contagens para as vistas:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as OrdemParaContar[];
+}
+
 export interface OrdemCompleta extends LinhaOrdem {
   /** A lista não seleciona esta coluna; a ficha sim, e precisa dela para auditar. */
   organization_id: string;
@@ -168,6 +204,42 @@ export async function tarefasDaOrdem(ordemId: string): Promise<TarefaDaOrdem[]> 
     .order("posicao");
   rebentar("carregar as tarefas", error);
   return (data ?? []) as unknown as TarefaDaOrdem[];
+}
+
+/**
+ * As especialidades que o trabalho desta ordem pede.
+ *
+ * Vem das tarefas, e as tarefas vêm da checklist do plano — por isso, na
+ * prática, é o **plano** que diz o que é preciso saber para fazer aquilo. Uma
+ * ordem cujas tarefas não têm especialidade devolve uma lista vazia, e isso
+ * não é um erro: é uma ordem que qualquer pessoa pode fazer.
+ *
+ * Só os ids. Os nomes vêm de `listarEspecialidades`, que já é lido para os
+ * filtros da agenda — não vale a pena juntar as duas coisas numa consulta com
+ * `join` para poupar um pedido que já estava a ser feito.
+ */
+export async function especialidadesDaOrdem(ordemId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_tarefa")
+    .select("skill_id")
+    .eq("ordem_id", ordemId)
+    .not("skill_id", "is", null);
+
+  if (error) {
+    // Sem `correcoes-modelo.sql` a coluna não existe. A sugestão continua a
+    // funcionar — fica só sem a pergunta "quem sabe fazer isto?".
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem especialidades na ordem:", error.message);
+    return [];
+  }
+
+  return [
+    ...new Set(
+      ((data ?? []) as { skill_id: string | null }[])
+        .map((t) => t.skill_id)
+        .filter((x): x is string => !!x)
+    ),
+  ];
 }
 
 /* ────────────────────────────── Sessões ────────────────────────────── */
@@ -1509,10 +1581,18 @@ export async function ordensDoPeriodo(
   const fim = new Date(ate);
   fim.setHours(23, 59, 59, 999);
 
+  /*
+   * As colunas de classificação e o local vinham em falta, e o tipo dizia que
+   * estavam cá. O efeito era silencioso e feio: na semana e no mês, filtrar
+   * por cliente ou por tipo de trabalho nunca dava nada — `undefined` não é
+   * igual a coisa nenhuma. E sem `local_id` não há como saber onde é que cada
+   * pessoa já vai estar, que é metade do que a sugestão de técnico precisa.
+   */
   const { data, error } = await supabase
     .from("ops_ordem")
     .select(
       "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
+        "local_id, cliente_id, tipo_trabalho_id, fornecedor_id, " +
         "agendada_para, janela_inicio, janela_fim"
     )
     .eq("organization_id", orgId)

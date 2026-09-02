@@ -7,8 +7,32 @@
 
 ---
 
-> ⚠ **As secções 1 a 9 são de 30 de agosto.** O que é verdade hoje está na
-> **§0**, logo a seguir — começa por aí.
+> ⚠ **As secções 1 a 9 são de 30 de agosto**, e a §7 foi corrigida a 2 de
+> setembro. O que é verdade hoje está na **§0a**, logo a seguir — começa por aí.
+
+## 0a. O que mudou a 2 de setembro — um dia de UX
+
+A lista de ordens e a ficha da ordem foram reescritas no que toca a layout, e o
+módulo passou a saber **sugerir quem devia ir** a cada ordem. O registo
+completo está em
+[`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md). Em resumo:
+
+| | |
+|---|---|
+| **Sugerir quem vai** | especialidade (50 %), agenda (30 %) e distância (20 %), com o porquê de cada lugar escrito ao lado |
+| **A lista lembra-se** | vista, pesquisa, filtros e ordenação vivem no endereço |
+| **Faixas por dia** | Atrasadas, Hoje, Amanhã, Até domingo, Mais tarde, Já passou, Sem data |
+| **Números nos separadores** | e o das atrasadas a vermelho |
+| **A pesquisa espera** | mandava uma consulta por cada letra escrita |
+| **As ações não fogem** | barra colada ao topo, e barra fixa em baixo no telemóvel |
+| **Duas colunas** | o trabalho à esquerda, o contexto à direita, a partir de `lg` |
+| **A régua do percurso** | cinco degraus, e a frase que diz o que falta a seguir |
+| **O relógio anda** | numa sessão aberta, o tempo deixou de ficar parado |
+| **O «Hoje» mostra o dia** | e cada bloco traz as três primeiras ordens, com contexto |
+
+**Nenhum SQL novo.** Tudo isto lê o que já existia.
+
+---
 
 ## 0b. O que mudou a 1 de setembro — o primeiro dia de uso a sério
 
@@ -329,24 +353,21 @@ Para apagar a regra no fim:
 ## 7. O push, e o que está em causa
 
 ```
-ramo:     feature/operacoes
-commits:  27 por enviar
-main:     intocado
+ramo:     feature/operacoes  — empurrado, alinhado com o origin
+main:     intocado, 44 commits atrás
 ```
 
-Duas opções, decididas em conjunto na sessão passada:
+⚠ **Esta secção estava desatualizada** até 2 de setembro: dizia que o push
+estava bloqueado e que havia 27 commits por enviar. O ramo está no origin há
+dias, e é dele que sai a pré-visualização do Vercel.
 
-**Só o ramo** *(escolhido, mas o push ficou bloqueado)*
-`git push -u origin feature/operacoes` → o Vercel cria um URL de
-pré-visualização. Ninguém no CRM vê nada. O link aparece na página do commit
-no GitHub — não é preciso conta no Vercel.
+Foi escolhido **só o ramo**: o Vercel cria um URL de pré-visualização a cada
+push, e ninguém no CRM vê nada. O link aparece na página do commit no GitHub —
+não é preciso conta no Vercel.
 
-**Direto para produção**
-Merge em `main` → `www.olyvia-ai.com/operacao` fica no ar, e o menu do CRM
-ganha "Operações" para quem tiver a permissão `operations.view`.
-
-⚠ **O push está bloqueado** para o assistente pelo modo automático. Tem de ser
-corrido à mão, ou com `!git push …` na conversa.
+A opção que continua **por tomar** é a outra: merge em `main` → 
+`www.olyvia-ai.com/operacao` fica no ar, e o menu do CRM ganha "Operações"
+para quem tiver a permissão `operations.view`.
 
 ⚠ **Por confirmar:** se as variáveis `VITE_SUPABASE_URL` e
 `VITE_SUPABASE_PUBLISHABLE_KEY` estão disponíveis no ambiente de
@@ -396,6 +417,7 @@ emails diferentes. Identificar pessoas por email, nunca por nome.
 |---|---|
 | [`../README.md`](../README.md) | como está construído, os ficheiros SQL, a autorização em três camadas |
 | [`mapa-do-modulo.md`](mapa-do-modulo.md) | **o inventário**: ecrãs, tabelas, vistas, escritas, avisos, ordem de instalação |
+| [`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md) | **um dia de UX**: a lista, a ficha, o «Hoje», e a sugestão de quem vai |
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com o levantamento do que o CRM já tem |
 | [`deploy-falhado.md`](deploy-falhado.md) | o deploy que falhou, e porquê |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Badge, Card, cx } from "../components/ui";
 import {
@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Clock,
   Euro,
   Eye,
   Ferramenta,
@@ -15,6 +16,7 @@ import {
   Mail,
   MapPin,
   QrCode,
+  User,
   X,
 } from "../components/icons";
 import {
@@ -75,6 +77,23 @@ export default function Ajuda() {
     setParams(p, { replace: true });
   };
 
+  /*
+   * Um link com `#` só funciona se o alvo já existir no ecrã.
+   *
+   * Aqui os separadores são condicionais: `#sugerir` vive dentro de "Como
+   * funciona", e quem chega de outro sítio abre a página com esse separador
+   * ainda por desenhar. Sem isto, o link levava ao topo da página e a pessoa
+   * ficava a procurar o que tinha ido lá ver.
+   */
+  useEffect(() => {
+    const alvo = window.location.hash.slice(1);
+    if (!alvo) return;
+    const t = setTimeout(() => {
+      document.getElementById(alvo)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [ver]);
+
   return (
     <div className="mx-auto max-w-3xl space-y-4">
       <div>
@@ -121,8 +140,17 @@ function PorqueMudar() {
         <p className="text-[11px] font-medium uppercase tracking-wide text-brand-600">
           Olyvia Operação
         </p>
-        <h2 className="mt-1.5 max-w-[22ch] text-2xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-3xl">
-          O trabalho faz-se sempre. O que se perde é a prova.
+        {/*
+          O título diz o que se ganha, e não o que se perde.
+
+          A versão anterior era "O trabalho faz-se sempre. O que se perde é a
+          prova." — lê-se como uma acusação a quem já anda a trabalhar, e é a
+          primeira frase que o cliente vê. As três colunas por baixo são
+          exatamente estas duas promessas: prova do que se fez, conta do que
+          custou. O título passou a ser a soma delas.
+        */}
+        <h2 className="mt-1.5 max-w-[24ch] text-2xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-3xl">
+          Fica provado o que se fez, e quanto custou.
         </h2>
         <p className="mt-3 max-w-prose text-sm leading-relaxed text-slate-600">
           A equipa vai lá, resolve, tira uma foto e manda-a por WhatsApp. Três meses depois
@@ -847,6 +875,120 @@ function ComoFunciona() {
         </p>
       </Card>
 
+      {/*
+        A sugestão de técnico, explicada por inteiro.
+
+        Está aqui, e não numa nota de rodapé, por uma razão: é a única coisa
+        nesta aplicação que **ordena pessoas**. Um número ao lado do nome de um
+        colega tem de poder ser discutido — e para ser discutido tem de estar
+        escrito de onde vem, quanto pesa cada parte, e o que acontece quando
+        falta informação. Uma caixa preta que escolhe quem trabalha seria a
+        pior coisa que este módulo podia ter.
+
+        O `scroll-mt` existe porque o cabeçalho da aplicação é fixo: sem ele,
+        o link `?ver=funciona#sugerir` deixava o título escondido por trás.
+      */}
+      <Card id="sugerir" className="scroll-mt-24 p-5">
+        <h2 className="text-base font-semibold text-slate-900">
+          Como se escolhe quem vai a uma ordem
+        </h2>
+        <p className="mt-1.5 text-sm text-slate-600">
+          Na ficha da ordem, ao lado de <em>Quem vai, e quando</em>, há um botão{" "}
+          <strong className="font-medium text-slate-800">Sugerir</strong>. Ele responde às três
+          perguntas que uma pessoa faria se tivesse tempo para as fazer — e mostra a resposta
+          de cada uma, por extenso, ao lado de cada nome.
+        </p>
+
+        <div className="mt-4 space-y-3">
+          {SUGESTAO.map((s) => (
+            <div key={s.pergunta} className="rounded-xl bg-slate-50 p-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <s.Icone width={16} height={16} className="shrink-0 text-brand-600" />
+                <h3 className="text-sm font-semibold text-slate-800">{s.pergunta}</h3>
+                <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium tabular-nums text-slate-500 ring-1 ring-inset ring-slate-200">
+                  pesa {s.peso}
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm leading-relaxed text-slate-600">{s.como}</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                <strong className="font-medium text-slate-600">De onde vem:</strong> {s.donde}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="mt-5 text-sm font-semibold text-slate-800">
+          Uma pergunta sem resposta não vota
+        </h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+          Se as tarefas da ordem não pedirem especialidade nenhuma, ou se o local não tiver
+          ponto no mapa, esse peso <strong className="font-medium text-slate-800">reparte-se
+          pelos restantes</strong> em vez de contar como zero. Contar um desconhecido como zero
+          castigaria toda a gente por igual — e mudaria a ordem final por causa de uma coisa
+          que ninguém sabe. O painel diz sempre quais das três perguntas ficaram de fora.
+        </p>
+
+        <h3 className="mt-4 text-sm font-semibold text-slate-800">
+          Férias e choques de hora não eliminam ninguém
+        </h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+          Uma ausência aprovada, um feriado, ou já ter outra ordem à mesma hora põem a pessoa no
+          fim da lista com o motivo escrito — mas <strong className="font-medium text-slate-800">
+          nunca a tiram de lá</strong>. É a mesma regra da marcação: avisar não é impedir. Há
+          dias em que se telefona à pessoa de folga porque só ela tem a chave, e quem coordena é
+          que decide.
+        </p>
+
+        <h3 className="mt-4 text-sm font-semibold text-slate-800">
+          Quando a ordem ainda não tem data
+        </h3>
+        <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+          A pergunta muda de <em>&ldquo;quem está livre nesse dia?&rdquo;</em> para{" "}
+          <em>&ldquo;quem consegue ir mais cedo?&rdquo;</em>. Olham-se os próximos{" "}
+          <strong className="font-medium text-slate-800">14 dias</strong> e procura-se o
+          primeiro em que a pessoa ainda cabe — menos de 8 horas comprometidas e sem ausência.
+          Nesse caso o botão passa a dizer <em>&ldquo;Escolher e marcar para quinta,
+          17/09&rdquo;</em>: as duas perguntas foram respondidas ao mesmo tempo, e obrigar a
+          repetir a segunda à mão seria deitar fora metade da resposta.
+        </p>
+
+        <div className="mt-4 space-y-2">
+          <p className="flex items-start gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">
+            <Check width={14} height={14} className="mt-0.5 shrink-0" />
+            <span>
+              <strong className="font-medium">Sugere, não decide.</strong> Não grava nada:
+              preenche os campos que já lá estavam, e a marcação continua a precisar dos mesmos
+              dois botões. Nenhuma ordem muda de dono por causa deste botão.
+            </span>
+          </p>
+          <p className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            <Check width={14} height={14} className="mt-0.5 shrink-0" />
+            <span>
+              <strong className="font-medium">Nada sai daqui.</strong> A conta é feita no
+              browser, com dados que a aplicação já lê. Não há serviço de fora, não há chave de
+              API, não há fatura — e os dados da equipa não passam por servidor nenhum de
+              terceiros.
+            </span>
+          </p>
+          <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <AlertTriangle width={14} height={14} className="mt-0.5 shrink-0" />
+            <span>
+              <strong className="font-medium">A distância é em linha reta</strong>, como um
+              pássaro a faria — a mesma conta que já ordena as paragens do dia. Serve para
+              comparar duas hipóteses; não serve para prometer quilómetros a ninguém. Com um rio
+              ou uma auto-estrada pelo meio, a estrada pode ser muito mais.
+            </span>
+          </p>
+        </div>
+
+        <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-500">
+          <strong className="font-medium text-slate-600">Para isto valer alguma coisa,</strong>{" "}
+          faltam três hábitos: pôr as especialidades nas tarefas das checklists, marcar as
+          moradas no mapa, e manter as férias no CRM. Sem eles a sugestão continua a funcionar —
+          só responde a menos perguntas, e diz quais.
+        </p>
+      </Card>
+
       <Card className="p-5">
         <h2 className="text-base font-semibold text-slate-900">O que vem do CRM</h2>
         <p className="mt-1.5 text-sm text-slate-600">
@@ -994,6 +1136,59 @@ function ComoFunciona() {
     </div>
   );
 }
+
+/**
+ * As três perguntas da sugestão de técnico, e o que cada uma pesa.
+ *
+ * Os pesos são os mesmos que estão em `domain/sugerir-tecnico.ts` — se um
+ * mudar lá, muda aqui. Uma ajuda que descreve uma conta diferente da que corre
+ * é pior do que não haver ajuda nenhuma: quem a lê fica a discutir um número
+ * que o ecrã nunca produziu.
+ *
+ * A ordem por que aparecem é a ordem do peso, e isso é a explicação: mandar a
+ * pessoa errada a 3 km custa uma segunda visita; mandar a pessoa certa a 30 km
+ * custa meia hora de carro.
+ */
+const SUGESTAO = [
+  {
+    Icone: User,
+    pergunta: "Sabe fazer isto?",
+    peso: "50 %",
+    como:
+      "Juntam-se as especialidades que as tarefas desta ordem pedem, e vê-se quem as tem. " +
+      "Quem tem todas fica com a pontuação cheia; quem tem metade fica com metade; quem não " +
+      "tem nenhuma continua na lista, mas com o que lhe falta escrito pelo nome.",
+    donde:
+      "a especialidade de cada tarefa, que vem da checklist do plano. Na prática é o plano " +
+      "que diz o que é preciso saber para fazer aquele trabalho.",
+  },
+  {
+    Icone: Clock,
+    pergunta: "Está livre?",
+    peso: "30 %",
+    como:
+      "Conta-se quantas horas cada pessoa já tem comprometidas nesse dia — uma ordem sem " +
+      "janela conta uma hora, com janela conta a janela — e oito horas é um dia cheio. " +
+      "Férias, feriados e choques de hora aparecem como aviso ao lado do nome.",
+    donde:
+      "as ordens já marcadas, mais os compromissos da agenda do CRM, mais as ausências e os " +
+      "horários. A agenda é uma só: uma visita comercial às 10h ocupa as 10h.",
+  },
+  {
+    Icone: MapPin,
+    pergunta: "Está perto?",
+    peso: "20 %",
+    como:
+      "Mede-se a distância do local desta ordem à paragem mais próxima que a pessoa já tem " +
+      "nesse dia. Ao pé da porta vale tudo, a 40 km ou mais não vale nada, e no meio desce a " +
+      "direito. Mede-se à mais próxima e não à média: quem já tem uma visita no mesmo prédio " +
+      "está lá, e a média de duas paragens em pontas opostas da cidade daria um ponto onde " +
+      "ninguém vai estar.",
+    donde:
+      "as coordenadas dos locais, marcadas na ficha de cada morada. Sem ponto no mapa esta " +
+      "pergunta não conta para ninguém.",
+  },
+] as const;
 
 const AUTOMATICO: readonly (readonly [string, string, string])[] = [
   [
@@ -1589,6 +1784,13 @@ const DIA_A_DIA = [
     texto:
       "Escolhes o responsável e a data lado a lado, para escolheres a pessoa a olhar para o dia dela. Quem entra na ordem passa a poder executá-la, e recebe o aviso no sino.",
     dica: "Se marcares alguém que já tem trabalho a essa hora, que esteja de férias, ou num feriado, aparece o aviso — e a marcação fica feita à mesma. Avisar não é impedir: há dias em que se vai na mesma, e quem coordena é que decide.",
+  },
+  {
+    titulo: "Deixar que ele sugira quem vai",
+    onde: "Na ficha da ordem › Sugerir",
+    texto:
+      "O botão «Sugerir» ordena a equipa por quem sabe fazer aquilo (pelas especialidades das tarefas), quem está livre nesse dia, e quem já vai estar mais perto. Cada nome vem com as razões escritas ao lado, e um por um podes discordar delas.",
+    dica: "Não grava nada: preenche os campos, e a marcação continua a precisar dos mesmos dois botões. Se a ordem ainda não tiver data, ele propõe também o primeiro dia em que a pessoa cabe. A conta está explicada por inteiro em Ajuda › Como funciona.",
   },
   {
     titulo: "Fazer o trabalho",

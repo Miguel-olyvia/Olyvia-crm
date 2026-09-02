@@ -15,10 +15,10 @@ Os ecrãs. A coluna **Quem vê** é imposta na base de dados, não no ecrã.
 
 | Rota | O que faz | Quem vê |
 |---|---|---|
-| `/` · **Hoje** | O que espera por mim e o que está a correr mal. Nada de filtros antes de mostrar. Ao abrir, quem coordena dispara a verificação de atrasos. | todos |
-| `/ordens` · **Ordens** | A lista, com seis vistas guardadas **e uma gaveta de filtros**: quem (incluindo &ldquo;sem ninguém&rdquo;), cliente, prioridade e natureza. Ordena por data, prioridade ou mais recentes. Cada linha diz **onde** é e **de quem** é. A procura apanha código, título e **nome do cliente**. | todos (só as suas, se técnico) |
+| `/` · **Hoje** | **O dia**, hora a hora (a equipa toda para quem coordena; só as suas para um técnico), o que espera por mim e o que está a correr mal — e cada bloco mostra **as três primeiras ordens**, com cliente, local e de quem é. Nada de filtros antes de mostrar. Ao abrir, quem coordena dispara a verificação de atrasos. | todos |
+| `/ordens` · **Ordens** | A lista, com seis vistas guardadas **com o número de cada uma** e uma gaveta de filtros: quem (incluindo &ldquo;sem ninguém&rdquo;), cliente, prioridade e natureza — mais um botão **&ldquo;As minhas&rdquo;** à vista. **Tudo vive no endereço**: recarregar não perde nada e o link partilha-se. Ordenada por data, parte-se em **faixas por dia**. Cada linha diz **onde** é e **de quem** é. A procura apanha código, título e nome do cliente, e **espera 300 ms** em vez de disparar a cada letra. `/` põe lá o cursor. | todos (só as suas, se técnico) |
 | `/ordens/nova` · **Nova ordem** | Quatro campos obrigatórios; o resto atrás de um clique. | todos (técnico → fica `por_aprovar`) |
-| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. **Acrescentar tarefas e leituras ali mesmo**, sem passar por Definições. Uma tarefa respondida fecha-se e deixa só um &ldquo;alterar&rdquo;. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
+| `/ordens/:codigo` · **Ficha da ordem** | Onde o trabalho acontece: tarefas, medições, fotos, custos, despacho, **a conversa da equipa**, histórico. **Duas colunas** a partir de `lg` — o trabalho à esquerda, o contexto à direita; no telemóvel o contexto vem primeiro. **As ações nunca fogem**: barra colada ao topo, e barra fixa em baixo no telemóvel. Uma **régua de cinco degraus** diz onde a ordem está e **o que falta a seguir**. **Acrescentar tarefas e leituras ali mesmo**, sem passar por Definições. Uma tarefa respondida fecha-se e deixa só um &ldquo;alterar&rdquo;. O botão **Sugerir** ordena a equipa por quem sabe, quem está livre e quem está perto. Fechada, tem o botão de mandar o relatório ao cliente. | quem está na ordem, e quem coordena |
 | `/ordens/:codigo/relatorio` · **Relatório** | O PDF para o cliente, pela impressão do browser. Sem custos, sem tarefas privadas. | quem coordena |
 | `/locais` · **Locais** | A árvore de locais e os equipamentos lá dentro. **É aqui que os locais nascem** — o botão do topo cria um local, o **+** de cada linha cria um espaço dentro dela. | todos; criar é de quem coordena |
 | `/locais/:codigo` · **Ficha do local** | **A morada inteira num ecrã só.** A árvore a qualquer profundidade, com os equipamentos de cada degrau; criar, editar, duplicar e remover espaços e equipamentos onde eles estão; **mover equipamentos** arrastando (ou pelo botão, no telemóvel); a gaveta do que foi removido, com **repor**; o mapa; as **etiquetas QR**; e as últimas ordens da morada **e dos espaços dela**, cada uma a dizer onde foi. ⚠ **Um espaço não tem página própria** — o endereço dele abre a página da morada, com a árvore aberta até lá. | todos; editar é de quem coordena |
@@ -300,11 +300,14 @@ Correm SQL contra um Postgres a sério (PGlite, sem Docker). `npm run validar-*`
 | `npm test` › `categorias-sugeridas` | o catálogo não tem códigos repetidos, e não oferece o que a empresa já tem |
 | `npm test` › `filtros-de-ordens` | cada condição estreita só o que devia, &ldquo;sem dono&rdquo; é uma resposta, e a lista nunca salta de ordem |
 | `npm test` › `resumo-do-periodo` | os números somam o que dizem somar, e &ldquo;não há dados&rdquo; não vira zero |
+| `npm test` › `agrupar-ordens` | cada ordem cai na faixa certa, uma já fechada nunca é acusada de estar atrasada, e agrupar não reordena nada |
+| `npm test` › `percurso` | a régua tem sempre cinco degraus, a marca cai no sítio certo, e uma pausada não desaparece do caminho |
+| `npm test` › `sugerir-tecnico` | quem sabe fazer o trabalho ganha a quem só está perto, uma pergunta sem resposta não vota, férias e choques não eliminam ninguém, e a lista nunca salta de ordem |
 | `validar-demo-orcamento` | a demo do orçamento corre, repete-se, dá os números que promete, e sai sem deixar rasto |
 | `validar-packs` | um pack instala-se, repete-se, e nunca reescreve o que já lá estava |
 | `validar-restricao` | as permissões que ficaram fechadas |
 
-Mais **392 testes de domínio** (`npm test`), sobre funções puras — sem base de
+Mais **449 testes de domínio** (`npm test`), sobre funções puras — sem base de
 dados, a correr em poucos segundos.
 
 ---

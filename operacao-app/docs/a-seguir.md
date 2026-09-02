@@ -25,6 +25,13 @@ e só um deles é urgente:
 
 ---
 
+> **Atualizado a 2 de setembro.** Um dia de UX tirou desta lista o item dos
+> filtros guardados, e acrescentou uma funcionalidade que não estava aqui: a
+> **sugestão de quem devia ir** a cada ordem. O que continua por fazer, e por
+> ordem, é o que está abaixo — e o nº 1 não mudou.
+
+---
+
 ## 1. O email que não chega ⚠
 
 **Prioridade: a mais alta. É a única coisa que promete e não cumpre.**
@@ -144,6 +151,23 @@ Uma ordem com quinze fotos não diz qual pertence a qual tarefa.
 | **O que falta** | o botão na tarefa, e mostrar as fotos por baixo dela |
 | **Custo** | horas |
 
+### Dar de comer à sugestão de técnico
+
+A sugestão existe desde 2 de setembro e responde a três perguntas — mas só
+responde às que tiverem dados. Hoje, na instalação real, há duas que quase
+sempre ficam de fora.
+
+| | |
+|---|---|
+| **O que já existe** | a conta, os pesos, e o painel que diz quais das perguntas ficaram sem resposta (`domain/sugerir-tecnico.ts`) |
+| **O que falta** | **especialidades nas tarefas** das checklists, e **coordenadas nos locais**. Sem elas, a sugestão decide-se quase só pela agenda |
+| **Custo** | não é código: é meia hora a preencher, uma vez |
+| **Como se vê** | abre o botão *Sugerir* numa ordem qualquer — ele diz, por escrito, o que não conseguiu pesar |
+
+Vale a pena medir isto depois do piloto: se as pessoas ignorarem sempre a
+sugestão, a pergunta certa não é "como melhorar a fórmula" — é "que informação
+é que quem coordena tem na cabeça e não está em lado nenhum".
+
 ### Notificar quem se atribui a si próprio
 
 Hoje não avisa, de propósito — quem se atribui já sabe. Durante o piloto, em que
@@ -155,15 +179,12 @@ Hoje não avisa, de propósito — quem se atribui já sabe. Durante o piloto, e
 | **Custo** | uma linha |
 | **Decisão** | por tomar. Ligar isto enche o sino de avisos das próprias ações |
 
-### Guardar os filtros da lista
+### ~~Guardar os filtros da lista~~ ✅ feito a 2 de setembro
 
-Os filtros da lista de ordens vivem só na sessão. Quem trabalha sempre com o
-mesmo cliente volta a escolhê-lo todos os dias.
-
-| | |
-|---|---|
-| **O que falta** | pôr o filtro no endereço (como já acontece com a vista) e/ou guardar o último |
-| **Custo** | horas |
+Vista, pesquisa, filtros e ordenação passaram todos para o endereço. Recarregar
+não perde nada, o "voltar" volta mesmo, e um link colado no chat abre a mesma
+lista do outro lado. Ver
+[`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md).
 
 ---
 
@@ -203,6 +224,8 @@ navegar.
 ## Ver também
 
 - [`onde-estamos.md`](onde-estamos.md) — o estado de hoje
+- [`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md) — o dia de
+  UX, e a sugestão de quem devia ir a cada ordem
 - [`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md) — o primeiro
   dia de uso a sério, e as dezasseis correções que saíram dele
 - [`teste-de-ponta-a-ponta.md`](teste-de-ponta-a-ponta.md) — como validar tudo

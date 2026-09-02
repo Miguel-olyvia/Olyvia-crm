@@ -420,6 +420,7 @@ salta, em vez de escorregar para o mês seguinte.
 |---|---|
 | [`docs/deploy-falhado.md`](docs/deploy-falhado.md) | O deploy que falhou: porquê, como se descobriu, e o que ficou diferente para não voltar a acontecer. |
 | [`docs/mapa-do-modulo.md`](docs/mapa-do-modulo.md) | **O inventário.** Os ecrãs, as tabelas, as vistas, as operações de escrita, os avisos, e a ordem de instalação. |
+| [`docs/o-que-mudou-a-2-de-setembro.md`](docs/o-que-mudou-a-2-de-setembro.md) | **Um dia de UX.** A lista de ordens, a ficha da ordem e o «Hoje» refeitos — e a **sugestão de quem devia ir** a cada ordem, com os pesos e os limites escritos. |
 | [`docs/o-que-mudou-a-1-de-setembro.md`](docs/o-que-mudou-a-1-de-setembro.md) | **O primeiro dia de uso a sério.** Catorze correções ao desenho, cada uma com a queixa que a originou. É o ficheiro que explica porque é que os ecrãs estão como estão. |
 | [`docs/teste-de-ponta-a-ponta.md`](docs/teste-de-ponta-a-ponta.md) | Como validar tudo, do menu do CRM até ao relatório, **sem fazer merge** — pelo deploy de preview do Vercel. |
 | [`docs/email-que-nao-chega.md`](docs/email-que-nao-chega.md) | O relatório que a fila diz ter enviado e não enviou. Bug do CRM, investigado até ao fim, correção por aplicar. |
