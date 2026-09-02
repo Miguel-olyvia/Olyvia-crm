@@ -8685,6 +8685,185 @@ export type Database = {
           },
         ]
       }
+      inventory_count_lines: {
+        Row: {
+          counted_at: string | null
+          counted_by: string | null
+          counted_quantity: number | null
+          created_at: string
+          discrepancy_resolution: string | null
+          id: string
+          inventory_count_id: string
+          moved_during_count: boolean
+          product_id: string
+          resolution_notes: string | null
+          stock_movement_id: string | null
+          system_quantity_at_start: number
+          updated_at: string
+        }
+        Insert: {
+          counted_at?: string | null
+          counted_by?: string | null
+          counted_quantity?: number | null
+          created_at?: string
+          discrepancy_resolution?: string | null
+          id?: string
+          inventory_count_id: string
+          moved_during_count?: boolean
+          product_id: string
+          resolution_notes?: string | null
+          stock_movement_id?: string | null
+          system_quantity_at_start: number
+          updated_at?: string
+        }
+        Update: {
+          counted_at?: string | null
+          counted_by?: string | null
+          counted_quantity?: number | null
+          created_at?: string
+          discrepancy_resolution?: string | null
+          id?: string
+          inventory_count_id?: string
+          moved_during_count?: boolean
+          product_id?: string
+          resolution_notes?: string | null
+          stock_movement_id?: string | null
+          system_quantity_at_start?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_count_lines_counted_by_fkey"
+            columns: ["counted_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_lines_counted_by_fkey"
+            columns: ["counted_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "inventory_count_lines_inventory_count_id_fkey"
+            columns: ["inventory_count_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_counts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_lines_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_lines_stock_movement_id_fkey"
+            columns: ["stock_movement_id"]
+            isOneToOne: false
+            referencedRelation: "stock_movements"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inventory_counts: {
+        Row: {
+          category_id: string | null
+          created_at: string
+          created_by: string
+          document_number: string
+          finalized_at: string | null
+          finalized_by: string | null
+          id: string
+          organization_id: string
+          started_at: string
+          status: string
+          updated_at: string
+          warehouse_id: string
+        }
+        Insert: {
+          category_id?: string | null
+          created_at?: string
+          created_by: string
+          document_number: string
+          finalized_at?: string | null
+          finalized_by?: string | null
+          id?: string
+          organization_id: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          warehouse_id: string
+        }
+        Update: {
+          category_id?: string | null
+          created_at?: string
+          created_by?: string
+          document_number?: string
+          finalized_at?: string | null
+          finalized_by?: string | null
+          id?: string
+          organization_id?: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+          warehouse_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_counts_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "product_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_finalized_by_fkey"
+            columns: ["finalized_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_finalized_by_fkey"
+            columns: ["finalized_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_counts_warehouse_id_fkey"
+            columns: ["warehouse_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       invoices: {
         Row: {
           amount: number
@@ -10225,6 +10404,65 @@ export type Database = {
           },
         ]
       }
+      ops_area: {
+        Row: {
+          ativo: boolean
+          criado_em: string
+          id: string
+          nome: string
+          organization_id: string
+          posicao: number
+        }
+        Insert: {
+          ativo?: boolean
+          criado_em?: string
+          id?: string
+          nome: string
+          organization_id: string
+          posicao?: number
+        }
+        Update: {
+          ativo?: boolean
+          criado_em?: string
+          id?: string
+          nome?: string
+          organization_id?: string
+          posicao?: number
+        }
+        Relationships: []
+      }
+      ops_area_tipo: {
+        Row: {
+          area_id: string
+          ativo: boolean
+          id: string
+          nome: string
+          posicao: number
+        }
+        Insert: {
+          area_id: string
+          ativo?: boolean
+          id?: string
+          nome: string
+          posicao?: number
+        }
+        Update: {
+          area_id?: string
+          ativo?: boolean
+          id?: string
+          nome?: string
+          posicao?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ops_area_tipo_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "ops_area"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ops_assinatura: {
         Row: {
           assinada_em: string
@@ -10306,6 +10544,7 @@ export type Database = {
           ativo: boolean
           atualizado_em: string
           categoria_id: string | null
+          centro_custo_id: string | null
           codigo: string
           criado_em: string
           criticidade: string
@@ -10325,6 +10564,7 @@ export type Database = {
           ativo?: boolean
           atualizado_em?: string
           categoria_id?: string | null
+          centro_custo_id?: string | null
           codigo: string
           criado_em?: string
           criticidade?: string
@@ -10344,6 +10584,7 @@ export type Database = {
           ativo?: boolean
           atualizado_em?: string
           categoria_id?: string | null
+          centro_custo_id?: string | null
           codigo?: string
           criado_em?: string
           criticidade?: string
@@ -10365,6 +10606,13 @@ export type Database = {
             columns: ["categoria_id"]
             isOneToOne: false
             referencedRelation: "ops_categoria_ativo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_ativo_centro_custo_id_fkey"
+            columns: ["centro_custo_id"]
+            isOneToOne: false
+            referencedRelation: "ops_centro_custo"
             referencedColumns: ["id"]
           },
           {
@@ -10407,6 +10655,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ops_centro_custo: {
+        Row: {
+          ativo: boolean
+          atualizado_em: string
+          codigo: string
+          criado_em: string
+          id: string
+          nome: string
+          organization_id: string
+        }
+        Insert: {
+          ativo?: boolean
+          atualizado_em?: string
+          codigo: string
+          criado_em?: string
+          id?: string
+          nome: string
+          organization_id: string
+        }
+        Update: {
+          ativo?: boolean
+          atualizado_em?: string
+          codigo?: string
+          criado_em?: string
+          id?: string
+          nome?: string
+          organization_id?: string
+        }
+        Relationships: []
       }
       ops_checklist: {
         Row: {
@@ -10637,6 +10915,30 @@ export type Database = {
           },
         ]
       }
+      ops_definicao: {
+        Row: {
+          atualizada_em: string
+          atualizada_por: string | null
+          chave: string
+          organization_id: string
+          valor: string
+        }
+        Insert: {
+          atualizada_em?: string
+          atualizada_por?: string | null
+          chave: string
+          organization_id: string
+          valor: string
+        }
+        Update: {
+          atualizada_em?: string
+          atualizada_por?: string | null
+          chave?: string
+          organization_id?: string
+          valor?: string
+        }
+        Relationships: []
+      }
       ops_evento: {
         Row: {
           antes: Json | null
@@ -10711,6 +11013,8 @@ export type Database = {
           codigo: string
           criado_em: string
           id: string
+          latitude: number | null
+          longitude: number | null
           morada: string | null
           nome: string
           notas: string | null
@@ -10729,6 +11033,8 @@ export type Database = {
           codigo: string
           criado_em?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           morada?: string | null
           nome: string
           notas?: string | null
@@ -10747,6 +11053,8 @@ export type Database = {
           codigo?: string
           criado_em?: string
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           morada?: string | null
           nome?: string
           notas?: string | null
@@ -10917,14 +11225,50 @@ export type Database = {
           },
         ]
       }
+      ops_motivo_pausa: {
+        Row: {
+          ativo: boolean
+          criado_em: string
+          exige_retoma: boolean
+          funcoes: string[]
+          id: string
+          nome: string
+          organization_id: string
+          posicao: number
+        }
+        Insert: {
+          ativo?: boolean
+          criado_em?: string
+          exige_retoma?: boolean
+          funcoes?: string[]
+          id?: string
+          nome: string
+          organization_id: string
+          posicao?: number
+        }
+        Update: {
+          ativo?: boolean
+          criado_em?: string
+          exige_retoma?: boolean
+          funcoes?: string[]
+          id?: string
+          nome?: string
+          organization_id?: string
+          posicao?: number
+        }
+        Relationships: []
+      }
       ops_ordem: {
         Row: {
           agendada_para: string | null
           aprovada_em: string | null
           aprovada_por: string | null
           area: string | null
+          area_id: string | null
+          area_tipo_id: string | null
           atualizada_em: string
           cancelada_em: string | null
+          centro_custo_id: string | null
           cliente_id: string
           codigo: string
           confirmada_em: string | null
@@ -10934,7 +11278,9 @@ export type Database = {
           criada_por: string | null
           descricao: string | null
           estado: string
+          fecha_automatico: boolean
           fechada_em: string | null
+          fornecedor_id: string | null
           gerada_por_tarefa_id: string | null
           id: string
           iniciada_em: string | null
@@ -10946,11 +11292,13 @@ export type Database = {
           organization_id: string
           origem: string
           pausa_motivo: string | null
+          pausa_motivo_id: string | null
           pausa_retoma_prevista: string | null
           plano_id: string | null
           prioridade: string
           responsavel_id: string | null
           tipo: string | null
+          tipo_trabalho_id: string | null
           titulo: string
         }
         Insert: {
@@ -10958,8 +11306,11 @@ export type Database = {
           aprovada_em?: string | null
           aprovada_por?: string | null
           area?: string | null
+          area_id?: string | null
+          area_tipo_id?: string | null
           atualizada_em?: string
           cancelada_em?: string | null
+          centro_custo_id?: string | null
           cliente_id: string
           codigo: string
           confirmada_em?: string | null
@@ -10969,7 +11320,9 @@ export type Database = {
           criada_por?: string | null
           descricao?: string | null
           estado?: string
+          fecha_automatico?: boolean
           fechada_em?: string | null
+          fornecedor_id?: string | null
           gerada_por_tarefa_id?: string | null
           id?: string
           iniciada_em?: string | null
@@ -10981,11 +11334,13 @@ export type Database = {
           organization_id: string
           origem: string
           pausa_motivo?: string | null
+          pausa_motivo_id?: string | null
           pausa_retoma_prevista?: string | null
           plano_id?: string | null
           prioridade?: string
           responsavel_id?: string | null
           tipo?: string | null
+          tipo_trabalho_id?: string | null
           titulo: string
         }
         Update: {
@@ -10993,8 +11348,11 @@ export type Database = {
           aprovada_em?: string | null
           aprovada_por?: string | null
           area?: string | null
+          area_id?: string | null
+          area_tipo_id?: string | null
           atualizada_em?: string
           cancelada_em?: string | null
+          centro_custo_id?: string | null
           cliente_id?: string
           codigo?: string
           confirmada_em?: string | null
@@ -11004,7 +11362,9 @@ export type Database = {
           criada_por?: string | null
           descricao?: string | null
           estado?: string
+          fecha_automatico?: boolean
           fechada_em?: string | null
+          fornecedor_id?: string | null
           gerada_por_tarefa_id?: string | null
           id?: string
           iniciada_em?: string | null
@@ -11016,14 +11376,37 @@ export type Database = {
           organization_id?: string
           origem?: string
           pausa_motivo?: string | null
+          pausa_motivo_id?: string | null
           pausa_retoma_prevista?: string | null
           plano_id?: string | null
           prioridade?: string
           responsavel_id?: string | null
           tipo?: string | null
+          tipo_trabalho_id?: string | null
           titulo?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "ops_ordem_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "ops_area"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_ordem_area_tipo_id_fkey"
+            columns: ["area_tipo_id"]
+            isOneToOne: false
+            referencedRelation: "ops_area_tipo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_ordem_centro_custo_id_fkey"
+            columns: ["centro_custo_id"]
+            isOneToOne: false
+            referencedRelation: "ops_centro_custo"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ops_ordem_gerada_por_tarefa_fkey"
             columns: ["gerada_por_tarefa_id"]
@@ -11039,10 +11422,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ops_ordem_pausa_motivo_id_fkey"
+            columns: ["pausa_motivo_id"]
+            isOneToOne: false
+            referencedRelation: "ops_motivo_pausa"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ops_ordem_plano_id_fkey"
             columns: ["plano_id"]
             isOneToOne: false
             referencedRelation: "ops_plano"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_ordem_tipo_trabalho_id_fkey"
+            columns: ["tipo_trabalho_id"]
+            isOneToOne: false
+            referencedRelation: "ops_tipo_trabalho"
             referencedColumns: ["id"]
           },
         ]
@@ -11674,6 +12071,39 @@ export type Database = {
           },
         ]
       }
+      ops_rotulo: {
+        Row: {
+          ativo: boolean
+          atualizado_em: string
+          id: string
+          lista: string
+          nome: string
+          ordem: number
+          organization_id: string
+          valor: string
+        }
+        Insert: {
+          ativo?: boolean
+          atualizado_em?: string
+          id?: string
+          lista: string
+          nome: string
+          ordem?: number
+          organization_id: string
+          valor: string
+        }
+        Update: {
+          ativo?: boolean
+          atualizado_em?: string
+          id?: string
+          lista?: string
+          nome?: string
+          ordem?: number
+          organization_id?: string
+          valor?: string
+        }
+        Relationships: []
+      }
       ops_sequencia: {
         Row: {
           chave: string
@@ -11780,6 +12210,42 @@ export type Database = {
           id?: string
           nome?: string
           organization_id?: string
+        }
+        Relationships: []
+      }
+      ops_tipo_trabalho: {
+        Row: {
+          ativo: boolean
+          atualizado_em: string
+          codigo: string
+          criado_em: string
+          fecha_automatico: boolean
+          id: string
+          nome: string
+          organization_id: string
+          posicao: number
+        }
+        Insert: {
+          ativo?: boolean
+          atualizado_em?: string
+          codigo: string
+          criado_em?: string
+          fecha_automatico?: boolean
+          id?: string
+          nome: string
+          organization_id: string
+          posicao?: number
+        }
+        Update: {
+          ativo?: boolean
+          atualizado_em?: string
+          codigo?: string
+          criado_em?: string
+          fecha_automatico?: boolean
+          id?: string
+          nome?: string
+          organization_id?: string
+          posicao?: number
         }
         Relationships: []
       }
@@ -19351,6 +19817,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      fn_next_inventory_count_number: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
       fn_next_stock_document_number: {
         Args: { p_document_type: string; p_organization_id: string }
         Returns: string
@@ -19950,6 +20420,10 @@ export type Database = {
         }
         Returns: undefined
       }
+      ops_agendar_relatorio: {
+        Args: { _autor_id: string; _ordem_id: string }
+        Returns: boolean
+      }
       ops_avaliar_leitura: {
         Args: {
           _max: number
@@ -20007,6 +20481,10 @@ export type Database = {
         }
         Returns: Json
       }
+      ops_definicao_de: {
+        Args: { _chave: string; _org_id: string }
+        Returns: string
+      }
       ops_disponibilidade: {
         Args: {
           _fim: string
@@ -20021,6 +20499,9 @@ export type Database = {
           tipo: string
         }[]
       }
+      ops_escapar_html: { Args: { _t: string }; Returns: string }
+      ops_exige_criacao: { Args: { _org_id: string }; Returns: string }
+      ops_exige_gestao: { Args: { _org_id: string }; Returns: string }
       ops_expandir_rrule: {
         Args: { _fim: string; _inicio: string; _regra: string }
         Returns: string[]
@@ -20046,6 +20527,10 @@ export type Database = {
           p_tipo_recorrencia?: string
         }
         Returns: Json
+      }
+      ops_linha_info: {
+        Args: { _rotulo: string; _valor: string }
+        Returns: string
       }
       ops_notificar: {
         Args: {
@@ -20073,6 +20558,7 @@ export type Database = {
         }
         Returns: number
       }
+      ops_numero_legivel: { Args: { _n: number }; Returns: string }
       ops_obra_de_orcamento_impl: {
         Args: {
           p_agendada_para?: string
@@ -20107,6 +20593,7 @@ export type Database = {
         Args: { _ordem_id: string }
         Returns: Json
       }
+      ops_relatorio_html: { Args: { _ordem_id: string }; Returns: string }
       ops_responder_medicao_impl: {
         Args: {
           p_medicao_def_id: string
@@ -20127,6 +20614,9 @@ export type Database = {
         }
         Returns: Json
       }
+      ops_semear_listas: { Args: { _org_id: string }; Returns: Json }
+      ops_semear_tipos_trabalho: { Args: { _org_id: string }; Returns: number }
+      ops_valores_da_lista: { Args: { _lista: string }; Returns: string[] }
       org_has_active_access: { Args: { _org_id: string }; Returns: boolean }
       portal_user_can_see_doc: {
         Args: { _entity_id: string; _entity_type: string }
@@ -20950,6 +21440,14 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_create_inventory_count: {
+        Args: {
+          p_category_id?: string
+          p_organization_id: string
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
       rpc_create_lead_duplicate_override: {
         Args: {
           p_assigned_to: string
@@ -21643,6 +22141,8 @@ export type Database = {
           p_notes?: string
           p_product_id: string
           p_qty: number
+          p_sale_source_id?: string
+          p_sale_source_type?: string
           p_warehouse_id: string
         }
         Returns: number
@@ -21840,6 +22340,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_finalize_inventory_count: {
+        Args: { p_inventory_count_id: string }
+        Returns: Json
+      }
       rpc_finalize_user_profile: {
         Args: {
           p_actor_id: string
@@ -22021,12 +22525,34 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_ops_acrescentar_tarefa: {
+        Args: {
+          p_limite_max?: number
+          p_limite_min?: number
+          p_nome: string
+          p_obrigatoria?: boolean
+          p_observacoes?: string
+          p_ordem_id: string
+          p_tipo?: string
+          p_unidade?: string
+        }
+        Returns: Json
+      }
       rpc_ops_agenda_do_dia: {
         Args: { _dia: string; _org_id: string }
         Returns: {
           ate: string
           desde: string
           detalhe: string
+          tipo: string
+          utilizador_id: string
+        }[]
+      }
+      rpc_ops_agenda_periodo: {
+        Args: { _ate: string; _de: string; _org_id: string }
+        Returns: {
+          detalhe: string
+          dia: string
           tipo: string
           utilizador_id: string
         }[]
@@ -22058,6 +22584,18 @@ export type Database = {
         Returns: Json
       }
       rpc_ops_avisar_atrasos: { Args: never; Returns: Json }
+      rpc_ops_compromissos_crm: {
+        Args: { _ate: string; _de: string; _org_id: string }
+        Returns: {
+          compromisso_id: string
+          dia_inteiro: boolean
+          fim: string
+          inicio: string
+          onde: string
+          titulo: string
+          utilizador_id: string
+        }[]
+      }
       rpc_ops_criar_local: {
         Args: {
           p_address_id?: string
@@ -22088,8 +22626,74 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_ops_definir: {
+        Args: { p_chave: string; p_org_id: string; p_valor: string }
+        Returns: Json
+      }
+      rpc_ops_destino_do_relatorio: {
+        Args: { p_ordem_id: string }
+        Returns: Json
+      }
+      rpc_ops_duplicar_checklist: {
+        Args: { p_checklist_id: string; p_nome?: string }
+        Returns: Json
+      }
+      rpc_ops_duplicar_local: {
+        Args: {
+          p_com_ativos?: boolean
+          p_com_espacos?: boolean
+          p_local_id: string
+          p_nome: string
+        }
+        Returns: Json
+      }
+      rpc_ops_duplicar_ordem: {
+        Args: { p_ordem_id: string; p_titulo?: string }
+        Returns: Json
+      }
+      rpc_ops_duplicar_plano: {
+        Args: { p_cliente_id?: string; p_nome?: string; p_plano_id: string }
+        Returns: Json
+      }
+      rpc_ops_enviar_relatorio: { Args: { p_ordem_id: string }; Returns: Json }
+      rpc_ops_escrever_mensagem: {
+        Args: { p_ordem_id: string; p_texto: string }
+        Returns: Json
+      }
       rpc_ops_experimentar_regra: {
         Args: { p_de?: string; p_quantas?: number; p_regra: string }
+        Returns: Json
+      }
+      rpc_ops_fechar_se_completa: {
+        Args: { p_ordem_id: string }
+        Returns: Json
+      }
+      rpc_ops_gravar_area: {
+        Args: {
+          p_ativo?: boolean
+          p_id?: string
+          p_nome: string
+          p_org_id: string
+        }
+        Returns: Json
+      }
+      rpc_ops_gravar_area_tipo: {
+        Args: {
+          p_area_id: string
+          p_ativo?: boolean
+          p_id?: string
+          p_nome: string
+        }
+        Returns: Json
+      }
+      rpc_ops_gravar_centro_custo: {
+        Args: {
+          p_ativo?: boolean
+          p_codigo: string
+          p_id?: string
+          p_nome: string
+          p_org_id: string
+        }
         Returns: Json
       }
       rpc_ops_gravar_checklist: {
@@ -22113,6 +22717,17 @@ export type Database = {
           p_org_id: string
           p_tipo: string
           p_unidade?: string
+        }
+        Returns: Json
+      }
+      rpc_ops_gravar_motivo_pausa: {
+        Args: {
+          p_ativo?: boolean
+          p_exige_retoma?: boolean
+          p_funcoes?: string[]
+          p_id?: string
+          p_nome: string
+          p_org_id: string
         }
         Returns: Json
       }
@@ -22144,6 +22759,37 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_ops_gravar_rotulo: {
+        Args: {
+          p_ativo?: boolean
+          p_lista: string
+          p_nome: string
+          p_ordem?: number
+          p_org_id: string
+          p_valor: string
+        }
+        Returns: Json
+      }
+      rpc_ops_gravar_skill: {
+        Args: {
+          p_ativo?: boolean
+          p_id?: string
+          p_nome: string
+          p_org_id: string
+        }
+        Returns: Json
+      }
+      rpc_ops_gravar_tipo_trabalho: {
+        Args: {
+          p_ativo?: boolean
+          p_codigo?: string
+          p_fecha_automatico?: boolean
+          p_id?: string
+          p_nome: string
+          p_org_id: string
+        }
+        Returns: Json
+      }
       rpc_ops_instalar_pack: {
         Args: { _org_id: string; _pack: string }
         Returns: Json
@@ -22164,6 +22810,14 @@ export type Database = {
       rpc_ops_materializar_planos: {
         Args: { _horizonte_dias?: number; _org_id?: string }
         Returns: Json
+      }
+      rpc_ops_motivos_de_pausa: {
+        Args: { _org_id: string }
+        Returns: {
+          exige_retoma: boolean
+          id: string
+          nome: string
+        }[]
       }
       rpc_ops_obra_de_orcamento: {
         Args: {
@@ -22205,6 +22859,11 @@ export type Database = {
       }
       rpc_ops_remover_anexo: { Args: { p_anexo_id: string }; Returns: Json }
       rpc_ops_remover_custo: { Args: { p_custo_id: string }; Returns: Json }
+      rpc_ops_remover_tarefa: { Args: { p_tarefa_id: string }; Returns: Json }
+      rpc_ops_repor_rotulos: {
+        Args: { p_lista?: string; p_org_id: string }
+        Returns: Json
+      }
       rpc_ops_responder_medicao: {
         Args: {
           p_medicao_def_id: string
@@ -22223,6 +22882,10 @@ export type Database = {
           p_valor_num?: number
           p_valor_texto?: string
         }
+        Returns: Json
+      }
+      rpc_ops_skills_do_utilizador: {
+        Args: { p_org_id: string; p_skills: string[]; p_utilizador_id: string }
         Returns: Json
       }
       rpc_ops_transitar_ordem: {
@@ -22312,6 +22975,10 @@ export type Database = {
           p_field_overrides?: Json
           p_submission_id: string
         }
+        Returns: Json
+      }
+      rpc_resolve_inventory_count_line: {
+        Args: { p_line_id: string; p_notes?: string; p_resolution: string }
         Returns: Json
       }
       rpc_restore_brand: {
@@ -22907,6 +23574,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_update_inventory_count_line_quantity: {
+        Args: { p_counted_quantity: number; p_line_id: string }
+        Returns: Json
       }
       rpc_update_lead: {
         Args: {
@@ -24033,12 +24704,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -24062,11 +24733,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -24087,11 +24758,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -24112,11 +24783,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -24129,11 +24800,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

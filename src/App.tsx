@@ -58,6 +58,7 @@ const Stocks = lazy(() => import("./pages/Stocks"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
 const ClientOrders = lazy(() => import("./pages/ClientOrders"));
+const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Services = lazy(() => import("./pages/Services"));
 const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
@@ -231,6 +232,8 @@ const App = () => (
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
                       {/* Fase 5.0F: exige inventory.view E client_contracts.view em simultâneo — mesma dupla verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
                       <Route path="/client-orders" element={<ProtectedRoute permissions={["inventory.view", "client_contracts.view"]} requireAll><ClientOrders /></ProtectedRoute>} />
+                      {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
+                      <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/service-categories" element={<ServiceCategories />} />

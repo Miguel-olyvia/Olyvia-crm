@@ -35,6 +35,7 @@ import {
   FileDown,
   ShieldAlert,
   ClipboardCheck,
+  ListChecks,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -182,7 +183,7 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders"],
+    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders", "/stock-counts"],
     permissions: ["suppliers.view"],
     items: [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
@@ -193,6 +194,9 @@ export const menuSections: MenuSection[] = [
       // em simultâneo (decisão do plano — evita expor nomes/valores de contratos
       // de clientes a quem só tem acesso a Inventário).
       { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permissions: ["inventory.view", "client_contracts.view"], requireAll: true },
+      // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
+      // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
+      { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.stockCounts", permission: "inventory.view" },
     ],
   },
   {
