@@ -772,7 +772,7 @@ export function ProposalCreateDialog({
               ) : (
                 <p className="text-xs text-amber-600 flex items-start gap-1.5">
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                  <span>Nenhum template escolhido. Não há layout por omissão — o PDF sai com o layout de outro documento e pode dizer “Orçamento” no título.</span>
+                  <span>Nenhum template escolhido.</span>
                 </p>
               )}
             </div>
