@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, FileText, Link2, Lock, Mail, Phone, UserPlus } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FileText, Link2, Lock, Mail, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -71,7 +71,19 @@ interface PendingSubmissionRow {
   candidates: ConflictCandidate[] | null;
 }
 
-type PendingAction = { submission: PendingSubmissionRow; action: "merge" | "new_lead" } | null;
+/**
+ * Só há uma acção: registar na ficha. NÃO se oferece "criar lead nova".
+ *
+ * A invariante do produto é que uma entidade não tem mais do que UMA lead. A
+ * acção `new_lead` da RPC insere uma lead apontada à MESMA entidade — não
+ * separa a pessoa em duas, cria-lhe uma segunda lead, que é exactamente o que
+ * se quer evitar. Quando uma submissão bate com quem já existe, o que acontece
+ * é avisar o comercial; não nasce lead nenhuma.
+ *
+ * A RPC mantém o ramo `new_lead` (é dela, e outros caminhos podem precisar);
+ * o que se retira é o botão que o chamava daqui.
+ */
+type PendingAction = { submission: PendingSubmissionRow; action: "merge" } | null;
 
 /**
  * A fila mostra TODAS as submissões por resolver, não só as duvidosas.
@@ -553,14 +565,6 @@ export default function PendingFormSubmissions() {
                             Registar na ficha como nota
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setPendingAction({ submission: row, action: "new_lead" })}
-                        >
-                          <UserPlus className="h-3.5 w-3.5 mr-1" />
-                          Abrir lead nova para esta pessoa
-                        </Button>
                       </div>
                     )}
                   </CardContent>
@@ -575,14 +579,10 @@ export default function PendingFormSubmissions() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pendingAction?.action === "merge"
-                ? "Registar na ficha como nota"
-                : "Abrir lead nova para esta pessoa"}
+              Registar na ficha como nota
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingAction?.action === "merge"
-                ? `Os valores submetidos ficam como nota na ficha de ${pendingAction?.submission.targetName}. Não são gravados nos campos da ficha — quem quiser alterar o email ou o telefone tem de o fazer à mão. A submissão deixa de aparecer nesta lista.`
-                : `Nasce uma lead nova com os valores submetidos, na MESMA pessoa (${pendingAction?.submission.targetName}) — não numa pessoa nova. Fica com duas leads abertas, e é isso que se pretende evitar: use isto só quando esta submissão for mesmo um negócio à parte. A submissão deixa de aparecer nesta lista.`}
+              {`Os valores submetidos ficam como nota na ficha de ${pendingAction?.submission.targetName}. Não são gravados nos campos da ficha — quem quiser alterar o email ou o telefone tem de o fazer à mão. A submissão deixa de aparecer nesta lista.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
