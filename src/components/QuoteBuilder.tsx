@@ -3664,7 +3664,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                   ) : (
                     <p className="text-xs text-amber-600 flex items-start gap-1.5">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      <span>Nenhum layout escolhido. Não há layout por omissão — o PDF é desenhado com o primeiro template activo da organização, por ordem alfabética.</span>
+                      <span>Nenhum layout escolhido.</span>
                     </p>
                   )}
                 </div>
