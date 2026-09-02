@@ -25,7 +25,6 @@ interface LeadInfoTabProps {
   deals: any[];
   nextAction: { description: string; date: string } | null;
   // Associations
-  contactAssociation: any;
   clientAssociation: any;
   getIdentity: (entityId: string) => any;
   onCreateDeal: () => void;
@@ -34,7 +33,6 @@ interface LeadInfoTabProps {
   clientOptions: any[];
   searchingClients: boolean;
   onSearchClients: (term: string) => void;
-  onAssociateContact: (leadId: string, contactId: string | null) => void;
   onAssociateClient: (leadId: string, clientId: string | null) => void;
   leadId: string;
 }
@@ -52,10 +50,10 @@ const ACTION_LABELS: Record<string, string> = {
 export function LeadInfoTab({
   lead, fieldDefs, fieldValues, leadName, leadEmail, leadPhone, leadAddress,
   status, source, assignedUserName, resolveFieldValue, deals, nextAction,
-  contactAssociation, clientAssociation, getIdentity,
+  clientAssociation, getIdentity,
   onCreateDeal, onScheduleAction,
   clientOptions, searchingClients,
-  onSearchClients, onAssociateContact, onAssociateClient, leadId,
+  onSearchClients, onAssociateClient, leadId,
 }: LeadInfoTabProps) {
   const [visitDate, setVisitDate] = useState<string | null>(null);
 
@@ -160,32 +158,11 @@ export function LeadInfoTab({
           <Link className="w-4 h-4" />
           Associações
         </h4>
+        {/* O cartao Contacto foi retirado: o modulo de Contactos deixou de existir
+            (Contacto fundiu-se no ciclo de vida da Lead) e o cartao mostrava sempre
+            "Nao convertida", porque `lead.contacts` nunca chegava a ser preenchido
+            -- nenhuma query de leads pede esse join. */}
         <div className="grid grid-cols-2 gap-4">
-          {/* Contact */}
-          <Card className="p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Contacto</span>
-            </div>
-            {contactAssociation ? (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">
-                    {getIdentity(contactAssociation.entity_id)?.display_name || "Contacto"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {getIdentity(contactAssociation.entity_id)?.email || "-"}
-                  </p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => onAssociateContact(leadId, null)} title="Remover">
-                  <Unlink className="w-4 h-4 text-destructive" />
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Não convertida</p>
-            )}
-          </Card>
-
           {/* Client */}
           <Card className="p-3">
             <div className="flex items-center gap-2 mb-2">

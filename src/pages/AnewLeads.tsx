@@ -2476,23 +2476,6 @@ export default function AnewLeads() {
   };
 
   // Associate lead with contact (uses converted_to_contact_id → anew_contacts).
-  const handleAssociateContact = async (leadId: string, contactId: string | null) => {
-    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    try {
-      await withAuditContext(supabase, auditUserId, async () => {
-        const { error } = await supabase
-          .from("anew_leads")
-          .update({ converted_to_contact_id: contactId } as any)
-          .eq("id", leadId);
-        if (error) throw error;
-      });
-      toast({ title: contactId ? t('leads.toast.contactAssociated') : t('leads.toast.contactRemoved') });
-      refreshSingleLead(leadId);
-    } catch (error: any) {
-      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
-    }
-  };
-
   // Associate lead with client (uses converted_to_client_id → anew_clients).
   // Legacy column client_id references the deprecated `clients` table and must not be used.
   const handleAssociateClient = async (leadId: string, clientId: string | null) => {
@@ -5893,7 +5876,6 @@ export default function AnewLeads() {
                         resolveFieldValue={resolveFieldValue}
                         deals={leadDetailDeals}
                         nextAction={nextAction}
-                        contactAssociation={selectedLead.contacts}
                         clientAssociation={selectedLead.clients}
                         getIdentity={getIdentity}
                         onCreateDeal={async () => {
@@ -5917,7 +5899,6 @@ export default function AnewLeads() {
                         clientOptions={clientOptions}
                         searchingClients={searchingClients}
                         onSearchClients={searchClients}
-                        onAssociateContact={handleAssociateContact}
                         onAssociateClient={handleAssociateClient}
                         leadId={selectedLead.id}
                       />
