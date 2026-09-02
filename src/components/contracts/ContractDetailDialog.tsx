@@ -16,6 +16,7 @@ import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ContractBodyTab } from "@/components/contracts/ContractBodyTab";
 import { extractPromptTokens } from "@/utils/contractVariables";
 import { DocumentsTab } from "@/components/shared/DocumentsTab";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import {
   FileText, Calendar, User, Euro, Send, Pencil, Loader2, Clock, Building2, Hash, CreditCard, StickyNote, CheckCircle, AlertTriangle, Paperclip, Edit3,
 } from "lucide-react";
@@ -57,6 +58,7 @@ export function ContractDetailDialog({
   });
   const [promptValues, setPromptValues] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState("detalhes");
+  const [missingMinutaOpen, setMissingMinutaOpen] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -141,6 +143,17 @@ export function ContractDetailDialog({
       toast.error(promptValidation.error.issues[0]?.message || "Valores de contrato inválidos");
       return;
     }
+
+    // Guardar sem minuta: confirmar antes. A validacao ja passou toda acima, por
+    // isso o "Guardar assim" chama directamente o envio.
+    if (!formData.template_id) {
+      setMissingMinutaOpen(true);
+      return;
+    }
+    submitPayload();
+  };
+
+  const submitPayload = () => {
 
     const payload: any = contract ? { ...formData, id: contract.id } : { ...formData };
     onSave(payload);
@@ -231,6 +244,7 @@ export function ContractDetailDialog({
   );
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -506,5 +520,13 @@ export function ContractDetailDialog({
         </Tabs>
       </DialogContent>
     </Dialog>
+
+    <MissingTemplateDialog
+      open={missingMinutaOpen}
+      kind="contract"
+      onCancel={() => setMissingMinutaOpen(false)}
+      onConfirm={() => { setMissingMinutaOpen(false); submitPayload(); }}
+    />
+    </>
   );
 }

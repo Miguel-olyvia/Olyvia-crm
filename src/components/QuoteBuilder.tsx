@@ -41,6 +41,7 @@ import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog"
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
 import { QuoteRejectReasonDialog } from "@/components/quotes/QuoteRejectReasonDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
@@ -185,7 +186,6 @@ interface ServiceFeeType {
   apply_vat?: boolean;
   vat_rate?: number | null;
 }
-
 
 // Bundle component line (for expanded view)
 interface BundleComponentLine {
@@ -982,7 +982,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           });
         });
       }
-
 
       // Helper functions for attribute price calculation
       const parseDimension = (value: string): { depth: number; width: number } | null => {
@@ -1984,12 +1983,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     handleSave();
   };
 
-
-
-
   // handleSave doubles as an onClick handler (<Button onClick={handleSave}>), so its
   // first argument may be a React MouseEvent — only treat it as a reject-reason
   // override when it is actually a string (the value passed from the confirm dialog).
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
+  const pendingSaveArgRef = useRef<unknown>(undefined);
+
   const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
 
@@ -2076,6 +2076,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         return;
       }
     }
+
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque outras confirmacoes (motivo de rejeicao, total nulo) reentram neste
+    // handler: se esta guarda corresse antes delas, o `ok` era reposto a false na
+    // primeira passagem e o aviso reaparecia depois de ja ter sido confirmado.
+    if (!formData.pdf_template_id && !missingTemplateOkRef.current) {
+      pendingSaveArgRef.current = rejectReasonOverride;
+      setMissingTemplateOpen(true);
+      return;
+    }
+    missingTemplateOkRef.current = false;
 
     saveLockRef.current = true;
     setLoading(true);
@@ -3000,7 +3013,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   // Removed handleSaveAttributes - now using LineAttributesDialog
 
-
   const calculateTotals = () => {
     let totalSemIva = 0;
     let totalIva = 0;
@@ -3334,7 +3346,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
-
 
           <TooltipProvider>
             <Tooltip>
@@ -4716,6 +4727,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           // reflete no closure de handleSave numa próxima renderização).
           handleSave(reason);
         }}
+      />
+
+      <MissingTemplateDialog
+        open={missingTemplateOpen}
+        kind="quote"
+        onCancel={() => setMissingTemplateOpen(false)}
+        onConfirm={() => { setMissingTemplateOpen(false); missingTemplateOkRef.current = true; handleSave(pendingSaveArgRef.current); }}
       />
     </div>
   );
