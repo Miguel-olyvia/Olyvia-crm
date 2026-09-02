@@ -28,6 +28,7 @@ import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposal
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -126,6 +127,8 @@ export function ProposalCreateDialog({
 
   const [savingProposal, setSavingProposal] = useState(false);
   const submitLockRef = useRef(false);
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
 
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
   const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
@@ -374,6 +377,7 @@ export function ProposalCreateDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (submitLockRef.current || savingProposal) return;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
@@ -393,6 +397,18 @@ export function ProposalCreateDialog({
       toast({ title: t('proposals.toast.validationError'), description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque uma guarda destas, posta antes de outras confirmacoes que reentrem
+    // neste handler, repoe o `ok` a false na primeira passagem e faz o aviso
+    // reaparecer depois de ja ter sido confirmado.
+    if (!formData.template_id && !missingTemplateOkRef.current) {
+      setMissingTemplateOpen(true);
+      return;
+    }
+    missingTemplateOkRef.current = false;
+
     setFieldErrors({});
 
     try {
@@ -706,6 +722,7 @@ export function ProposalCreateDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -1021,5 +1038,16 @@ export function ProposalCreateDialog({
         </form>
       </DialogContent>
     </Dialog>
+    <MissingTemplateDialog
+      open={missingTemplateOpen}
+      kind="proposal"
+      onCancel={() => setMissingTemplateOpen(false)}
+      onConfirm={() => {
+        setMissingTemplateOpen(false);
+        missingTemplateOkRef.current = true;
+        handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+      }}
+    />
+    </>
   );
 }

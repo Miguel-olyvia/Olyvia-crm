@@ -30,6 +30,7 @@ import { MIN_SEARCH_TERM_LENGTH, normalizeSearchTerm } from "@/lib/search/scoped
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
@@ -393,6 +394,8 @@ const Proposals = () => {
   const [showNullTotalDialog, setShowNullTotalDialog] = useState(false);
   const [nullTotalQuoteNames, setNullTotalQuoteNames] = useState<string[]>([]);
   const nullTotalConfirmedRef = useRef(false);
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
   const proposalFormRef = useRef<HTMLFormElement>(null);
   const [suggestedQuotes, setSuggestedQuotes] = useState<QuoteItem[]>([]);
   
@@ -601,7 +604,6 @@ const Proposals = () => {
     );
     setQuoteSearchResults(merged.map(toQuoteItem));
   }, [activeCompany?.id, toQuoteItem, formData.assigned_to]);
-
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
@@ -1830,7 +1832,6 @@ const Proposals = () => {
         assigned_to: formData.assigned_to || null,
       };
 
-
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
@@ -1854,6 +1855,7 @@ const Proposals = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (submitLockRef.current || savingProposal) return;
 
     // Pre-validation: block submit if any inline quote has lines but ALL of them are invalid (qt <= 0).
@@ -1882,7 +1884,6 @@ const Proposals = () => {
       setShowNullTotalDialog(true);
       return;
     }
-    nullTotalConfirmedRef.current = false;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
     const inlineQuotesTotal = inlineQuotes.reduce((sum, q) => sum + calcInlineQuoteTotal(q), 0);
@@ -1911,6 +1912,24 @@ const Proposals = () => {
       toast({ title: t('proposals.toast.validationError'), description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque outras confirmacoes (motivo de rejeicao, total nulo) reentram neste
+    // handler: se esta guarda corresse antes delas, o `ok` era reposto a false na
+    // primeira passagem e o aviso reaparecia depois de ja ter sido confirmado.
+    if (!formData.template_id && !missingTemplateOkRef.current) {
+      setMissingTemplateOpen(true);
+      return;
+    }
+
+    // Passaram todas as guardas: e aqui, e so aqui, que as confirmacoes se
+    // consomem. Repor `nullTotalConfirmedRef` mais acima, mal a sua verificacao
+    // passava, fazia o dialogo de total nulo reaparecer quando a confirmacao do
+    // template reentrava neste handler -- ja confirmado, e a perguntar outra vez.
+    missingTemplateOkRef.current = false;
+    nullTotalConfirmedRef.current = false;
+
     setFieldErrors({});
 
     try {
@@ -2161,7 +2180,6 @@ const Proposals = () => {
     setRenewDate(format(defaultDate, "yyyy-MM-dd"));
     setRenewDialogOpen(true);
   };
-
 
   const handleMarkAsSent = async (proposal: Proposal) => {
     try {
@@ -4064,6 +4082,24 @@ const Proposals = () => {
         }}
       />
 
+      <MissingTemplateDialog
+        open={missingTemplateOpen}
+        kind="proposal"
+        onCancel={() => {
+          setMissingTemplateOpen(false);
+          // Cancelar abandona a gravacao, e uma gravacao abandonada nao deixa
+          // confirmacoes de pe. Sem isto, o "sim" dado ao total nulo sobrevivia
+          // ao cancelamento e valia depois para OUTRA escolha de orcamentos, que
+          // o utilizador nunca chegou a ver avisada.
+          nullTotalConfirmedRef.current = false;
+        }}
+        onConfirm={() => {
+          setMissingTemplateOpen(false);
+          missingTemplateOkRef.current = true;
+          handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+        }}
+      />
+
       <AlertDialog open={showNullTotalDialog} onOpenChange={setShowNullTotalDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -4076,6 +4112,13 @@ const Proposals = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
+            {/* Nao repoe `missingTemplateOkRef` aqui: a guarda do template corre
+                DEPOIS desta (:1882 antes de :1921) e o ref e consumido no mesmo
+                ciclo sincrono em que e posto a true, portanto este botao nunca e
+                clicavel com ele a true. Verificado; um reset aqui seria codigo
+                morto a fingir que protege. Se a ordem das guardas mudar, isto
+                passa a fazer falta -- e entao no `onOpenChange`, nao no onClick,
+                para cobrir tambem Escape e clique fora. */}
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               nullTotalConfirmedRef.current = true;
