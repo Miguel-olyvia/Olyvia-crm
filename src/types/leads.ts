@@ -1,48 +1,25 @@
 /**
  * Tipos das Leads.
  *
- * Extraídos de `src/pages/AnewLeads.tsx`, onde viviam a meio de sete mil
- * linhas. O objectivo da extracção NÃO foi mudar comportamento — os tipos
- * saem daqui exactamente como estavam — foi deixar de esconder a dívida
- * descrita abaixo.
+ * Extraídos de `src/pages/AnewLeads.tsx`, onde viviam a meio de sete mil linhas.
  *
  * ---------------------------------------------------------------------------
- * A DÍVIDA: `[key: string]: any`
+ * ESTAS INTERFACES NÃO TÊM ASSINATURA DE ÍNDICE. NÃO ACRESCENTE UMA.
  * ---------------------------------------------------------------------------
- * Tanto `Lead` como `FieldDefinition` terminam numa assinatura de índice
- * `[key: string]: any`. Essa linha ANULA, como rede de segurança, todos os
- * campos declarados acima dela:
+ * Até 2026-09-02 ambas terminavam em `[key: string]: any`, o que ANULAVA como
+ * rede de segurança todos os campos declarados acima: `lead.statuss` compilava,
+ * `lead.campo_inventado` compilava, e `lead.status.toUpperCase()` compilava
+ * mesmo com `null` em execução.
  *
- *   lead.seja_o_que_for        compila (campo que não existe)
- *   lead.statuss               compila (gralha em `status`)
- *   lead.status.toUpperCase()  compila mesmo que o valor seja `null` em
- *                              execução — `any` desliga também a verificação
- *                              de nulos
+ * O que isso escondeu, durante meses: o cartão "Associações" do detalhe da lead
+ * lia `lead.contacts` e `lead.clients` — dois campos que nenhuma consulta traz.
+ * Eram sempre `undefined`, o cartão dizia sempre "Não convertida" mesmo em leads
+ * convertidas, e ninguém deu por isso porque o sintoma parecia uma resposta
+ * normal. Sem a assinatura de índice, o compilador teria recusado a linha no
+ * momento em que foi escrita.
  *
- * É pior do que um `as any`, e por uma razão estrutural. Um `as any` é local
- * e visível: desliga a verificação numa expressão, e vê-se ali. Isto é global
- * e silencioso: desliga a verificação de TODAS as propriedades, em TODOS os
- * `Lead`, em qualquer ficheiro que importe o tipo — e não entra em contagem
- * nenhuma. Uma auditoria que conte `as any` sente-se completa e deixa isto
- * de fora.
- *
- * Que está a tapar coisas hoje, e não em teoria: `contact_attempts` é lido em
- * cinco sítios de `AnewLeads.tsx` e não está declarado em `Lead`. Não é bug —
- * a coluna existe mesmo na base, e vem em `LEADS_LIST_COLUMNS`. Mas se alguém
- * a renomear, ou escrever `contact_attemps`, o compilador cala-se: o código
- * faz `l.contact_attempts || 0` e o ecrã passa a mostrar "0 tentativas de
- * contacto" para toda a gente, com ar de perfeitamente normal.
- *
- * ---------------------------------------------------------------------------
- * PORQUE É QUE A LINHA NÃO É REMOVIDA AQUI
- * ---------------------------------------------------------------------------
- * No momento em que desaparece, o TypeScript deixa de perdoar e revela de uma
- * vez todos os sítios que leem campos não declarados, ou que leem um campo
- * possivelmente `null` sem o verificar. São dezenas, no caminho crítico do
- * negócio. É projecto próprio, com tempo dedicado — não um item de limpeza a
- * apanhar de passagem.
+ * Se um campo é lido, declare-o aqui. Se não é declarado, é porque não existe.
  */
-
 export interface Lead {
   id: string;
   organization_id: string;
@@ -66,8 +43,19 @@ export interface Lead {
   callback_notes?: string | null;
   profiles?: { name: string | null } | null;
   assigned_user?: { id: string; name: string | null } | null;
-  /** Ver "A DÍVIDA" no topo deste ficheiro antes de acrescentar campos aqui. */
-  [key: string]: any;
+  /** Quantas vezes se tentou contactar. Lido na lista, no detalhe, e incrementado
+   *  ao registar um contacto. */
+  contact_attempts?: number | null;
+  /** Etiqueta SQL/MQL do cabeçalho, visível só quando a lead está em "Qualified".
+   *  O tipo literal vem da CHECK constraint da base; o gerador de tipos do
+   *  Supabase não a conhece e declara `string`, daí o cast no ponto de fronteira. */
+  qualification_type?: 'sql' | 'mql' | null;
+  /** Escrito ao criar Pedidos, Orçamentos e Propostas a partir da lead.
+   *  NOTA: pelo contrato work-orgs (Fase 4, migração 20260926010000) este campo
+   *  deixou de ser filtro de visibilidade e devia deixar de ser escrito — mas os
+   *  caminhos de escrita do frontend ficaram explicitamente fora desse âmbito
+   *  (Fase 3, por fazer). Declarado porque ainda é lido, não porque deva ficar. */
+  root_organization_id?: string | null;
 }
 
 export interface FieldDefinition {
@@ -86,6 +74,4 @@ export interface FieldDefinition {
   placeholder?: string;
   help_text?: string;
   display_style?: string;
-  /** Ver "A DÍVIDA" no topo deste ficheiro antes de acrescentar campos aqui. */
-  [key: string]: any;
 }

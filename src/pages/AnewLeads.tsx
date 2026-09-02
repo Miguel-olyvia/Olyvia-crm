@@ -2328,6 +2328,11 @@ export default function AnewLeads() {
 
     const mapped: Lead = {
       ...d,
+      // Ponto de fronteira: `d` vem do gerador de tipos do Supabase, que nao
+      // conhece a CHECK constraint de qualification_type e o declara `string`.
+      // A base garante 'sql' | 'mql'; o cast e so aqui, uma vez, e nao no resto
+      // do ficheiro.
+      qualification_type: (d.qualification_type ?? null) as 'sql' | 'mql' | null,
       field_values: (d.field_values && typeof d.field_values === 'object' && !Array.isArray(d.field_values))
         ? d.field_values as Record<string, any>
         : {},
@@ -6073,8 +6078,6 @@ export default function AnewLeads() {
                     <TabsContent value="journey" className="mt-4">
                       <LeadJourneyTab
                         lead={selectedLead}
-                        hasClient={!!selectedLead.clients}
-                        clientCreatedAt={null}
                         interactionCount={leadInteractionCounts[selectedEntityId] || 0}
                         dealCount={0}
                         dealValue={0}
