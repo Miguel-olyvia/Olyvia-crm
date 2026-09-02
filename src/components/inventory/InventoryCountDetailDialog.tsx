@@ -160,20 +160,41 @@ export default function InventoryCountDetailDialog({
     }
   }, [countId, t, toast]);
 
-  const loadMovements = useCallback(async (lineIds: string[]) => {
-    if (lineIds.length === 0) {
+  // Filtra por stock_movement_id (gravado na linha só quando 'ajustado' gerou
+  // mesmo um movimento) em vez de reference_id IN (todos os ids de linha) —
+  // uma sessão grande (milhares de linhas) produzia um URL de dezenas de
+  // milhares de caracteres, rejeitado pela infraestrutura do Supabase antes
+  // de responder ("Failed to fetch", sem cabeçalhos, indistinguível de CORS).
+  // stock_movement_id é sempre gravado junto com reference_id (ver migration
+  // 20261116020000, secção 9) — mesmo resultado, lista tipicamente muito mais
+  // pequena (só linhas realmente ajustadas). Batching a 200 ids mantido como
+  // rede de segurança, mesmo padrão já usado noutras páginas do projeto.
+  const MOVEMENT_ID_CHUNK = 200;
+
+  const loadMovements = useCallback(async (movementIds: string[]) => {
+    if (movementIds.length === 0) {
       setMovements([]);
       return;
     }
     setMovementsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("stock_movements")
-        .select("id, movement_type, quantity, balance_after, document_number, counterparty, notes, created_at")
-        .in("reference_id", lineIds)
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      setMovements((data || []) as MovementRow[]);
+      const chunks: string[][] = [];
+      for (let i = 0; i < movementIds.length; i += MOVEMENT_ID_CHUNK) {
+        chunks.push(movementIds.slice(i, i + MOVEMENT_ID_CHUNK));
+      }
+      const results = await Promise.all(
+        chunks.map((chunk) =>
+          supabase
+            .from("stock_movements")
+            .select("id, movement_type, quantity, balance_after, document_number, counterparty, notes, created_at")
+            .in("id", chunk)
+        )
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) throw failed.error;
+      const rows = results.flatMap((r) => (r.data || []) as MovementRow[]);
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setMovements(rows);
     } catch (error: any) {
       toast({ title: t('stockCounts.toast.movementsLoadError'), description: error.message, variant: "destructive" });
     } finally {
@@ -188,11 +209,11 @@ export default function InventoryCountDetailDialog({
   }, [open, countId]);
 
   useEffect(() => {
-    if (!open || lines.length === 0) {
-      if (open) setMovements([]);
-      return;
-    }
-    loadMovements(lines.map((l) => l.id));
+    if (!open) return;
+    const movementIds = lines
+      .map((l) => l.stock_movement_id)
+      .filter((id): id is string => !!id);
+    loadMovements(movementIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lines]);
 
