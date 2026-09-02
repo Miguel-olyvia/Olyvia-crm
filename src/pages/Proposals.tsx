@@ -36,7 +36,7 @@ import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll
 import { 
   Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, Eye, Settings2,
-  Copy, History, Link2, Paintbrush, Palette,
+  Copy, History, Link2, Paintbrush, Palette, AlertTriangle,
   CheckSquare, Send, Mail, MoreHorizontal, Phone, MessageSquare, KeyRound,
   RotateCcw, BarChart3, Columns3, LayoutList, Download, HelpCircle
 } from "lucide-react";
@@ -1805,8 +1805,10 @@ const Proposals = () => {
       }
 
       const stage = workflowStages.find(s => s.id === formData.stage_id);
-      const defaultTemplate = proposalTemplates.find(tt => tt.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      // Sem default silencioso: o template e o que a pessoa escolheu, ou nenhum.
+      // Cair para um default que a organizacao pode nao ter fazia o PDF sair com
+      // o layout de outro documento (P-2026-0616 saiu com "Orcamento" no titulo).
+      const templateId = formData.template_id || null;
       const probability = selectedDeal?.probability ?? 50;
       const proposalEntityId = !formData.deal_id ? (selectedEntity?.entityId || null) : (selectedDeal?.entity_id || null);
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
@@ -1922,8 +1924,7 @@ const Proposals = () => {
       const stage = workflowStages.find(s => s.id === formData.stage_id);
       const probability = selectedDeal?.probability ?? 50;
 
-      const defaultTemplate = proposalTemplates.find(t => t.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      const templateId = formData.template_id || null;
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
@@ -3076,31 +3077,36 @@ const Proposals = () => {
                         </p>
                       </div>
                       {/* Template de proposta */}
-                      {proposalTemplates.length > 0 && (
-                        <div className="col-span-2 space-y-2">
-                          <Label className="flex items-center gap-2">
-                            <Palette className="h-4 w-4" />
-                            Template de Proposta
-                          </Label>
-                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Template default" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Nenhum (usa default)</SelectItem>
-                              {proposalTemplates.map((tmpl) => (
-                                <SelectItem key={tmpl.id} value={tmpl.id}>
-                                  <div className="flex items-center gap-2">
-                                    {tmpl.name}
-                                    {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                      <div className="col-span-2 space-y-2">
+                        <Label className="flex items-center gap-2">
+                          <Palette className="h-4 w-4" />
+                          Template de Proposta
+                        </Label>
+                        <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolher template" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Nenhum</SelectItem>
+                            {proposalTemplates.map((tmpl) => (
+                              <SelectItem key={tmpl.id} value={tmpl.id}>
+                                <div className="flex items-center gap-2">
+                                  {tmpl.name}
+                                  {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {formData.template_id ? (
                           <p className="text-xs text-muted-foreground">Define o design da proposta no portal e no PDF</p>
-                        </div>
-                      )}
+                        ) : (
+                          <p className="text-xs text-amber-600 flex items-start gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span>Nenhum template escolhido. Não há layout por omissão — o PDF sai com o layout de outro documento e pode dizer “Orçamento” no título.</span>
+                          </p>
+                        )}
+                      </div>
                       {/* Deal search */}
                       <div className="col-span-2 space-y-2">
                         <Label>{t('proposals.form.deal')}</Label>
