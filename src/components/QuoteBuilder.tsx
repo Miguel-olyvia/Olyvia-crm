@@ -3664,7 +3664,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                   ) : (
                     <p className="text-xs text-amber-600 flex items-start gap-1.5">
                       <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                      <span>Nenhum layout escolhido.</span>
+                      <span>Nenhum template escolhido.</span>
                     </p>
                   )}
                 </div>
