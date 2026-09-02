@@ -753,26 +753,20 @@ export function ProposalCreateDialog({
               <Label className="flex items-center gap-2">
                 <Palette className="h-4 w-4" /> Template de Proposta
               </Label>
-              {proposalTemplates.length > 0 ? (
-                <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
-                  <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {proposalTemplates.map((tmpl) => (
-                      <SelectItem key={tmpl.id} value={tmpl.id}>
-                        <div className="flex items-center gap-2">
-                          {tmpl.name}
-                          {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Esta organização ainda não tem templates de proposta.
-                </p>
-              )}
+              <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {proposalTemplates.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      <div className="flex items-center gap-2">
+                        {tmpl.name}
+                        {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               {formData.template_id ? (
                 <p className="text-xs text-muted-foreground">Define o design da proposta no portal e no PDF</p>
               ) : (
