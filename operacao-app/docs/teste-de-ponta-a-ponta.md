@@ -130,6 +130,19 @@ coisa, para e anota.
 - [ ] **25.** Reparar: por baixo do local há **"Novo espaço dentro de…"**.
 - [ ] **26.** Atribuir **a ti**, agendar para hoje.
       ℹ *Não vai tocar o sino: atribuir a si próprio não avisa, de propósito.*
+- [ ] **26b.** Carregar em **Sugerir**, ao lado de *Quem vai, e quando*.
+      *Ver: a equipa ordenada, cada nome com as razões por baixo, e no topo a
+      caixa que diz **quais das três perguntas contaram**. Numa instalação
+      sem especialidades nas tarefas e sem coordenadas nos locais, ele diz
+      isso por escrito em vez de fingir que pesou tudo — é o comportamento
+      certo, não uma avaria.*
+- [ ] **26c.** Escolher alguém na lista.
+      *Ver: o campo do responsável fica preenchido, **e mais nada acontece**.
+      A sugestão não grava: continua a ser preciso «Gravar quem vai».*
+- [ ] **26d.** Tirar a data à ordem e carregar em **Sugerir** outra vez.
+      *Ver: o botão de cada linha passa a **«Escolher e marcar para …»**, com
+      o primeiro dia em que a pessoa cabe. A pergunta mudou de "quem está
+      livre nesse dia" para "quem consegue ir mais cedo".*
 - [ ] **27.** Responder à primeira tarefa.
       *Ver: a ordem passa a **em curso** sozinha. E a tarefa **fecha-se**, com um
       "alterar" pequeno.*
@@ -165,6 +178,43 @@ coisa, para e anota.
 - [ ] **42.** O mesmo nas vistas de **dia**, **semana** e **mapa**.
 - [ ] **43.** No painel, **Abrir a ficha** → leva à ordem.
 
+### Parte F2 — a lista e a ficha, refeitas a 2 de setembro
+
+O que aqui se prova é sobretudo **memória** e **alcance**: que a lista não se
+esquece do que lhe pediram, e que os botões não fogem de quem está a trabalhar.
+
+- [ ] **43a.** `/ordens` — reparar nos **números** dos separadores, e no das
+      atrasadas a **vermelho**.
+- [ ] **43b.** Ligar um filtro de cliente → **recarregar a página** (F5).
+      *Ver: o filtro continua lá. O endereço tem `?cliente=…`.*
+- [ ] **43c.** Copiar o endereço e abri-lo noutro separador.
+      *Ver: abre a mesma lista, já estreitada.*
+- [ ] **43d.** Carregar em **voltar**.
+      *Ver: volta ao estado anterior da lista, e não à página anterior.*
+- [ ] **43e.** Escrever depressa na pesquisa.
+      *Ver: a lista só vai à base **quando os dedos param**. Não pisca a cada
+      letra, e o resultado é o da palavra inteira.*
+- [ ] **43f.** Carregar em **`/`** com o cursor fora de qualquer campo.
+      *Ver: o cursor salta para a pesquisa.*
+- [ ] **43g.** Ordenar **por data** → ver as faixas **Atrasadas · Hoje ·
+      Amanhã · …**. Ordenar **por prioridade** → as faixas desaparecem.
+      ℹ *É de propósito: cabeçalhos de dia por cima de uma lista ordenada por
+      urgência seriam duas respostas contraditórias no mesmo ecrã.*
+- [ ] **43h.** Carregar em **As minhas**, e depois tirar a pastilha do filtro.
+- [ ] **43i.** Descer a lista até ao fim.
+      *Ver: a barra com as vistas e os filtros **fica colada ao topo**.*
+- [ ] **43j.** Abrir uma ordem e descer até às sessões.
+      *Ver: a barra com **Iniciar/Pausar/Fechar** continua no topo, com o
+      código da ordem à vista.*
+- [ ] **43k.** Numa ordem **em curso**, ficar parado a olhar meio minuto.
+      *Ver: o tempo da sessão aberta **anda**. Antes ficava no valor que tinha
+      quando a página carregou.*
+- [ ] **43l.** Ler a **régua de cinco degraus** e a frase por baixo.
+      *Ver: numa fechada diz que falta confirmar — que é onde as ordens ficam
+      paradas sem ninguém saber porquê.*
+- [ ] **43m.** Num ecrã largo, reparar nas **duas colunas**: o trabalho à
+      esquerda, o contexto à direita.
+
 ### Parte G — o que fica depois
 
 - [ ] **44.** Voltar à ficha do local → **"O que já se fez aqui"**.
@@ -194,6 +244,16 @@ endereço** no telemóvel e repete só isto:
 - [ ] O botão **mover** num equipamento (arrastar não funciona com o dedo).
 - [ ] O **painel da ordem** na agenda: encosta em baixo, não ao lado.
 - [ ] Texto a sair do ecrã em `Nova ordem` e em `Definições`.
+- [ ] ⚠ **A barra de ações da ficha da ordem.** Descer a ficha toda e
+      confirmar que **Iniciar/Pausar/Fechar** ficam fixos em baixo, **por cima
+      da navegação e sem a tapar**, e que a última linha da página não fica
+      escondida por trás dela.
+      ℹ *É o único sítio de todo o dia 2 em que a altura foi medida a olho.
+      Se estiver mal, vê-se de imediato.*
+- [ ] Na ficha da ordem, o **contexto vem primeiro** (onde é, quem vai) e as
+      tarefas vêm a seguir. No computador é ao contrário, e é de propósito.
+- [ ] `/ordens`: as faixas por dia e as linhas cabem sem scroll horizontal.
+- [ ] `/` (Hoje): **o dia** aparece em cima, por hora.
 
 ---
 
@@ -256,6 +316,9 @@ function**. Usa-se um cliente que já exista e salta-se o passo de o criar.
 ---
 
 ## Ver também
+
+- [`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md) — o que
+  mudou nos passos **26b–26d** e na **Parte F2**, e porquê
 
 - [`onde-estamos.md`](onde-estamos.md) — o estado do módulo
 - [`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md) — porque é

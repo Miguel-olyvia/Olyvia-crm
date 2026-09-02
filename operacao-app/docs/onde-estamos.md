@@ -215,7 +215,8 @@ Do zero até entregar ao cliente:
 | Orçamento aceite → obra | `/orcamentos` |
 | O que mudou face ao Infraspeak, e o tutorial | `/ajuda` |
 
-**Verificado:** 12 validadores contra Postgres a sério, 123 testes de domínio,
+**Verificado:** 12 validadores contra Postgres a sério, 123 testes de domínio
+*(a 30 de agosto — hoje são 26 validadores e 449 testes)*,
 build limpo, zero erros de lint.
 
 **Garantia que se mantém:** zero chaves estrangeiras de `ops_*` para fora, e
@@ -311,7 +312,7 @@ vieram de meia hora de uso real, e nenhuma aparecia nos 123 testes.
 cd operacao-app
 
 npm run dev                # servidor local, porta 5274
-npm test -- --run          # 123 testes de domínio
+npm test -- --run          # 449 testes de domínio
 npm run typecheck
 npm run build
 ```

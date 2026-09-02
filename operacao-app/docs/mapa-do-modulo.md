@@ -265,6 +265,47 @@ Duas decisões que evitam avisos falsos:
 
 Nenhum destes avisos impede a marcação. Quem coordena é que decide.
 
+**É esta leitura que a sugestão de técnico usa.** O botão *Sugerir*, na ficha da
+ordem, pergunta a mesma agenda quem está livre — e por isso herda as mesmas
+duas decisões e a mesma regra de privacidade: de uma ausência só sai a data, e
+nunca o motivo. O que a sugestão acrescenta é a leitura de
+`ops_ordem_tarefa.skill_id` (o que o trabalho pede) e de
+`ops_utilizador_skill` (o que cada pessoa sabe), ambas tabelas do módulo.
+
+---
+
+## 6c. Sugerir quem vai a uma ordem
+
+Uma conta, **nenhuma escrita, nenhum SQL novo, nenhum serviço de fora**. Corre
+no browser sobre leituras que já existiam.
+
+| Pergunta | Peso | O que lê |
+|---|---|---|
+| **Sabe fazer isto?** | 50 % | `ops_ordem_tarefa.skill_id` — que vem da checklist do plano — cruzado com `ops_utilizador_skill` |
+| **Está livre?** | 30 % | `ops_ordem` do período, mais os compromissos e as ausências do CRM (§6b) |
+| **Está perto?** | 20 % | `ops_local.latitude/longitude`, com a mesma trigonometria que ordena as paragens do dia |
+
+Quatro regras que valem mais do que a fórmula, e que estão em
+`domain/sugerir-tecnico.ts` com um teste cada:
+
+- **Uma pergunta sem resposta não vota.** Sem especialidade pedida ou sem ponto
+  no mapa, o peso reparte-se pelos restantes em vez de contar como zero — e o
+  painel diz quais das três ficaram de fora. Contar um desconhecido como zero
+  castiga toda a gente por igual e muda a ordem final por causa de uma coisa
+  que ninguém sabe.
+- **Bloqueios não são vetos.** Férias, feriado e choque de hora põem a pessoa no
+  fim com o motivo escrito, e **nunca a tiram da lista**. É a mesma regra da
+  marcação: avisar não é impedir.
+- **Cada lugar traz o porquê**, por extenso. Uma lista ordenada sem razões é um
+  oráculo, e ninguém confia num oráculo à segunda vez que ele erra.
+- **Não grava.** Preenche os campos; a marcação continua a precisar dos mesmos
+  dois botões.
+
+⚠ **A distância é em linha reta.** Serve para comparar duas hipóteses, não para
+prometer quilómetros. Está escrito no ecrã e na Ajuda.
+
+Explicado para quem o usa em `/ajuda?ver=funciona#sugerir`.
+
 ---
 
 ## 7. Os 17 validadores

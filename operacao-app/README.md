@@ -224,7 +224,7 @@ db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
 db/analises.sql        4 vistas: vida do equipamento, leituras, PMP, exportar
 db/agenda.sql          férias, horários e feriados, vindos do CRM
 tools/validar-*        17 validadores contra Postgres real, sem Docker
-src/domain/            regras puras — 221 testes, sem infraestrutura
+src/domain/            regras puras — 449 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
@@ -237,7 +237,50 @@ src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 221 testes a correr em pouco mais de um segundo.
+haver 449 testes a correr em poucos segundos.
+
+Os ficheiros de `src/domain/` que decidem alguma coisa que se vê no ecrã:
+
+| Ficheiro | O que decide |
+|---|---|
+| `estados.ts` | as transições possíveis de uma ordem, e porque não |
+| `respostas.ts` | quem pode responder a uma tarefa, e o que lhe falta |
+| `alertas.ts` | atrasada, parada, retoma ultrapassada, por aprovar há muito |
+| `filtros-de-ordens.ts` | estreitar e ordenar a lista, sem nunca a fazer saltar |
+| `agrupar-ordens.ts` | as faixas por dia da lista — e que uma fechada nunca é "atrasada" |
+| `percurso.ts` | os cinco degraus da ficha, e a frase que diz o que falta a seguir |
+| `sugerir-tecnico.ts` | **quem devia ir a uma ordem**, e o porquê de cada lugar |
+| `agenda.ts` | a régua do dia, a carga de cada pessoa, semana e mês |
+| `rota.ts` | a distância entre dois pontos, e a ordem das paragens do dia |
+| `mapa.ts` | ler coordenadas de um link, e os links do Maps |
+| `conformidade.ts` · `tempo.ts` · `analises.ts` | veredictos, durações, e os números das Análises |
+| `rotulos.ts` | o nome que a empresa dá a cada valor das listas do código |
+
+### Sugerir quem vai — o que lê, e o que não faz
+
+O botão **Sugerir**, na ficha da ordem, ordena a equipa por três perguntas com
+pesos: **sabe fazer isto** (50 %), **está livre** (30 %), **está perto** (20 %).
+A conta está em `domain/sugerir-tecnico.ts`, é pura, e tem 27 testes.
+
+Vale a pena saber três coisas antes de olhar para o código:
+
+- **Não escreve nada.** Não há RPC nova, não há SQL novo, não há tabela nova.
+  Preenche os campos que já lá estavam, e a marcação continua a precisar dos
+  mesmos dois botões. Uma sugestão que gravasse sozinha seria uma decisão
+  tomada por um botão chamado "sugerir".
+- **Não sai da máquina.** A conta corre no browser sobre leituras que a
+  aplicação já fazia — `ops_ordem_tarefa.skill_id`, `ops_utilizador_skill`,
+  `ops_ordem`, `ops_local`, e as duas RPCs de agenda do CRM. Sem chave de API,
+  sem serviço de fora, sem fatura, e sem dados da equipa a passar por servidor
+  de terceiros. A distância usa a mesma trigonometria de `rota.ts`.
+- **Uma pergunta sem resposta não vota.** Sem especialidade nas tarefas ou sem
+  ponto no mapa, esse peso reparte-se pelos restantes em vez de contar como
+  zero — e o painel diz quais das três perguntas ficaram de fora. Contar um
+  desconhecido como zero castigava toda a gente por igual, e mudava a ordem
+  final por causa de uma coisa que ninguém sabe.
+
+Está explicada por inteiro, para quem a usa, em `/ajuda?ver=funciona#sugerir` —
+com os pesos e com os limites, incluindo que a distância é em linha reta.
 
 ### As três escritas, e só três
 
@@ -278,7 +321,7 @@ Trancar tudo por simetria só acrescentaria atrito onde não há nada a proteger
 
 ```bash
 npm run dev                     # servidor de desenvolvimento (porta 5274)
-npm run test                    # 62 testes de domínio
+npm run test                    # 449 testes de domínio
 npm run typecheck               # tsc --noEmit
 npm run build                   # typecheck + build de produção
 
