@@ -56,7 +56,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Search, Plus, RefreshCw, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
-  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
+  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Link2, Unlink,
   Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
   Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload, Columns3
 } from "lucide-react";
@@ -348,6 +348,152 @@ const leadFormsFieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefi
 // this small common set, an unresolved key is humanized (snake_case -> Title
 // Case) rather than ever shown raw. Extracted to src/lib/leads/fieldLabels.ts
 // so other surfaces (pending form_submissions review page) share it.
+
+// --- "Formulários" tab: um cartão por submissão, vindo de DUAS fontes ---
+// Desde a deteccao de duplicados, quem já existe na organização deixa de gerar
+// lead nova: a submissão acumula em public.form_submissions. Ler só anew_leads
+// faria essas submissões DESAPARECER deste separador. Os dois tipos de cartão
+// partilham os campos submetidos e distinguem-se pelo estado que mostram: uma
+// lead tem fase do funil, uma submissão tem estado de revisão.
+type LeadFormCardKind = "lead" | "submission";
+/** Estado de revisão de uma linha de form_submissions (ver PendingFormSubmissions.tsx). */
+type LeadFormReviewState = "pending" | "merged" | "new_lead" | "resolved";
+interface LeadFormConflictEntity {
+  id: string;
+  name: string;
+}
+interface LeadFormCard {
+  /** Único entre as duas fontes: os ids vivem em tabelas diferentes. */
+  key: string;
+  kind: LeadFormCardKind;
+  id: string;
+  createdAt: string | null;
+  campaignName: string | null;
+  source: string | null;
+  fieldValues: Record<string, unknown>;
+  fieldLabels: Record<string, string>;
+  districtFieldKeys: Set<string>;
+  districtNameById: Record<string, string>;
+  /** Só nas leads: fase do funil. */
+  stageLabel: string | null;
+  /** Só nas submissões. */
+  reviewState: LeadFormReviewState | null;
+  /** CONFLITO (06): as duas entidades candidatas, com nome. */
+  conflictEntities: readonly LeadFormConflictEntity[] | null;
+  /** Dado novo que NUNCA foi gravado na ficha da pessoa. */
+  unsavedEmail: string | null;
+  unsavedPhone: string | null;
+  /**
+   * Porque e que esta submissao nao criou lead: o que coincidiu e com que
+   * registo. Sem isto o cartao mostra o que a pessoa preencheu e deixa quem
+   * la chega sem perceber porque e que nao ha lead nova.
+   */
+  matchReason: string | null;
+}
+
+/**
+ * Frase que diz porque e que uma submissao nao virou lead nova.
+ *
+ * Le o que a deteccao de duplicados deixou em `field_values._meta.dedup`:
+ * `por` diz o que coincidiu (email, telefone, ou os dois) e `registo` diz com
+ * que tipo de ficha coincidiu. Devolve null quando nao ha nada guardado --
+ * submissoes anteriores a isto, que ficam sem explicacao em vez de inventarem
+ * uma.
+ */
+function describeFormSubmissionMatch(dedupMeta: any): string | null {
+  const por = dedupMeta?.por;
+  if (!por) return null;
+
+  const registo = dedupMeta?.registo === "client" ? "um cliente" : "uma lead";
+
+  if (por === "conflito") {
+    return "Nao entrou como lead nova: o email e o telefone apontam para pessoas diferentes.";
+  }
+
+  const coincidencia = por === "ambos"
+    ? "o email e o telefone sao iguais"
+    : por === "email"
+      ? "o email e igual"
+      : "o telefone e igual";
+
+  return `Nao entrou como lead nova: ja existe ${registo} em que ${coincidencia}.`;
+}
+
+// Fase do funil por status da lead. Ao nivel do modulo porque a query do
+// separador "Formularios" (acima do corpo do componente) tambem a usa.
+const statusToStageMap: Record<string, string> = {
+  new: "novo",
+  contacted: "contactado",
+  qualified: "qualificado",
+  proposal_sent: "proposta",
+  converted: "ganho",
+  won: "ganho",
+  lost: "perdido",
+  rejected: "perdido",
+  callback_scheduled: "contactado",
+  visit_scheduled: "contactado",
+  negotiation: "proposta",
+  no_answer: "contactado",
+  incomplete: "novo",
+};
+
+const LEAD_FORM_SUBMISSION_COLUMNS =
+  "id, campaign_id, field_values, status, resolution, resolved_at, created_at, entity_id, campaigns(id, name)";
+
+/**
+ * Submissões de formulário da entidade. `conflicting_entity_id` só existe a
+ * partir da migration 20261116050000; enquanto ela não estiver aplicada o
+ * PostgREST recusa a coluna, e o separador tem de continuar a funcionar sem a
+ * marca de conflito em vez de ficar vazio.
+ */
+async function fetchEntityFormSubmissions(entityId: string, organizationId: string | null): Promise<any[]> {
+  // Sem organização não há como isolar o inquilino: devolve-se vazio em vez de
+  // arriscar mostrar a submissão de outra organização.
+  if (!organizationId) return [];
+
+  // Cast deliberado: `conflicting_entity_id` ainda nao existe nos tipos
+  // gerados (a migration esta por aplicar), e a query tem de compilar na mesma.
+  const withConflict = await (supabase as any)
+    .from("form_submissions")
+    .select(`${LEAD_FORM_SUBMISSION_COLUMNS}, conflicting_entity_id`)
+    .eq("entity_id", entityId)
+    .eq("organization_id", organizationId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (!withConflict.error) return withConflict.data || [];
+
+  const missingColumn =
+    withConflict.error.code === "42703" ||
+    withConflict.error.code === "PGRST204" ||
+    /conflicting_entity_id/.test(withConflict.error.message || "");
+  if (!missingColumn) throw withConflict.error;
+
+  const { data, error } = await supabase
+    .from("form_submissions")
+    .select(LEAD_FORM_SUBMISSION_COLUMNS)
+    .eq("entity_id", entityId)
+    .eq("organization_id", organizationId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return data || [];
+}
+
+function resolveLeadFormReviewState(row: { resolution?: string | null; resolved_at?: string | null }): LeadFormReviewState {
+  if (!row.resolved_at) return "pending";
+  if (row.resolution === "merged" || row.resolution === "new_lead") return row.resolution;
+  return "resolved";
+}
+
+const LEAD_FORM_REVIEW_LABELS: Record<LeadFormReviewState, string> = {
+  pending: "Por rever",
+  merged: "Associada ao registo",
+  new_lead: "Virou lead nova",
+  resolved: "Revista",
+};
 
 export default function AnewLeads() {
   const { t } = useTranslation();
@@ -760,36 +906,42 @@ export default function AnewLeads() {
   const leadDetailProposals = leadDetailFinanceData?.proposals || [];
   const leadDetailQuotes = leadDetailFinanceData?.quotes || [];
 
-  // "Formulários" tab — every anew_leads row sharing this lead's entity_id
-  // that carries actual submitted field_values (i.e. one card per form
-  // submission tied to the same underlying person/entity, including this
-  // lead's own submission). Read-only, scoped by entity_id + RLS, same
-  // convention as the deals/proposals/quotes query above.
-  const { data: leadDetailFormSubmissions = [], isLoading: leadDetailFormsLoading } = useQuery({
+  // "Formulários" tab — um cartão por submissão, lido de DUAS fontes:
+  //  1. anew_leads da entidade que carregam field_values submetidos (como antes);
+  //  2. form_submissions da entidade — onde passam a acumular as submissões de
+  //     quem já existia na organização e por isso NÃO gerou lead nova.
+  // Sem a segunda fonte, essas submissões desapareciam deste ecrã.
+  // Read-only, scoped by entity_id + RLS, same convention as the
+  // deals/proposals/quotes query above.
+  const { data: leadDetailFormSubmissions = [], isLoading: leadDetailFormsLoading } = useQuery<LeadFormCard[]>({
     queryKey: ["lead-detail-form-submissions", leadDetailEntityId, leadDetailOrganizationId],
     queryFn: async () => {
       const entityId = leadDetailEntityId as string;
 
-      const { data } = await supabase
-        .from("anew_leads")
-        .select("id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")
-        .eq("entity_id", entityId)
-        .is("deleted_at", null)
-        .not("field_values", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const [leadsRes, submissionRows] = await Promise.all([
+        supabase
+          .from("anew_leads")
+          .select("id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")
+          .eq("entity_id", entityId)
+          .is("deleted_at", null)
+          .not("field_values", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(20),
+        fetchEntityFormSubmissions(entityId, leadDetailOrganizationId),
+      ]);
 
-      const submissions = (data || []).filter((row: any) => {
-        const keys = Object.keys(row.field_values || {}).filter((key) => key !== "_meta");
-        return keys.length > 0;
-      });
+      const hasSubmittedValues = (row: any) =>
+        Object.keys(row.field_values || {}).filter((key) => key !== "_meta").length > 0;
+      const leadRows = (leadsRes.data || []).filter(hasSubmittedValues);
+      const submissions = (submissionRows || []).filter(hasSubmittedValues);
+      const allRows = [...leadRows, ...submissions];
 
       const campaignIds = Array.from(
-        new Set(submissions.map((row: any) => row.campaign_id).filter(Boolean)),
+        new Set(allRows.map((row: any) => row.campaign_id).filter(Boolean)),
       ) as string[];
       // Manual-source submissions carry no campaign_id - resolve those against
       // the org's own field definitions instead of leaving them unlabeled.
-      const hasNoCampaignSubmission = submissions.some((row: any) => !row.campaign_id);
+      const hasNoCampaignSubmission = allRows.some((row: any) => !row.campaign_id);
 
       const definitionsByCampaign: Record<string, LeadDialogFieldDefinition[]> = {};
       await Promise.all([
@@ -824,13 +976,87 @@ export default function AnewLeads() {
         districtNameById = Object.fromEntries((districts || []).map((d: any) => [d.id, d.name]));
       }
 
-      return submissions.map((row: any) => {
-        const definitions = row.campaign_id
-          ? definitionsByCampaign[row.campaign_id] || []
+      // CONFLITO (06): mostram-se AS DUAS entidades candidatas, com nome, para
+      // quem lê perceber a dúvida. Uma delas é a própria entidade da submissão.
+      const conflictEntityIds = Array.from(
+        new Set(
+          submissions
+            .flatMap((row: any) => [row.conflicting_entity_id, row.conflicting_entity_id ? row.entity_id : null])
+            .filter(Boolean),
+        ),
+      ) as string[];
+      let entityNameById: Record<string, string> = {};
+      if (conflictEntityIds.length > 0) {
+        const { data: entities } = await supabase
+          .from("anew_entities")
+          .select("id, display_name")
+          .in("id", conflictEntityIds);
+        entityNameById = Object.fromEntries(
+          (entities || []).map((e: any) => [e.id, e.display_name || "Sem nome"]),
+        );
+      }
+
+      const labelsFor = (campaignId: string | null): Record<string, string> => {
+        const definitions = campaignId
+          ? definitionsByCampaign[campaignId] || []
           : definitionsByCampaign["__org__"] || [];
-        const fieldLabels = Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
-        return { ...row, fieldLabels, districtFieldKeys, districtNameById };
+        return Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
+      };
+
+      const leadCards: LeadFormCard[] = leadRows.map((row: any) => ({
+        key: `lead:${row.id}`,
+        kind: "lead",
+        id: row.id,
+        createdAt: row.created_at ?? null,
+        campaignName: row.campaigns?.name ?? null,
+        source: row.source ?? null,
+        fieldValues: row.field_values || {},
+        fieldLabels: labelsFor(row.campaign_id),
+        districtFieldKeys,
+        districtNameById,
+        stageLabel: statusToStageMap[row.status] || row.status || null,
+        reviewState: null,
+        conflictEntities: null,
+        unsavedEmail: null,
+        unsavedPhone: null,
+        matchReason: null,
+      }));
+
+      const submissionCards: LeadFormCard[] = submissions.map((row: any) => {
+        // Dado novo assinalado pela detecção de duplicados. NUNCA foi gravado
+        // na ficha da pessoa: vive apenas aqui, em _meta.dedup.
+        const dedupMeta = (row.field_values as any)?._meta?.dedup || null;
+        const conflictingEntityId = row.conflicting_entity_id || null;
+        return {
+          key: `submission:${row.id}`,
+          kind: "submission",
+          id: row.id,
+          createdAt: row.created_at ?? null,
+          campaignName: row.campaigns?.name ?? null,
+          source: null,
+          fieldValues: row.field_values || {},
+          fieldLabels: labelsFor(row.campaign_id),
+          districtFieldKeys,
+          districtNameById,
+          stageLabel: null,
+          reviewState: resolveLeadFormReviewState(row),
+          conflictEntities: conflictingEntityId
+            ? [
+                { id: row.entity_id, name: entityNameById[row.entity_id] || "Entidade sem nome" },
+                { id: conflictingEntityId, name: entityNameById[conflictingEntityId] || "Entidade sem nome" },
+              ]
+            : null,
+          unsavedEmail: dedupMeta?.novo_email ?? null,
+          unsavedPhone: dedupMeta?.novo_telefone ?? null,
+          matchReason: describeFormSubmissionMatch(dedupMeta),
+        };
       });
+
+      // As duas fontes são tabelas distintas, mas a chave composta protege
+      // contra qualquer id repetido dentro da mesma fonte.
+      return Array.from(
+        new Map([...leadCards, ...submissionCards].map((card) => [card.key, card])).values(),
+      ).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     },
     enabled: showDetails && !!leadDetailEntityId,
   });
@@ -925,22 +1151,6 @@ export default function AnewLeads() {
   }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
 
 
-
-  const statusToStageMap: Record<string, string> = {
-    new: "novo",
-    contacted: "contactado",
-    qualified: "qualificado",
-    proposal_sent: "proposta",
-    converted: "ganho",
-    won: "ganho",
-    lost: "perdido",
-    rejected: "perdido",
-    callback_scheduled: "contactado",
-    visit_scheduled: "contactado",
-    negotiation: "proposta",
-    no_answer: "contactado",
-    incomplete: "novo",
-  };
 
   // Load status counts directly from database (independent of pagination)
   // Uses server-side GROUP BY for maximum performance
@@ -2645,54 +2855,12 @@ export default function AnewLeads() {
   };
 
   // Auto-mapping aliases for common field names
-  const FIELD_ALIASES: Record<string, string[]> = {
-    first_name: ['first_name', 'nome', 'firstName', 'primeiro_nome', 'name', 'nome_completo', 'primeironome'],
-    last_name: ['last_name', 'apelido', 'lastName', 'ultimo_nome', 'surname', 'sobrenome', 'ultimonome'],
-    email: ['email', 'e-mail', 'e_mail', 'mail', 'correio_eletronico', 'correio'],
-    phone: ['phone', 'telefone', 'telemovel', 'mobile', 'cel', 'telemóvel', 'cellphone', 'contacto', 'celular'],
-    phone_country_code: ['phone_country_code', 'codigo_pais', 'country_code', 'indicativo', 'ddi'],
-    company_name: ['company_name', 'empresa', 'company', 'nome_empresa', 'organizacao', 'companyname'],
-    vat: ['vat', 'nif', 'contribuinte', 'fiscal', 'tax_id', 'taxid', 'numero_contribuinte'],
-    position: ['position', 'cargo', 'funcao', 'job_title', 'profissao', 'jobtitle'],
-    address: ['address', 'morada', 'endereco', 'rua', 'endereço', 'street'],
-    city: ['city', 'cidade', 'localidade'],
-    postal_code: ['postal_code', 'codigo_postal', 'cp', 'cep', 'postalcode', 'zip', 'zipcode'],
-    district: ['district', 'distrito', 'regiao', 'região', 'provincia', 'estado'],
-    notes: ['notes', 'notas', 'observacoes', 'observações', 'comentarios', 'obs'],
-    website: ['website', 'site', 'url', 'pagina', 'web'],
-    industry: ['industry', 'industria', 'setor', 'ramo', 'sector'],
-  };
+  // A tabela de sinonimos que adivinhava campos (FIELD_ALIASES) e a
+  // extractFieldsWithAutoMapping foram removidas: eram usadas SO pela conversao
+  // em cliente, que deixou de recalcular a identidade da entidade. Ficam ainda
+  // outras copias desta heuristica noutros pontos do ficheiro, para APRESENTACAO
+  // -- essas nao escrevem nada.
 
-  // Extract fields using automatic mapping (aliases)
-  const extractFieldsWithAutoMapping = (fieldValues: Record<string, any> | null, targetType: 'contact' | 'client'): Record<string, any> => {
-    const result: Record<string, any> = {};
-    if (!fieldValues) return result;
-
-    const targetFields = targetType === 'contact' 
-      ? ['first_name', 'last_name', 'email', 'phone', 'phone_country_code', 'vat', 'position', 'address', 'city', 'postal_code', 'district', 'notes', 'website']
-      : ['first_name', 'last_name', 'email', 'phone', 'phone_country_code', 'company_name', 'vat', 'position', 'industry', 'website', 'address', 'city', 'postal_code', 'district', 'notes'];
-
-    for (const targetField of targetFields) {
-      const aliases = FIELD_ALIASES[targetField] || [targetField];
-      
-      for (const key of Object.keys(fieldValues)) {
-        if (key === '_meta') continue;
-        const keyLower = key.toLowerCase().replace(/[-_\s]/g, '');
-        
-        if (aliases.some(alias => keyLower === alias.toLowerCase().replace(/[-_\s]/g, '') || keyLower.includes(alias.toLowerCase().replace(/[-_\s]/g, '')))) {
-          const value = fieldValues[key];
-          if (value && value !== '') {
-            result[targetField] = value;
-            break; // Found a match, move to next target field
-          }
-        }
-      }
-    }
-
-    return result;
-  };
-
-  // Opens the conversion dialog to ask about campaign association
   const openConversionDialog = (lead: Lead, type: 'client') => {
     setConversionLead(lead);
     setConversionType(type);
@@ -2719,30 +2887,27 @@ export default function AnewLeads() {
   };
 
   const doConvertToClient = async (lead: Lead, selectedCampaignId: string | null) => {
-    let clientData: Record<string, any> = {};
-
-    const campaignToUse = selectedCampaignId || lead.campaign_id;
-    if (campaignToUse) {
-      const { data: fieldDefsForConvert } = await supabase
-        .from("lead_field_definitions")
-        .select("*")
-        .eq("campaign_id", campaignToUse)
-        .eq("is_active", true);
-
-      const fieldsWithMapping = (fieldDefsForConvert || []).filter(f => f.client_field_mapping);
-      if (fieldsWithMapping.length > 0) {
-        for (const field of fieldsWithMapping) {
-          const leadValue = lead.field_values?.[field.field_key];
-          if (leadValue && field.client_field_mapping) {
-            clientData[field.client_field_mapping] = leadValue;
-          }
-        }
-      } else {
-        clientData = extractFieldsWithAutoMapping(lead.field_values, 'client');
-      }
-    } else {
-      clientData = extractFieldsWithAutoMapping(lead.field_values, 'client');
-    }
+    // Converter em cliente e dar um PAPEL a uma entidade que ja existe. Nao e
+    // recalcular quem ela e.
+    //
+    // Ate 2026-09-02 este caminho reconstruia a identidade a partir dos
+    // `field_values` da lead -- ou pelo `client_field_mapping` da campanha, ou
+    // por uma tabela de sinonimos que adivinhava pelo nome da chave -- e
+    // escrevia o resultado por cima de `anew_entities.first_name/last_name`.
+    //
+    // Tres razoes para sair:
+    //   1. `anew_clients` nao tem nome, email nem telefone. O unico uso daqueles
+    //      valores eram tres campos da ENTIDADE, que ja estavam la escritos
+    //      correctamente pelo create-lead, com normalizacao e tudo.
+    //   2. Escrevia por cima do que estava certo (`CASE WHEN o novo nao for
+    //      nulo`, nao `CASE WHEN o actual estiver vazio`).
+    //   3. O ramo do mapeamento era tudo-ou-nada: bastava UM campo mapeado para
+    //      os outros serem ignorados em silencio, e lia de
+    //      `lead_field_definitions` quando o mapeamento dos formularios vive em
+    //      `form_fields`.
+    //
+    // O tipo de cliente continua a ser decidido -- mas pela entidade, que sabe
+    // o que e, e nao por adivinhacao sobre os campos do formulario.
 
     const authUserId = scopeAuthUserId;
     if (!authUserId) throw new Error('Utilizador não autenticado');
@@ -2767,19 +2932,14 @@ export default function AnewLeads() {
       }
     }
 
-    const hasCompanyName = !!clientData.company_name;
-    const clientType: "company" | "person" = hasCompanyName ? 'company' : 'person';
-
-    let firstName = clientData.first_name;
-    let lastName = clientData.last_name;
-    let companyName = clientData.company_name;
-
-    if (clientType === 'person') {
-      firstName = firstName || null;
-      lastName = lastName || null;
-    } else {
-      companyName = companyName || null;
-    }
+    // O tipo vem da entidade -- `anew_entities.type` -- e nao de haver ou nao um
+    // campo chamado "empresa" no formulario.
+    const entityIdentity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    const clientType: "company" | "person" =
+      entityIdentity?.type === 'company' ? 'company' : 'person';
+    const companyName = clientType === 'company'
+      ? (entityIdentity?.display_name || null)
+      : null;
 
     const rootOrgId = await resolveRootOrgId(lead.organization_id);
     const orgIdsToSync = Array.from(new Set([lead.organization_id, rootOrgId].filter(Boolean)));
@@ -2817,12 +2977,10 @@ export default function AnewLeads() {
 
     const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
 
-    const clientDataForRpc = {
-      ...clientData,
-      first_name: firstName,
-      last_name: lastName,
-      company_name: companyName,
-    };
+    // So o que a RPC precisa para decidir o tipo de cliente. `first_name` e
+    // `last_name` NAO vao de proposito: a RPC usa-os para escrever na entidade,
+    // e a identidade da entidade nao se toca numa conversao.
+    const clientDataForRpc = { company_name: companyName };
 
     let client: any = null;
     try {
@@ -5851,34 +6009,105 @@ export default function AnewLeads() {
                         <p className="text-sm text-muted-foreground text-center py-8">Sem submissões de formulário associadas a esta lead</p>
                       ) : (
                         <div className="space-y-3">
-                          {leadDetailFormSubmissions.map((submission: any) => {
-                            const entries = Object.entries(submission.field_values || {}).filter(
+                          {leadDetailFormSubmissions.map((card: LeadFormCard) => {
+                            const entries = Object.entries(card.fieldValues || {}).filter(
                               ([key]) => key !== "_meta",
                             );
-                            const statusLabel = statusToStageMap[submission.status] || submission.status;
+                            const isSubmission = card.kind === "submission";
                             return (
-                              <Card key={submission.id}>
+                              <Card
+                                key={card.key}
+                                className="border-l-4"
+                                style={{ borderLeftColor: isSubmission ? "hsl(var(--muted-foreground))" : "hsl(var(--primary))" }}
+                              >
                                 <CardContent className="py-3 px-4 space-y-2">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="text-sm font-medium">{submission.campaigns?.name || "Sem campanha"}</p>
+                                    <p className="text-sm font-medium flex items-center gap-1.5">
+                                      {isSubmission
+                                        ? <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                                        : <Workflow className="w-3.5 h-3.5 text-primary" />}
+                                      {card.campaignName || "Sem campanha"}
+                                    </p>
                                     <div className="flex items-center gap-2">
-                                      {submission.source && <span className="text-[10px] text-muted-foreground">{submission.source}</span>}
-                                      {statusLabel && <Badge variant="outline" className="text-[10px] capitalize">{statusLabel}</Badge>}
-                                      {submission.created_at && (
+                                      {card.source && <span className="text-[10px] text-muted-foreground">{card.source}</span>}
+                                      {/* Uma lead tem fase do funil; uma submissão tem estado de revisão. */}
+                                      {isSubmission ? (
+                                        <>
+                                          <Badge variant="secondary" className="text-[10px]">Submissão</Badge>
+                                          {card.reviewState && (
+                                            <Badge
+                                              variant={card.reviewState === "pending" ? "destructive" : "outline"}
+                                              className="text-[10px]"
+                                            >
+                                              {LEAD_FORM_REVIEW_LABELS[card.reviewState]}
+                                            </Badge>
+                                          )}
+                                        </>
+                                      ) : (
+                                        card.stageLabel && <Badge variant="outline" className="text-[10px] capitalize">{card.stageLabel}</Badge>
+                                      )}
+                                      {card.createdAt && (
                                         <span className="text-[10px] text-muted-foreground">
-                                          {new Date(submission.created_at).toLocaleString("pt-PT")}
+                                          {new Date(card.createdAt).toLocaleString("pt-PT")}
                                         </span>
                                       )}
                                     </div>
                                   </div>
+
+                                  {/* Porque é que isto não criou lead nova. Sem esta linha o
+                                      cartão mostra o que a pessoa preencheu e não explica nada. */}
+                                  {card.matchReason && !card.conflictEntities && (
+                                    <p className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                                      <Link2 className="w-3.5 h-3.5 shrink-0 mt-px" />
+                                      <span>{card.matchReason}</span>
+                                    </p>
+                                  )}
+
+                                  {/* CONFLITO (06): o email aponta para uma entidade e o telefone para outra. */}
+                                  {card.conflictEntities && (
+                                    <div className="rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 px-3 py-2 space-y-1">
+                                      <p className="text-[11px] font-medium text-amber-700 flex items-center gap-1.5">
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                        Conflito: o email e o telefone apontam para pessoas diferentes
+                                      </p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {card.conflictEntities.map((entity) => (
+                                          <Badge key={entity.id} variant="outline" className="text-[10px] border-amber-500/60">
+                                            {entity.name}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Dado novo que a submissão trouxe e que NUNCA foi gravado na ficha. */}
+                                  {(card.unsavedEmail || card.unsavedPhone) && (
+                                    <div className="rounded-md border border-dashed px-3 py-2 space-y-1">
+                                      {card.unsavedEmail && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                                          <span className="font-medium">{sanitizeFieldValue(card.unsavedEmail)}</span>
+                                          <Badge variant="outline" className="text-[10px]">não gravado</Badge>
+                                        </div>
+                                      )}
+                                      {card.unsavedPhone && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <Phone className="w-3.5 h-3.5 text-muted-foreground" />
+                                          <span className="font-medium">{sanitizeFieldValue(card.unsavedPhone)}</span>
+                                          <Badge variant="outline" className="text-[10px]">não gravado</Badge>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
                                     {entries.map(([key, value]) => {
-                                      const resolvedValue = submission.districtFieldKeys?.has(key)
-                                        ? submission.districtNameById?.[value as string] ?? value
+                                      const resolvedValue = card.districtFieldKeys?.has(key)
+                                        ? card.districtNameById?.[value as string] ?? value
                                         : value;
                                       return (
                                         <div key={key} className="flex items-baseline justify-between gap-2 text-xs border-b border-dashed py-1">
-                                          <span className="text-muted-foreground">{submission.fieldLabels?.[key] || humanizeFormFieldKey(key)}</span>
+                                          <span className="text-muted-foreground">{card.fieldLabels?.[key] || humanizeFormFieldKey(key)}</span>
                                           <span className="font-medium text-right">{sanitizeFieldValue(resolvedValue)}</span>
                                         </div>
                                       );

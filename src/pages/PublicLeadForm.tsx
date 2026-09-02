@@ -723,7 +723,10 @@ export default function PublicLeadForm() {
   const [leadId, setLeadId] = useState<string | null>(null);
   // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
   // "lead" when only an older lead_id-only response shape is ever received.
-  const [targetType, setTargetType] = useState<"lead" | "contact" | "client">("lead");
+  // "submission": a submissao ficou ligada a um registo que ja existia e a
+  // chave de continuacao e o id da linha em form_submissions, nao o de uma
+  // lead — nunca pode entrar nos ramos que tratam `leadId` como lead.
+  const [targetType, setTargetType] = useState<"lead" | "contact" | "client" | "submission">("lead");
   const [isComplete, setIsComplete] = useState(false);
   const [locationRejected, setLocationRejected] = useState(false);
   const [resolvedSourceId, setResolvedSourceId] = useState<string | null>(querySourceId);
@@ -1349,7 +1352,7 @@ export default function PublicLeadForm() {
 
         // Prefer the polymorphic target_type/target_id continuation key;
         // fall back to lead_id/"lead" if an older response shape is ever received.
-        const resolvedTargetType: "lead" | "contact" | "client" = data.target_type || "lead";
+        const resolvedTargetType: "lead" | "contact" | "client" | "submission" = data.target_type || "lead";
         let resolvedLeadId = data.target_id || data.lead_id;
 
         if (data.is_complete && hasSchedulingStep && schedulingSlot && resolvedTargetType === "lead") {
