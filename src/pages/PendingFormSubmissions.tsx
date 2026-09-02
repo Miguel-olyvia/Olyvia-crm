@@ -461,9 +461,10 @@ export default function PendingFormSubmissions() {
           <h1 className="text-2xl font-bold">Submissões de formulário pendentes</h1>
           <p className="text-sm text-muted-foreground">
             As suas leads e os seus clientes que voltaram a preencher um formulário público. Não geraram lead nova —
-            a submissão ficou ligada à ficha que já existe. Quando há dúvida, o email aponta para uma pessoa e o
-            telefone para outra: essas aparecem assinaladas, com as duas candidatas. Confirme a associação ou crie
-            uma nova lead se o registo estiver errado.
+            a submissão ficou ligada à ficha que já existe, e o comercial responsável foi avisado. Quando há dúvida,
+            o email aponta para uma pessoa e o telefone para outra: essas aparecem assinaladas, com as duas
+            candidatas. Os valores submetidos não entram na ficha sozinhos — registe-os como nota se quiser
+            guardá-los no histórico da pessoa.
           </p>
         </div>
       </div>
