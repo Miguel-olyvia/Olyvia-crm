@@ -575,6 +575,23 @@ BEGIN
     EXCEPTION WHEN OTHERS THEN
       v_ignorados := v_ignorados || jsonb_build_object(
         'plano', v_plano.codigo, 'regra', v_plano.regra_recorrencia, 'erro', SQLERRM);
+
+      -- Um plano que falha em silêncio é a pior falha desta aplicação: as
+      -- ordens preventivas deixam de nascer, e só se dá por isso quando o
+      -- cliente pergunta pela manutenção que não foi feita.
+      --
+      -- O `entity_id` vai NULL de propósito — isto não é sobre uma ordem. O
+      -- guarda de duplicados usa (tipo, entity_id, pessoa), por isso só se
+      -- repete depois de alguém ler o primeiro aviso.
+      IF to_regprocedure('public.ops_notificar_coordenacao(uuid,text,text,text,text,uuid,text,uuid)')
+         IS NOT NULL THEN
+        PERFORM public.ops_notificar_coordenacao(
+          v_plano.organization_id, 'operacoes_plano_falhou',
+          'O plano ' || v_plano.codigo || ' não gerou ordens',
+          'A regra de repetição foi recusada: ' || SQLERRM
+            || ' Enquanto não for corrigida, este plano não cria trabalho.',
+          '/operacao/planos', NULL, 'urgent');
+      END IF;
     END;
   END LOOP;
 
@@ -652,18 +669,42 @@ $rls$;
 -- 10. Verificação
 -- ============================================================
 
+-- Este bloco já contou TODAS as tabelas `ops_*` e comparou com 26, o número
+-- que existia no dia em que este ficheiro foi escrito. Funcionou uma vez, e
+-- partiu-se no dia em que `orcamentos.sql` acrescentou a sua tabela: voltar a
+-- correr isto numa base atualizada rebentava com "esperadas 26, encontradas 27",
+-- e o ficheiro inteiro fazia rollback.
+--
+-- Um número fixo é uma afirmação sobre o módulo todo, e este ficheiro só
+-- responde por sete tabelas. Passa a verificar essas sete pelo nome. A conta
+-- da RLS fica — essa é sobre todas de propósito, e continua verdadeira à
+-- medida que o módulo cresce.
+
 DO $verificar$
-DECLARE v_tab integer; v_rls integer;
+DECLARE
+  v_tab   integer;
+  v_rls   integer;
+  v_falta text;
 BEGIN
+  SELECT string_agg(t, ', ' ORDER BY t) INTO v_falta
+    FROM unnest(ARRAY[
+      'ops_skill', 'ops_utilizador_skill', 'ops_horario', 'ops_medicao_def',
+      'ops_medicao_opcao', 'ops_checklist_tarefa_medicao', 'ops_ordem_tarefa_medicao'
+    ]) AS t
+   WHERE to_regclass('public.' || t) IS NULL;
+
+  IF v_falta IS NOT NULL THEN
+    RAISE EXCEPTION 'Faltam tabelas deste ficheiro: %', v_falta;
+  END IF;
+
   SELECT count(*) INTO v_tab FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%';
   SELECT count(*) INTO v_rls FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%' AND rowsecurity;
 
-  IF v_tab <> 26 THEN RAISE EXCEPTION 'Esperadas 26 tabelas ops_*, encontradas %', v_tab; END IF;
   IF v_rls <> v_tab THEN RAISE EXCEPTION '% tabelas sem RLS', v_tab - v_rls; END IF;
 
-  RAISE NOTICE 'Operações: modelo corrigido. % tabelas, todas com RLS.', v_tab;
+  RAISE NOTICE 'Operações: modelo corrigido. As 7 tabelas deste ficheiro existem; % tabelas ops_*, todas com RLS.', v_tab;
 END
 $verificar$;
 

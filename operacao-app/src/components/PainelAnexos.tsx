@@ -33,6 +33,37 @@ import { dataHora } from "../lib/formatar";
  *    ninguém ter decidido nada.
  */
 
+/**
+ * O que o campo de ficheiros oferece.
+ *
+ * A mesma lista está na base, em `db/documentos-e-ativos.sql`, e é a de lá que
+ * manda: esta é só para o diálogo do sistema não mostrar ficheiros que o
+ * servidor vai recusar.
+ */
+const ACEITA = [
+  "image/*",
+  "audio/*",
+  ".pdf",
+  ".doc", ".docx",
+  ".xls", ".xlsx",
+  ".odt", ".ods",
+  ".csv", ".txt",
+].join(",");
+
+/** A extensão, para o quadradinho: DOCX, XLSX, PDF. */
+function extensao(nome: string): string {
+  const p = nome.split(".").pop();
+  return p && p.length <= 4 ? p.toUpperCase() : "FIC";
+}
+
+/** O tamanho como se diz. Nulo acontece em ficheiros antigos. */
+function comoTamanho(bytes: number | null): string {
+  if (!bytes || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} kB`;
+  return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} MB`;
+}
+
 export default function PainelAnexos({
   ordemId,
   organizationId,
@@ -51,6 +82,10 @@ export default function PainelAnexos({
   aoMudar: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const inputFicheiroRef = useRef<HTMLInputElement>(null);
+  // Uma foto vê-se; um documento lê-se pelo nome. São duas listas diferentes.
+  const fotos = anexos.filter((a) => (a.mime ?? "").startsWith("image/"));
+  const documentos = anexos.filter((a) => !(a.mime ?? "").startsWith("image/"));
   const [urls, setUrls] = useState<Map<string, string>>(new Map());
   const [aSubir, setASubir] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -134,21 +169,40 @@ export default function PainelAnexos({
               label="Só para nós"
               hint="Não sai no relatório do cliente"
             />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={aSubir}
+              onClick={() => inputFicheiroRef.current?.click()}
+            >
+              <Plus width={14} height={14} />
+              Ficheiro
+            </Button>
             <Button size="sm" disabled={aSubir} onClick={() => inputRef.current?.click()}>
               <Plus width={14} height={14} />
-              {aSubir ? "A enviar…" : "Anexar"}
+              {aSubir ? "A enviar…" : "Foto"}
             </Button>
           </div>
         )}
       </div>
 
+      {/* Dois caminhos, e de propósito. `capture` faz o telemóvel abrir a
+          câmara direto — ótimo para quem está no local, inútil para quem quer
+          anexar um auto de medição em Word. */}
       <input
         ref={inputRef}
         type="file"
         multiple
-        // `capture` faz o telemóvel abrir a câmara direto, em vez da galeria.
         capture="environment"
-        accept="image/*,application/pdf,audio/*"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => void enviar(e.target.files)}
+      />
+      <input
+        ref={inputFicheiroRef}
+        type="file"
+        multiple
+        accept={ACEITA}
         className="hidden"
         onChange={(e) => void enviar(e.target.files)}
       />
@@ -157,11 +211,41 @@ export default function PainelAnexos({
 
       {anexos.length === 0 ? (
         <p className="mt-3 text-sm text-slate-400">
-          Sem fotos. Uma do sítio antes de mexer poupa muita discussão depois.
+          Sem fotos nem ficheiros. Uma foto do local antes de mexer poupa muita discussão
+          depois.
         </p>
       ) : (
+        <>
+        {/* Os documentos primeiro e em lista: um Word numa grelha de miniaturas
+            é um quadrado cinzento com um nome cortado ao meio. */}
+        {documentos.length > 0 && (
+          <ul className="mt-3 divide-y divide-slate-100">
+            {documentos.map((a) => (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  onClick={() => setAVer(a)}
+                  className="flex w-full items-center gap-3 py-2 text-left"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-[10px] font-semibold uppercase text-slate-500">
+                    {extensao(a.nome)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm text-slate-800">
+                      {a.legenda ?? a.nome}
+                    </span>
+                    <span className="block text-xs text-slate-400">{comoTamanho(a.tamanho)}</span>
+                  </span>
+                  {a.privado && <Badge>só para nós</Badge>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {fotos.length > 0 && (
         <ul className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          {anexos.map((a) => {
+          {fotos.map((a) => {
             const url = urls.get(a.caminho);
             const imagem = (a.mime ?? "").startsWith("image/");
             return (
@@ -203,6 +287,8 @@ export default function PainelAnexos({
             );
           })}
         </ul>
+        )}
+        </>
       )}
 
       {aSubir && (

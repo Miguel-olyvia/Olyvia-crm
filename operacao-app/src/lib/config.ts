@@ -8,6 +8,7 @@
 
 import { supabase } from "./supabase";
 import { ErroDeEscrita, ErroDeDados } from "./dados";
+import type { Lista, RotuloGravado } from "../domain/rotulos";
 
 function rebentar(contexto: string, error: { message: string } | null): void {
   if (!error) return;
@@ -58,7 +59,9 @@ export async function gravarLocal(l: {
   tipo: string;
   parentId?: string | null;
   morada?: string | null;
-}): Promise<void> {
+  latitude?: number | null;
+  longitude?: number | null;
+}): Promise<string | null> {
   const linha = {
     organization_id: l.orgId,
     cliente_id: l.clienteId,
@@ -67,11 +70,25 @@ export async function gravarLocal(l: {
     tipo: l.tipo,
     parent_id: l.parentId ?? null,
     morada: l.morada ?? null,
+    // Meia coordenada não é um sítio: ou vão as duas, ou vai nulo nas duas.
+    // A base tem a mesma regra em `ops_local_coordenadas_validas`.
+    latitude: l.latitude ?? null,
+    longitude: l.longitude ?? null,
   };
-  const { error } = l.id
-    ? await supabase.from("ops_local").update(linha).eq("id", l.id)
-    : await supabase.from("ops_local").insert(linha);
+  // Devolve o id de quem acabou de nascer: quem cria um espaco a meio de
+  // abrir uma ordem tem de o poder escolher a seguir, sem recarregar nada.
+  if (l.id) {
+    const { error } = await supabase.from("ops_local").update(linha).eq("id", l.id);
+    if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
+    return null;
+  }
+  const { data, error } = await supabase
+    .from("ops_local")
+    .insert(linha)
+    .select("id")
+    .single();
   if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
+  return (data as { id: string } | null)?.id ?? null;
 }
 
 export async function gravarAtivo(a: {
@@ -85,6 +102,7 @@ export async function gravarAtivo(a: {
   modelo?: string | null;
   numeroSerie?: string | null;
   criticidade?: string;
+  centroCustoId?: string | null;
 }): Promise<void> {
   const linha = {
     organization_id: a.orgId,
@@ -96,11 +114,58 @@ export async function gravarAtivo(a: {
     modelo: a.modelo ?? null,
     num_serie: a.numeroSerie ?? null,
     criticidade: a.criticidade ?? "normal",
+    // O centro de custo do equipamento é o que as ordens dele herdam.
+    centro_custo_id: a.centroCustoId ?? null,
   };
   const { error } = a.id
     ? await supabase.from("ops_ativo").update(linha).eq("id", a.id)
     : await supabase.from("ops_ativo").insert(linha);
   if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
+}
+
+/**
+ * Tirar de vista, ou repor.
+ *
+ * ⚠ **Nunca apaga.** Põe `ativo = false`, e as listas todas já filtram por
+ * esse campo — o equipamento desaparece do ecrã e o histórico fica intacto.
+ * Um `DELETE` a sério ia em cascata pelas ordens que apontam para ele
+ * (`ops_ordem_alvo`), e um engano numa lista passaria a custar dois anos de
+ * trabalho. Por isso a palavra no botão é &ldquo;remover&rdquo; e não
+ * &ldquo;apagar&rdquo;: é o que realmente acontece.
+ */
+export async function removerAtivo(id: string, remover: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("ops_ativo")
+    .update({ ativo: !remover })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
+}
+
+/**
+ * Mudar um equipamento de local.
+ *
+ * O extintor que estava “na torre” e afinal está na garagem. Antes só se
+ * resolvia apagando e criando outro — e aí perdia-se o histórico dele, que
+ * é exatamente a razão de o equipamento existir na base.
+ *
+ * A mudança fica registada sozinha: há um gatilho em `documentos-e-ativos.sql`
+ * que escreve &ldquo;Mudou de local&rdquo; no histórico, com o antes e o depois.
+ */
+export async function moverAtivo(id: string, localId: string): Promise<void> {
+  const { error } = await supabase
+    .from("ops_ativo")
+    .update({ local_id: localId })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "equipamento"));
+}
+
+/** O mesmo para um espaço. Quem chama garante que está vazio. */
+export async function removerLocal(id: string, remover: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("ops_local")
+    .update({ ativo: !remover })
+    .eq("id", id);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "local"));
 }
 
 export interface CategoriaAtivo {
@@ -418,4 +483,512 @@ export async function criarLocal(l: {
     nome: string;
     ja_existia: boolean;
   };
+}
+
+/* ────────────────────── Packs de configuração ────────────────────── */
+
+export interface Pack {
+  pack: string;
+  nome: string;
+  descricao: string;
+  categorias: number;
+  medicoes: number;
+  checklists: number;
+}
+
+export interface ResultadoDoPack {
+  ok: boolean;
+  pack: string;
+  nome: string;
+  criadas: { categorias: number; medicoes: number; checklists: number };
+  saltadas: { categorias: number; medicoes: number; checklists: number };
+}
+
+export async function listarPacks(): Promise<Pack[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_packs");
+  if (error) {
+    // `db/packs.sql` é opcional. Sem ele não há packs para oferecer, e o resto
+    // das Definições continua a funcionar — por isso isto não rebenta.
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem packs de configuração:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as Pack[];
+}
+
+export async function instalarPack(orgId: string, pack: string): Promise<ResultadoDoPack> {
+  const { data, error } = await supabase.rpc("rpc_ops_instalar_pack", {
+    _org_id: orgId,
+    _pack: pack,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível instalar o pack.");
+  return data as unknown as ResultadoDoPack;
+}
+
+/* ─────────────────── Tipos de trabalho e centros de custo ──────────────── */
+
+export interface TipoTrabalho {
+  id: string;
+  codigo: string;
+  nome: string;
+  posicao: number;
+  fecha_automatico: boolean;
+  ativo: boolean;
+}
+
+export interface CentroCusto {
+  id: string;
+  codigo: string;
+  nome: string;
+  ativo: boolean;
+}
+
+/**
+ * Os tipos de trabalho da organização — semeando-os se ainda não houver.
+ *
+ * A sementeira é aqui e não no SQL de instalação porque as organizações não se
+ * conhecem todas no momento de instalar: aparecem à medida que alguém entra em
+ * cada uma. A função da base recusa semear duas vezes, por isso chamar isto a
+ * cada abertura não faz mal nenhum.
+ *
+ * Se a sementeira falhar (falta de permissão, por exemplo), lê-se na mesma o
+ * que houver. Uma lista vazia é pior do que um erro, mas um erro em cima de
+ * uma lista que até existia seria pior ainda.
+ */
+export async function listarTiposTrabalho(orgId: string): Promise<TipoTrabalho[]> {
+  await supabase.rpc("ops_semear_tipos_trabalho", { _org_id: orgId });
+
+  const { data, error } = await supabase
+    .from("ops_tipo_trabalho")
+    .select("id, codigo, nome, posicao, fecha_automatico, ativo")
+    .eq("organization_id", orgId)
+    .order("posicao");
+
+  rebentar("carregar os tipos de trabalho", error);
+  return (data ?? []) as unknown as TipoTrabalho[];
+}
+
+export async function gravarTipoTrabalho(t: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  codigo?: string | null;
+  fechaAutomatico?: boolean;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_tipo_trabalho", {
+    p_org_id: t.orgId,
+    p_nome: t.nome,
+    p_codigo: t.codigo ?? null,
+    p_fecha_automatico: t.fechaAutomatico ?? false,
+    p_id: t.id ?? null,
+    p_ativo: t.ativo ?? true,
+  });
+  if (error) {
+    // A unicidade dos tipos é pelo NOME, e não pelo código — o código repete-se
+    // de propósito. A mensagem tem de dizer o que a pessoa fez, não o que a
+    // base chama àquilo.
+    throw new ErroDeEscrita(
+      error.message.includes("duplicate key")
+        ? "Já existe um tipo de trabalho com esse nome."
+        : traduzir(error.message, "tipo de trabalho")
+    );
+  }
+}
+
+export async function listarCentrosCusto(orgId: string): Promise<CentroCusto[]> {
+  const { data, error } = await supabase
+    .from("ops_centro_custo")
+    .select("id, codigo, nome, ativo")
+    .eq("organization_id", orgId)
+    .order("codigo");
+
+  rebentar("carregar os centros de custo", error);
+  return (data ?? []) as unknown as CentroCusto[];
+}
+
+export async function gravarCentroCusto(c: {
+  orgId: string;
+  id?: string | null;
+  codigo: string;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_centro_custo", {
+    p_org_id: c.orgId,
+    p_codigo: c.codigo,
+    p_nome: c.nome,
+    p_id: c.id ?? null,
+    p_ativo: c.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "centro de custo"));
+}
+
+/* ────────────────────────────── Fornecedores ───────────────────────────── */
+
+export interface Fornecedor {
+  id: string;
+  nome: string;
+}
+
+/**
+ * Os fornecedores do Olyvia. **Só se leem.**
+ *
+ * Criar um fornecedor novo é no CRM — este módulo não escreve em tabelas de
+ * negócio dele. O ecrã leva lá quem precisar.
+ *
+ * A tabela pode não existir numa instalação, e por isso um erro aqui devolve
+ * lista vazia em vez de levar o formulário à frente: escolher fornecedor é
+ * opcional, e uma ordem sem fornecedor é uma ordem normal.
+ */
+export async function listarFornecedores(orgId: string): Promise<Fornecedor[]> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("id, name, organization_id")
+    .eq("organization_id", orgId)
+    .order("name")
+    .limit(500);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem fornecedores:", error.message);
+    return [];
+  }
+  return ((data ?? []) as { id: string; name: string | null }[]).map((f) => ({
+    id: f.id,
+    nome: f.name ?? "(sem nome)",
+  }));
+}
+
+/* ──────────────────────────── Duplicar ─────────────────────────────────── */
+
+export interface ResultadoDaCopia {
+  ok: boolean;
+  id: string;
+  codigo: string;
+  tarefas?: number;
+  alvos?: number;
+  equipamentos?: number;
+  estado?: string;
+}
+
+/**
+ * Duplicar não é clonar: copia-se o molde, nunca o que aconteceu.
+ *
+ * Uma ordem copiada nasce por fazer, um plano nasce suspenso, uma checklist
+ * nasce em rascunho, e um local não leva as coordenadas. As regras estão na
+ * base (`db/duplicar.sql`), que é onde têm de estar.
+ */
+async function duplicar(rpc: string, args: Record<string, unknown>): Promise<ResultadoDaCopia> {
+  const { data, error } = await supabase.rpc(rpc, args);
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "cópia"));
+  return data as unknown as ResultadoDaCopia;
+}
+
+export const duplicarChecklist = (id: string, nome?: string | null) =>
+  duplicar("rpc_ops_duplicar_checklist", { p_checklist_id: id, p_nome: nome ?? null });
+
+export const duplicarPlano = (id: string, nome?: string | null, clienteId?: string | null) =>
+  duplicar("rpc_ops_duplicar_plano", {
+    p_plano_id: id,
+    p_nome: nome ?? null,
+    p_cliente_id: clienteId ?? null,
+  });
+
+/**
+ * A cópia leva a árvore toda: os espaços, os espaços dos espaços, e os
+ * equipamentos de cada um. Duplicar um espaço dá um irmão dentro do mesmo
+ * local — a box 13 nasce ao lado da box 12, e não como morada nova.
+ */
+export const duplicarLocal = (
+  id: string,
+  nome: string,
+  comAtivos = true,
+  comEspacos = true
+) =>
+  duplicar("rpc_ops_duplicar_local", {
+    p_local_id: id,
+    p_nome: nome,
+    p_com_ativos: comAtivos,
+    p_com_espacos: comEspacos,
+  });
+
+export const duplicarOrdem = (id: string, titulo?: string | null) =>
+  duplicar("rpc_ops_duplicar_ordem", { p_ordem_id: id, p_titulo: titulo ?? null });
+
+/* ───────────────────────── Especialidades ──────────────────────────────── */
+
+export interface Especialidade {
+  id: string;
+  nome: string;
+}
+
+export async function listarEspecialidades(orgId: string): Promise<Especialidade[]> {
+  const { data, error } = await supabase
+    .from("ops_skill")
+    .select("id, nome")
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("nome");
+  rebentar("carregar as especialidades", error);
+  return (data ?? []) as unknown as Especialidade[];
+}
+
+/**
+ * Quem tem cada especialidade.
+ *
+ * Devolve um mapa `especialidade → utilizadores`, que é como o filtro da
+ * agenda a usa: escolhe-se "Eletricista" e ficam as ordens de quem o é.
+ */
+export async function quemTemCadaEspecialidade(
+  orgId: string
+): Promise<Map<string, string[]>> {
+  const { data, error } = await supabase
+    .from("ops_utilizador_skill")
+    .select("utilizador_id, skill_id, ops_skill!inner(organization_id)")
+    .eq("ops_skill.organization_id", orgId);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem especialidades:", error.message);
+    return new Map();
+  }
+
+  const fora = new Map<string, string[]>();
+  for (const l of (data ?? []) as { utilizador_id: string; skill_id: string }[]) {
+    const lista = fora.get(l.skill_id) ?? [];
+    lista.push(l.utilizador_id);
+    fora.set(l.skill_id, lista);
+  }
+  return fora;
+}
+
+/* ───────────────── Motivos de pausa, áreas e tipos ─────────────────────── */
+
+export interface MotivoDePausa {
+  id: string;
+  nome: string;
+  exige_retoma: boolean;
+}
+
+/**
+ * Os motivos que **esta** pessoa pode usar.
+ *
+ * Vem de uma RPC e não de um `select` filtrado no cliente: a lista completa
+ * inclui motivos que são decisão de quem gere, e filtrar no ecrã dava-a a
+ * quem abrisse as ferramentas do browser.
+ */
+export async function listarMotivosDePausa(orgId: string): Promise<MotivoDePausa[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_motivos_de_pausa", { _org_id: orgId });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem motivos de pausa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as MotivoDePausa[];
+}
+
+/** Todos, para o ecrã de definições — que só quem gere abre. */
+export interface MotivoDePausaCompleto extends MotivoDePausa {
+  funcoes: string[];
+  ativo: boolean;
+  posicao: number;
+}
+
+export async function listarTodosOsMotivos(orgId: string): Promise<MotivoDePausaCompleto[]> {
+  await supabase.rpc("ops_semear_listas", { _org_id: orgId });
+  const { data, error } = await supabase
+    .from("ops_motivo_pausa")
+    .select("id, nome, funcoes, exige_retoma, ativo, posicao")
+    .eq("organization_id", orgId)
+    .order("posicao");
+
+  // Numa instalação onde `db/listas-operacao.sql` ainda não correu, a tabela
+  // não existe. O separador inteiro não pode partir por causa disso — mostra
+  // a lista vazia, e enche quando o SQL correr.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem motivos de pausa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as MotivoDePausaCompleto[];
+}
+
+export async function gravarMotivoDePausa(m: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  funcoes: string[];
+  exigeRetoma?: boolean;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_motivo_pausa", {
+    p_org_id: m.orgId,
+    p_nome: m.nome,
+    p_funcoes: m.funcoes,
+    p_exige_retoma: m.exigeRetoma ?? true,
+    p_id: m.id ?? null,
+    p_ativo: m.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "motivo de pausa"));
+}
+
+export interface Area {
+  id: string;
+  nome: string;
+  ativo: boolean;
+  tipos: { id: string; nome: string; ativo: boolean }[];
+}
+
+export async function listarAreas(orgId: string): Promise<Area[]> {
+  await supabase.rpc("ops_semear_listas", { _org_id: orgId });
+
+  const [{ data: as, error: e1 }, { data: ts, error: e2 }] = await Promise.all([
+    supabase
+      .from("ops_area")
+      .select("id, nome, ativo, posicao")
+      .eq("organization_id", orgId)
+      .order("posicao"),
+    supabase
+      .from("ops_area_tipo")
+      .select("id, area_id, nome, ativo, posicao")
+      .order("posicao"),
+  ]);
+
+  if (e1 ?? e2) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem áreas:", (e1 ?? e2)?.message);
+    return [];
+  }
+
+  const porArea = new Map<string, Area["tipos"]>();
+  for (const t of (ts ?? []) as { id: string; area_id: string; nome: string; ativo: boolean }[]) {
+    const lista = porArea.get(t.area_id) ?? [];
+    lista.push({ id: t.id, nome: t.nome, ativo: t.ativo });
+    porArea.set(t.area_id, lista);
+  }
+
+  return ((as ?? []) as { id: string; nome: string; ativo: boolean }[]).map((a) => ({
+    ...a,
+    tipos: porArea.get(a.id) ?? [],
+  }));
+}
+
+export async function gravarArea(a: {
+  orgId: string;
+  id?: string | null;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_area", {
+    p_org_id: a.orgId,
+    p_nome: a.nome,
+    p_id: a.id ?? null,
+    p_ativo: a.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "área"));
+}
+
+export async function gravarTipoDeArea(t: {
+  areaId: string;
+  id?: string | null;
+  nome: string;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_area_tipo", {
+    p_area_id: t.areaId,
+    p_nome: t.nome,
+    p_id: t.id ?? null,
+    p_ativo: t.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "tipo"));
+}
+
+/* ───────────────── Os nomes que a empresa dá às listas ───────────────── */
+
+
+/**
+ * O que esta organização renomeou, reordenou ou escondeu.
+ *
+ * Uma organização que nunca abriu este ecrã devolve lista vazia — e é
+ * exatamente isso que faz `opcoesDaLista` cair nos nomes do código.
+ */
+export async function listarRotulos(orgId: string): Promise<RotuloGravado[]> {
+  const { data, error } = await supabase
+    .from("ops_rotulo")
+    .select("lista, valor, nome, ordem, ativo")
+    .eq("organization_id", orgId);
+  // Sem rótulos a aplicação funciona na mesma. Um erro aqui não pode deixar
+  // ninguém sem caixas de escolha.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem rótulos próprios:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as RotuloGravado[];
+}
+
+export async function gravarRotulo(r: {
+  orgId: string;
+  lista: Lista;
+  valor: string;
+  nome: string;
+  ordem?: number | null;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_rotulo", {
+    p_org_id: r.orgId,
+    p_lista: r.lista,
+    p_valor: r.valor,
+    p_nome: r.nome,
+    p_ordem: r.ordem ?? null,
+    p_ativo: r.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "nome"));
+}
+
+/** Voltar aos nomes de origem. Apaga as linhas; o código volta a mandar. */
+export async function reporRotulos(orgId: string, lista?: Lista): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_repor_rotulos", {
+    p_org_id: orgId,
+    p_lista: lista ?? null,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "nome"));
+}
+
+/* ─────────────────────── Especialidades (escrita) ─────────────────────── */
+
+export async function gravarEspecialidade(e: {
+  orgId: string;
+  nome: string;
+  id?: string | null;
+  ativo?: boolean;
+}): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_gravar_skill", {
+    p_org_id: e.orgId,
+    p_nome: e.nome,
+    p_id: e.id ?? null,
+    p_ativo: e.ativo ?? true,
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "especialidade"));
+}
+
+/**
+ * As especialidades de uma pessoa, todas de uma vez.
+ *
+ * Manda-se o conjunto inteiro e não uma de cada vez: assim não há o estado a
+ * meio de "tirei uma, ainda não pus a outra", que no filtro da agenda dá uma
+ * pessoa a desaparecer sem ninguém perceber porquê.
+ */
+export async function especialidadesDaPessoa(
+  orgId: string,
+  utilizadorId: string,
+  skills: readonly string[]
+): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_skills_do_utilizador", {
+    p_org_id: orgId,
+    p_utilizador_id: utilizadorId,
+    p_skills: [...skills],
+  });
+  if (error) throw new ErroDeEscrita(traduzir(error.message, "especialidade"));
 }

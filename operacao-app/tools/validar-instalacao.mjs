@@ -1,10 +1,16 @@
 /**
  * Corre a SEQUÊNCIA DE INSTALAÇÃO inteira contra um Postgres limpo:
  *
- *     schema.sql → permissoes.sql → rpcs.sql → rpcs-tarefas.sql
+ *     schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql
+ *                 → rpcs-tarefas.sql
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
- *                 → despacho.sql → orcamentos.sql → anexos.sql
- *                 → planos-crud.sql → config.sql → custos.sql → cliente-crm.sql
+ *                 → agenda.sql → despacho.sql → orcamentos.sql → anexos.sql
+ *                 → assinaturas.sql → mapa.sql
+ *                 → relatorio-automatico.sql → relatorio-manual.sql → campos-ordem.sql → duplicar.sql → tarefas-na-ordem.sql
+ *                 → documentos-e-ativos.sql
+ *                 → listas-operacao.sql → listas-configuraveis.sql → mensagens.sql
+ *                 → planos-crud.sql → config.sql → packs.sql → custos.sql
+ *                 → analises.sql → cliente-crm.sql
  *                 → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
@@ -97,6 +103,12 @@ await passo("db/schema.sql outra vez (idempotência)", ler("schema.sql"));
 await passo("db/permissoes.sql", ler("permissoes.sql"));
 await passo("db/permissoes.sql outra vez (idempotência)", ler("permissoes.sql"));
 
+// Antes das RPCs, porque são elas que chamam ops_notificar(). A chamada está
+// atrás de um to_regprocedure, por isso a ordem não parte nada — mas fora de
+// ordem os avisos ficam por enviar, e isso não dá erro nenhum.
+await passo("db/notificacoes.sql", ler("notificacoes.sql"));
+await passo("db/notificacoes.sql outra vez (idempotência)", ler("notificacoes.sql"));
+
 // A lógica na base: RPCs, triggers, planos, e as correções ao modelo.
 // A ordem importa — correcoes-modelo.sql substitui funções que planos.sql cria.
 await passo("db/rpcs.sql", ler("rpcs.sql"));
@@ -106,18 +118,46 @@ await passo("db/correcoes-modelo.sql", ler("correcoes-modelo.sql"));
 await passo("db/correcoes-modelo.sql outra vez (idempotência)", ler("correcoes-modelo.sql"));
 await passo("db/medicoes.sql", ler("medicoes.sql"));
 await passo("db/medicoes.sql outra vez (idempotência)", ler("medicoes.sql"));
+await passo("db/agenda.sql", ler("agenda.sql"));
+await passo("db/agenda.sql outra vez (idempotência)", ler("agenda.sql"));
 await passo("db/despacho.sql", ler("despacho.sql"));
 await passo("db/despacho.sql outra vez (idempotência)", ler("despacho.sql"));
 await passo("db/orcamentos.sql", ler("orcamentos.sql"));
 await passo("db/orcamentos.sql outra vez (idempotência)", ler("orcamentos.sql"));
 await passo("db/anexos.sql", ler("anexos.sql"));
 await passo("db/anexos.sql outra vez (idempotência)", ler("anexos.sql"));
+await passo("db/assinaturas.sql", ler("assinaturas.sql"));
+await passo("db/assinaturas.sql outra vez (idempotência)", ler("assinaturas.sql"));
+await passo("db/mapa.sql", ler("mapa.sql"));
+await passo("db/mapa.sql outra vez (idempotência)", ler("mapa.sql"));
+await passo("db/relatorio-automatico.sql", ler("relatorio-automatico.sql"));
+await passo("db/relatorio-automatico.sql outra vez (idempotência)", ler("relatorio-automatico.sql"));
+await passo("db/campos-ordem.sql", ler("campos-ordem.sql"));
+await passo("db/campos-ordem.sql outra vez (idempotência)", ler("campos-ordem.sql"));
+await passo("db/duplicar.sql", ler("duplicar.sql"));
+await passo("db/duplicar.sql outra vez (idempotência)", ler("duplicar.sql"));
+await passo("db/tarefas-na-ordem.sql", ler("tarefas-na-ordem.sql"));
+await passo("db/tarefas-na-ordem.sql outra vez (idempotência)", ler("tarefas-na-ordem.sql"));
+await passo("db/documentos-e-ativos.sql", ler("documentos-e-ativos.sql"));
+await passo("db/documentos-e-ativos.sql outra vez (idempotência)", ler("documentos-e-ativos.sql"));
+await passo("db/listas-operacao.sql", ler("listas-operacao.sql"));
+await passo("db/listas-operacao.sql outra vez (idempotência)", ler("listas-operacao.sql"));
+await passo("db/listas-configuraveis.sql", ler("listas-configuraveis.sql"));
+await passo("db/listas-configuraveis.sql outra vez (idempotência)", ler("listas-configuraveis.sql"));
+await passo("db/mensagens.sql", ler("mensagens.sql"));
+await passo("db/mensagens.sql outra vez (idempotência)", ler("mensagens.sql"));
+await passo("db/relatorio-manual.sql", ler("relatorio-manual.sql"));
+await passo("db/relatorio-manual.sql outra vez (idempotência)", ler("relatorio-manual.sql"));
 await passo("db/planos-crud.sql", ler("planos-crud.sql"));
 await passo("db/planos-crud.sql outra vez (idempotência)", ler("planos-crud.sql"));
 await passo("db/config.sql", ler("config.sql"));
 await passo("db/config.sql outra vez (idempotência)", ler("config.sql"));
+await passo("db/packs.sql", ler("packs.sql"));
+await passo("db/packs.sql outra vez (idempotência)", ler("packs.sql"));
 await passo("db/custos.sql", ler("custos.sql"));
 await passo("db/custos.sql outra vez (idempotência)", ler("custos.sql"));
+await passo("db/analises.sql", ler("analises.sql"));
+await passo("db/analises.sql outra vez (idempotência)", ler("analises.sql"));
 await passo("db/cliente-crm.sql", ler("cliente-crm.sql"));
 await passo("db/cliente-crm.sql outra vez (idempotência)", ler("cliente-crm.sql"));
 
@@ -302,6 +342,35 @@ console.log("\n─── depois de remover a demo ──────────
     : mau(
         `a remoção da demo mexeu no CRM: ${JSON.stringify(crmAntesDaRemocao)} → ${JSON.stringify(crmDepois)}`
       );
+}
+
+// ── Voltar a correr um ficheiro sozinho, numa base já completa ──────────
+//
+// É isto que se faz a sério: um ficheiro muda, e cola-se SÓ esse no SQL Editor
+// do Supabase, numa base que já tem tudo o resto.
+//
+// A sequência de cima NÃO apanha este caso. Correu correcoes-modelo.sql antes de
+// orcamentos.sql, e o bloco de verificação desse ficheiro contava todas as
+// tabelas `ops_*` e comparava com 26 — o número certo naquele instante. Numa
+// base completa dá 27, e o ficheiro inteiro fazia rollback com "Esperadas 26
+// tabelas ops_*, encontradas 27". Foi assim que rebentou em produção.
+//
+// Um ficheiro que não se pode voltar a correr não serve para nada.
+
+console.log("\n─── cada ficheiro sozinho, numa base completa ─");
+
+for (const f of [
+  "schema.sql", "permissoes.sql", "notificacoes.sql", "rpcs.sql", "rpcs-tarefas.sql",
+  "planos.sql", "correcoes-modelo.sql", "medicoes.sql", "agenda.sql", "despacho.sql",
+  "orcamentos.sql", "anexos.sql", "assinaturas.sql", "mapa.sql", "relatorio-automatico.sql", "relatorio-manual.sql", "campos-ordem.sql", "duplicar.sql", "tarefas-na-ordem.sql", "documentos-e-ativos.sql", "listas-operacao.sql", "listas-configuraveis.sql", "mensagens.sql", "planos-crud.sql", "config.sql", "custos.sql",
+  "packs.sql", "analises.sql", "cliente-crm.sql",
+]) {
+  try {
+    await db.exec(ler(f));
+    ok(`db/${f} volta a correr sozinho`);
+  } catch (e) {
+    mau(`db/${f} não volta a correr: ${e.message.split("\n")[0]}`);
+  }
 }
 
 // ── Veredicto ────────────────────────────────────────────────────────────

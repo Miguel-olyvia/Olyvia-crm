@@ -11,12 +11,16 @@ import Ordens from "./pages/Ordens";
 // arranque leve para quem abre a app no telemóvel, em obra.
 const OrdemDetalhe = lazy(() => import("./pages/OrdemDetalhe"));
 const Locais = lazy(() => import("./pages/Locais"));
+const LocalDetalhe = lazy(() => import("./pages/LocalDetalhe"));
+const AtivoDetalhe = lazy(() => import("./pages/AtivoDetalhe"));
 const NovaOrdem = lazy(() => import("./pages/NovaOrdem"));
 const Orcamentos = lazy(() => import("./pages/Orcamentos"));
 const Relatorio = lazy(() => import("./pages/Relatorio"));
 const Planos = lazy(() => import("./pages/Planos"));
 const Definicoes = lazy(() => import("./pages/Definicoes"));
 const AjudaPagina = lazy(() => import("./pages/Ajuda"));
+const Analises = lazy(() => import("./pages/Analises"));
+const Agenda = lazy(() => import("./pages/Agenda"));
 
 export default function App() {
   return (
@@ -89,10 +93,43 @@ export default function App() {
           }
         />
         <Route
+          path="/agenda"
+          element={
+            <Suspense fallback={<Spinner label="A montar o dia…" />}>
+              <Agenda />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/analises"
+          element={
+            <Suspense fallback={<Spinner label="A somar o que já está gravado…" />}>
+              <Analises />
+            </Suspense>
+          }
+        />
+        <Route
           path="/locais"
           element={
             <Suspense fallback={<Spinner label="A carregar os locais…" />}>
               <Locais />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/locais/:codigo"
+          element={
+            <Suspense fallback={<Spinner label="A carregar o local…" />}>
+              <LocalDetalhe />
+            </Suspense>
+          }
+        />
+        {/* O destino das etiquetas QR. Quem aponta a câmara aterra aqui. */}
+        <Route
+          path="/ativos/:codigo"
+          element={
+            <Suspense fallback={<Spinner label="A carregar o equipamento…" />}>
+              <AtivoDetalhe />
             </Suspense>
           }
         />

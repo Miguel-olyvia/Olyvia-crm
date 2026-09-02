@@ -84,8 +84,39 @@ export const MapPin = (p: IconProps) => (
   </svg>
 );
 
+export const Mail = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3.5 7 7.6 5.4a1.6 1.6 0 0 0 1.8 0L20.5 7" />
+  </svg>
+);
+
+export const Robo = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <path d="M12 4v4" />
+    <circle cx="9" cy="14" r="1.2" />
+    <circle cx="15" cy="14" r="1.2" />
+  </svg>
+);
+
+export const Copiar = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
 export const Clock = (p: IconProps) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.2 2" /></svg>
+);
+
+export const Calendario = (p: IconProps) => (
+  <svg {...base(p)}><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M8 3v4" /><path d="M16 3v4" /></svg>
+);
+
+export const Grafico = (p: IconProps) => (
+  <svg {...base(p)}><path d="M3 3v18h18" /><path d="M7 15v3" /><path d="M12 10v8" /><path d="M17 6v12" /></svg>
 );
 
 export const Play = (p: IconProps) => (
@@ -162,10 +193,57 @@ export const Inbox = (p: IconProps) => (
   </svg>
 );
 
+export const Mensagens = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M20 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9Z" />
+  </svg>
+);
+
+/** Um QR code, para as etiquetas dos equipamentos. */
+export const QrCode = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+    <path d="M14 14h3v3h-3zM20 14v0M14 20v0M20 20v0" />
+  </svg>
+);
+
+/** Uma chave de fendas — a reparação que nasce de uma inspeção. */
+export const Ferramenta = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M14.7 6.3a4 4 0 0 0 5 5l-8.4 8.4a2.4 2.4 0 0 1-3.4-3.4l8.4-8.4Z" />
+    <path d="M15 5.5 18.5 2 22 5.5 18.5 9" />
+  </svg>
+);
+
+/** Um telemóvel — a parte que decide se a equipa usa isto ou não. */
+export const Telemovel = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="6" y="2" width="12" height="20" rx="2.5" />
+    <path d="M11 18.5h2" />
+  </svg>
+);
+
 export const Ajuda = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="9" />
     <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
     <path d="M12 17h.01" />
+  </svg>
+);
+
+/** O sino. O mesmo do CRM, para se reconhecer sem se pensar. */
+export const Sino = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+  </svg>
+);
+
+/** O funil dos filtros. Três traços que estreitam — a forma que toda a gente já conhece. */
+export const Listar = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 5h18M6 12h12M10 19h4" />
   </svg>
 );
