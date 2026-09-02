@@ -150,11 +150,6 @@ interface ContactResultConfig {
   color: string;
 }
 
-interface ClientOption {
-  id: string;
-  entity_id: string | null;
-}
-
 // Contact fields available for mapping - labels will be translated via t()
 const CONTACT_FIELD_KEYS = [
   { value: "", labelKey: "leads.fields.noMapping" },
@@ -576,8 +571,6 @@ export default function AnewLeads() {
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   
   // Contact/Client association state
-  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
-  const [searchingClients, setSearchingClients] = useState(false);
   
   // Column customization state — initialized from the default set (rather
   // than []) so the table doesn't render with only the fixed checkbox/Ações
@@ -2443,58 +2436,6 @@ export default function AnewLeads() {
   });
 
   // Debounce timers for search inputs (300ms) — cancels pending query on each keystroke
-  const searchClientsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Search clients for association
-  const searchClients = (query: string) => {
-    if (searchClientsTimer.current) clearTimeout(searchClientsTimer.current);
-    if (!query || query.length < 2) {
-      setClientOptions([]);
-      return;
-    }
-    searchClientsTimer.current = setTimeout(async () => {
-      setSearchingClients(true);
-      // First resolve entity IDs matching the query, then find associated clients
-      const { ids: matchingEntityIds } = await searchEntityIds(query);
-      if (matchingEntityIds.length === 0) {
-        setClientOptions([]);
-        setSearchingClients(false);
-        return;
-      }
-      const { data } = await supabase
-        .from("anew_clients")
-        .select("id, entity_id")
-        .eq("organization_id", activeCompanyId)
-        .in("entity_id", matchingEntityIds)
-        .limit(10);
-      const results = (data || []).map((c: any) => ({ id: c.id, entity_id: c.entity_id }));
-      const eIds = results.map((r: any) => r.entity_id).filter(Boolean);
-      if (eIds.length > 0) await resolveEntities(eIds);
-      setClientOptions(results as ClientOption[]);
-      setSearchingClients(false);
-    }, 300);
-  };
-
-  // Associate lead with contact (uses converted_to_contact_id → anew_contacts).
-  // Associate lead with client (uses converted_to_client_id → anew_clients).
-  // Legacy column client_id references the deprecated `clients` table and must not be used.
-  const handleAssociateClient = async (leadId: string, clientId: string | null) => {
-    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    try {
-      await withAuditContext(supabase, auditUserId, async () => {
-        const { error } = await supabase
-          .from("anew_leads")
-          .update({ converted_to_client_id: clientId } as any)
-          .eq("id", leadId);
-        if (error) throw error;
-      });
-      toast({ title: clientId ? t('leads.toast.clientAssociated') : t('leads.toast.clientRemoved') });
-      refreshSingleLead(leadId);
-    } catch (error: any) {
-      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
-    }
-  };
-
   // Load reference data for fields that store IDs (ref_district, ref_company, etc.)
   const loadReferenceData = async (fields: FieldDefinition[]) => {
     const refFields = fields.filter(f => f.field_type.startsWith('ref_'));
@@ -5876,8 +5817,6 @@ export default function AnewLeads() {
                         resolveFieldValue={resolveFieldValue}
                         deals={leadDetailDeals}
                         nextAction={nextAction}
-                        clientAssociation={selectedLead.clients}
-                        getIdentity={getIdentity}
                         onCreateDeal={async () => {
                           if (!selectedLead || !activeCompanyId) return;
                           const result = await createDealFromLead({
@@ -5896,11 +5835,6 @@ export default function AnewLeads() {
                           setShowDetails(false);
                           openContactDialogForLead(selectedLead);
                         }}
-                        clientOptions={clientOptions}
-                        searchingClients={searchingClients}
-                        onSearchClients={searchClients}
-                        onAssociateClient={handleAssociateClient}
-                        leadId={selectedLead.id}
                       />
                     </TabsContent>
 
