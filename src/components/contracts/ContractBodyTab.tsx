@@ -14,7 +14,7 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -120,7 +120,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       }
       const { error } = await (supabase as any)
         .from("client_contracts")
-        .update({ contract_body_html: html })
+        // Regenerar (ou guardar o corpo a mao) e a UNICA forma de mudar um
+        // contrato assinado, e tem de ser pedida por alguem. Descongela-se: a
+        // proxima leitura produz o documento de novo e volta a congela-lo.
+        .update({ contract_body_html: html, ...UNFREEZE_CONTRACT_COLUMNS })
         .eq("id", contract.id);
       if (error) throw error;
     },
@@ -308,6 +311,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: signerName,
           company_signed_by_id: anewUser?.id || user.id,
+          // Assinar MUDA o documento (a assinatura passa a fazer parte dele).
+          // Descongela-se para a proxima leitura o reconstruir ja com ela --
+          // sem isto, uma empresa que assine depois do cliente ficaria com a
+          // sua assinatura de fora do documento congelado.
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
         .eq("id", contract.id);
 
@@ -343,6 +351,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: templateSignatoryUser.name || "Representante",
           company_signed_by_id: templateSignatoryUser.id,
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
         .eq("id", contract.id);
 
