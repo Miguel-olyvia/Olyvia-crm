@@ -291,7 +291,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // 6. Resolve existing lead + merged field values
-    let lead: { id: string } | null = null;
+    let lead: { id: string; assigned_to?: string | null } | null = null;
     let entityId: string | null = null;
     let mergedFieldValues: Record<string, any> = field_values;
 
@@ -334,7 +334,7 @@ Deno.serve(async (req: Request) => {
     if (leadIdToUse) {
       const { data: existingLead, error: existingLeadError } = await supabase
         .from('anew_leads')
-        .select('id, entity_id, field_values, root_organization_id')
+        .select('id, entity_id, field_values, root_organization_id, assigned_to')
         .eq('id', leadIdToUse)
         .eq('organization_id', organizationId)
         .maybeSingle();
@@ -346,7 +346,7 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      lead = { id: existingLead.id };
+      lead = { id: existingLead.id, assigned_to: existingLead.assigned_to ?? null };
       entityId = existingLead.entity_id;
       rootOrganizationId = existingLead.root_organization_id || rootOrganizationId;
 
@@ -582,7 +582,16 @@ Deno.serve(async (req: Request) => {
     if (district_id) {
       leadUpdate.lead_district_id = district_id;
     }
-    if (assignedToAnewId) {
+    // NUNCA por cima de um dono que ja existe.
+    //
+    // Ate haver deduplicacao, a lead que chegava aqui era sempre nova e sem
+    // dono, por isso atribui-la ao tecnico da visita nao tirava nada a
+    // ninguem. Agora a visita pode cair numa lead que JA e de alguem -- e
+    // escrever por cima roubava-lha, sem aviso: quem a trabalhava deixava de a
+    // ver na sua lista de um momento para o outro.
+    //
+    // Sem dono, mantem-se o comportamento de sempre.
+    if (assignedToAnewId && !lead.assigned_to) {
       leadUpdate.assigned_to = assignedToAnewId;
     }
     if (lead_id) {
