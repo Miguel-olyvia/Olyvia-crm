@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, FileText, Link2, Lock, Mail, Phone } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FileText, Link2, Mail, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -86,7 +86,7 @@ interface PendingSubmissionRow {
  * A RPC mantém o ramo `new_lead` (é dela, e outros caminhos podem precisar);
  * o que se retira é o botão que o chamava daqui.
  */
-type PendingAction = { submission: PendingSubmissionRow; action: "merge" } | null;
+type PendingAction = { submission: PendingSubmissionRow; action: "merge"; entityId?: string } | null;
 
 /**
  * A fila mostra TODAS as submissões por resolver, não só as duvidosas.
@@ -186,7 +186,7 @@ interface ConflictCandidatesProps {
   candidates: ConflictCandidate[];
   linkedEntityId: string;
   canResolve: boolean;
-  onMergeLinked: () => void;
+  onChoose: (entityId: string) => void;
 }
 
 /**
@@ -200,7 +200,7 @@ interface ConflictCandidatesProps {
  * outra fase. Até lá o botão dessa candidata está desativado e diz porquê, em
  * vez de fingir uma escolha que a base de dados não executa.
  */
-function ConflictCandidates({ candidates, linkedEntityId, canResolve, onMergeLinked }: ConflictCandidatesProps) {
+function ConflictCandidates({ candidates, linkedEntityId, canResolve, onChoose }: ConflictCandidatesProps) {
   return (
     <div className="rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 p-3 space-y-3">
       <div className="flex items-center gap-2">
@@ -250,24 +250,17 @@ function ConflictCandidates({ candidates, linkedEntityId, canResolve, onMergeLin
                 )}
               </div>
 
-              {canResolve &&
-                (isLinked ? (
-                  <Button size="sm" variant="outline" className="w-full" onClick={onMergeLinked}>
-                    <Link2 className="h-3.5 w-3.5 mr-1" />
-                    Associar a este registo
-                  </Button>
-                ) : (
-                  <>
-                    <Button size="sm" variant="outline" className="w-full" disabled>
-                      <Lock className="h-3.5 w-3.5 mr-1" />
-                      Associar a este registo
-                    </Button>
-                    <p className="text-[10px] text-muted-foreground leading-snug">
-                      Ainda não disponível: a resolução só sabe associar ao registo encontrado pelo email. Associar a
-                      este exige alterar a base de dados.
-                    </p>
-                  </>
-                ))}
+              {canResolve && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => onChoose(candidate.id)}
+                >
+                  <Link2 className="h-3.5 w-3.5 mr-1" />
+                  É esta pessoa
+                </Button>
+              )}
             </div>
           );
         })}
@@ -440,6 +433,9 @@ export default function PendingFormSubmissions() {
       const { error } = await supabase.rpc("rpc_resolve_form_submission", {
         p_submission_id: pendingAction.submission.id,
         p_action: pendingAction.action,
+        // Sem conflito vai indefinido, e a base usa a entidade da submissao —
+        // exactamente o comportamento de antes.
+        p_entity_id: pendingAction.entityId ?? undefined,
       });
       if (error) throw error;
 
@@ -604,7 +600,7 @@ export default function PendingFormSubmissions() {
                         candidates={row.candidates}
                         linkedEntityId={row.entity_id}
                         canResolve={canResolve}
-                        onMergeLinked={() => setPendingAction({ submission: row, action: "merge" })}
+                        onChoose={(entityId) => setPendingAction({ submission: row, action: "merge", entityId })}
                       />
                     )}
 
@@ -617,7 +613,7 @@ export default function PendingFormSubmissions() {
                             onClick={() => setPendingAction({ submission: row, action: "merge" })}
                           >
                             <Link2 className="h-3.5 w-3.5 mr-1" />
-                            Registar na ficha como nota
+                            {pendingAction?.entityId ? "Escolher esta pessoa" : "Registar na ficha como nota"}
                           </Button>
                         )}
                       </div>
@@ -637,7 +633,9 @@ export default function PendingFormSubmissions() {
               Registar na ficha como nota
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {`Os valores submetidos ficam como nota na ficha de ${pendingAction?.submission.targetName}. Não são gravados nos campos da ficha — quem quiser alterar o email ou o telefone tem de o fazer à mão. A submissão deixa de aparecer nesta lista.`}
+              {pendingAction?.entityId
+                ? "A submissão passa a pertencer a esta pessoa: fica ligada à ficha dela, deixa de estar ligada à outra, e deixa de aparecer marcada como duvidosa. Os valores submetidos ficam como nota nessa ficha. Não há como voltar atrás por aqui."
+                : `Os valores submetidos ficam como nota na ficha de ${pendingAction?.submission.targetName}. Não são gravados nos campos da ficha — quem quiser alterar o email ou o telefone tem de o fazer à mão. A submissão deixa de aparecer nesta lista.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
