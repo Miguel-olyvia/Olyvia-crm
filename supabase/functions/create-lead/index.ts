@@ -1111,13 +1111,18 @@ Deno.serve(async (req) => {
           console.error('[create-lead] notificacao de submissao associada falhou (continuando):', notifyErr);
         }
 
-        // `target_type` da RESPOSTA nao e o da tabela: o frontend usa-o como
-        // chave de continuacao e trata 'lead' como um id de anew_leads (chega a
-        // marcar agendamentos com ele). Uma submissao ligada a uma lead
-        // existente devolve 'submission', que o update-lead encaminha para
-        // form_submissions. 'client' mantem-se para nao partir formularios a
-        // meio ja em curso.
-        const wireTargetType = existingTarget.targetType === 'lead' ? 'submission' : existingTarget.targetType;
+        // A RESPOSTA e sempre igual, tenha-se reconhecido a pessoa ou nao.
+        //
+        // Isto e uma regra de privacidade, nao um detalhe: se aqui saisse
+        // 'submission' quando ha match e 'lead' quando nao ha, qualquer pessoa
+        // que soubesse o email de outra descobria, submetendo o formulario e
+        // olhando para a resposta, se ela e lead ou cliente desta organizacao.
+        // Quem esta do lado de fora do formulario nao deve saber nada.
+        //
+        // O `target_id` continua a ser o id da submissao -- um UUID, que nao
+        // revela nada. O update-lead resolve a tabela certa pelo proprio id,
+        // sem confiar neste rotulo.
+        const wireTargetType = 'lead';
 
         return new Response(
           JSON.stringify({

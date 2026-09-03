@@ -296,10 +296,33 @@ Deno.serve(async (req: Request) => {
     let mergedFieldValues: Record<string, any> = field_values;
 
     if (lead_id) {
+      // O `lead_id` que chega do formulario publico pode nao ser uma lead.
+      //
+      // Quando o formulario reconhece alguem que ja existe, nao nasce lead: a
+      // submissao acumula em form_submissions e e ESSE id que segue como chave
+      // de continuacao -- de proposito, para que a resposta publica seja igual
+      // nos dois casos e ninguem de fora descubra, submetendo, se uma pessoa e
+      // lead ou cliente desta organizacao.
+      //
+      // Sem esta resolucao, essa pessoa apanhava "Lead not found" ao marcar
+      // visita: partia-lhe o formulario E denunciava, pelo erro, aquilo que a
+      // resposta uniforme escondia. Resolve-se para a lead a que a submissao
+      // esta ligada, que e onde a visita deve mesmo ficar marcada.
+      let resolvedLeadId = lead_id;
+      const { data: submissionRow } = await supabase
+        .from('form_submissions')
+        .select('target_type, target_id')
+        .eq('id', lead_id)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      if (submissionRow?.target_type === 'lead' && submissionRow.target_id) {
+        resolvedLeadId = submissionRow.target_id as string;
+      }
+
       const { data: existingLead, error: existingLeadError } = await supabase
         .from('anew_leads')
         .select('id, entity_id, field_values, root_organization_id')
-        .eq('id', lead_id)
+        .eq('id', resolvedLeadId)
         .eq('organization_id', organizationId)
         .maybeSingle();
 

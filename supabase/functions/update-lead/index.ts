@@ -144,8 +144,24 @@ Deno.serve(async (req) => {
       );
     }
 
-    // --- Contact/client target: update form_submissions, never anew_leads/anew_contacts/anew_clients ---
-    if (targetType === "contact" || targetType === "client" || targetType === "submission") {
+    // A resposta publica do create-lead diz SEMPRE `target_type: "lead"`, quer
+    // tenha reconhecido a pessoa quer nao. Sem isso, quem soubesse o email de
+    // alguem descobria, submetendo o formulario e olhando para a resposta, se
+    // essa pessoa e lead ou cliente desta organizacao -- um canal de
+    // enumeracao aberto a qualquer visitante. Ninguem de fora deve saber nada.
+    //
+    // Por isso a continuacao NAO pode confiar no rotulo: resolve-se pelo
+    // proprio id, que e um UUID e nao revela nada. Se existir uma linha em
+    // form_submissions com este id, e uma submissao; caso contrario e lead.
+    const { data: submissionByIdRow } = await supabase
+      .from("form_submissions")
+      .select("id")
+      .eq("id", targetId)
+      .maybeSingle();
+    const isSubmissionTarget = !!submissionByIdRow?.id;
+
+    // --- Submission target: update form_submissions, never anew_leads/anew_contacts/anew_clients ---
+    if (isSubmissionTarget || targetType === "contact" || targetType === "client" || targetType === "submission") {
       const { data: existingSubmission, error: submissionError } = await supabase
         .from("form_submissions")
         .select("*")
