@@ -2076,14 +2076,18 @@ const ClientContracts = () => {
                                       contrato" e entregava a lista de todas, deixando a pessoa a
                                       procurar o que já tinha à frente. As duas páginas já sabiam
                                       abrir um registo por `?open=`; faltava passar-lho.
-                                      Desactivados quando o contrato não tem nenhum ligado — dos
-                                      244 contratos, 243 têm proposta. */}
+                                      "Ver orçamentos" só fica activo se houver mesmo orçamentos
+                                      para mostrar: ou um ligado ao contrato, ou a proposta dele a
+                                      ter algum. Ligá-lo a "tem proposta" deixava-o activo em 135
+                                      contratos cuja proposta não tem orçamento nenhum, e abria
+                                      uma lista vazia sem dizer que estava filtrada — quem lá
+                                      chegava concluía que os orçamentos tinham desaparecido. */}
                                   <DropdownMenuItem
                                     disabled={!contract.proposal_id}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
                                     onClick={() => navigate(
                                       contract.quote_id
                                         ? `/quotes?open=${contract.quote_id}`
@@ -2137,7 +2141,7 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
                                     onClick={() => navigate(
                                       contract.quote_id
                                         ? `/quotes?open=${contract.quote_id}`
@@ -2184,7 +2188,7 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
                                     onClick={() => navigate(
                                       contract.quote_id
                                         ? `/quotes?open=${contract.quote_id}`
@@ -2227,7 +2231,7 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
                                     onClick={() => navigate(
                                       contract.quote_id
                                         ? `/quotes?open=${contract.quote_id}`
