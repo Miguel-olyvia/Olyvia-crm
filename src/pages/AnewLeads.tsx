@@ -57,7 +57,7 @@ import {
   Search, Plus, RefreshCw, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
   LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Link2, Unlink,
-  Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
+  Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash,
   Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload, Columns3
 } from "lucide-react";
 import {
@@ -97,7 +97,7 @@ import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useEntityIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, resolveEntityByIdentity, validateEntityCoherence, type EntityIdentity } from "@/hooks/useEntityIdentity";
 import { NativeSelect } from "@/components/ui/native-select";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
 import { DuplicateEntityDialog } from "@/components/shared/DuplicateEntityDialog";
@@ -767,6 +767,12 @@ export default function AnewLeads() {
   const [conversionLead, setConversionLead] = useState<Lead | null>(null);
   const [conversionType, setConversionType] = useState<'client'>('client');
   const [conversionCampaignId, setConversionCampaignId] = useState<string>("");
+  // A ficha da pessoa que o dialogo de conversao mostra. Guardada em estado
+  // proprio -- e nao lida do formulario -- porque e a ficha que sobrevive a
+  // conversao: a rpc_convert_lead_to_client nao escreve nome, email nem
+  // telefone em lado nenhum.
+  const [conversionIdentity, setConversionIdentity] = useState<EntityIdentity | null>(null);
+  const [conversionIdentityLoading, setConversionIdentityLoading] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const conversionLockRef = useRef(false);
 
@@ -2869,7 +2875,21 @@ export default function AnewLeads() {
     setConversionLead(lead);
     setConversionType(type);
     setConversionCampaignId(lead.campaign_id || "");
+
+    const cached = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    setConversionIdentity(cached);
     setShowConversionDialog(true);
+
+    // A ficha pode ainda nao estar em cache (lead aberta por link directo, por
+    // exemplo). Vale a pena ir busca-la: dizer "sem nome na ficha" por falta de
+    // leitura seria a mesma mentira que adivinhar o nome pelo formulario.
+    if (lead.entity_id && !cached) {
+      const entityId = lead.entity_id;
+      setConversionIdentityLoading(true);
+      resolveEntities([entityId])
+        .then(map => setConversionIdentity(map[entityId] || null))
+        .finally(() => setConversionIdentityLoading(false));
+    }
   };
 
   // Execute the actual conversion to client (converting to "contact" no longer
@@ -6407,6 +6427,7 @@ export default function AnewLeads() {
           if (!open) {
             setShowConversionDialog(false);
             setConversionLead(null);
+            setConversionIdentity(null);
           }
         }}>
           <DialogContent className="max-w-md">
@@ -6416,88 +6437,86 @@ export default function AnewLeads() {
             
             <div className="space-y-4 py-4">
               <p className="text-sm text-muted-foreground">
-                Os seguintes dados serão utilizados na conversão:
+                Estes são os dados da ficha da pessoa. A conversão muda o papel — não altera nenhum deles:
               </p>
 
               {conversionLead && (() => {
-                // Extract the data that will be converted using auto-mapping
-                const fieldValues = conversionLead.field_values || {};
-                const CONV_ALIASES: Record<string, string[]> = {
-                  name: ['name', 'nome', 'full_name', 'nome_completo', 'first_name', 'primeiro_nome', 'client_name', 'nome_cliente', 'contacto', 'contact_name', 'first_name', 'last_name', 'primeironome', 'ultimonome', 'firstname', 'lastname'],
-                  email: ['email', 'e-mail', 'email_address', 'endereco_email', 'correio_eletronico', 'mail', 'e_mail', 'correio'],
-                  phone: ['phone', 'telefone', 'phone_number', 'numero_telefone', 'tel', 'telemovel', 'mobile', 'celular', 'contacto_telefonico', 'telemóvel', 'cellphone', 'cel', 'contacto'],
-                  vat: ['vat', 'nif', 'contribuinte', 'fiscal', 'tax_id', 'taxid', 'numero_contribuinte'],
-                  address: ['address', 'morada', 'endereco', 'rua', 'endereço', 'street'],
-                  city: ['city', 'cidade', 'localidade', 'concelho'],
-                  postal_code: ['postal_code', 'codigo_postal', 'cp', 'cep', 'postalcode', 'zip', 'zipcode'],
-                  district: ['district', 'distrito', 'regiao', 'região', 'provincia'],
-                  position: ['position', 'cargo', 'funcao', 'job_title', 'profissao'],
-                };
-                
-                const normalize = (str: string): string => str.toLowerCase().replace(/[-_\s]/g, '');
-                
-                const findFieldValue = (aliases: string[]): string | null => {
-                  const normalizedAliases = aliases.map(normalize);
-                  for (const key of Object.keys(fieldValues)) {
-                    if (key === '_meta') continue;
-                    const normalizedKey = normalize(key);
-                    if (normalizedAliases.some(alias => normalizedKey === alias || normalizedKey.includes(alias) || alias.includes(normalizedKey))) {
-                      const value = fieldValues[key];
-                      if (value && typeof value === 'object' && !Array.isArray(value)) {
-                        // Format address objects
-                        const addr = value as Record<string, any>;
-                        const parts = [
-                          [addr.street || addr.rua, addr.number || addr.numero].filter(Boolean).join(' '),
-                          addr.floor || addr.andar || null,
-                          [addr.postal_code || addr.codigo_postal, addr.city || addr.cidade].filter(Boolean).join(' '),
-                        ].filter(Boolean);
-                        return parts.join(', ') || null;
-                      }
-                      if (value && typeof value === 'string' && value.trim()) {
-                        return value.trim();
-                      }
-                    }
-                  }
-                  return null;
-                };
-                
-                const extractedName = findFieldValue(CONV_ALIASES.name);
-                const extractedEmail = findFieldValue(CONV_ALIASES.email);
-                const extractedPhone = findFieldValue(CONV_ALIASES.phone);
-                const extractedVat = findFieldValue(CONV_ALIASES.vat);
-                const extractedAddress = findFieldValue(CONV_ALIASES.address);
-                const extractedCity = findFieldValue(CONV_ALIASES.city);
-                const extractedPostalCode = findFieldValue(CONV_ALIASES.postal_code);
-                const extractedDistrict = findFieldValue(CONV_ALIASES.district);
-                const extractedPosition = findFieldValue(CONV_ALIASES.position);
-                
-                const hasAddressInfo = extractedAddress || extractedCity || extractedPostalCode;
-                const fullAddress = [extractedAddress, extractedPostalCode, extractedCity].filter(Boolean).join(', ');
+                // O que aqui aparece TEM de ser o que fica gravado. Ate 2026-09-03
+                // este bloco adivinhava nome, email, telefone e morada a partir dos
+                // `field_values` do formulario, com listas de sinonimos. Isso deixou
+                // de ser verdade quando a conversao deixou de escrever na pessoa: o
+                // dialogo mostrava "EmbedTracking" e a ficha mantinha outro nome. Um
+                // pedido de confirmacao que mostra o valor errado e pior do que nao
+                // mostrar nada -- da confianca falsa a quem confirma.
+                const identity = conversionIdentity;
 
-                const InfoRow = ({ icon: Icon, label, value }: { icon: any; label: string; value: string | null }) => (
+                // O nome da ficha: `display_name` primeiro, com first/last como
+                // recurso para fichas antigas onde o display ficou por preencher.
+                const nomeDaFicha =
+                  identity?.display_name?.trim() ||
+                  [identity?.first_name, identity?.last_name].filter(Boolean).join(' ').trim() ||
+                  null;
+
+                const telefoneDaFicha = identity?.phone
+                  ? [identity.phone_country_code, identity.phone].filter(Boolean).join(' ')
+                  : null;
+
+                const moradaDaFicha =
+                  [identity?.address, identity?.postal_code, identity?.city]
+                    .filter(Boolean)
+                    .join(', ') || null;
+
+                const isEmpresa = identity?.type === 'company';
+
+                const InfoRow = ({ icon: Icon, label, value, emptyLabel }: { icon: any; label: string; value: string | null; emptyLabel: string }) => (
                   <div className="flex items-center gap-3">
                     <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <div>
                       <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-sm font-medium">{value || <span className="text-muted-foreground italic">Não encontrado</span>}</p>
+                      <p className="text-sm font-medium">
+                        {value || <span className="text-muted-foreground italic">{emptyLabel}</span>}
+                      </p>
                     </div>
                   </div>
                 );
-                
+
+                if (conversionIdentityLoading) {
+                  return (
+                    <div className="p-4 bg-muted rounded-lg">
+                      <p className="text-sm text-muted-foreground">A ler a ficha da pessoa...</p>
+                    </div>
+                  );
+                }
+
+                // Sem entidade nao ha ficha nenhuma para mostrar. Dizemo-lo, em vez
+                // de cair para o formulario.
+                if (!conversionLead.entity_id || !identity) {
+                  return (
+                    <div className="p-4 bg-muted rounded-lg">
+                      <p className="text-sm text-muted-foreground italic">
+                        Esta lead não tem ficha de pessoa associada.
+                      </p>
+                    </div>
+                  );
+                }
+
                 return (
                   <div className="p-4 bg-muted rounded-lg space-y-3">
-                    <InfoRow icon={User} label="Nome" value={extractedName} />
-                    <InfoRow icon={Mail} label="Email" value={extractedEmail} />
-                    <InfoRow icon={Phone} label="Telefone" value={extractedPhone} />
-                    {extractedVat && <InfoRow icon={Hash} label="NIF" value={extractedVat} />}
-                    {extractedPosition && <InfoRow icon={Briefcase} label="Cargo" value={extractedPosition} />}
-                    {hasAddressInfo && <InfoRow icon={MapPin} label="Morada" value={fullAddress} />}
-                    {extractedDistrict && <InfoRow icon={MapPin} label="Distrito" value={extractedDistrict} />}
-                    
+                    <InfoRow
+                      icon={isEmpresa ? Building2 : User}
+                      label={isEmpresa ? 'Empresa' : 'Nome'}
+                      value={nomeDaFicha}
+                      emptyLabel="sem nome na ficha"
+                    />
+                    <InfoRow icon={Mail} label="Email" value={identity.email} emptyLabel="sem email na ficha" />
+                    <InfoRow icon={Phone} label="Telefone" value={telefoneDaFicha} emptyLabel="sem telefone na ficha" />
+                    {identity.vat && <InfoRow icon={Hash} label="NIF" value={identity.vat} emptyLabel="sem NIF na ficha" />}
+                    {moradaDaFicha && <InfoRow icon={MapPin} label="Morada" value={moradaDaFicha} emptyLabel="sem morada na ficha" />}
+
                     {conversionLead.campaign_id && (
                       <div className="pt-2 mt-2 border-t">
                         <p className="text-xs text-muted-foreground">
-                          Campanha associada: será usado o mapeamento configurado
+                          Campanha associada: será registada na origem do cliente
                         </p>
                       </div>
                     )}
