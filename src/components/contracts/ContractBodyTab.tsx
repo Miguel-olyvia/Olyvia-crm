@@ -57,12 +57,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   // Um contrato em vigor nao se edita a mao: o texto livre fica trancado.
   const isLocked = readOnly || ["signed", "active"].includes(contract?.status);
 
-  // REGENERAR e a excepcao, e de proposito. E a unica forma de alterar um
-  // contrato assinado, e sem ela um contrato congelado ficaria impossivel de
-  // corrigir para sempre -- trancado por estar assinado, e imutavel por estar
-  // congelado. Continua a exigir dois passos deliberados (escolher a minuta,
-  // depois guardar), e e so ao guardar que o congelamento e desfeito.
-  const podeRegenerar = !readOnly;
+  // Regenerar NAO se abre a contratos em vigor, de proposito: um documento
+  // assinado nao muda -- nem pela minuta, nem por quem o abre, nem por quem o
+  // manda gerar outra vez. O caminho de descongelamento existe no codigo e
+  // continua a servir contratos ainda por assinar; para os assinados nao ha
+  // porta, e e essa a intencao.
   const contratoEmVigor = isContractInForce(contract);
 
   const { data: templates = [] } = useQuery({
@@ -532,9 +531,9 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
             variant="outline"
             size="sm"
             onClick={() => setIsGenerateOpen(true)}
-            disabled={!podeRegenerar}
+            disabled={isLocked}
             className="gap-1.5"
-            title={contratoEmVigor ? "Regenerar substitui o documento deste contrato assinado. É a única forma de o alterar." : undefined}
+            title={contratoEmVigor ? "Um contrato assinado não pode ser regenerado." : undefined}
           >
             <RefreshCw className="h-3.5 w-3.5" />
             {bodyHtml ? "Regenerar" : "Gerar de Minuta"}
