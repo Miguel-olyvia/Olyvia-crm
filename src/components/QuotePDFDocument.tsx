@@ -281,7 +281,16 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const quoteRowAltBg = proposalTemplate?.quote_row_alt_bg || '#f9fafb';
   const contentBlockBg = proposalTemplate?.content_block_bg || proposalTemplate?.background_color || '#ffffff';
   const secondaryTextColor = proposalTemplate?.text_secondary_color || '#374151';
-  const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || 'ORÇAMENTO';
+  // Numa proposta, o valor por omissao nunca deve ser a palavra "Orcamento". O
+  // documento ja sabia distinguir os dois para acertar o NUMERO (ver headerNumber
+  // mais abaixo); faltava saber para o titulo e para os rotulos das seccoes.
+  // Calculado aqui em cima, e nao junto ao numero, porque o titulo precisa dele.
+  const ehProposta = documentContext?.kind === 'proposal';
+  const rotuloDocumento = ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
+  const rotuloDetalhes = ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
+  const rotuloValor = ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
+
+  const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || rotuloDocumento;
   const showCompanyInfo = proposalTemplate?.show_company_info !== false;
   const showClientInfo = proposalTemplate?.show_client_info !== false;
   const showValidity = proposalTemplate?.show_validity !== false;
@@ -410,10 +419,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const configuredSections = Array.isArray(proposalTemplate?.sections) && proposalTemplate.sections.length > 0
     ? proposalTemplate.sections
     : [
-        { id: 'header', type: 'header', label: 'Cabeçalho', visible: true, settings: { customTitle: 'ORÇAMENTO' } },
+        { id: 'header', type: 'header', label: 'Cabeçalho', visible: true, settings: { customTitle: rotuloDocumento } },
         { id: 'client_info', type: 'client_info', label: 'Cliente', visible: true, settings: { sectionLabel: 'CLIENTE' } },
         { id: 'notes', type: 'notes', label: 'Notas', visible: true, settings: { sectionLabel: 'NOTAS' } },
-        { id: 'quote_items', type: 'quote_items', label: 'Detalhes do Orçamento', visible: true, settings: { sectionLabel: 'DETALHES DO ORÇAMENTO' } },
+        { id: 'quote_items', type: 'quote_items', label: 'Detalhes do Orçamento', visible: true, settings: { sectionLabel: rotuloDetalhes } },
         { id: 'terms', type: 'terms', label: 'Condições Gerais', visible: true, settings: { sectionLabel: 'CONDIÇÕES GERAIS' } },
         { id: 'footer', type: 'footer', label: 'Rodapé', visible: true, settings: {} },
       ];
@@ -429,7 +438,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // que está a ser renderizado por baixo. O número da proposta só entra quando
   // existe mesmo; sem ele, cair para o do orçamento é preferível a deixar o
   // documento sem qualquer identificação.
-  const isProposalDocument = documentContext?.kind === 'proposal';
+  const isProposalDocument = ehProposta;
   const headerNumber =
     (isProposalDocument ? (documentContext as { number?: string | null }).number : null)
     || quote.quote_number
@@ -511,7 +520,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const renderQuoteItems = (section: any) => (
     <View>
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'DETALHES DO ORÇAMENTO')}</Text>
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
           <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
             <Text style={columnStyles.sku}>SKU</Text>
@@ -682,7 +691,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     if (hideTotals) return null;
     return (
     <View style={styles.section} wrap={false} minPresenceAhead={115}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALOR DO ORÇAMENTO')}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloValor)}</Text>
       {renderTotals()}
     </View>
     );

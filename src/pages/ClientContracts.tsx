@@ -961,10 +961,23 @@ const ClientContracts = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       const selectedProposal = proposals.find(p => p.id === data.proposal_id);
-      if (!selectedProposal) throw new Error("Proposal not found");
+      if (!selectedProposal) throw new Error("A proposta escolhida já não está disponível. Feche e volte a abrir o diálogo.");
       const resolvedEntityId = selectedProposal.entity_id || selectedProposal._resolvedEntityId;
       const clientId = selectedProposal._resolvedClientId;
-      if (!clientId) throw new Error("Client not found.");
+      if (!clientId) {
+        // "Client not found." batia com /not found/i em friendlyError.ts:46 e saia
+        // ao utilizador como "Recurso nao encontrado." -- uma mensagem que nao diz
+        // nada a quem a le. Sao dois casos distintos, e ambos comuns: medido a
+        // 2026-09-02 no remoto, de 624 propostas activas ha 15 sem entidade nem
+        // pedido e 474 com entidade que nunca foi convertida em cliente.
+        // As mensagens abaixo estao em portugues de proposito: o mapFriendly
+        // devolve o texto cru quando nenhuma regra bate, e nenhuma bate nestas.
+        throw new Error(
+          resolvedEntityId
+            ? "Esta proposta está ligada a uma entidade que ainda não é cliente. Converta-a em cliente antes de criar o contrato."
+            : "Esta proposta não tem entidade nem pedido associado, por isso não há cliente para o contrato."
+        );
+      }
       const totalValue = selectedProposal.quotes?.reduce((sum: number, q: any) => sum + (q.total || 0), 0) || 0;
       let rootOrgId = activeCompany.id;
       try {

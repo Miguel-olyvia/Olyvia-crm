@@ -723,7 +723,10 @@ export default function PublicLeadForm() {
   const [leadId, setLeadId] = useState<string | null>(null);
   // Polymorphic continuation key: "lead" | "contact" | "client". Falls back to
   // "lead" when only an older lead_id-only response shape is ever received.
-  const [targetType, setTargetType] = useState<"lead" | "contact" | "client">("lead");
+  // "submission": a submissao ficou ligada a um registo que ja existia e a
+  // chave de continuacao e o id da linha em form_submissions, nao o de uma
+  // lead — nunca pode entrar nos ramos que tratam `leadId` como lead.
+  const [targetType, setTargetType] = useState<"lead" | "contact" | "client" | "submission">("lead");
   const [isComplete, setIsComplete] = useState(false);
   const [locationRejected, setLocationRejected] = useState(false);
   const [resolvedSourceId, setResolvedSourceId] = useState<string | null>(querySourceId);
@@ -1231,6 +1234,36 @@ export default function PublicLeadForm() {
     return true;
   };
 
+  /**
+   * Distrito e codigo postal que o agendamento usa -- resolvidos NUMA so
+   * funcao, porque o calendario e a marcacao TEM de usar o mesmo criterio.
+   *
+   * Enquanto estiveram separados, o calendario lia so
+   * `scheduling_district_field_key` e a marcacao tinha ainda um recurso pelo
+   * tipo de campo. Nos formularios em que essa chave esta a null -- que sao os
+   * que existem -- o calendario pedia a disponibilidade SEM distrito e
+   * mostrava as horas de todos os tecnicos da organizacao, e depois a marcacao
+   * filtrava. O visitante escolhia uma hora que via livre e apanhava "o
+   * horario ja nao esta disponivel". Confirmado ao vivo na nike: 09:00 dadas
+   * como livres, recusadas por o unico tecnico do distrito ja la ter visita.
+   *
+   * `ref_district` e o marcador estrutural do campo de distrito: sobrevive a
+   * qualquer mudanca de nome, ao contrario de fixar "po_distrito".
+   */
+  const resolveSchedulingDistrictId = (step: { scheduling_district_field_key?: string | null } | null | undefined) => {
+    const key =
+      step?.scheduling_district_field_key
+      || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
+    return key ? formValues[key] : undefined;
+  };
+
+  const resolveSchedulingPostalCode = (step: { scheduling_postal_code_field_key?: string | null } | null | undefined) => {
+    const key =
+      step?.scheduling_postal_code_field_key
+      || submittedFields.find(f => f.contact_field_mapping === 'postal_code')?.field_key;
+    return key ? formValues[key] : undefined;
+  };
+
   const completeScheduledBooking = async (resolvedLeadId: string) => {
     if (!formConfig || !schedulingSlot) return resolvedLeadId;
 
@@ -1243,27 +1276,12 @@ export default function PublicLeadForm() {
         lead_id: resolvedLeadId,
         slot_start: schedulingSlot.start,
         slot_end: schedulingSlot.end,
-        postal_code: (() => {
-          const pcKey =
-            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_postal_code_field_key
-            // Same reasoning as the district below: fall back to the field that
-            // declares itself as the postal code through contact_field_mapping.
-            || submittedFields.find(f => f.contact_field_mapping === 'postal_code')?.field_key;
-          return pcKey ? formValues[pcKey] : undefined;
-        })(),
-        district_id: (() => {
-          const districtKey =
-            formConfig.steps.find(s => s.step_type === 'scheduling')?.scheduling_district_field_key
-            // No explicit key configured: find the district field by what it IS,
-            // not by what it is called. ref_district is the structural marker and
-            // survives any rename, whereas hard-coding "po_distrito" would break
-            // the moment someone renames the field or another form uses its own.
-            // Without this the payload carried no district at all, so
-            // find_nearest_resources ran unfiltered and picked an arbitrary
-            // technician regardless of the district the visitor chose.
-            || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
-          return districtKey ? formValues[districtKey] : undefined;
-        })(),
+        postal_code: resolveSchedulingPostalCode(
+          formConfig.steps.find(s => s.step_type === 'scheduling'),
+        ),
+        district_id: resolveSchedulingDistrictId(
+          formConfig.steps.find(s => s.step_type === 'scheduling'),
+        ),
         field_values: formValues,
         campaign_id: formConfig.campaign_id || campaignId || undefined,
         source_id: resolvedSourceId || null,
@@ -1349,7 +1367,7 @@ export default function PublicLeadForm() {
 
         // Prefer the polymorphic target_type/target_id continuation key;
         // fall back to lead_id/"lead" if an older response shape is ever received.
-        const resolvedTargetType: "lead" | "contact" | "client" = data.target_type || "lead";
+        const resolvedTargetType: "lead" | "contact" | "client" | "submission" = data.target_type || "lead";
         let resolvedLeadId = data.target_id || data.lead_id;
 
         if (data.is_complete && hasSchedulingStep && schedulingSlot && resolvedTargetType === "lead") {
@@ -2540,14 +2558,8 @@ export default function PublicLeadForm() {
                     stepNumber={currentStepData.step_number}
                     boardId={currentStepData.scheduling_board_id || null}
                     durationMinutes={currentStepData.scheduling_duration_minutes || 60}
-                    postalCode={(() => {
-                      const pcKey = currentStepData.scheduling_postal_code_field_key;
-                      return pcKey ? formValues[pcKey] : undefined;
-                    })()}
-                    districtId={(() => {
-                      const districtKey = currentStepData.scheduling_district_field_key;
-                      return districtKey ? formValues[districtKey] : undefined;
-                    })()}
+                    postalCode={resolveSchedulingPostalCode(currentStepData)}
+                    districtId={resolveSchedulingDistrictId(currentStepData)}
                     primaryColor={primaryColor}
                     textColor={branding?.text_color}
                     buttonTextColor={branding?.button_text_color}

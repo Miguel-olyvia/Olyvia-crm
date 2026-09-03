@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, MapPin, Calendar, Tag, Briefcase, Link, Unlink, Building2, AlertTriangle, CalendarCheck } from "lucide-react";
+import { User, Mail, Phone, MapPin, Calendar, Tag, Briefcase, AlertTriangle, CalendarCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
@@ -25,18 +25,9 @@ interface LeadInfoTabProps {
   deals: any[];
   nextAction: { description: string; date: string } | null;
   // Associations
-  contactAssociation: any;
-  clientAssociation: any;
-  getIdentity: (entityId: string) => any;
   onCreateDeal: () => void;
   onScheduleAction: () => void;
   // Association handlers
-  clientOptions: any[];
-  searchingClients: boolean;
-  onSearchClients: (term: string) => void;
-  onAssociateContact: (leadId: string, contactId: string | null) => void;
-  onAssociateClient: (leadId: string, clientId: string | null) => void;
-  leadId: string;
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -52,10 +43,7 @@ const ACTION_LABELS: Record<string, string> = {
 export function LeadInfoTab({
   lead, fieldDefs, fieldValues, leadName, leadEmail, leadPhone, leadAddress,
   status, source, assignedUserName, resolveFieldValue, deals, nextAction,
-  contactAssociation, clientAssociation, getIdentity,
   onCreateDeal, onScheduleAction,
-  clientOptions, searchingClients,
-  onSearchClients, onAssociateContact, onAssociateClient, leadId,
 }: LeadInfoTabProps) {
   const [visitDate, setVisitDate] = useState<string | null>(null);
 
@@ -152,63 +140,6 @@ export function LeadInfoTab({
           </div>
         </div>
       )}
-
-      {/* Associations */}
-      <Separator />
-      <div>
-        <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <Link className="w-4 h-4" />
-          Associações
-        </h4>
-        <div className="grid grid-cols-2 gap-4">
-          {/* Contact */}
-          <Card className="p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Contacto</span>
-            </div>
-            {contactAssociation ? (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">
-                    {getIdentity(contactAssociation.entity_id)?.display_name || "Contacto"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {getIdentity(contactAssociation.entity_id)?.email || "-"}
-                  </p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => onAssociateContact(leadId, null)} title="Remover">
-                  <Unlink className="w-4 h-4 text-destructive" />
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Não convertida</p>
-            )}
-          </Card>
-
-          {/* Client */}
-          <Card className="p-3">
-            <div className="flex items-center gap-2 mb-2">
-              <Building2 className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm font-medium">Cliente</span>
-            </div>
-            {clientAssociation ? (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">
-                    {getIdentity(clientAssociation.entity_id)?.display_name || "Cliente"}
-                  </p>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => onAssociateClient(leadId, null)} title="Remover">
-                  <Unlink className="w-4 h-4 text-destructive" />
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Não convertida</p>
-            )}
-          </Card>
-        </div>
-      </div>
 
       {/* Active Deals */}
       <Separator />
