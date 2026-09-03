@@ -17,7 +17,7 @@ interface ClientDetailHeaderProps {
   onWhatsApp: () => void;
   onEdit: () => void;
   onClose: () => void;
-  onRevertToContact?: () => void;
+  onRevertToLead?: () => void;
   canRevert?: boolean;
 }
 
@@ -30,7 +30,7 @@ const HEALTH_COLORS: Record<string, string> = {
 };
 
 export function ClientDetailHeader({
-  client, healthScore, tags, onCreateDeal, onEmail, onCall, onWhatsApp, onEdit, onClose, onRevertToContact, canRevert,
+  client, healthScore, tags, onCreateDeal, onEmail, onCall, onWhatsApp, onEdit, onClose, onRevertToLead, canRevert,
 }: ClientDetailHeaderProps) {
   const initials = [client.first_name?.[0], client.last_name?.[0]].filter(Boolean).join("").toUpperCase() || "?";
   const fullName = [client.first_name, client.last_name].filter(Boolean).join(" ") || "—";
@@ -136,9 +136,9 @@ export function ClientDetailHeader({
             <Button size="sm" variant="outline"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            {canRevert && onRevertToContact && (
+            {canRevert && onRevertToLead && (
               <PermissionGate permission="clients.edit">
-                <DropdownMenuItem onClick={onRevertToContact}>
+                <DropdownMenuItem onClick={onRevertToLead}>
                   <Undo2 className="w-3.5 h-3.5 mr-2" />
                   Reverter para Lead
                 </DropdownMenuItem>

@@ -66,7 +66,7 @@ import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { formatWhatsAppLink } from "@/utils/whatsapp";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
-import { useConversionRevert } from "@/hooks/useConversionRevert";
+import { useConversionRevert, revertToLeadConfirmationText } from "@/hooks/useConversionRevert";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { withAuditContext } from "@/utils/auditContext";
@@ -262,7 +262,8 @@ const AnewClients = () => {
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [clientToRevert, setClientToRevert] = useState<ClientRecord | null>(null);
   const [reverting, setReverting] = useState(false);
-  const { revertContactToClient, canRevertClientToContact } = useConversionRevert();
+  const [revertPreviousStatus, setRevertPreviousStatus] = useState<string | null>(null);
+  const { revertClientToLead, getClientRevertPreview, getRevertableClientIds } = useConversionRevert();
 
   // Duplicate detection state for clients
   const [clientDuplicateDialogOpen, setClientDuplicateDialogOpen] = useState(false);
@@ -773,6 +774,11 @@ const AnewClients = () => {
         });
       }
 
+      // Quais destes clientes vieram de uma lead — numa query só, para a
+      // listagem saber onde mostrar o "Reverter para Lead" sem um pedido por linha.
+      const revertable = await getRevertableClientIds(newClients.map(c => c.id));
+      setRevertableClientIds(prev => (isInitial ? revertable : new Set([...prev, ...revertable])));
+
       let uniqueNewCount = newClients.length;
       if (isInitial) setClients(newClients);
       else setClients(prev => {
@@ -804,7 +810,7 @@ const AnewClients = () => {
   // ciclo de recarregamento descrito em src/lib/clientsNoContactFilterKey.ts;
   // remover a chave deixa o filtro `no_contact_30d` preso a um conjunto
   // obsoleto.
-  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, noContactFilterKey, resolveEntities, getIdentity, toast, t]);
+  }, [getPermissionScope, scopeAnewUserId, scopedUserIds, companyFilter, activeCompany?.id, effectiveSearch, statusFilter, dateFrom, dateTo, salesRepFilter, noContactFilterKey, resolveEntities, getIdentity, getRevertableClientIds, toast, t]);
 
   useEffect(() => {
     if (!scopeLoading && isParentOrg !== null) loadClients(0, true, initialLoadDoneRef.current);
@@ -1081,6 +1087,16 @@ const AnewClients = () => {
   };
 
   const handleDeleteClick = (client: ClientRecord, e: React.MouseEvent) => { e.stopPropagation(); setClientToDelete(client); setDeleteDialogOpen(true); };
+
+  // O estado anterior é lido ANTES de confirmar, para o diálogo poder dizer em
+  // que estado a lead vai ficar — ou admitir que esse estado não ficou registado.
+  const handleRevertClick = async (client: ClientRecord) => {
+    setClientToRevert(client);
+    setRevertPreviousStatus(null);
+    setRevertDialogOpen(true);
+    const preview = await getClientRevertPreview(client.id);
+    setRevertPreviousStatus(preview.previousStatus);
+  };
 
   // Bug 9 — "Marcar como VIP": toggles anew_clients.custom_fields->>'vip' via
   // rpc_toggle_client_vip (atomic, single audit row).
@@ -2586,11 +2602,14 @@ const AnewClients = () => {
                                     setShowScheduleMeetingDialog(true);
                                   }}><Calendar className="w-3.5 h-3.5 mr-2" />Agendar reunião</DropdownMenuItem>
 
-                                  {client.source_type === 'contact' && (
+                                  {/* Só há conversão para desfazer quando este cliente veio mesmo
+                                      de uma lead — a condição antiga (source_type === 'contact')
+                                      era do módulo de Contactos e nunca era verdadeira. */}
+                                  {revertableClientIds.has(client.id) && (
                                     <>
                                       <DropdownMenuSeparator />
                                       <PermissionGate permission="clients.edit">
-                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setClientToRevert(client); setRevertDialogOpen(true); }}>
+                                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleRevertClick(client); }}>
                                           <Undo2 className="w-3.5 h-3.5 mr-2" />Reverter para Lead
                                         </DropdownMenuItem>
                                       </PermissionGate>
@@ -2890,8 +2909,8 @@ const AnewClients = () => {
           onConfirm={(includeSensitive) => void performExport(includeSensitive)}
         />
 
-        {/* Revert to Contact Confirmation */}
-        <AlertDialog open={revertDialogOpen} onOpenChange={setRevertDialogOpen}>
+        {/* Confirmação da reversão de cliente para lead */}
+        <AlertDialog open={revertDialogOpen} onOpenChange={(open) => { setRevertDialogOpen(open); if (!open) { setClientToRevert(null); setRevertPreviousStatus(null); } }}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle className="flex items-center gap-2">
@@ -2901,7 +2920,7 @@ const AnewClients = () => {
                 Reverter para Lead
               </AlertDialogTitle>
               <AlertDialogDescription>
-                Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
+                {revertToLeadConfirmationText(revertPreviousStatus)}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -2913,10 +2932,11 @@ const AnewClients = () => {
                   if (!clientToRevert) return;
                   setReverting(true);
                   try {
-                    const success = await revertContactToClient(clientToRevert.id);
+                    const success = await revertClientToLead(clientToRevert.id);
                     if (success) {
                       setRevertDialogOpen(false);
                       setClientToRevert(null);
+                      setRevertPreviousStatus(null);
                       setClients([]);
                       setHasMore(true);
                       loadClients(0, true);

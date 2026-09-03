@@ -36,8 +36,10 @@ vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast }),
 }));
 
-// Identity translation: the assertions below are then on the exact keys the
-// component passes, so a reworded toast still fails the test.
+// Identity translation: the error toast is asserted on the exact key the hook
+// passes, so a reworded toast still fails the test. O aviso de sucesso não passa
+// por traduções — é português literal, como o diálogo que o antecede — e por
+// isso é asserido pelo texto que o utilizador lê mesmo.
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
@@ -52,11 +54,11 @@ beforeEach(() => {
 
 describe("useConversionRevert observability", () => {
   it("reports the failed revert to Sentry, tagged entity-conversion", async () => {
-    const rpcError = new Error('permission denied for function revert_contact_to_client');
+    const rpcError = new Error('permission denied for function rpc_revert_client_to_lead');
     rpc.mockResolvedValue({ data: null, error: rpcError });
 
     const { result } = renderHook(() => useConversionRevert());
-    await result.current.revertContactToClient("client-1");
+    await result.current.revertClientToLead("client-1");
 
     expect(captureException).toHaveBeenCalledTimes(1);
     expect(captureException).toHaveBeenCalledWith(rpcError, {
@@ -69,7 +71,7 @@ describe("useConversionRevert observability", () => {
     rpc.mockResolvedValue({ data: null, error: rpcError });
 
     const { result } = renderHook(() => useConversionRevert());
-    await result.current.revertContactToClient("client-1");
+    await result.current.revertClientToLead("client-1");
 
     expect(toast).toHaveBeenCalledTimes(1);
     expect(toast).toHaveBeenCalledWith({
@@ -84,7 +86,7 @@ describe("useConversionRevert observability", () => {
 
     const { result } = renderHook(() => useConversionRevert());
 
-    await expect(result.current.revertContactToClient("client-1")).resolves.toBe(false);
+    await expect(result.current.revertClientToLead("client-1")).resolves.toBe(false);
   });
 
   it("keeps working when Sentry itself blows up — observability must not break the flow", async () => {
@@ -97,35 +99,57 @@ describe("useConversionRevert observability", () => {
 
     // The user still gets their toast and the caller still gets `false`, even
     // though the reporting call threw underneath.
-    await expect(result.current.revertContactToClient("client-1")).resolves.toBe(false);
+    await expect(result.current.revertClientToLead("client-1")).resolves.toBe(false);
     expect(toast).toHaveBeenCalledWith(
       expect.objectContaining({ variant: "destructive" }),
     );
   });
 
-  it("reports nothing and shows the unchanged success toast when the revert works", async () => {
-    rpc.mockResolvedValue({ data: null, error: null });
+  it("reports nothing and shows the success toast naming the stage the lead went back to", async () => {
+    rpc.mockResolvedValue({
+      data: { status: "qualified", estado_anterior_conhecido: true },
+      error: null,
+    });
 
     const { result } = renderHook(() => useConversionRevert());
-    const ok = await result.current.revertContactToClient("client-1");
+    const ok = await result.current.revertClientToLead("client-1");
 
     expect(ok).toBe(true);
     expect(captureException).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith({
-      title: "conversion.revert.contactToClientSuccess",
-      description: "conversion.revert.contactToClientSuccessDesc",
+      title: "Conversão revertida",
+      description:
+        "A ficha de cliente foi apagada e a pessoa voltou ao funil de leads em Qualificado." +
+        " Os orçamentos, propostas, contratos e acessos ao portal continuam ligados à pessoa e não se perdem.",
     });
   });
 
-  it("tags the lead→contact revert with the same flow", async () => {
-    const rpcError = new Error("boom");
-    rpc.mockResolvedValue({ data: null, error: rpcError });
+  // O ecrã não pode afirmar que repôs o estado anterior quando ele nunca foi
+  // guardado: aí a lead vai para negociação e a mensagem tem de o dizer.
+  it("says the previous stage was never recorded instead of pretending it knows", async () => {
+    rpc.mockResolvedValue({
+      data: { status: "negotiation", estado_anterior_conhecido: false },
+      error: null,
+    });
 
     const { result } = renderHook(() => useConversionRevert());
-    await result.current.revertLeadToContact("contact-1");
+    await result.current.revertClientToLead("client-1");
 
-    expect(captureException).toHaveBeenCalledWith(rpcError, {
-      tags: { flow: "entity-conversion" },
+    expect(toast).toHaveBeenCalledWith({
+      title: "Conversão revertida",
+      description:
+        "A ficha de cliente foi apagada e a pessoa voltou ao funil de leads." +
+        " O estado anterior não ficou registado, por isso ficou em Negociação." +
+        " Os orçamentos, propostas, contratos e acessos ao portal continuam ligados à pessoa e não se perdem.",
     });
+  });
+
+  it("calls the lead-revert RPC, not the retired contact one", async () => {
+    rpc.mockResolvedValue({ data: { status: "negotiation" }, error: null });
+
+    const { result } = renderHook(() => useConversionRevert());
+    await result.current.revertClientToLead("client-1");
+
+    expect(rpc).toHaveBeenCalledWith("rpc_revert_client_to_lead", { p_client_id: "client-1" });
   });
 });

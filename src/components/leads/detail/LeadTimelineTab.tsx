@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, MessageCircle, Eye, CalendarIcon, Sparkles, Pencil, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { leadStatusLabel } from "@/lib/leads/statusLabels";
 
 interface TimelineEvent {
   id: string;
@@ -78,21 +79,9 @@ const AUDIT_IGNORED_FIELDS = new Set([
 
 // Raw status/stage values -> the same PT labels shown elsewhere (funnel,
 // status pills), so "Editou estado" reads as "new → rejected" no longer.
-const STATUS_VALUE_LABELS: Record<string, string> = {
-  new: "Novo",
-  contacted: "Contactado",
-  visit_scheduled: "Visita Agendada",
-  qualified: "Qualificado",
-  negotiation: "Negociação",
-  converted: "Ganho",
-  rejected: "Perdido",
-  lost: "Perdido",
-  incomplete: "Incompleto",
-  cancelled: "Cancelado",
-  callback_scheduled: "Callback Agendado",
-  no_answer: "Sem Resposta",
-};
-const statusValueLabel = (value: string): string => STATUS_VALUE_LABELS[value] || value;
+// A lista vive em @/lib/leads/statusLabels porque a reversão de cliente para
+// lead precisa dos mesmos rótulos.
+const statusValueLabel = (value: string): string => leadStatusLabel(value);
 
 // Friendly labels for satellite-table INSERTs, instead of a generic
 // "Registo adicionado" that gives no clue what was actually added.

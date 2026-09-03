@@ -2169,21 +2169,7 @@ export const translations = {
     'contacts.convert.converting': 'Converting...',
     
     // Conversion Revert
-    'conversion.revert.contactNotFound': 'Contact not found',
-    'conversion.revert.notFromLead': 'This contact was not converted from a lead',
-    'conversion.revert.notAuthenticated': 'Not authenticated',
-    'conversion.revert.leadToContactSuccess': 'Conversion reverted',
-    'conversion.revert.leadToContactSuccessDesc': 'The contact was removed and the lead status reset.',
-    'conversion.revert.clientNotFound': 'Client not found',
-    'conversion.revert.notFromContact': 'This client was not converted from a contact',
-    'conversion.revert.contactToClientSuccess': 'Conversion reverted',
-    'conversion.revert.contactToClientSuccessDesc': 'The client was removed and the contact status reset.',
     'conversion.revert.error': 'Error reverting conversion',
-    'conversion.revert.revertToLead': 'Revert to Lead',
-    'conversion.revert.revertToContact': 'Revert to Contact',
-    'conversion.revert.confirmTitle': 'Revert Conversion',
-    'conversion.revert.confirmLeadDesc': 'This will delete the contact and restore the lead to its previous state. This action cannot be undone.',
-    'conversion.revert.confirmClientDesc': 'This will delete the client and restore the contact to its previous state. This action cannot be undone.',
     
     // Contact Details Dialog
     'contacts.details.tabs.info': 'Info',
@@ -9303,21 +9289,7 @@ export const translations = {
     'contacts.convert.converting': 'A converter...',
     
     // Reversão de Conversão
-    'conversion.revert.contactNotFound': 'Contacto não encontrado',
-    'conversion.revert.notFromLead': 'Este contacto não foi convertido a partir de uma lead',
-    'conversion.revert.notAuthenticated': 'Não autenticado',
-    'conversion.revert.leadToContactSuccess': 'Conversão revertida',
-    'conversion.revert.leadToContactSuccessDesc': 'O contacto foi removido e o estado da lead foi reposto.',
-    'conversion.revert.clientNotFound': 'Cliente não encontrado',
-    'conversion.revert.notFromContact': 'Este cliente não foi convertido a partir de um contacto',
-    'conversion.revert.contactToClientSuccess': 'Conversão revertida',
-    'conversion.revert.contactToClientSuccessDesc': 'O cliente foi removido e o estado do contacto foi reposto.',
     'conversion.revert.error': 'Erro ao reverter conversão',
-    'conversion.revert.revertToLead': 'Reverter para Lead',
-    'conversion.revert.revertToContact': 'Reverter para Contacto',
-    'conversion.revert.confirmTitle': 'Reverter Conversão',
-    'conversion.revert.confirmLeadDesc': 'Isto irá eliminar o contacto e repor a lead ao estado anterior. Esta ação não pode ser desfeita.',
-    'conversion.revert.confirmClientDesc': 'Isto irá eliminar o cliente e repor o contacto ao estado anterior. Esta ação não pode ser desfeita.',
     
     // Contact Details Dialog
     'contacts.details.tabs.info': 'Info',

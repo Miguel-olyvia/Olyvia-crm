@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2 } from "lucide-react";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
-import { useConversionRevert } from "@/hooks/useConversionRevert";
+import { useConversionRevert, revertToLeadConfirmationText } from "@/hooks/useConversionRevert";
 import { Separator } from "@/components/ui/separator";
 import { contactSchema, contactCompanySchema, dealSchema, proposalSchema } from "@/lib/validations";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -168,7 +168,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [canRevert, setCanRevert] = useState(false);
-  const { revertContactToClient, canRevertClientToContact } = useConversionRevert();
+  const [revertPreviousStatus, setRevertPreviousStatus] = useState<string | null>(null);
+  const { revertClientToLead, getClientRevertPreview } = useConversionRevert();
 
   const [editFormData, setEditFormData] = useState({
     first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351",
@@ -207,7 +208,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     loadEnrichedData();
     loadGroupCompanies();
     setActiveTab("summary");
-    canRevertClientToContact(client.id).then(v => { if (!isCancelled) setCanRevert(v); });
+    // Uma leitura só serve as duas coisas: se o botão aparece, e o que o
+    // diálogo de confirmação promete quanto ao estado em que a lead fica.
+    getClientRevertPreview(client.id).then(preview => {
+      if (isCancelled) return;
+      setCanRevert(preview.canRevert);
+      setRevertPreviousStatus(preview.previousStatus);
+    });
     setEditFormData({
       first_name: client.first_name || "", last_name: client.last_name || "",
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
@@ -1024,7 +1031,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               onWhatsApp={handleWhatsApp}
               onEdit={() => setActiveTab("edit")}
               onClose={() => onOpenChange(false)}
-              onRevertToContact={() => setRevertDialogOpen(true)}
+              onRevertToLead={() => setRevertDialogOpen(true)}
               canRevert={canRevert}
             />
 
@@ -1355,7 +1362,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           onSaved={handleRefresh}
         />
       )}
-      {/* Revert to Contact Confirmation */}
+      {/* Confirmação da reversão de cliente para lead */}
       <AlertDialog open={revertDialogOpen} onOpenChange={setRevertDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1366,7 +1373,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               Reverter para Lead
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
+              {revertToLeadConfirmationText(revertPreviousStatus)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1377,7 +1384,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 e.preventDefault();
                 setReverting(true);
                 try {
-                  const success = await revertContactToClient(client.id);
+                  const success = await revertClientToLead(client.id);
                   if (success) {
                     setRevertDialogOpen(false);
                     onOpenChange(false);
