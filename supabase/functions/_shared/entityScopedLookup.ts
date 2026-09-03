@@ -393,7 +393,11 @@ export async function emitFormResubmissionAlert(params: {
     : "Lead existente voltou a submeter formulário";
 
   const labelName = displayName || "Entidade";
-  const message = `${labelName} preencheu novamente o formulário. Não foi criada uma nova lead.`;
+  // NAO prometer "nao foi criada uma nova lead": deixou de ser sempre verdade.
+  // Quem ja e CLIENTE e marca visita pelo formulario passa a ganhar a lead que
+  // nao tinha -- e a invariante a funcionar, nao um defeito. O que e verdade
+  // nos dois casos e que a submissao ficou na ficha que ja existia.
+  const message = `${labelName} preencheu novamente o formulário. A submissão ficou na ficha que já existe.`;
 
   // Nunca `/contacts`: essa rota reencaminha para `/leads` e a ligação morria.
   const link = summary.targetType === "client"
