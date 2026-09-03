@@ -35,6 +35,10 @@ interface ScheduleItemDialogProps {
   currentUserId?: string;
   currentEmployeeId?: string;
   defaultDate?: Date;
+  /** Título pré-preenchido para uma marcação nova (ex.: visita pedida num formulário). */
+  defaultTitle?: string;
+  /** Cliente pré-seleccionado para uma marcação nova. */
+  defaultClientId?: string;
   companyId?: string;
   onSave: (data: Partial<ScheduleItem>, assigneeIds: string[]) => Promise<void>;
   onDelete?: (id: string) => Promise<void>;
@@ -52,6 +56,8 @@ export function ScheduleItemDialog({
   currentUserId,
   currentEmployeeId,
   defaultDate,
+  defaultTitle,
+  defaultClientId,
   companyId,
   onSave,
   onDelete,
@@ -116,10 +122,14 @@ export function ScheduleItemDialog({
     fetchLead();
   }, [open, item]);
 
+  // Uma data que traz hora própria (slot horário do calendário, hora pedida
+  // numa submissão de formulário) tem de ser respeitada. Só quando vem à
+  // meia-noite — isto é, sem hora nenhuma, um dia inteiro — é que se assume
+  // o início do dia de trabalho.
   const getDefaultDates = (date?: Date) => {
-    const start = date
-      ? setMinutes(setHours(date, 9), 0)
-      : setMinutes(setHours(new Date(), 9), 0);
+    const hasTimeOfDay = !!date && (date.getHours() !== 0 || date.getMinutes() !== 0);
+    const base = date ?? new Date();
+    const start = hasTimeOfDay ? base : setMinutes(setHours(base, 9), 0);
     const end = addHours(start, 1);
     return { start, end };
   };
@@ -128,7 +138,7 @@ export function ScheduleItemDialog({
 
   const [formData, setFormData] = useState({
     board_id: item?.board_id || boards[0]?.id || '',
-    title: item?.title || '',
+    title: item?.title || defaultTitle || '',
     description: item?.description || '',
     status: item?.status || 'scheduled' as ScheduleItemStatus,
     start_datetime: item?.start_datetime 
@@ -138,7 +148,7 @@ export function ScheduleItemDialog({
       ? format(new Date(item.end_datetime), "yyyy-MM-dd'T'HH:mm")
       : format(defaultEnd, "yyyy-MM-dd'T'HH:mm"),
     all_day: item?.all_day || false,
-    client_id: item?.client_id || '',
+    client_id: item?.client_id || defaultClientId || '',
     contact_id: item?.contact_id || '',
     location: item?.location || '',
     priority: item?.priority || 0,
@@ -161,7 +171,7 @@ export function ScheduleItemDialog({
       const { start, end } = getDefaultDates(defaultDate);
       setFormData({
         board_id: item?.board_id || boards[0]?.id || '',
-        title: item?.title || '',
+        title: item?.title || defaultTitle || '',
         description: item?.description || '',
         status: item?.status || 'scheduled' as ScheduleItemStatus,
         start_datetime: item?.start_datetime 
@@ -171,7 +181,7 @@ export function ScheduleItemDialog({
           ? format(new Date(item.end_datetime), "yyyy-MM-dd'T'HH:mm")
           : format(end, "yyyy-MM-dd'T'HH:mm"),
         all_day: item?.all_day || false,
-        client_id: item?.client_id || '',
+        client_id: item?.client_id || defaultClientId || '',
         contact_id: item?.contact_id || '',
         location: item?.location || '',
         priority: item?.priority || 0,
@@ -186,7 +196,7 @@ export function ScheduleItemDialog({
       setSelectedInvitees([]);
       setFieldErrors({});
     }
-  }, [open, item, boards, defaultDate]);
+  }, [open, item, boards, defaultDate, defaultTitle, defaultClientId]);
 
   // Check if selected board is a time-off board
   const selectedBoard = useMemo(() => 

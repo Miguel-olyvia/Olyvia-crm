@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays } from 'date-fns';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Layout from '@/components/Layout';
 import { usePermissions } from '@/hooks/usePermissions';
 import { usePermissionScope } from '@/hooks/usePermissionScope';
@@ -33,9 +33,23 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 type ViewMode = 'month' | 'week' | 'day';
 type TabType = 'calendar' | 'boards' | 'resources' | 'rules';
 
+/**
+ * O que a fila de submissoes pendentes (PendingFormSubmissions) manda com o
+ * botao "Marcar reuniao": a pessoa e a hora que ela pediu e ficou por marcar.
+ * Sem isto o comercial aterrava no calendario em branco e tinha de reencontrar
+ * tudo a mao a partir do texto do cartao.
+ */
+type SchedulingHandoffState = {
+  requestedStart?: string | null;
+  targetName?: string | null;
+  targetType?: string | null;
+  clientId?: string | null;
+};
+
 export default function Scheduling() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { activeCompany, userType } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const { getPermissionScope, authUserId, teamMemberIds, anewUserId, loading: scopeLoading } = usePermissionScope();
@@ -125,6 +139,7 @@ export default function Scheduling() {
   const [selectedBoard, setSelectedBoard] = useState<ScheduleBoard | null>(null);
   const [selectedResource, setSelectedResource] = useState<ScheduleResource | null>(null);
   const [defaultDate, setDefaultDate] = useState<Date | undefined>();
+  const [prefill, setPrefill] = useState<{ title?: string; clientId?: string }>({});
   const [boardToDelete, setBoardToDelete] = useState<string | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -217,8 +232,34 @@ export default function Scheduling() {
     loadItems();
   }, [currentDate, viewMode, selectedBoardIds, selectedResourceIds, scheduleScope, currentUserId, dataReady, teamAuthUserIds]);
 
-  const handleItemClick = (item: ScheduleItem) => { setSelectedItem(item); setDefaultDate(undefined); setItemDialogOpen(true); };
-  const handleAddClick = (date?: Date) => { setSelectedItem(null); setDefaultDate(date); setItemDialogOpen(true); };
+  // Chegada a partir da fila de submissoes pendentes: abre logo a marcacao
+  // nova no dia e hora que a pessoa pediu, com o nome dela no titulo. Espera-se
+  // pelo dataReady para os quadros ja estarem carregados quando o dialogo abre.
+  const handoffConsumed = useRef(false);
+  useEffect(() => {
+    if (handoffConsumed.current || !dataReady) return;
+    const handoff = location.state as SchedulingHandoffState | null;
+    if (!handoff?.requestedStart) return;
+    const requested = new Date(handoff.requestedStart);
+    if (Number.isNaN(requested.getTime())) return;
+
+    handoffConsumed.current = true;
+    setActiveTab('calendar');
+    setViewMode('day');
+    setCurrentDate(requested);
+    setSelectedItem(null);
+    setDefaultDate(requested);
+    setPrefill({
+      title: handoff.targetName ? `Visita a ${handoff.targetName}` : undefined,
+      clientId: handoff.targetType === 'client' && handoff.clientId ? handoff.clientId : undefined,
+    });
+    setItemDialogOpen(true);
+    // Consumido: um refresh ou um voltar atras nao pode reabrir o dialogo.
+    navigate(location.pathname, { replace: true, state: null });
+  }, [dataReady, location.pathname, location.state, navigate]);
+
+  const handleItemClick = (item: ScheduleItem) => { setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true); };
+  const handleAddClick = (date?: Date) => { setSelectedItem(null); setDefaultDate(date); setPrefill({}); setItemDialogOpen(true); };
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
     if (await rescheduleItem(itemId, newStart, newEnd)) {
       setItems(prev => prev.map(item => item.id === itemId ? { ...item, start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() } : item));
@@ -532,7 +573,8 @@ export default function Scheduling() {
 
       <ScheduleItemDialog open={itemDialogOpen} onOpenChange={setItemDialogOpen} item={selectedItem} boards={boards} resources={resources}
         contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
-        defaultDate={defaultDate} companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
+        defaultDate={defaultDate} defaultTitle={prefill.title} defaultClientId={prefill.clientId}
+        companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />
       <ScheduleResourceDialog open={resourceDialogOpen} onOpenChange={setResourceDialogOpen} resource={selectedResource} employees={employees} users={assignableUsers} allUsers={users} onSave={handleSaveResource} />
       <ScheduleSettingsDialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen} companyId={activeCompany?.id} />
