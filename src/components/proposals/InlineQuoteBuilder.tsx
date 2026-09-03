@@ -16,6 +16,7 @@ import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
+import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 export interface InlineQuoteLine {
   id: string;
@@ -209,9 +210,14 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
       const vatRate = item.vat_rate || DEFAULT_IVA;
       const retailPrice = basePrice + (attributePriceAddon || 0);
       
-      const materialCost = retailPrice > 0 
-        ? retailPrice / (1 + defaultMargin / 100)
-        : 0;
+      // O custo é o preço de COMPRA definido do artigo. Antes era inventado
+      // (preço de venda a dividir pela margem por omissão), o que gravava um
+      // custo falso na linha e obrigava a reconstruir o preço de venda a
+      // partir dele, perdendo cêntimos pelo caminho.
+      const definedCost = Number(item.cost_price ?? 0) || 0;
+      const materialCost = definedCost > 0
+        ? definedCost
+        : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
       
       const maxOrdem = quote.lines.length + newLines.length > 0 
         ? Math.max(...[...quote.lines, ...newLines].map(l => l.ordem)) + 1 
@@ -225,14 +231,16 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         unidade: item.uom_symbol || item.uom_name || "un",
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
-        margem_percent: materialCost > 0 ? defaultMargin : 0,
+        // O markup passa a ser consequência do custo e do preço, não a origem do preço.
+        margem_percent: materialCost > 0 ? markupFromCostAndPrice(materialCost, retailPrice) || defaultMargin : 0,
         iva_percent: vatRate,
         int_percent: 0,
         discount_percent: 0,
         ordem: maxOrdem,
         product_id: item.type === "product" ? item.id : null,
         service_id: item.type === "service" ? item.id : null,
-        retail_price_unit: materialCost > 0 ? undefined : retailPrice,
+        // O preço de venda definido fica SEMPRE na linha e é ele que manda.
+        retail_price_unit: retailPrice,
         cost_price: materialCost,
         selected_attributes: fullAttributes || {},
       });
@@ -477,7 +485,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
               : 0;
             const retailPrice = retailInfo.price + attributeAddon;
             const marginPercent = costPrice > 0 && retailPrice > 0
-              ? Math.max(0, ((retailPrice / costPrice) - 1) * 100)
+              ? markupFromCostAndPrice(costPrice, retailPrice)
               : (costPrice > 0 ? DEFAULT_MARGIN : 0);
 
             return {
@@ -496,7 +504,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
               catalog_item_id: null,
               product_id: item.product.id,
               service_id: null,
-              retail_price_unit: costPrice > 0 ? undefined : retailPrice,
+              retail_price_unit: retailPrice,
               cost_price: costPrice,
               selected_attributes: defaultAttributes,
             };
@@ -506,7 +514,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
             const retailInfo = serviceRetailMap.get(item.service.id) || { price: 0, vat_rate: DEFAULT_IVA };
             const costPrice = serviceCostMap.get(item.service.id) || 0;
             const marginPercent = costPrice > 0 && retailInfo.price > 0
-              ? Math.max(0, ((retailInfo.price / costPrice) - 1) * 100)
+              ? markupFromCostAndPrice(costPrice, retailInfo.price)
               : (costPrice > 0 ? DEFAULT_MARGIN : 0);
 
             return {
@@ -525,7 +533,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
               catalog_item_id: null,
               product_id: null,
               service_id: item.service.id,
-              retail_price_unit: costPrice > 0 ? undefined : retailInfo.price,
+              retail_price_unit: retailInfo.price,
               cost_price: costPrice,
               selected_attributes: defaultAttributes,
             };
@@ -587,14 +595,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     onChange({ ...quote, lines: quote.lines.filter(l => l.id !== lineId) });
   };
 
-  const calcLinePrice = (line: InlineQuoteLine) => {
-    const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-    const isManual = custoUnit === 0 && line.retail_price_unit !== undefined && line.retail_price_unit !== null;
-    const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-    const base = unitPrice * line.qt;
-    const afterDiscount = base * (1 - (line.discount_percent || 0) / 100);
-    return afterDiscount;
-  };
+  const calcLinePrice = (line: InlineQuoteLine) => getLineSubtotal(line);
 
   // Bundle-aware VAT calculation shared with QuoteBuilderSidebar's consolidated
   // totals, so this card's own badge/totals can never disagree with the sidebar.
@@ -699,8 +700,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
 
                     {sectionLines.map(line => {
                       const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-                      const isManual = custoUnit === 0;
-                      const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+                      const unitPrice = getLineUnitPrice(line);
                       const lineTotal = calcLinePrice(line);
                       const isBundleLine = getLineBundleComponents(line).length > 0;
 
@@ -753,14 +753,14 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                           />
                           <Input
                             type="number"
-                            value={isManual ? (line.retail_price_unit ?? "") : unitPrice.toFixed(2)}
+                            value={unitPrice ? unitPrice.toFixed(2) : ""}
                             onChange={(e) => {
                               const v = parseFloat(e.target.value) || 0;
+                              // Um preço escrito à mão manda sempre; quando há custo,
+                              // o markup é reajustado para se manter coerente.
+                              updateLine(line.id, "retail_price_unit", v);
                               if (custoUnit > 0) {
-                                const newMargin = ((v / custoUnit) - 1) * 100;
-                                updateLine(line.id, "margem_percent", Math.max(0, newMargin));
-                              } else {
-                                updateLine(line.id, "retail_price_unit", v);
+                                updateLine(line.id, "margem_percent", markupFromCostAndPrice(custoUnit, v, line.int_percent));
                               }
                             }}
                             placeholder="0.00"

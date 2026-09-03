@@ -29,6 +29,7 @@ import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -476,12 +477,9 @@ export function ProposalCreateDialog({
         if (validLines.length === 0) continue;
 
         const linesToInsert = validLines.map(l => {
-          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-          const precoSemIvaBase = unitPrice * l.qt;
+          // Subtotal gravado pela fonte única do preço da linha.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const precoSemIva = getLineSubtotal(l);
           const ivaValor = precoSemIva * (l.iva_percent / 100);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
@@ -703,7 +701,7 @@ export function ProposalCreateDialog({
             } else if (manualPrice) {
               retailPrice = manualPrice;
             }
-            const margin = costPrice > 0 && retailPrice > 0 ? ((retailPrice - costPrice) / costPrice) * 100 : 30;
+            const margin = costPrice > 0 && retailPrice > 0 ? markupFromCostAndPrice(costPrice, retailPrice) : 30;
             return {
               id: `temp_deal_${Date.now()}_${idx}`, section_name: "Geral",
               descricao_snapshot: name, item_description: "",

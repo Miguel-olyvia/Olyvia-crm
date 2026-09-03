@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { InlineQuoteData } from "@/components/proposals/InlineQuoteBuilder";
 import { fetchActivePdfTemplates } from "@/utils/quotePdfTemplate";
 import { buildQuoteRenderContext } from "@/utils/buildQuoteRenderContext";
+import { getLineSubtotal } from "@/utils/quotes/quoteLinePricing";
 
 GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -119,12 +120,9 @@ export function QuotePdfPreviewDialog({
       });
 
       const mapLine = (line: any, sectionName: string) => {
-        const custoUnit = (line.custo_material_unit || 0) + (line.custo_mao_obra_unit || 0);
-        const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-        const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + (line.margem_percent || 0) / 100) * (1 + (line.int_percent || 0) / 100);
-        const precoSemIvaBase = unitPrice * (line.qt || 0);
-        const lineDiscount = line.discount_percent || 0;
-        const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+        // Fonte única do preço da linha (preço de venda definido manda,
+        // unitário fechado ao cêntimo antes de multiplicar pela quantidade).
+        const precoSemIva = getLineSubtotal(line);
 
         return {
           ...line,

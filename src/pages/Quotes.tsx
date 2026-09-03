@@ -82,6 +82,7 @@ import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialo
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { getLineUnitPrice, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
 
 // Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
 const MIN_QUOTE_SEARCH_LENGTH = 2;
@@ -2341,15 +2342,15 @@ export default function Quotes() {
                             </TableHeader>
                             <TableBody>
                               {detailLines.map((line) => {
-                                const materialCost = parseFloat(String(line.custo_material_unit || 0));
-                                const laborCost = parseFloat(String(line.custo_mao_obra_unit || 0));
-                                const margin = parseFloat(String(line.margem_percent || 0));
-                                const unitPrice = (materialCost + laborCost) * (1 + margin / 100);
+                                // Preço unitário pela fonte única: passa a incluir a
+                                // comissão de intermediação e o preço de venda definido,
+                                // que esta tabela ignorava.
+                                const unitPrice = getLineUnitPrice(line);
                                 const qty = parseFloat(String(line.qt || 0));
                                 const subtotalLine = parseFloat(String(line.total_sem_iva || 0));
                                 const unitCost = detailLineCosts[line.id] ?? 0;
                                 const lineMargin = unitPrice > 0 && unitCost > 0
-                                  ? ((unitPrice - unitCost) / unitPrice) * 100
+                                  ? marginOnPrice(unitCost, unitPrice)
                                   : null;
                                 const marginColor = lineMargin == null
                                   ? "text-muted-foreground"
