@@ -1927,7 +1927,7 @@ const ClientContracts = () => {
                       </TableCell>
                       <TableCell>
                         {contract.proposals ? (
-                          <Badge variant="outline" className="text-xs cursor-pointer hover:bg-primary/10" onClick={() => navigate("/proposals")}>
+                          <Badge variant="outline" className="text-xs cursor-pointer hover:bg-primary/10" onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}>
                             {contract.proposals.title || "Proposta"}
                           </Badge>
                         ) : <span className="text-xs text-muted-foreground">—</span>}
@@ -2071,8 +2071,21 @@ const ClientContracts = () => {
                                    <DropdownMenuItem onClick={() => handleOpenReassign(contract)}>👤 Reatribuir comercial</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  {/* Levam o registo consigo. Navegavam para a lista inteira sem
+                                      identificador nenhum: o menu prometia "ver a proposta deste
+                                      contrato" e entregava a lista de todas, deixando a pessoa a
+                                      procurar o que já tinha à frente. As duas páginas já sabiam
+                                      abrir um registo por `?open=`; faltava passar-lho.
+                                      Desactivados quando o contrato não tem nenhum ligado — dos
+                                      244 contratos, 243 têm proposta. */}
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.quote_id}
+                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
@@ -2115,8 +2128,14 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.quote_id}
+                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
@@ -2152,8 +2171,14 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.quote_id}
+                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                 </>
                               )}
                               {contract.status === "expired" && (
@@ -2169,7 +2194,10 @@ const ClientContracts = () => {
                                   <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (expirado mantém histórico)</DropdownMenuItem>
@@ -2182,8 +2210,14 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.quote_id}
+                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {canDelete && canDeleteContract(contract) ? (
