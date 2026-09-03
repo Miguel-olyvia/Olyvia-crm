@@ -450,6 +450,10 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
     contrato_valor: parseNumericAmount(contract.total_value) ?? 0,
     contrato_data_inicio: contract.start_date,
     contrato_data_fim: contract.end_date,
+    // A data do documento e a de CRIACAO do contrato, nao a de hoje. Todos os
+    // caminhos que geram o texto -- o PDF, o portal do cliente e as
+    // pre-visualizacoes -- passam por aqui, por isso basta dize-lo uma vez.
+    data_documento: contract.created_at || undefined,
   };
 
 
