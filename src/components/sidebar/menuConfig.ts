@@ -73,6 +73,12 @@ export interface TopLevelItem {
    * carregamento de página a sério — ver AppSidebar.handleTopLevelClick.
    */
   external?: boolean;
+  /**
+   * Só aparece a administradores (`super_admin` / `system_admin`), qualquer que
+   * seja a permissão. Para páginas ainda não prontas para toda a gente: sem
+   * isto, o item aparecia a todos e só bloqueava ao clicar.
+   */
+  adminOnly?: boolean;
 }
 
 export const topLevelItems: TopLevelItem[] = [
@@ -91,6 +97,7 @@ export const topLevelItems: TopLevelItem[] = [
     icon: ListChecks,
     labelKey: "sidebar.activities",
     permissions: ["scheduling.items.view"],
+    adminOnly: true,
   },
   {
     id: "operacao",

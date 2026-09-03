@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { usePermissionScope } from '@/hooks/usePermissionScope';
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -13,6 +14,15 @@ interface ProtectedRouteProps {
   permission?: string;
   /** OR-logic: user needs at least one of these permissions */
   permissions?: string[];
+  /**
+   * Só administradores (`super_admin` ou `system_admin`) entram.
+   *
+   * Serve para páginas que ainda não estão prontas para toda a gente. É
+   * deliberadamente uma trava de PAPEL e não de permissão: a permissão que
+   * guardava a página dos agendamentos guarda também o calendário, o menu e a
+   * acção na lista de leads — retirá-la a um papel fechava tudo isso junto.
+   */
+  adminOnly?: boolean;
   /** The page component to render if access is granted */
   children: ReactNode;
 }
@@ -22,14 +32,15 @@ interface ProtectedRouteProps {
  * Wraps a page component and blocks access if the user lacks the required permission.
  * Shows a localized "Access Denied" page inside the Layout shell.
  */
-export function ProtectedRoute({ permission, permissions, children }: ProtectedRouteProps) {
+export function ProtectedRoute({ permission, permissions, adminOnly, children }: ProtectedRouteProps) {
   const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
+  const { anewRoleCode, loading: scopeLoading } = usePermissionScope();
   const { isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
 
   // Wait until BOTH company context and permissions are fully resolved
-  if (permissionsLoading || companyLoading) {
+  if (permissionsLoading || companyLoading || (adminOnly && scopeLoading)) {
     return (
       <Layout>
         <div className="flex-1 flex items-center justify-center p-8">
@@ -41,7 +52,9 @@ export function ProtectedRoute({ permission, permissions, children }: ProtectedR
 
   // Check access
   let hasAccess = true;
-  if (permission) {
+  if (adminOnly) {
+    hasAccess = anewRoleCode === 'super_admin' || anewRoleCode === 'system_admin';
+  } else if (permission) {
     hasAccess = hasPermission(permission);
   } else if (permissions && permissions.length > 0) {
     hasAccess = hasAnyPermission(permissions);

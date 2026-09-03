@@ -2,6 +2,7 @@ import React, { useMemo, memo, useCallback, useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePermissionScope } from '@/hooks/usePermissionScope';
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
 import { useSidebarAlertCounts } from "@/hooks/useSidebarAlertCounts";
@@ -35,6 +36,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const location = useLocation();
   const navigate = useNavigate();
   const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
+  const { anewRoleCode } = usePermissionScope();
   const { openSectionId, setOpenSectionId, closeSubmenu, isManuallyClosedRef } = useSidebarExpand();
   const { activeCompany } = useCompany();
   const { sectionCounts } = useSidebarAlertCounts(activeCompany?.id);
@@ -49,6 +51,12 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const canViewItem = useCallback(
     (item: MenuItem): boolean => {
       if (permissionsLoading) return true;
+      // Páginas ainda não prontas para toda a gente: nem aparecem a quem não
+      // pode entrar, em vez de aparecerem e negarem o acesso ao clique.
+      if ((item as { adminOnly?: boolean }).adminOnly
+        && !(anewRoleCode === 'super_admin' || anewRoleCode === 'system_admin')) {
+        return false;
+      }
       if (item.permissions && item.permissions.length > 0) {
         return hasAnyPermission(item.permissions);
       }
@@ -57,7 +65,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
       }
       return true;
     },
-    [permissionsLoading, hasPermission, hasAnyPermission]
+    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode]
   );
 
   const canViewTopLevel = useCallback(
