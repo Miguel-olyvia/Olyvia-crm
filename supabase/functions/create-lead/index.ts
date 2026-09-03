@@ -951,6 +951,11 @@ Deno.serve(async (req) => {
           kind: dedupOutcome!.kind,
           por: dedupPor,
           registo: existingTarget.targetType,
+          // OS VALORES que coincidiram. Dizer "o email e igual" sem dizer qual
+          // obriga quem le a ir procurar. Guarda-se so o que bateu: no match
+          // por email nao se guarda o telefone, porque esse nao coincidiu.
+          ...(dedupPor === 'ambos' || dedupPor === 'email' ? { email_igual: leadEmail ?? null } : {}),
+          ...(dedupPor === 'ambos' || dedupPor === 'telefone' ? { telefone_igual: leadPhone ?? null } : {}),
           // 03/05 — a submissao trouxe um telefone ou um email que a ficha nao
           // tem. NUNCA se escreve na ficha da pessoa: fica assinalado aqui, e
           // o separador mostra-o marcado como "nao gravado".

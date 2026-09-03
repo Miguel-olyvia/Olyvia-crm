@@ -55,6 +55,9 @@ interface PendingSubmissionRow {
   target_type: "lead" | "contact" | "client";
   /** O que coincidiu com a ficha existente: "email", "telefone", "ambos" ou "conflito". */
   matchedBy: "email" | "telefone" | "ambos" | "conflito" | null;
+  /** OS VALORES que coincidiram — só os que bateram, para não obrigar a ir procurar. */
+  matchedEmail: string | null;
+  matchedPhone: string | null;
   target_id: string;
   campaign_id: string | null;
   form_id: string | null;
@@ -374,12 +377,15 @@ export default function PendingFormSubmissions() {
         // que a submissao entrou. E o que aconteceu de facto, nao uma
         // reconstrucao posterior. Submissoes anteriores a isto vem sem nada,
         // e ficam sem explicacao em vez de inventarem uma.
-        const matchedBy = (s.field_values as any)?._meta?.dedup?.por ?? null;
+        const dedupMeta = (s.field_values as any)?._meta?.dedup ?? null;
+        const matchedBy = dedupMeta?.por ?? null;
 
         return {
           ...s,
           targetName,
           matchedBy,
+          matchedEmail: dedupMeta?.email_igual ?? null,
+          matchedPhone: dedupMeta?.telefone_igual ?? null,
           campaignName: s.campaign_id ? campaignNameById[s.campaign_id] || null : null,
           formName: s.form_id ? formNameById[s.form_id] || null : null,
           fieldLabels,
@@ -519,10 +525,10 @@ export default function PendingFormSubmissions() {
                         Já existe {row.target_type === "client" ? "o cliente" : "a lead"}{" "}
                         <span className="font-medium text-foreground">{row.targetName}</span>
                         {row.matchedBy === "ambos"
-                          ? " com o mesmo email e o mesmo telefone."
+                          ? ` com o mesmo email${row.matchedEmail ? ` (${row.matchedEmail})` : ""} e o mesmo telefone${row.matchedPhone ? ` (${row.matchedPhone})` : ""}.`
                           : row.matchedBy === "email"
-                            ? " com o mesmo email."
-                            : " com o mesmo telefone."}{" "}
+                            ? ` com o mesmo email${row.matchedEmail ? ` (${row.matchedEmail})` : ""}.`
+                            : ` com o mesmo telefone${row.matchedPhone ? ` (${row.matchedPhone})` : ""}.`}{" "}
                         A submissão já ficou ligada a essa ficha — não foi criada lead nova.
                       </p>
                     )}

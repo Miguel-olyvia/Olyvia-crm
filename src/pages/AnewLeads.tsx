@@ -407,16 +407,20 @@ function describeFormSubmissionMatch(dedupMeta: any): string | null {
   const registo = dedupMeta?.registo === "client" ? "um cliente" : "uma lead";
 
   if (por === "conflito") {
-    return "Nao entrou como lead nova: o email e o telefone apontam para pessoas diferentes.";
+    return "Não entrou como lead nova: o email e o telefone apontam para pessoas diferentes.";
   }
 
-  const coincidencia = por === "ambos"
-    ? "o email e o telefone sao iguais"
-    : por === "email"
-      ? "o email e igual"
-      : "o telefone e igual";
+  // Dizer "o email e igual" sem dizer QUAL obriga quem le a ir procurar.
+  const email = dedupMeta?.email_igual ? ` (${dedupMeta.email_igual})` : "";
+  const telefone = dedupMeta?.telefone_igual ? ` (${dedupMeta.telefone_igual})` : "";
 
-  return `Nao entrou como lead nova: ja existe ${registo} em que ${coincidencia}.`;
+  const coincidencia = por === "ambos"
+    ? `o email${email} e o telefone${telefone} são os mesmos`
+    : por === "email"
+      ? `o email${email} é o mesmo`
+      : `o telefone${telefone} é o mesmo`;
+
+  return `Não entrou como lead nova: já existe ${registo} em que ${coincidencia}.`;
 }
 
 // Fase do funil por status da lead. Ao nivel do modulo porque a query do
