@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hasFrozenBody, UNFREEZE_CONTRACT_COLUMNS } from "../contractDocument";
+import { hasFrozenBody, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "../contractDocument";
 
 /**
  * Descarregar um contrato assinado é LER, não produzir. Até aqui o documento
@@ -27,5 +27,26 @@ describe("um contrato assinado deixa de mudar por alguém o abrir", () => {
       contract_body_frozen_html: null,
       contract_frozen_at: null,
     });
+  });
+});
+
+/**
+ * Quando é que um contrato está "em vigor" para efeitos de congelamento.
+ * A data de assinatura do cliente não chega: 14 contratos estão marcados como
+ * assinados ou activos sem essa data, porque só a empresa assinou.
+ */
+describe("que contratos são congelados", () => {
+  it("o cliente assinou", () => {
+    expect(isContractInForce({ signature_date: "2026-08-19T10:00:00Z", status: "pending_signature" })).toBe(true);
+  });
+
+  it("assinado só pela empresa, sem data de assinatura do cliente", () => {
+    expect(isContractInForce({ signature_date: null, status: "signed" })).toBe(true);
+    expect(isContractInForce({ signature_date: null, status: "active" })).toBe(true);
+  });
+
+  it("um rascunho não congela — ainda está a ser trabalhado", () => {
+    expect(isContractInForce({ signature_date: null, status: "draft" })).toBe(false);
+    expect(isContractInForce({})).toBe(false);
   });
 });

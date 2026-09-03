@@ -1212,6 +1212,20 @@ export function hasFrozenBody(contract: any): boolean {
  * agora ja com a alteracao. Abrir NAO e uma alteracao, e por isso nunca passa
  * por aqui.
  */
+/**
+ * O contrato esta EM VIGOR, e por isso o seu documento nao pode continuar a
+ * mudar sozinho?
+ *
+ * A data de assinatura do cliente nao chega: medido no remoto, 14 contratos
+ * estao marcados como assinados ou activos SEM essa data -- assinou so a
+ * empresa. Sem os incluir ficavam de fora do congelamento e continuavam a mudar
+ * com a minuta, ao mesmo tempo que o ecra os trancava por estarem assinados.
+ */
+export function isContractInForce(contract: { signature_date?: string | null; status?: string | null } | null | undefined): boolean {
+  if (!contract) return false;
+  return !!contract.signature_date || ["signed", "active"].includes(contract.status ?? "");
+}
+
 export const UNFREEZE_CONTRACT_COLUMNS = {
   contract_body_frozen_html: null,
   contract_frozen_at: null,
@@ -1331,7 +1345,12 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
     // pediu e exactamente este, quer a gravacao resulte quer nao. Falhar a
     // gravacao significa que se volta a tentar na leitura seguinte -- nunca que
     // o utilizador fica sem documento.
-    if (contract.signature_date && contract.id) {
+    // "Em vigor" por qualquer dos dois sinais, e nao so pela data de assinatura
+    // do cliente: medido no remoto, 14 contratos estao marcados como assinados
+    // ou activos SEM data de assinatura -- assinou so a empresa. Sem os incluir,
+    // ficavam de fora do congelamento e continuavam a mudar com a minuta, ao
+    // mesmo tempo que o ecra os trancava por estarem assinados.
+    if (isContractInForce(contract) && contract.id) {
       void (supabase as any)
         .from("client_contracts")
         .update({ contract_body_frozen_html: bodyHtml, contract_frozen_at: new Date().toISOString() })

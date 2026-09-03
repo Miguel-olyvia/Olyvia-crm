@@ -14,7 +14,7 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -54,7 +54,16 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     setGeneratedFromName(null);
   }, [contract?.id, contract?.contract_body_html]);
 
+  // Um contrato em vigor nao se edita a mao: o texto livre fica trancado.
   const isLocked = readOnly || ["signed", "active"].includes(contract?.status);
+
+  // REGENERAR e a excepcao, e de proposito. E a unica forma de alterar um
+  // contrato assinado, e sem ela um contrato congelado ficaria impossivel de
+  // corrigir para sempre -- trancado por estar assinado, e imutavel por estar
+  // congelado. Continua a exigir dois passos deliberados (escolher a minuta,
+  // depois guardar), e e so ao guardar que o congelamento e desfeito.
+  const podeRegenerar = !readOnly;
+  const contratoEmVigor = isContractInForce(contract);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-for-body", activeCompany?.id],
@@ -519,7 +528,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
               <PenTool className="h-3 w-3" /> Assinado pela empresa
             </Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setIsGenerateOpen(true)} disabled={isLocked} className="gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsGenerateOpen(true)}
+            disabled={!podeRegenerar}
+            className="gap-1.5"
+            title={contratoEmVigor ? "Regenerar substitui o documento deste contrato assinado. É a única forma de o alterar." : undefined}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
             {bodyHtml ? "Regenerar" : "Gerar de Minuta"}
           </Button>
