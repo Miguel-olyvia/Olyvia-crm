@@ -453,7 +453,17 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
     // A data do documento e a de CRIACAO do contrato, nao a de hoje. Todos os
     // caminhos que geram o texto -- o PDF, o portal do cliente e as
     // pre-visualizacoes -- passam por aqui, por isso basta dize-lo uma vez.
+    //
+    // Sao DUAS as portas por onde a data de hoje entrava, e por isso ha aqui
+    // dois campos: `data_documento` alimenta o marcador {{data_atual}}, que as
+    // minutas usam junto as assinaturas; `data` alimenta o bloco "Data:" do
+    // CABECALHO (contractHeader.ts), que ninguem preenchia e caia sempre em
+    // todayPt(). Era esta segunda que punha a data de hoje no topo da primeira
+    // pagina de contratos assinados ha meses -- e a que se via no ecra.
     data_documento: contract.created_at || undefined,
+    data: contract.created_at
+      ? new Date(contract.created_at).toLocaleDateString("pt-PT")
+      : undefined,
   };
 
 

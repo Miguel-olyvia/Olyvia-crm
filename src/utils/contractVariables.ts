@@ -161,6 +161,15 @@ export interface ContractVariableData {
    * em "hoje", que aí é o que faz sentido.
    */
   data_documento?: string;
+  /**
+   * Data mostrada no bloco "Data:" do CABEÇALHO (contractHeader.ts).
+   *
+   * É a segunda porta por onde a data de hoje entrava: o cabeçalho lê
+   * `sampleData.data` e, quando ninguém lho passa — o que era sempre —, cai em
+   * `todayPt()`. Ficava a data de hoje, em formato ISO, no topo da primeira
+   * página de contratos assinados há meses.
+   */
+  data?: string;
   empresa_nome?: string;
   empresa_nif?: string;
   empresa_morada?: string;
