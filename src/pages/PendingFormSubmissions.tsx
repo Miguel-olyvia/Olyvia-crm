@@ -68,6 +68,9 @@ interface PendingSubmissionRow {
   campaignName: string | null;
   formName: string | null;
   fieldLabels: Record<string, string>;
+  /** Campos de distrito: guardam o id, e sem isto o ecrã mostrava o UUID. */
+  districtFieldKeys: Set<string>;
+  districtNameById: Record<string, string>;
   /** Entidade a que a submissão está ligada (a do email, no caso 06). */
   conflictingEntityId: string | null;
   /** [entidade do email, entidade do telefone] — só preenchido em conflito. */
@@ -374,6 +377,21 @@ export default function PendingFormSubmissions() {
           : Promise.resolve(),
       ]);
 
+      // Os campos de distrito guardam o id da divisao administrativa, nao o
+      // nome. Sem esta traducao o cartao mostrava um UUID a quem esta a rever.
+      const todasDefinicoes = Object.values(definitionsByCampaign).flat();
+      const districtFieldKeys = new Set(
+        todasDefinicoes.filter((d: any) => d.field_type === "ref_district").map((d: any) => d.field_key),
+      );
+      let districtNameById: Record<string, string> = {};
+      if (districtFieldKeys.size > 0) {
+        const { data: districts } = await supabase
+          .from("administrative_divisions")
+          .select("id, name")
+          .eq("admin_level", 1);
+        districtNameById = Object.fromEntries((districts || []).map((d: any) => [d.id, d.name]));
+      }
+
       const mapped: PendingSubmissionRow[] = submissions.map((s: any) => {
         const definitions = s.campaign_id
           ? definitionsByCampaign[s.campaign_id] || []
@@ -403,6 +421,8 @@ export default function PendingFormSubmissions() {
           campaignName: s.campaign_id ? campaignNameById[s.campaign_id] || null : null,
           formName: s.form_id ? formNameById[s.form_id] || null : null,
           fieldLabels,
+          districtFieldKeys,
+          districtNameById,
           conflictingEntityId,
           candidates: conflictingEntityId
             ? [candidateById[s.entity_id], candidateById[conflictingEntityId]].filter(Boolean)
@@ -583,7 +603,9 @@ export default function PendingFormSubmissions() {
                               {row.fieldLabels[key] || humanizeFormFieldKey(key)}
                             </span>
                             <span className="font-medium text-right flex items-center justify-end gap-1.5">
-                              {sanitizeFieldValue(value)}
+                              {row.districtFieldKeys.has(key)
+                                ? (row.districtNameById[String(value)] || sanitizeFieldValue(value))
+                                : sanitizeFieldValue(value)}
                               {/* O valor que bateu marcado onde ele esta, para nao
                                   obrigar a compara-lo de cabeca com o bloco de cima. */}
                               {isMatchedValue(value, row) && (
