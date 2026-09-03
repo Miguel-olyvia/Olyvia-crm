@@ -295,34 +295,47 @@ Deno.serve(async (req: Request) => {
     let entityId: string | null = null;
     let mergedFieldValues: Record<string, any> = field_values;
 
+    // A submissao pode estar ligada a um CLIENTE, nao a uma lead.
+    //
+    // Quem ja e cliente e volta a preencher o formulario recebe, como toda a
+    // gente, o id da submissao como chave de continuacao. Mas um cliente nao
+    // tem lead activa -- se esse id fosse procurado em `anew_leads`, dava
+    // "Lead not found" e a visita nao ficava marcada: o formulario parava no
+    // ultimo passo e o cliente nao conseguia marcar visita nenhuma. Medido ao
+    // vivo na nike, e a exposicao sao os clientes contactaveis das
+    // organizacoes com formularios de agendamento.
+    //
+    // O que deve acontecer e o que a invariante manda: a entidade nao tem lead,
+    // por isso nasce uma -- na MESMA entidade, reaproveitada da submissao, sem
+    // criar pessoa repetida. Deixa-se o `lead_id` cair e segue-se o caminho
+    // normal de criacao, mais abaixo.
+    let submissionEntityId: string | null = null;
+    let resolvedLeadIdFromSubmission: string | null = null;
     if (lead_id) {
-      // O `lead_id` que chega do formulario publico pode nao ser uma lead.
-      //
-      // Quando o formulario reconhece alguem que ja existe, nao nasce lead: a
-      // submissao acumula em form_submissions e e ESSE id que segue como chave
-      // de continuacao -- de proposito, para que a resposta publica seja igual
-      // nos dois casos e ninguem de fora descubra, submetendo, se uma pessoa e
-      // lead ou cliente desta organizacao.
-      //
-      // Sem esta resolucao, essa pessoa apanhava "Lead not found" ao marcar
-      // visita: partia-lhe o formulario E denunciava, pelo erro, aquilo que a
-      // resposta uniforme escondia. Resolve-se para a lead a que a submissao
-      // esta ligada, que e onde a visita deve mesmo ficar marcada.
-      let resolvedLeadId = lead_id;
       const { data: submissionRow } = await supabase
         .from('form_submissions')
-        .select('target_type, target_id')
+        .select('target_type, target_id, entity_id')
         .eq('id', lead_id)
         .eq('organization_id', organizationId)
         .maybeSingle();
-      if (submissionRow?.target_type === 'lead' && submissionRow.target_id) {
-        resolvedLeadId = submissionRow.target_id as string;
+      if (submissionRow) {
+        submissionEntityId = (submissionRow.entity_id as string) ?? null;
+        if (submissionRow.target_type === 'lead' && submissionRow.target_id) {
+          resolvedLeadIdFromSubmission = submissionRow.target_id as string;
+        }
       }
+    }
 
+    // Uma submissao que nao aponta a uma lead (cliente) nao tem lead para onde
+    // ir: segue como se nao viesse `lead_id`.
+    const leadIdToUse = resolvedLeadIdFromSubmission
+      ?? (submissionEntityId ? null : lead_id);
+
+    if (leadIdToUse) {
       const { data: existingLead, error: existingLeadError } = await supabase
         .from('anew_leads')
         .select('id, entity_id, field_values, root_organization_id')
-        .eq('id', resolvedLeadId)
+        .eq('id', leadIdToUse)
         .eq('organization_id', organizationId)
         .maybeSingle();
 
@@ -345,6 +358,14 @@ Deno.serve(async (req: Request) => {
         ...existingFieldValues,
         ...field_values,
       };
+    }
+
+    // A entidade que a deteccao de duplicados JA escolheu manda sobre a que se
+    // encontraria aqui. Sao a mesma pessoa nos casos normais, mas a da
+    // submissao e a decidida com as regras completas (email e telefone, com
+    // conflitos resolvidos); a daqui compara tambem por NIF e escolhe uma.
+    if (!entityId && submissionEntityId) {
+      entityId = submissionEntityId;
     }
 
     // 7. Entity deduplication (same logic as insert-lead)
@@ -387,7 +408,8 @@ Deno.serve(async (req: Request) => {
         email: leadEmail,
         phone: leadPhone,
       });
-      if (scopedHit?.entityId) {
+      // `!entityId`: nunca por cima da que veio da submissao.
+      if (!entityId && scopedHit?.entityId) {
         entityId = scopedHit.entityId;
       }
     }
