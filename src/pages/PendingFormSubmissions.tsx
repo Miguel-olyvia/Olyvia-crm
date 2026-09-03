@@ -133,6 +133,27 @@ async function fetchPendingSubmissions(organizationId: string): Promise<any[]> {
   return data || [];
 }
 
+/**
+ * O valor submetido e um dos que fez o match?
+ *
+ * Compara-se como a deteccao compara: email sem maiusculas, telefone pelos
+ * ultimos 9 digitos -- senao "+351 917 654 321" nunca bateria com "917654321"
+ * e a marca ficava de fora exactamente nos casos em que mais faz falta.
+ */
+function isMatchedValue(value: unknown, row: { matchedEmail: string | null; matchedPhone: string | null }): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const texto = value.trim();
+
+  if (row.matchedEmail && texto.toLowerCase() === row.matchedEmail.trim().toLowerCase()) return true;
+
+  if (row.matchedPhone) {
+    const digitos = (s: string) => s.replace(/\D/g, "").slice(-9);
+    const submetido = digitos(texto);
+    if (submetido.length === 9 && submetido === digitos(row.matchedPhone)) return true;
+  }
+  return false;
+}
+
 /** Nome, emails e telefones de cada entidade candidata, para quem lê perceber a dúvida. */
 async function fetchConflictCandidates(entityIds: string[]): Promise<Record<string, ConflictCandidate>> {
   if (entityIds.length === 0) return {};
@@ -518,19 +539,39 @@ export default function PendingFormSubmissions() {
                       </div>
                     </div>
 
-                    {/* O que coincidiu. Sem isto o cartao mostra o que a pessoa
-                        preencheu e nao diz com quem, nem porque. */}
+                    {/* O que coincidiu, em bloco e nao numa frase corrida.
+                        Enterrado no meio do texto ninguem via qual era o valor
+                        que bateu; e o nome tem de vir identificado como sendo o
+                        da FICHA, porque a mesma pessoa pode reenviar o
+                        formulario com outro nome e os dois teem de se
+                        distinguir. */}
                     {row.matchedBy && row.matchedBy !== "conflito" && (
-                      <p className="text-xs text-muted-foreground">
-                        Já existe {row.target_type === "client" ? "o cliente" : "a lead"}{" "}
-                        <span className="font-medium text-foreground">{row.targetName}</span>
-                        {row.matchedBy === "ambos"
-                          ? ` com o mesmo email${row.matchedEmail ? ` (${row.matchedEmail})` : ""} e o mesmo telefone${row.matchedPhone ? ` (${row.matchedPhone})` : ""}.`
-                          : row.matchedBy === "email"
-                            ? ` com o mesmo email${row.matchedEmail ? ` (${row.matchedEmail})` : ""}.`
-                            : ` com o mesmo telefone${row.matchedPhone ? ` (${row.matchedPhone})` : ""}.`}{" "}
-                        A submissão já ficou ligada a essa ficha — não foi criada lead nova.
-                      </p>
+                      <div className="rounded-md border bg-muted/40 px-3 py-2 space-y-1.5">
+                        <p className="text-[11px] text-muted-foreground">
+                          Coincide com {row.target_type === "client" ? "o cliente" : "a lead"} que já existe:{" "}
+                          <span className="font-medium text-foreground">{row.targetName}</span>
+                        </p>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {row.matchedEmail && (
+                            <span className="inline-flex items-center gap-1.5 text-xs">
+                              <Mail className="h-3 w-3 text-muted-foreground" />
+                              <span className="font-medium">{row.matchedEmail}</span>
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">igual</Badge>
+                            </span>
+                          )}
+                          {row.matchedPhone && (
+                            <span className="inline-flex items-center gap-1.5 text-xs">
+                              <Phone className="h-3 w-3 text-muted-foreground" />
+                              <span className="font-medium">{row.matchedPhone}</span>
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">igual</Badge>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Não foi criada lead nova. Abaixo está o que a pessoa preencheu desta vez — o nome pode
+                          não ser o mesmo da ficha.
+                        </p>
+                      </div>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
@@ -545,7 +586,14 @@ export default function PendingFormSubmissions() {
                             <span className="text-muted-foreground">
                               {row.fieldLabels[key] || humanizeFormFieldKey(key)}
                             </span>
-                            <span className="font-medium text-right">{sanitizeFieldValue(value)}</span>
+                            <span className="font-medium text-right flex items-center justify-end gap-1.5">
+                              {sanitizeFieldValue(value)}
+                              {/* O valor que bateu marcado onde ele esta, para nao
+                                  obrigar a compara-lo de cabeca com o bloco de cima. */}
+                              {isMatchedValue(value, row) && (
+                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">igual</Badge>
+                              )}
+                            </span>
                           </div>
                         ))
                       )}
