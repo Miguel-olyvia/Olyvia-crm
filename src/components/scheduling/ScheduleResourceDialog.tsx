@@ -5,12 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 import { scheduleResourceSchema } from '@/lib/validations';
 import { ResourceServiceAreas } from './ResourceServiceAreas';
-import { Power, PowerOff } from 'lucide-react';
 import type { ScheduleResource } from '@/types/scheduling';
 
 interface ScheduleResourceDialogProps {
@@ -340,34 +340,20 @@ export function ScheduleResourceDialog({
               Apagar um recurso e em cascata: leva as atribuicoes dele nas
               visitas, e perde-se o registo de quem fez o que. Para quem sai da
               empresa a saida certa e esta -- o historico fica, e a pessoa
-              deixa de aparecer para marcacoes novas. Ate agora o ecra so
-              oferecia a destrutiva. */}
+              deixa de aparecer para marcacoes novas. */}
           {resource && canEdit && (
-            <div className="rounded-lg border p-3 flex items-start justify-between gap-4">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium flex items-center gap-2">
-                  {formData.is_active
-                    ? <><Power className="h-4 w-4 text-emerald-600" /> {t('scheduling.resourceActive') || 'Recurso activo'}</>
-                    : <><PowerOff className="h-4 w-4 text-muted-foreground" /> {t('scheduling.resourceInactive') || 'Recurso inactivo'}</>}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {formData.is_active
-                    ? (t('scheduling.resourceActiveHint') || 'Aparece nas marcações e conta para a disponibilidade.')
-                    : (t('scheduling.resourceInactiveHint') || 'Não aparece em marcações novas. O histórico de visitas mantém-se.')}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant={formData.is_active ? 'outline' : 'default'}
-                size="sm"
-                className="shrink-0"
-                disabled={loading}
-                onClick={() => setFormData(f => ({ ...f, is_active: !f.is_active }))}
-              >
+            <div className="flex items-center justify-between">
+              <Label htmlFor="resource-active">
                 {formData.is_active
-                  ? (t('scheduling.deactivateResource') || 'Desactivar')
-                  : (t('scheduling.reactivateResource') || 'Reactivar')}
-              </Button>
+                  ? t('scheduling.resourceActive')
+                  : t('scheduling.resourceInactive')}
+              </Label>
+              <Switch
+                id="resource-active"
+                checked={formData.is_active}
+                disabled={loading}
+                onCheckedChange={(v) => setFormData(f => ({ ...f, is_active: v }))}
+              />
             </div>
           )}
 

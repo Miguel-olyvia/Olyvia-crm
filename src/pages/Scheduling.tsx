@@ -495,7 +495,7 @@ export default function Scheduling() {
                       {/* Sem isto nao se distingue, na lista, quem saiu de quem ca esta. */}
                       {resource.is_active === false && (
                         <Badge variant="outline" className="text-muted-foreground">
-                          {t('scheduling.resourceInactive') || 'Inactivo'}
+                          {t('scheduling.resourceInactive')}
                         </Badge>
                       )}
                     </div>
