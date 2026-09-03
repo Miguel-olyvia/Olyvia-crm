@@ -48,6 +48,17 @@ const KEY_TO_ROUTE: Record<string, string> = {
   client: "/clients",
 };
 
+// Tabela de origem de cada passo, para os casos em que é preciso ir buscar a
+// entidade (pessoa/empresa) a que o registo pertence. Só entram os tipos cuja
+// tabela tem mesmo a coluna `entity_id`.
+const KEY_TO_SOURCE_TABLE: Record<string, string> = {
+  lead: "anew_leads",
+  deal: "deals",
+  proposal: "proposals",
+  quote: "quotes",
+  contract: "client_contracts",
+};
+
 const DEFAULT_LABELS: Record<string, string> = {
   lead: "Lead",
   deal: "Pedido",
@@ -79,6 +90,8 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
           lead: null, deal: null, proposal: null, quote: null, contract: null, client: null,
         };
 
+        let configOrgId: string | null = null;
+
         if (data) {
           resolved = {
             lead: data.lead_id,
@@ -88,16 +101,24 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
             contract: data.contract_id,
             client: data.client_id,
           };
-
-          // Fetch org pipeline config using organization_id from the link
-          if (data.organization_id || data.root_organization_id) {
-            const orgId = data.root_organization_id || data.organization_id;
-            await loadPipelineConfig(orgId, resolved);
-          } else {
-            buildDefaultSteps(resolved);
-          }
+          resolved[entityType] = resolved[entityType] || entityId;
+          configOrgId = data.root_organization_id || data.organization_id || null;
         } else {
           await resolveFromFKChain(resolved);
+        }
+
+        // Um orçamento (ou proposta) não tem ligação directa à lead: quando não
+        // passou por um Pedido, `deal_id` é nulo e a cadeia de FKs não chega lá.
+        // A única ligação verdadeira é a entidade (a pessoa/empresa) — é por aí
+        // que se acende o passo Lead quando ela existe mesmo.
+        if (!resolved.lead) {
+          await resolveLeadFromEntity(resolved);
+        }
+
+        if (configOrgId) {
+          await loadPipelineConfig(configOrgId, resolved);
+        } else {
+          buildDefaultSteps(resolved);
         }
 
         setPipelineData(resolved);
@@ -168,15 +189,49 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
           if (quote?.proposal_id) resolved.proposal = quote.proposal_id;
           if (quote?.deal_id) {
             resolved.deal = quote.deal_id;
-            const { data: deal } = await supabase.from("deals").select("lead_id").eq("id", quote.deal_id).maybeSingle();
+          } else if (quote?.proposal_id) {
+            // O orçamento pode não guardar o Pedido, mas a proposta de onde veio guarda.
+            const { data: prop } = await supabase.from("proposals").select("deal_id").eq("id", quote.proposal_id).maybeSingle();
+            if (prop?.deal_id) resolved.deal = prop.deal_id;
+          }
+          if (resolved.deal) {
+            const { data: deal } = await supabase.from("deals").select("lead_id").eq("id", resolved.deal).maybeSingle();
             if (deal?.lead_id) resolved.lead = deal.lead_id;
           }
         }
       } catch (e) {
         // graceful degradation
       }
+    };
 
-      buildDefaultSteps(resolved);
+    // Acende o passo Lead a partir da entidade do próprio registo. Usa-se apenas
+    // como recurso, quando nenhuma ligação directa (pipeline_links ou cadeia de
+    // FKs) chegou a uma lead.
+    const resolveLeadFromEntity = async (resolved: Record<string, string | null>) => {
+      const sourceTable = KEY_TO_SOURCE_TABLE[entityType];
+      if (!sourceTable) return;
+
+      try {
+        const { data: record } = await (supabase.from(sourceTable) as any)
+          .select("entity_id, organization_id")
+          .eq("id", entityId)
+          .maybeSingle();
+
+        if (!record?.entity_id || !record?.organization_id) return;
+
+        const { data: lead } = await (supabase.from("anew_leads") as any)
+          .select("id")
+          .eq("entity_id", record.entity_id)
+          .eq("organization_id", record.organization_id)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (lead?.id) resolved.lead = lead.id;
+      } catch (e) {
+        // graceful degradation
+      }
     };
 
     fetchPipelineData();
