@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, FileText, Link2, Mail, Phone } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarClock, FileText, Link2, Mail, Phone } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -75,6 +75,17 @@ interface PendingSubmissionRow {
   conflictingEntityId: string | null;
   /** [entidade do email, entidade do telefone] — só preenchido em conflito. */
   candidates: ConflictCandidate[] | null;
+  /**
+   * Hora que a pessoa pediu para a visita e que NÃO chegou a ser marcada.
+   *
+   * O book-slot só marca com o comercial de quem já é conhecido: a visita é
+   * dele. Se ele não estivesse livre àquela hora, não se passa a visita a
+   * outro — guarda-se o pedido e responde-se ao visitante como se tivesse
+   * corrido bem, para de fora não se distinguir quem já é conhecido de quem é
+   * novo. Sem mostrar isto aqui, o pedido morria dentro do JSON e o comercial
+   * nunca saberia que aquela pessoa pediu hora.
+   */
+  requestedVisitStart: string | null;
 }
 
 /**
@@ -183,6 +194,15 @@ async function fetchConflictCandidates(entityIds: string[]): Promise<Record<stri
     if (candidate && row.phone_number) candidate.phones = [...candidate.phones, row.phone_number];
   }
   return byId;
+}
+
+/** "9 de setembro, 10:00" — por extenso, que é como quem lê fala da hora. */
+function formatRequestedVisit(iso: string): string | null {
+  const data = new Date(iso);
+  if (Number.isNaN(data.getTime())) return null;
+  const dia = data.toLocaleDateString("pt-PT", { day: "numeric", month: "long" });
+  const hora = data.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  return `${dia}, ${hora}`;
 }
 
 interface ConflictCandidatesProps {
@@ -412,6 +432,10 @@ export default function PendingFormSubmissions() {
         const dedupMeta = (s.field_values as any)?._meta?.dedup ?? null;
         const matchedBy = dedupMeta?.por ?? null;
 
+        // O book-slot grava aqui a hora que ficou por marcar. Só existe nas
+        // submissões em que houve mesmo um pedido de visita sem agenda livre.
+        const agendamentoPedido = (s.field_values as any)?._meta?.agendamento_pedido ?? null;
+
         return {
           ...s,
           targetName,
@@ -427,6 +451,7 @@ export default function PendingFormSubmissions() {
           candidates: conflictingEntityId
             ? [candidateById[s.entity_id], candidateById[conflictingEntityId]].filter(Boolean)
             : null,
+          requestedVisitStart: agendamentoPedido?.inicio ?? null,
         };
       });
 
@@ -531,6 +556,7 @@ export default function PendingFormSubmissions() {
             rows.map((row) => {
               const entries = Object.entries(row.field_values || {}).filter(([key]) => key !== "_meta");
               const isConflict = !!row.candidates && row.candidates.length > 0;
+              const horaPedida = row.requestedVisitStart ? formatRequestedVisit(row.requestedVisitStart) : null;
               return (
                 <Card
                   key={row.id}
@@ -587,6 +613,47 @@ export default function PendingFormSubmissions() {
                           Não foi criada lead nova. Abaixo está o que a pessoa preencheu desta vez — o nome pode
                           não ser o mesmo da ficha.
                         </p>
+                      </div>
+                    )}
+
+                    {/* A hora pedida vem ANTES dos campos submetidos: é o que
+                        obriga a agir, e enterrada debaixo da lista passava
+                        despercebida. */}
+                    {horaPedida && (
+                      <div className="rounded-md border border-sky-500/60 bg-sky-500/5 px-3 py-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <CalendarClock className="h-4 w-4 text-sky-600 shrink-0" />
+                          <p className="text-sm font-medium text-sky-700 dark:text-sky-400">
+                            Pediu visita para {horaPedida} — ficou por marcar
+                          </p>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          Não estava livre a essa hora. A visita a {row.targetName} é sua, por isso não foi
+                          marcada a mais ninguém — combine outra hora e marque-a no agendamento.
+                        </p>
+                        {canResolve && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              navigate("/scheduling", {
+                                state: {
+                                  submissionId: row.id,
+                                  entityId: row.entity_id,
+                                  targetName: row.targetName,
+                                  // O agendamento so sabe ligar a marcacao a um
+                                  // cliente; para leads vai so o nome no titulo.
+                                  targetType: row.target_type,
+                                  clientId: row.target_type === "client" ? row.target_id : null,
+                                  requestedStart: row.requestedVisitStart,
+                                },
+                              })
+                            }
+                          >
+                            <CalendarClock className="h-3.5 w-3.5 mr-1" />
+                            Marcar reunião
+                          </Button>
+                        )}
                       </div>
                     )}
 

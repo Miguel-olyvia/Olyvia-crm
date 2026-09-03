@@ -179,7 +179,15 @@ Deno.serve(async (req: Request) => {
     // dono, ninguem dava por isso. Com deduplicacao, a lead ja tem dono: dar a
     // visita a outro separa quem vende de quem visita, ou tira-lhe a lead.
     let ownerAnewUserId: string | null = null;
-    let ownerResourceId: string | null = null;
+    // A lead apanhada JA aqui: mais abaixo ela so e resolvida depois do ponto
+    // onde o pedido por marcar precisa dela.
+    let ownerLeadId: string | null = null;
+    // TODOS os recursos do comercial, nao um.
+    // Um comercial pode ter mais do que um recurso activo -- na nike ha quem
+    // tenha dois. Escolher `limit(1)` deixava ao acaso qual deles se olhava, e
+    // bastava sair o que nao cobre o distrito para o pedido ficar por marcar
+    // com o comercial disponivel no outro.
+    let ownerResourceIds: string[] = [];
     {
       const { data: sub } = lead_id
         ? await supabase
@@ -191,6 +199,7 @@ Deno.serve(async (req: Request) => {
         : { data: null };
 
       if (sub?.target_type === 'lead' && sub.target_id) {
+        ownerLeadId = sub.target_id as string;
         const { data: l } = await supabase
           .from('anew_leads').select('assigned_to, created_by').eq('id', sub.target_id).maybeSingle();
         ownerAnewUserId = l?.assigned_to ?? l?.created_by ?? null;
@@ -206,10 +215,8 @@ Deno.serve(async (req: Request) => {
           .select('id')
           .eq('user_id', ownerAnewUserId)
           .eq('organization_id', organizationId)
-          .eq('is_active', true)
-          .limit(1)
-          .maybeSingle();
-        ownerResourceId = res?.id ?? null;
+          .eq('is_active', true);
+        ownerResourceIds = (res ?? []).map((r: { id: string }) => r.id);
       }
     }
 
@@ -247,8 +254,8 @@ Deno.serve(async (req: Request) => {
 
     // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
     // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
-    const ordered = ownerResourceId
-      ? orderedCandidates.filter((cand: { id: string }) => cand.id === ownerResourceId)
+    const ordered = ownerResourceIds.length > 0
+      ? orderedCandidates.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
       : orderedCandidates;
 
     for (const candidate of ordered) {
@@ -275,7 +282,7 @@ Deno.serve(async (req: Request) => {
     //
     // Ao visitante responde-se com sucesso, como a toda a gente: de fora nao se
     // distingue quem ja e conhecido de quem e novo.
-    if (!assignedResourceId && ownerResourceId && lead_id) {
+    if (!assignedResourceId && ownerResourceIds.length > 0 && lead_id) {
       try {
         const { data: sub } = await supabase
           .from('form_submissions')
@@ -306,6 +313,21 @@ Deno.serve(async (req: Request) => {
           .eq('id', lead_id);
       } catch (pedidoErr) {
         console.error('[book-slot] nao foi possivel guardar a hora pedida:', pedidoErr);
+      }
+
+      // A lead fica marcada como "por agendar a mao". A fila le do
+      // `_meta.agendamento_pedido` e mostra o cartao na mesma, mas ha quem
+      // procure leads por esta coluna -- sem isto, esta ficava de fora dessa
+      // procura, e o estado dela dizia o contrario do que era.
+      if (ownerLeadId) {
+        try {
+          await supabase
+            .from('anew_leads')
+            .update({ needs_manual_scheduling: true })
+            .eq('id', ownerLeadId);
+        } catch (marcaErr) {
+          console.error('[book-slot] nao foi possivel marcar a lead como por agendar:', marcaErr);
+        }
       }
 
       console.log('[book-slot] comercial sem disponibilidade; pedido guardado para marcacao a mao', {
