@@ -492,6 +492,12 @@ export default function Scheduling() {
                         {(resource.resource_type as string) === 'other' && (t('scheduling.resourceType.other') || 'Outro')}
                       </Badge>
                       <Badge variant="secondary">{resource.max_daily_capacity}h{t('scheduling.perDay')}</Badge>
+                      {/* Sem isto nao se distingue, na lista, quem saiu de quem ca esta. */}
+                      {resource.is_active === false && (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          {t('scheduling.resourceInactive') || 'Inactivo'}
+                        </Badge>
+                      )}
                     </div>
                     {resource.user?.name ? (
                       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
