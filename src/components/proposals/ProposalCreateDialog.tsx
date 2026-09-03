@@ -154,6 +154,12 @@ export function ProposalCreateDialog({
   const [showContactDropdown, setShowContactDropdown] = useState(false);
   const [selectedContact, setSelectedContact] = useState<ContactSearchResult | null>(null);
 
+  // Nome de quem já vem escolhido de fora (menu de três pontos do cliente).
+  // Lido da ficha da entidade e não de campos do formulário: é a mesma linha
+  // que depois vai gravada em proposals.entity_id, por isso o ecrã tem de
+  // mostrar exactamente essa pessoa e não uma aproximação.
+  const [presetEntityName, setPresetEntityName] = useState<string | null>(null);
+
   const [proposalItems, setProposalItems] = useState<ProposalItem[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
 
@@ -184,6 +190,25 @@ export function ProposalCreateDialog({
       })),
     );
   }, [scopedDealResults]);
+
+  // Nome da pessoa pré-escolhida. Só enquanto o diálogo está aberto, para não
+  // ficar preso o nome de um cliente anterior quando se abre o menu de outro.
+  useEffect(() => {
+    if (!open || !presetEntityId) {
+      setPresetEntityName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("anew_entities")
+        .select("display_name")
+        .eq("id", presetEntityId)
+        .maybeSingle();
+      if (!cancelled) setPresetEntityName(data?.display_name ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [open, presetEntityId]);
 
   // Load workflow stages + templates
   const loadStagesAndTemplates = useCallback(async () => {
@@ -794,51 +819,62 @@ export function ProposalCreateDialog({
               )}
             </div>
 
-            {/* Contact search */}
+            {/* Pessoa da proposta. Com presetEntityId não há nada a escolher: a
+                cascata de entity_id dá-lhe sempre prioridade, por isso um campo
+                de procura aqui aceitava um nome e ignorava-o. */}
             <div className="col-span-2 space-y-2">
-              <Label>Contacto</Label>
-              <div className="relative">
-                {selectedContact ? (
-                  <div className="flex items-start gap-2 p-3 border rounded-md bg-muted/30">
-                    <Badge variant="secondary" className="shrink-0 mt-0.5">Contacto</Badge>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium">{selectedContact.display_name}</span>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                        {selectedContact.email && <span className="text-xs text-muted-foreground">{selectedContact.email}</span>}
-                        {selectedContact.phone && <span className="text-xs text-muted-foreground">{selectedContact.phone}</span>}
+              {presetEntityId ? (
+                <div className="flex items-center gap-2 p-3 border rounded-md bg-muted/30">
+                  <span className="text-sm text-muted-foreground">Proposta para:</span>
+                  <span className="text-sm font-medium truncate">{presetEntityName ?? "—"}</span>
+                </div>
+              ) : (
+                <>
+                  <Label>Lead ou cliente</Label>
+                  <div className="relative">
+                    {selectedContact ? (
+                      <div className="flex items-start gap-2 p-3 border rounded-md bg-muted/30">
+                        <Badge variant="secondary" className="shrink-0 mt-0.5">Pessoa</Badge>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium">{selectedContact.display_name}</span>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                            {selectedContact.email && <span className="text-xs text-muted-foreground">{selectedContact.email}</span>}
+                            {selectedContact.phone && <span className="text-xs text-muted-foreground">{selectedContact.phone}</span>}
+                          </div>
+                        </div>
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedContact(null); setSelectedQuotes([]); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
-                    </div>
-                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedContact(null); setSelectedQuotes([]); }}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Input
-                      placeholder="Pesquisar contacto pelo nome..."
-                      value={contactSearch}
-                      onChange={(e) => handleContactSearch(e.target.value)}
-                      onFocus={() => { if (contactSearchResults.length > 0) setShowContactDropdown(true); }}
-                      onBlur={() => { setTimeout(() => setShowContactDropdown(false), 200); }}
-                    />
-                    {showContactDropdown && contactSearchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[280px] overflow-y-auto">
-                        {contactSearchResults.map((contact) => (
-                          <button key={contact.entity_id} type="button" className="w-full px-3 py-3 text-left hover:bg-muted border-b last:border-b-0"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => handleSelectContact(contact)}>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary" className="text-xs shrink-0">Contacto</Badge>
-                              <span className="text-sm font-medium truncate">{contact.display_name}</span>
-                            </div>
-                            {contact.email && <div className="text-xs text-muted-foreground mt-1 ml-[52px]">{contact.email}</div>}
-                          </button>
-                        ))}
-                      </div>
+                    ) : (
+                      <>
+                        <Input
+                          placeholder="Pesquisar lead ou cliente pelo nome..."
+                          value={contactSearch}
+                          onChange={(e) => handleContactSearch(e.target.value)}
+                          onFocus={() => { if (contactSearchResults.length > 0) setShowContactDropdown(true); }}
+                          onBlur={() => { setTimeout(() => setShowContactDropdown(false), 200); }}
+                        />
+                        {showContactDropdown && contactSearchResults.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[280px] overflow-y-auto">
+                            {contactSearchResults.map((contact) => (
+                              <button key={contact.entity_id} type="button" className="w-full px-3 py-3 text-left hover:bg-muted border-b last:border-b-0"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleSelectContact(contact)}>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="secondary" className="text-xs shrink-0">Pessoa</Badge>
+                                  <span className="text-sm font-medium truncate">{contact.display_name}</span>
+                                </div>
+                                {contact.email && <div className="text-xs text-muted-foreground mt-1 ml-[52px]">{contact.email}</div>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Deal search */}
@@ -863,7 +899,7 @@ export function ProposalCreateDialog({
                 ) : (
                   <>
                     <Input
-                      placeholder={presetEntityId ? "Pesquisar pedidos deste contacto..." : (t('proposals.form.searchDealPlaceholder') || "Pesquisar pedidos de proposta...")}
+                      placeholder={presetEntityId ? "Pesquisar pedidos desta pessoa..." : (t('proposals.form.searchDealPlaceholder') || "Pesquisar pedidos de proposta...")}
                       value={dealSearch}
                       onChange={(e) => handleDealSearch(e.target.value)}
                       onFocus={() => { if (dealSearchResults.length > 0) setShowDealDropdown(true); }}
