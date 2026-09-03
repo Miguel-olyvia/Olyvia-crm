@@ -311,6 +311,9 @@ Deno.serve(async (req: Request) => {
     // normal de criacao, mais abaixo.
     let submissionEntityId: string | null = null;
     let resolvedLeadIdFromSubmission: string | null = null;
+    // Quem ja e CLIENTE nao ganha lead: a visita fica no cliente, que a agenda
+    // sabe referenciar directamente (`schedule_items.client_id`).
+    let submissionClientId: string | null = null;
     if (lead_id) {
       const { data: submissionRow } = await supabase
         .from('form_submissions')
@@ -322,6 +325,8 @@ Deno.serve(async (req: Request) => {
         submissionEntityId = (submissionRow.entity_id as string) ?? null;
         if (submissionRow.target_type === 'lead' && submissionRow.target_id) {
           resolvedLeadIdFromSubmission = submissionRow.target_id as string;
+        } else if (submissionRow.target_type === 'client' && submissionRow.target_id) {
+          submissionClientId = submissionRow.target_id as string;
         }
       }
     }
@@ -465,7 +470,12 @@ Deno.serve(async (req: Request) => {
     }
 
     // 8. Create lead when needed
-    if (!lead) {
+    //
+    // `!submissionClientId`: um cliente NAO ganha lead. Antes ganhava -- foi uma
+    // correcao feita para desbloquear o cliente que nao conseguia marcar de
+    // todo, e resolveu o bloqueio criando o problema errado: uma lead que nao
+    // devia existir, para uma pessoa que ja passou dessa fase.
+    if (!lead && !submissionClientId) {
       const { data: newLead, error: leadError } = await supabase
         .from('anew_leads')
         .insert({
@@ -504,7 +514,10 @@ Deno.serve(async (req: Request) => {
       .insert({
         board_id: boardId,
         title,
-        description: `Lead: ${lead.id}`,
+        description: submissionClientId ? `Cliente: ${submissionClientId}` : `Lead: ${lead!.id}`,
+        // A agenda liga-se ao cliente por coluna propria; a lead vive na nota
+        // lateral, porque schedule_items nao tem coluna para ela.
+        client_id: submissionClientId,
         status: 'scheduled',
         origin: 'api',
         start_datetime: slot_start,
@@ -513,7 +526,8 @@ Deno.serve(async (req: Request) => {
         location: fullLocation || null,
         priority: 0,
         metadata: {
-          lead_id: lead.id,
+          ...(lead ? { lead_id: lead.id } : {}),
+          ...(submissionClientId ? { client_id: submissionClientId } : {}),
           form_id,
           postal_code: postal_code || field_values.postal_code,
           booked_via: 'public_form',
@@ -573,6 +587,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Tudo o que se segue e sobre a LEAD. Sendo cliente, nao ha lead nenhuma
+    // para actualizar -- a visita ja ficou ligada a ficha dele.
+    if (lead) {
     // Update lead with scheduled_visit_id
     const leadUpdate: Record<string, any> = {
       scheduled_visit_id: scheduleItem.id,
@@ -616,6 +633,7 @@ Deno.serve(async (req: Request) => {
       await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
     } catch (inviteBurnErr) {
       console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
+    }
     }
 
     // 11. Create booking token for cancellation.
@@ -685,7 +703,7 @@ Deno.serve(async (req: Request) => {
                 link: '/scheduling',
                 entity_type: 'schedule_item',
                 entity_id: scheduleItem.id,
-                data: { schedule_item_id: scheduleItem.id, lead_id: lead.id },
+                data: { schedule_item_id: scheduleItem.id, lead_id: lead?.id ?? null },
               });
             }
           }
@@ -700,8 +718,10 @@ Deno.serve(async (req: Request) => {
       // would get a confusing "you still need to book" email after already
       // booking. Fail-soft.
       try {
-        await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
-        await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
+        if (lead) {
+          await supabase.from('scheduling_invites').update({ used_at: new Date().toISOString() }).eq('lead_id', lead.id).is('used_at', null);
+          await supabase.from('scheduled_emails').update({ status: 'cancelled' }).eq('entity_type', 'lead_scheduling_invite').eq('entity_id', lead.id).eq('status', 'pending');
+        }
       } catch (inviteBurnErr) {
         console.error('[book-slot] failed to burn scheduling invite (non-fatal):', inviteBurnErr);
       }
@@ -802,7 +822,7 @@ Deno.serve(async (req: Request) => {
             await scheduleEmail(supabase, {
               organizationId, userId: createdBy, toEmail: t.email,
               subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
-              entityType: 'leads', entityId: lead.id, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
             });
           }
         }
@@ -827,12 +847,12 @@ Deno.serve(async (req: Request) => {
       minute: '2-digit',
     });
 
-    console.log(`book-slot: lead=${lead.id}, item=${scheduleItem.id}, resource=${assignedResourceId}, slot=${slot_start}`);
+    console.log(`book-slot: lead=${lead?.id ?? '-'}, client=${submissionClientId ?? '-'}, item=${scheduleItem.id}, resource=${assignedResourceId}, slot=${slot_start}`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        lead_id: lead.id,
+        lead_id: lead?.id ?? null,
         schedule_item_id: scheduleItem.id,
         booking_ref: scheduleItem.id.slice(0, 8).toUpperCase(),
         scheduled_start: slot_start,
