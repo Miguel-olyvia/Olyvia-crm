@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import {
@@ -522,22 +522,21 @@ export default function AnewLeads() {
   } = usePermissionScope();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   
-  const [leads, setLeads] = useState<Lead[]>([]);
+
   const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [kanbanTruncated, setKanbanTruncated] = useState(false);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
   const [contactResults, setContactResults] = useState<ContactResultConfig[]>([]);
   const [referenceData, setReferenceData] = useState<Record<string, Record<string, string>>>({});
-  const [loading, setLoading] = useState(true);
+
   
   // Infinite scroll / pagination state
   const PAGE_SIZE = 25;
+  /** Chave da cache da lista de leads. Ver `leadsQuery`. */
+  const LEADS_LIST_QUERY_KEY = "anew-leads-list";
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const currentPageRef = useRef(0);
-  const isLoadingRef = useRef(false);
+
   const descendantCacheRef = useRef<{ key: string; ids: string[]; hierarchy: any[] } | null>(null);
   const leadsTableScrollRef = useRef<HTMLDivElement | null>(null);
   const leadsTableScrollbarRef = useRef<HTMLDivElement | null>(null);
@@ -578,87 +577,6 @@ export default function AnewLeads() {
   // Deep-link: ?open=<leadId> opens the details dialog (Olyvia chat links).
   // ?open_lead=<uuid> is the equivalent used by notification alert links and
   // requires a valid UUID before it is honoured.
-  useEffect(() => {
-    const openIdParam = searchParams.get("open");
-    const openLeadParam = searchParams.get("open_lead");
-    const openLeadIsValidUuid = !!openLeadParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(openLeadParam);
-    const openId = openIdParam || (openLeadIsValidUuid ? openLeadParam : null);
-    if (!openId || !activeCompanyId || selectedLead) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const found = leads.find((l) => l.id === openId);
-        if (found) {
-          if (!cancelled) {
-            setSelectedLead(found);
-            setDetailTab("info");
-            setShowDetails(true);
-          }
-        } else {
-          let openQuery = (supabase as any)
-            .from("anew_leads")
-            .select(`
-              id, entity_id, campaign_id,
-              status, workflow_stage_id, assigned_to, created_by,
-              organization_id, root_organization_id,
-              created_at, updated_at, converted_at,
-              converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-              field_values, notes, source, source_id,
-              last_contact_at, last_contact_result, contact_attempts,
-              callback_scheduled_at, callback_notes, tags,
-              qualification_type, qualified_at,
-              campaigns(id, name)
-            `)
-            .eq("id", openId)
-            .eq("organization_id", activeCompanyId)
-            .is("deleted_at", null);
-          const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-          openQuery = applyLeadVisibilityFilter(
-            openQuery,
-            requestedScope,
-            scopeAnewUserId,
-            scopeAuthUserId,
-            teamMemberIds,
-          );
-          const { data } = await openQuery.maybeSingle();
-          if (!cancelled && data) {
-            setSelectedLead({
-              ...data,
-              field_values: data.field_values && typeof data.field_values === "object"
-                ? data.field_values
-                : {},
-            } as Lead);
-            setDetailTab("info");
-            setShowDetails(true);
-          } else if (!cancelled) {
-            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          const next = new URLSearchParams(searchParams);
-          next.delete("open");
-          next.delete("open_lead");
-          setSearchParams(next, { replace: true });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // selectedLead is intentionally excluded: re-running when a dialog is already
-    // open would clobber the in-flight open state. The effect must only fire when
-    // the ?open= param or org/scope context changes, not when the user navigates
-    // within the already-open detail dialog.
-  }, [
-    searchParams,
-    activeCompanyId,
-    leads,
-    getPermissionScope,
-    onlyMine,
-    scopeAnewUserId,
-    scopeAuthUserId,
-    teamMemberIds,
-  ]);
 
   // Derive totals from statusCounts (single source of truth from RPC)
   const globalTotal = useMemo(() => 
@@ -828,22 +746,6 @@ export default function AnewLeads() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!activeCompanyId || showContactDialog || selectedLead) return;
-    try {
-      const raw = localStorage.getItem(LEAD_CONTACT_DIALOG_STATE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { leadId?: string; companyId?: string | null };
-      if (!saved.leadId || saved.companyId !== activeCompanyId) return;
-      const existing = leads.find((lead) => lead.id === saved.leadId);
-      if (existing) {
-        setSelectedLead(existing);
-        setShowContactDialog(true);
-      }
-    } catch {
-      localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
-    }
-  }, [activeCompanyId, leads, selectedLead, showContactDialog]);
 
   // Cleanup effect to reset any lingering pointer-events blocks from Radix components on unmount
   useEffect(() => {
@@ -1137,9 +1039,12 @@ export default function AnewLeads() {
       // campaigns, lead sources, workflow stages, forms, company users, and
       // comercial users are fetched via useQuery (see below) and no longer
       // orchestrated from here.
+      //
+      // A LISTA de leads ja nao e pedida aqui: os filtros fazem parte da chave
+      // da cache, por isso mudar um filtro re-le sozinho. Este efeito trata so
+      // dos contadores, que vem de um RPC separado.
       initialLoadDoneRef.current = true;
       loadStatusCounts();
-      loadLeads();
 
       // Defer secondary loads so critical path renders first
       const timer = setTimeout(() => {
@@ -1147,8 +1052,6 @@ export default function AnewLeads() {
       }, 200);
       return () => clearTimeout(timer);
     } else {
-      // Subsequent renders: only reload leads + counts (filters/search changed)
-      loadLeads();
       loadStatusCounts();
     }
     // loadContactResults is intentionally excluded from the dep array. This
@@ -2076,34 +1979,22 @@ export default function AnewLeads() {
   });
 
 
-  // Load leads with server-side pagination
-  const loadLeads = useCallback(async (append = false) => {
-    if (!activeCompanyId) return;
-    
-    if (append) {
-      if (isLoadingRef.current) return;
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-      currentPageRef.current = 0;
-    }
-    isLoadingRef.current = true;
-    
-    const from = currentPageRef.current * PAGE_SIZE;
+  /**
+   * Le UMA pagina de leads. Nao toca em estado nenhum: devolve o que leu, e
+   * quem manda na lista e a cache (ver `leadsQuery` a seguir).
+   *
+   * Era daqui que vinha a divergencia: a lista era sincronizada a mao em
+   * catorze sitios, e bastava um caminho novo esquecer-se de a recarregar para
+   * o ecra passar a mostrar algo que ja nao esta na base. Agora os filtros
+   * fazem parte da chave da cache -- mudar um filtro RE-LE, sem ninguem se ter
+   * de lembrar disso.
+   */
+  const fetchLeadsPage = useCallback(async (page: number) => {
+    const append = page > 0;
+    const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
-    
-    const viewScope = getPermissionScope("leads.view");
-    if (viewScope === "NONE") {
-      setLeads([]);
-      setHasMore(false);
-      setLoading(false);
-      setLoadingMore(false);
-      isLoadingRef.current = false;
-      return;
-    }
-    
-    // Total count is now derived from statusCounts (loaded via RPC) — no separate count query needed
 
+    const viewScope = getPermissionScope("leads.view");
     const requestedScope = normalizeLeadScope(viewScope, onlyMine);
     const query = buildLeadsBaseQuery({
       organizationId: activeCompanyId,
@@ -2122,10 +2013,15 @@ export default function AnewLeads() {
       .order("id", { ascending: false })
       .range(from, to);
 
-    if (error) {
-      const description = await getFriendlyErrorMessage(error);
-      toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
-    } else {
+    // O erro sobe: quem o apanha e a cache, e o efeito que a observa mostra o
+    // aviso. Antes era engolido aqui, e a lista ficava simplesmente vazia.
+    if (error) throw error;
+
+    {
+      // Agregados da primeira pagina (saude e pipeline). Sao devolvidos em vez
+      // de escritos no estado, para a cache poder guardar a pagina inteira.
+      let saude: { counts: Record<string, number>; dealSet: Set<string> } | null = null;
+      let pipeline: Record<string, LeadPipelineEntry> | null = null;
       const allUserIds = new Set<string>();
       for (const d of (data || [])) {
         if (d.created_by && d.source !== 'web' && d.source !== 'api' && d.source !== 'import') {
@@ -2212,8 +2108,7 @@ export default function AnewLeads() {
             if (row.has_open_deal) dealSet.add(row.entity_id);
           });
         }
-        setLeadInteractionCounts(counts);
-        setLeadDealEntityIds(dealSet);
+        saude = { counts, dealSet };
 
         // Pipeline (Deals/Propostas/Orçamentos) aggregate for the new
         // "Pipeline" column — same aggregate-RPC pattern as the health call
@@ -2251,7 +2146,7 @@ export default function AnewLeads() {
               quote_value_with_iva: Number(row.quote_value_with_iva) || 0,
             };
           });
-          setLeadPipelineData(pipelineMap);
+          pipeline = pipelineMap;
         }
       }
 
@@ -2269,24 +2164,223 @@ export default function AnewLeads() {
         // So we keep all results (server already filtered) — no extra exclusion needed
       }
       
-      if (append) {
-        setLeads(prev => {
-          const existingIds = new Set(prev.map(l => l.id));
-          const newLeads = finalLeads.filter(l => !existingIds.has(l.id));
-          return [...prev, ...newLeads];
-        });
-      } else {
-        setLeads(finalLeads);
-      }
-      
-      setHasMore(mappedLeads.length === PAGE_SIZE);
-      currentPageRef.current += 1;
+      // A pagina vai inteira para a cache. A juncao das paginas e a remocao de
+      // repetidos passam a ser feitas ao ler (ver `leads`, mais abaixo).
+      return {
+        leads: finalLeads,
+        cheia: mappedLeads.length === PAGE_SIZE,
+        saude,
+        pipeline,
+      };
     }
-    
-    isLoadingRef.current = false;
-    setLoading(false);
-    setLoadingMore(false);
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+
+  /**
+   * A lista de leads, gerida pela cache. A chave inclui a organizacao, o ambito
+   * do utilizador e TODOS os filtros: mudar qualquer um deles e uma chave nova,
+   * e uma chave nova le da base. E por isso que a lista deixa de poder ficar
+   * diferente do que la esta -- ja nao depende de alguem se lembrar de a mandar
+   * recarregar.
+   */
+  const leadsQuery = useInfiniteQuery({
+    queryKey: [
+      LEADS_LIST_QUERY_KEY, activeCompanyId, normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
+      scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter,
+      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo,
+    ],
+    queryFn: ({ pageParam }) => fetchLeadsPage(pageParam as number),
+    initialPageParam: 0,
+    getNextPageParam: (ultima, todas) => (ultima?.cheia ? todas.length : undefined),
+    enabled: Boolean(activeCompanyId) && !scopeLoading && getPermissionScope("leads.view") !== "NONE",
+    staleTime: 30 * 1000,
+  });
+
+  // Paginas juntas, sem repetidos. Uma lead pode aparecer em duas paginas se
+  // outra for criada entretanto e empurrar a lista.
+  const leads = useMemo(() => {
+    const vistos = new Set<string>();
+    const juntas: Lead[] = [];
+    for (const pagina of leadsQuery.data?.pages ?? []) {
+      for (const lead of pagina?.leads ?? []) {
+        if (vistos.has(lead.id)) continue;
+        vistos.add(lead.id);
+        juntas.push(lead);
+      }
+    }
+    return juntas;
+  }, [leadsQuery.data]);
+
+  // `scopeLoading` entra aqui de proposito: enquanto o ambito do utilizador nao
+  // estiver resolvido a consulta esta parada, e sem isto a pagina piscava "sem
+  // leads" antes de sequer tentar ler. Com a permissao a NONE, `scopeLoading` ja
+  // e falso e o vazio e o correcto.
+  const loading = scopeLoading || (leadsQuery.isPending && leadsQuery.fetchStatus !== "idle");
+  const loadingMore = leadsQuery.isFetchingNextPage;
+  const hasMore = Boolean(leadsQuery.hasNextPage);
+
+  // Estes dois efeitos leem a lista (`leads`) e tem-na nas dependencias, que
+  // sao avaliadas durante o render. Por isso vivem AQUI, depois de a lista
+  // existir, e nao la em cima junto aos outros efeitos: la, a lista ainda nao
+  // esta inicializada e o ecra rebentava ao abrir.
+
+  useEffect(() => {
+    const openIdParam = searchParams.get("open");
+    const openLeadParam = searchParams.get("open_lead");
+    const openLeadIsValidUuid = !!openLeadParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(openLeadParam);
+    const openId = openIdParam || (openLeadIsValidUuid ? openLeadParam : null);
+    if (!openId || !activeCompanyId || selectedLead) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const found = leads.find((l) => l.id === openId);
+        if (found) {
+          if (!cancelled) {
+            setSelectedLead(found);
+            setDetailTab("info");
+            setShowDetails(true);
+          }
+        } else {
+          let openQuery = (supabase as any)
+            .from("anew_leads")
+            .select(`
+              id, entity_id, campaign_id,
+              status, workflow_stage_id, assigned_to, created_by,
+              organization_id, root_organization_id,
+              created_at, updated_at, converted_at,
+              converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
+              field_values, notes, source, source_id,
+              last_contact_at, last_contact_result, contact_attempts,
+              callback_scheduled_at, callback_notes, tags,
+              qualification_type, qualified_at,
+              campaigns(id, name)
+            `)
+            .eq("id", openId)
+            .eq("organization_id", activeCompanyId)
+            .is("deleted_at", null);
+          const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+          openQuery = applyLeadVisibilityFilter(
+            openQuery,
+            requestedScope,
+            scopeAnewUserId,
+            scopeAuthUserId,
+            teamMemberIds,
+          );
+          const { data } = await openQuery.maybeSingle();
+          if (!cancelled && data) {
+            setSelectedLead({
+              ...data,
+              field_values: data.field_values && typeof data.field_values === "object"
+                ? data.field_values
+                : {},
+            } as Lead);
+            setDetailTab("info");
+            setShowDetails(true);
+          } else if (!cancelled) {
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("open");
+          next.delete("open_lead");
+          setSearchParams(next, { replace: true });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // selectedLead is intentionally excluded: re-running when a dialog is already
+    // open would clobber the in-flight open state. The effect must only fire when
+    // the ?open= param or org/scope context changes, not when the user navigates
+    // within the already-open detail dialog.
+  }, [
+    searchParams,
+    activeCompanyId,
+    leads,
+    getPermissionScope,
+    onlyMine,
+    scopeAnewUserId,
+    scopeAuthUserId,
+    teamMemberIds,
+  ]);
+
+  useEffect(() => {
+    if (!activeCompanyId || showContactDialog || selectedLead) return;
+    try {
+      const raw = localStorage.getItem(LEAD_CONTACT_DIALOG_STATE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { leadId?: string; companyId?: string | null };
+      if (!saved.leadId || saved.companyId !== activeCompanyId) return;
+      const existing = leads.find((lead) => lead.id === saved.leadId);
+      if (existing) {
+        setSelectedLead(existing);
+        setShowContactDialog(true);
+      }
+    } catch {
+      localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
+    }
+  }, [activeCompanyId, leads, selectedLead, showContactDialog]);
+
+  // Os agregados da primeira pagina alimentam as colunas de saude e pipeline.
+  const primeiraPagina = leadsQuery.data?.pages?.[0];
+  useEffect(() => {
+    if (!primeiraPagina) return;
+    if (primeiraPagina.saude) {
+      setLeadInteractionCounts(primeiraPagina.saude.counts);
+      setLeadDealEntityIds(primeiraPagina.saude.dealSet);
+    }
+    if (primeiraPagina.pipeline) setLeadPipelineData(primeiraPagina.pipeline);
+  }, [primeiraPagina]);
+
+  // O erro de leitura deixou de ser engolido: se a lista nao carregar, diz-se.
+  useEffect(() => {
+    if (!leadsQuery.error) return;
+    let cancelado = false;
+    void (async () => {
+      const description = await getFriendlyErrorMessage(leadsQuery.error);
+      if (!cancelado) toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
+    })();
+    return () => { cancelado = true; };
+  }, [leadsQuery.error, toast, t]);
+
+  /**
+   * Ponto unico de "os dados mudaram, re-le". Os catorze sitios que antes
+   * sincronizavam a lista a mao continuam a chamar isto, mas agora limitam-se a
+   * marcar a cache como velha -- quem re-le e a cache.
+   */
+  const loadLeads = useCallback((append = false) => {
+    if (append) { void leadsQuery.fetchNextPage(); return; }
+    void queryClient.invalidateQueries({ queryKey: [LEADS_LIST_QUERY_KEY] });
+    // `fetchNextPage` tem identidade estavel na react-query v5; depender do
+    // objecto `leadsQuery` inteiro recriaria esta funcao a cada leitura.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient, leadsQuery.fetchNextPage]);
+
+  /**
+   * Actualizacoes imediatas da lista, para o ecra responder sem esperar pela
+   * base. Antes escreviam num `useState` proprio; agora escrevem na cache, que
+   * e o mesmo sitio de onde a lista e lida -- e por isso nao ha duas versoes da
+   * verdade a poder divergir.
+   *
+   * A transformacao e aplicada pagina a pagina, o que so e correcto porque
+   * nenhuma delas ACRESCENTA leads (substituem ou removem, sempre por id).
+   * Acrescentar tem funcao propria, que escreve so na primeira pagina.
+   */
+  const transformarListaEmCache = useCallback((fn: (leads: Lead[]) => Lead[]) => {
+    queryClient.setQueriesData({ queryKey: [LEADS_LIST_QUERY_KEY] }, (antigo: any) => {
+      if (!antigo?.pages) return antigo;
+      return { ...antigo, pages: antigo.pages.map((pagina: any) => ({ ...pagina, leads: fn(pagina?.leads ?? []) })) };
+    });
+  }, [queryClient]);
+
+  const acrescentarLeadEmCache = useCallback((lead: Lead) => {
+    queryClient.setQueriesData({ queryKey: [LEADS_LIST_QUERY_KEY] }, (antigo: any) => {
+      if (!antigo?.pages?.length) return antigo;
+      const [primeira, ...restantes] = antigo.pages;
+      return { ...antigo, pages: [{ ...primeira, leads: [lead, ...(primeira?.leads ?? [])] }, ...restantes] };
+    });
+  }, [queryClient]);
 
   const KANBAN_LEADS_LIMIT = 500;
 
@@ -2512,7 +2606,7 @@ export default function AnewLeads() {
 
     if (!d) {
       // Lead was deleted — remove from local state
-      setLeads((previous) =>
+      transformarListaEmCache((previous) =>
         reconcileRefreshedLead(previous, selectedLead, leadId, null).leads
       );
       if (selectedLead?.id === leadId) {
@@ -2571,7 +2665,7 @@ export default function AnewLeads() {
       await resolveEntities(entityIds);
     }
 
-    setLeads((previous) =>
+    transformarListaEmCache((previous) =>
       reconcileRefreshedLead(previous, selectedLead, leadId, mapped).leads
     );
     setSelectedLead((previous) => previous?.id === leadId ? mapped : previous);
@@ -2585,6 +2679,7 @@ export default function AnewLeads() {
     queryClient.invalidateQueries({ queryKey: ["lead-resolved-stage", leadId] });
     return mapped;
   }, [
+    transformarListaEmCache,
     activeCompanyId,
     getPermissionScope,
     loadStatusCounts,
@@ -3723,7 +3818,7 @@ export default function AnewLeads() {
       setCreateLeadCampaignId("");
       setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
-        setLeads(prev => [{
+        acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!,
           organization_id: activeCompanyId!,
           campaign_id: createLeadCampaignId || null,
@@ -3738,7 +3833,7 @@ export default function AnewLeads() {
           converted_at: null,
           assigned_to: assignedToForPostCommit,
           entity_id: entityIdForPostCommit,
-        } as Lead, ...prev]);
+        } as Lead);
       }
       await loadStatusCounts();
     } finally {
@@ -3942,13 +4037,13 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.createSuccess') });
       setShowCreateLead(false); setNewLeadValues({}); setCreateLeadCampaignId(""); setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
-        setLeads(prev => [{
+        acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!, organization_id: activeCompanyId!,
           campaign_id: createLeadCampaignId || null, field_values: cleanFieldValuesForPostCommit,
           status: 'new', source: "manual", notes: null, tags: null, created_at: new Date().toISOString(),
           created_by: createdBy, converted_to_contact_id: null, converted_at: null,
           assigned_to: assignedTo, entity_id: entityIdForPostCommit,
-        } as Lead, ...prev]);
+        } as Lead);
       }
       await loadStatusCounts();
     } finally {
@@ -4036,7 +4131,7 @@ export default function AnewLeads() {
       setPendingLeadData(null);
       setDuplicateMatches([]);
       setNewLeadValues({});
-      setLeads([]); setHasMore(true); loadLeads();
+      loadLeads();
       loadStatusCounts();
     } catch (err: unknown) {
       const description = await getFriendlyErrorMessage(err);
@@ -4177,10 +4272,10 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.deleteError'), description: rpcError.message, variant: "destructive" });
     } else {
       toast({ title: t('leads.toast.deleteSuccess') });
-      setLeads(prev => prev.filter(l => l.id !== id));
+      transformarListaEmCache(prev => prev.filter(l => l.id !== id));
       loadStatusCounts();
     }
-  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId]);
+  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId, transformarListaEmCache]);
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
