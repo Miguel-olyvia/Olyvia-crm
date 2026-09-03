@@ -267,6 +267,9 @@ export default function Quotes() {
   
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
+  // Filtro por proposta, vindo do endereco (?proposal=...). Nao e um filtro do
+  // ecra: e o contexto de quem chegou aqui a partir de um contrato.
+  const proposalFilter = searchParams.get("proposal");
   // A pesquisa e agora um filtro da query (e do RPC dos KPIs), portanto cada
   // tecla premida disparava uma consulta a lista, uma contagem e o
   // get_quotes_kpi_stats. Debounce igual ao da pagina de Propostas: o valor
@@ -892,7 +895,7 @@ export default function Quotes() {
       }
     };
     resolveComercialNames();
-  }, [quotes, allQuotesForDashboard]);
+  }, [quotes, allQuotesForDashboard, proposalFilter]);
 
   // Aggregate quote lines for all loaded quotes (for margin, cost, items columns).
   // Costs resolved in REAL-TIME via shared resolver (handles products, services,
@@ -1083,6 +1086,10 @@ export default function Quotes() {
       // cliente e \"Maria da Silva\", e este filtro voltava a escondê-las porque
       // o nome nao contem a frase seguida. Era essa a divergencia entre os
       // cartoes e a lista. A pesquisa e agora feita uma unica vez, na query.
+      // Vindo de um contrato: mostrar so os orcamentos da proposta dele. O
+      // contrato quase nunca aponta a um orcamento directamente -- 16 em 244 --
+      // mas aponta a proposta, e e a proposta que os conhece.
+      if (proposalFilter && quote.proposal_id !== proposalFilter) return false;
       if (statusFilter !== "all" && quote.estado !== statusFilter) return false;
       if (dateFrom || dateTo) {
         const quoteDate = parseISO(quote.created_at);

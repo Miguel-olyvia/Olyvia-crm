@@ -2083,8 +2083,12 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id}
-                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    onClick={() => navigate(
+                                      contract.quote_id
+                                        ? `/quotes?open=${contract.quote_id}`
+                                        : `/quotes?proposal=${contract.proposal_id}`,
+                                    )}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2133,8 +2137,12 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id}
-                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    onClick={() => navigate(
+                                      contract.quote_id
+                                        ? `/quotes?open=${contract.quote_id}`
+                                        : `/quotes?proposal=${contract.proposal_id}`,
+                                    )}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2176,8 +2184,12 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id}
-                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    onClick={() => navigate(
+                                      contract.quote_id
+                                        ? `/quotes?open=${contract.quote_id}`
+                                        : `/quotes?proposal=${contract.proposal_id}`,
+                                    )}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                 </>
                               )}
@@ -2215,8 +2227,12 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id}
-                                    onClick={() => navigate(`/quotes?open=${contract.quote_id}`)}
+                                    disabled={!contract.quote_id && !contract.proposal_id}
+                                    onClick={() => navigate(
+                                      contract.quote_id
+                                        ? `/quotes?open=${contract.quote_id}`
+                                        : `/quotes?proposal=${contract.proposal_id}`,
+                                    )}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
