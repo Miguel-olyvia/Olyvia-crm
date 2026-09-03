@@ -172,6 +172,47 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // 2b. De quem e esta pessoa, e qual o recurso desse comercial.
+    //
+    // A visita de quem JA e nosso pertence a quem trata dela. Antes ia para o
+    // tecnico menos ocupado do distrito -- e como a lead era sempre nova e sem
+    // dono, ninguem dava por isso. Com deduplicacao, a lead ja tem dono: dar a
+    // visita a outro separa quem vende de quem visita, ou tira-lhe a lead.
+    let ownerAnewUserId: string | null = null;
+    let ownerResourceId: string | null = null;
+    {
+      const { data: sub } = lead_id
+        ? await supabase
+          .from('form_submissions')
+          .select('target_type, target_id')
+          .eq('id', lead_id)
+          .eq('organization_id', organizationId)
+          .maybeSingle()
+        : { data: null };
+
+      if (sub?.target_type === 'lead' && sub.target_id) {
+        const { data: l } = await supabase
+          .from('anew_leads').select('assigned_to, created_by').eq('id', sub.target_id).maybeSingle();
+        ownerAnewUserId = l?.assigned_to ?? l?.created_by ?? null;
+      } else if (sub?.target_type === 'client' && sub.target_id) {
+        const { data: cl } = await supabase
+          .from('anew_clients').select('assigned_to, created_by').eq('id', sub.target_id).maybeSingle();
+        ownerAnewUserId = cl?.assigned_to ?? cl?.created_by ?? null;
+      }
+
+      if (ownerAnewUserId) {
+        const { data: res } = await supabase
+          .from('schedule_resources')
+          .select('id')
+          .eq('user_id', ownerAnewUserId)
+          .eq('organization_id', organizationId)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle();
+        ownerResourceId = res?.id ?? null;
+      }
+    }
+
     // 3. Find a resource with availability at the requested slot.
     // find_nearest_resources already applies the district-coverage-with-
     // fallback rule and excludes resources at max_daily_capacity for this
@@ -204,7 +245,13 @@ Deno.serve(async (req: Request) => {
       candidatesWithSlot.map((res: any) => ({ id: res.resource_id }))
     );
 
-    for (const candidate of orderedCandidates) {
+    // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
+    // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
+    const ordered = ownerResourceId
+      ? orderedCandidates.filter((cand: { id: string }) => cand.id === ownerResourceId)
+      : orderedCandidates;
+
+    for (const candidate of ordered) {
       // Re-verify at confirmation time — availability may have been computed
       // moments earlier and another booking could have taken the slot since.
       const { data: conflict } = await supabase.rpc('check_schedule_conflict', {
@@ -216,6 +263,59 @@ Deno.serve(async (req: Request) => {
         assignedResourceId = candidate.id;
         break;
       }
+    }
+
+    // O comercial da pessoa nao esta livre a esta hora, ou nao cobre o
+    // distrito. NAO se marca a mais ninguem: a visita e dele.
+    //
+    // Guarda-se a hora que a pessoa escolheu na propria submissao, e ela fica
+    // na FILA DELE -- a fila ja mostra a cada um as submissoes das SUAS fichas,
+    // pelo ambito de leitura, portanto isto nao precisa de fila nova. Ele abre,
+    // ve a hora pedida, e marca a reuniao a mao.
+    //
+    // Ao visitante responde-se com sucesso, como a toda a gente: de fora nao se
+    // distingue quem ja e conhecido de quem e novo.
+    if (!assignedResourceId && ownerResourceId && lead_id) {
+      try {
+        const { data: sub } = await supabase
+          .from('form_submissions')
+          .select('field_values')
+          .eq('id', lead_id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+
+        const fv = (sub?.field_values ?? {}) as Record<string, any>;
+        await supabase
+          .from('form_submissions')
+          .update({
+            field_values: {
+              ...fv,
+              _meta: {
+                ...(fv._meta ?? {}),
+                agendamento_pedido: {
+                  inicio: slot_start,
+                  fim: slot_end,
+                  board_id: boardId,
+                  form_id,
+                  distrito_id: district_id || null,
+                  pedido_em: new Date().toISOString(),
+                },
+              },
+            },
+          })
+          .eq('id', lead_id);
+      } catch (pedidoErr) {
+        console.error('[book-slot] nao foi possivel guardar a hora pedida:', pedidoErr);
+      }
+
+      console.log('[book-slot] comercial sem disponibilidade; pedido guardado para marcacao a mao', {
+        submissao: lead_id, comercial: ownerAnewUserId,
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, pending_manual_scheduling: true }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (!assignedResourceId) {
