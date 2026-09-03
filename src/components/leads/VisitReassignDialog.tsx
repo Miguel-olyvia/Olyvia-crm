@@ -67,7 +67,15 @@ interface Lead {
   field_values: Record<string, any> | null;
   assigned_to?: string;
   scheduled_visit_id?: string | null;
-  // Relational links that can exist on older data and are more reliable than name matching
+  // Ligações relacionais que existem em dados antigos e são mais fiáveis do que
+  // comparar nomes.
+  //
+  // `contact_id` e `converted_to_contact_id` são HISTÓRICO: o módulo de
+  // Contactos foi retirado do produto e ninguém converte para contacto desde
+  // 15 de Junho. Medido no remoto: 3 leads em 6 352 têm
+  // `converted_to_contact_id`, e os 3 contactos ainda existem — por isso o ramo
+  // fica, para esses continuarem a funcionar. Não é caminho corrente; quem
+  // escrever código novo deve usar `converted_to_client_id`.
   contact_id?: string | null;
   client_id?: string | null;
   converted_to_contact_id?: string | null;
