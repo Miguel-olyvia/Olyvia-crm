@@ -353,6 +353,16 @@ export function injectSignaturesIntoBlock(
 }
 
 /**
+ * A linha da minuta congelada no contrato (`template_snapshot`), ou null se o
+ * contrato nao tem copia -- feito antes do congelamento, ou sem minuta.
+ */
+export function contractTemplateSnapshot(contract: any): Record<string, any> | null {
+  const snap = contract?.template_snapshot;
+  if (!snap || typeof snap !== "object" || Array.isArray(snap)) return null;
+  return snap as Record<string, any>;
+}
+
+/**
  * Carrega nome + cargo do signatário escolhido numa minuta (`signatory_user_id`,
  * `signatory_role_id`). Devolve null se a minuta não tem signatário definido.
  */
@@ -363,6 +373,18 @@ export async function fetchTemplateSignatory(templateId: string | null | undefin
     .select("signatory_user_id, signatory_role_id")
     .eq("id", templateId)
     .maybeSingle();
+  return resolveSignatoryFromTemplateRow(tpl);
+}
+
+/**
+ * O mesmo, partindo de uma linha de minuta ja em maos -- em particular a copia
+ * congelada no contrato. Quem assina pela empresa foi decidido quando o
+ * contrato foi feito; trocar hoje o signatario na minuta nao pode reescrever o
+ * documento de um contrato antigo.
+ */
+export async function resolveSignatoryFromTemplateRow(
+  tpl: { signatory_user_id?: string | null; signatory_role_id?: string | null } | null | undefined,
+): Promise<{ name: string; roleName: string } | null> {
   if (!tpl?.signatory_user_id) return null;
   const [{ data: u }, { data: r }] = await Promise.all([
     (supabase as any).from("anew_users").select("name").eq("id", tpl.signatory_user_id).maybeSingle(),
@@ -778,9 +800,14 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
   }
 
   // Signatário escolhido na minuta — usado pelo bloco final do contrato.
+  // Havendo cópia congelada da minuta, é dela que sai: quem assinava pela
+  // empresa no momento em que o contrato foi feito.
+  const snapshot = contractTemplateSnapshot(contract);
   const tplId = contract.contract_template_id || contract.template_id || null;
-  if (tplId) {
-    const sig = await fetchTemplateSignatory(tplId);
+  if (snapshot || tplId) {
+    const sig = snapshot
+      ? await resolveSignatoryFromTemplateRow(snapshot as any)
+      : await fetchTemplateSignatory(tplId);
     if (sig?.name) {
       data.signatario_nome = sig.name;
       data.signatario_cargo = sig.roleName || "";
@@ -1226,6 +1253,24 @@ export function isContractInForce(contract: { signature_date?: string | null; st
   return !!contract.signature_date || ["signed", "active"].includes(contract.status ?? "");
 }
 
+/**
+ * A copia congelada da minuta que o contrato usou (`template_snapshot`), na
+ * mesma forma em que a minuta viva e lida.
+ *
+ * A coluna guarda a linha inteira de `client_contract_templates` do momento em
+ * que o contrato foi feito, por isso traz as mesmas chaves. Aqui devolvem-se so
+ * as duas que montam o documento -- o texto e as definicoes de aspecto --, para
+ * o caminho congelado e o caminho vivo produzirem exactamente a mesma coisa.
+ *
+ * Devolve null quando nao ha copia (contratos anteriores ao congelamento, ou
+ * sem minuta nenhuma): so nesse caso se vai ler a minuta viva.
+ */
+export function templateSnapshotAsTemplate(contract: any): { body_html: any; doc_settings: any } | null {
+  const snap = contractTemplateSnapshot(contract);
+  if (!snap) return null;
+  return { body_html: snap.body_html ?? null, doc_settings: snap.doc_settings ?? null };
+}
+
 export const UNFREEZE_CONTRACT_COLUMNS = {
   contract_body_frozen_html: null,
   contract_frozen_at: null,
@@ -1234,7 +1279,12 @@ export const UNFREEZE_CONTRACT_COLUMNS = {
 export async function resolveContractDocument(contract: any, orgId: string, activeCompanyName?: string): Promise<ResolvedContractDocument | null> {
   if (!contract || !orgId) return null;
 
-  const templateId = contract.contract_template_id || contract.template_id || null;
+  // A minuta que ESTE contrato usou, congelada no momento em que foi criado.
+  // Havendo-a, e ela que manda: a minuta viva nem chega a ser lida, e por isso
+  // editar hoje o texto partilhado ja nao muda o documento de um contrato feito
+  // no mes passado.
+  const snapshot = templateSnapshotAsTemplate(contract);
+  const templateId = snapshot ? null : (contract.contract_template_id || contract.template_id || null);
   const [variableData, organizationRes, settingsRes, templateRes] = await Promise.all([
     gatherContractData(contract, orgId),
     (supabase as any).from("anew_organizations").select("name, logo_url, metadata").eq("id", orgId).single(),
@@ -1248,10 +1298,12 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   if (settingsRes.error) throw settingsRes.error;
   if (templateRes?.error) throw templateRes.error;
 
-  let templateData = templateRes?.data || null;
+  let templateData = snapshot || templateRes?.data || null;
 
-  // Fallback: if contract has neither own body nor a linked template, try the
-  // organization's default contract template so the PDF can still be produced.
+  // Ultimo recurso: o contrato nao tem corpo proprio NEM minuta com texto (nem
+  // viva nem congelada). Vai-se buscar a minuta por omissao da organizacao para
+  // ainda assim haver documento. Um contrato com copia congelada com texto
+  // nunca passa por aqui.
   if (!contract.contract_body_html && !templateData?.body_html) {
     const { data: defaultTpl, error: defaultErr } = await (supabase as any)
       .from("client_contract_templates")
