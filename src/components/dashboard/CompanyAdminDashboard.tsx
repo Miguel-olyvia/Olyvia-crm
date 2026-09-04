@@ -64,7 +64,7 @@ const CompanyAdminDashboard = () => {
           client.from("anew_clients").select("id").in("organization_id", companyIds).is("deleted_at", null),
           client.from("deals").select("id, value").in("organization_id", companyIds),
           client.from("quotes").select("id").in("organization_id", companyIds),
-          client.from("activities").select("id").in("organization_id", companyIds),
+          client.from("activities").select("id").in("organization_id", companyIds).neq("completed", true),
         ]);
 
         const totalValue = dealsResult.data?.reduce((sum: number, deal: any) => sum + (Number(deal.value) || 0), 0) || 0;

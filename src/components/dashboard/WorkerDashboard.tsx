@@ -46,7 +46,16 @@ const WorkerDashboard = () => {
         const client = supabase as any;
         const filterId = businessUserId || user.id;
 
-        const tasksResult = await client.from("activities").select("id").eq("assigned_to", filterId);
+        // As tarefas da pessoa sao as `activities` que ela criou: o modulo de
+        // Atividades e de ambito proprio, quem cria e o dono (20261116180000).
+        // Antes isto filtrava por `assigned_to`, uma coluna que deixou de
+        // existir -- e a tabela tinha 4 linhas, portanto o cartao dizia zero a
+        // toda a gente desde sempre.
+        const tasksResult = await client
+          .from("activities")
+          .select("id")
+          .eq("created_by", filterId)
+          .neq("completed", true);
         const dealsResult = await client.from("deals").select("id").eq("assigned_to", filterId);
         const quotesResult = await client.from("quotes").select("id").eq("created_by", filterId);
 
