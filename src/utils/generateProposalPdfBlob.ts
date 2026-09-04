@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
-import { fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
+import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { captureFlowError } from '@/lib/observability/captureFlowError';
 
@@ -233,11 +233,7 @@ async function generateFromQuotePdfs(
         'Há uma versão nova da aplicação. Recarregue a página (Ctrl+F5) e tente novamente.'
       );
     }
-    throw new Error(
-      houveFalha
-        ? 'Não foi possível produzir o documento desta proposta. O erro ficou registado — se persistir, é preciso olhar para ele.'
-        : 'Não foi possível gerar nenhuma página para esta proposta.'
-    );
+    throw new Error('Não foi possível produzir o documento desta proposta.');
   }
 
   const bytes = await merged.save();
