@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 
 // Proposal-type templates ("Templates de Proposta") use a different section
 // layout convention (client_info/company_info as "card"/"inline" blocks)
@@ -169,6 +170,16 @@ async function generateFromQuotePdfs(
 
   const merged = await PDFDocument.create();
   const lastQuoteId = resolvedQuotes[resolvedQuotes.length - 1]?.id;
+  // Continua-se a tentar os orcamentos seguintes -- um partido nao deve levar
+  // os outros atras. O motivo de cada falha vai para a consola e para o
+  // Sentry; ao utilizador nao se mostra o erro cru, mostra-se o que ele pode
+  // fazer.
+  let houveFalha = false;
+  // Uma falha a CARREGAR o gerador (e nao a executa-lo) quer dizer que a
+  // pagina esta aberta desde antes de uma publicacao e pede um pedaco de
+  // codigo que ja nao existe. Nada tem a ver com esta proposta, e recarregar
+  // resolve -- por isso e a unica classe que merece mensagem propria.
+  let versaoDesactualizada = false;
 
   for (const quote of resolvedQuotes) {
     try {
@@ -204,11 +215,29 @@ async function generateFromQuotePdfs(
       copied.forEach((page) => merged.addPage(page));
     } catch (e) {
       console.error(`[generateProposalPdfBlob] Failed quote ${quote.id}:`, e);
+      captureFlowError(e, 'proposal-document-export');
+      houveFalha = true;
+      const motivo = e instanceof Error ? e.message : String(e);
+      if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(motivo)) {
+        versaoDesactualizada = true;
+      }
     }
   }
 
   if (merged.getPageCount() === 0) {
-    throw new Error('Não foi possível gerar nenhuma página para esta proposta.');
+    // A mensagem antiga dizia so "nao foi possivel gerar nenhuma pagina": o
+    // motivo morria na consola e quem a lia ficava sem saber o que fazer.
+    // Agora distingue-se o unico caso em que o utilizador PODE resolver.
+    if (versaoDesactualizada) {
+      throw new Error(
+        'Há uma versão nova da aplicação. Recarregue a página (Ctrl+F5) e tente novamente.'
+      );
+    }
+    throw new Error(
+      houveFalha
+        ? 'Não foi possível produzir o documento desta proposta. O erro ficou registado — se persistir, é preciso olhar para ele.'
+        : 'Não foi possível gerar nenhuma página para esta proposta.'
+    );
   }
 
   const bytes = await merged.save();
