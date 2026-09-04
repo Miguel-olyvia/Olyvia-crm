@@ -571,7 +571,13 @@ serve(async (req: Request) => {
         email,
         password: tempPassword,
         email_confirm: true,
-        user_metadata: { full_name: entity?.display_name || contactName },
+        // entity_id vai no user_metadata para que o trigger public.handle_new_user()
+        // LIGUE a conta à ficha de pessoa que já existe, em vez de criar uma segunda.
+        // Não se pode usar admin_created aqui: o trigger tem de continuar a criar a
+        // linha em anew_users, senão o loop de espera abaixo falha e apaga a conta.
+        // Tem de ser user_metadata (não app_metadata): o GoTrue só grava o
+        // app_metadata num UPDATE posterior, invisível ao AFTER INSERT.
+        user_metadata: { full_name: entity?.display_name || contactName, entity_id: entityId },
       }));
 
       if (createError || !newUser?.user) {
