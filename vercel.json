@@ -1,4 +1,5 @@
 {
+  "installCommand": "npm install --prefer-offline --no-audit --no-fund",
   "buildCommand": "bash tools/build-vercel.sh",
   "rewrites": [
     {
