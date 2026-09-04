@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
-import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
+import { fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 
 // Proposal-type templates ("Templates de Proposta") use a different section
@@ -51,7 +51,14 @@ function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate:
  * produce the same document.
  */
 export interface ProposalPdfPrefetch {
-  proposal: { id: string; proposal_number?: string | null; title?: string | null; template_id?: string | null; organization_id?: string | null } | null;
+  proposal: {
+    id: string;
+    proposal_number?: string | null;
+    title?: string | null;
+    template_id?: string | null;
+    template_snapshot?: unknown;
+    organization_id?: string | null;
+  } | null;
   quotes: Array<{ quote: any; lines: any[]; fees: any[] }>;
 }
 
@@ -64,7 +71,7 @@ async function generateFromQuotePdfs(
     // Fetch proposal basic data for filename + template resolution
     const { data, error: propErr } = await (supabase as any)
       .from('proposals')
-      .select('id, proposal_number, title, template_id, organization_id')
+      .select('id, proposal_number, title, template_id, template_snapshot, organization_id')
       .eq('id', proposalId)
       .maybeSingle();
     if (propErr) throw propErr;
@@ -73,7 +80,9 @@ async function generateFromQuotePdfs(
 
   // Template explicitly selected on the proposal — used for branding only
   // (see mergeProposalBranding above), never as the structural template.
-  const explicitProposalTemplate = await fetchQuotePdfTemplateById(proposal?.template_id);
+  // A copia congelada na proposta manda sobre o modelo vivo -- ver
+  // resolveProposalBrandingTemplate.
+  const explicitProposalTemplate = await resolveProposalBrandingTemplate(proposal);
   const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
 
   // Resolve quote ids linked to this proposal

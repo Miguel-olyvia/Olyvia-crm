@@ -323,10 +323,14 @@ const handler = async (req: Request): Promise<Response> => {
       // Get client name from entity if available
       const clientName = "Cliente";
 
-      // Get template body if available
-      const templateBody = proposal.proposal_templates?.verification_email_body || null;
-      const emailSubject = proposal.proposal_templates?.verification_email_subject 
-        ? proposal.proposal_templates.verification_email_subject
+      // Get template body if available.
+      // A copia congelada da proposta manda sobre o modelo vivo, pela mesma
+      // razao que o PDF e o portal: editar o modelo partilhado nao deve mudar
+      // o que e mandado a proposito de uma proposta ja enviada.
+      const emailTemplate = proposal.template_snapshot || proposal.proposal_templates;
+      const templateBody = emailTemplate?.verification_email_body || null;
+      const emailSubject = emailTemplate?.verification_email_subject
+        ? emailTemplate.verification_email_subject
             .replace(/\{\{titulo_proposta\}\}/g, proposal.title)
         : `Código de Verificação - ${action === "accept" ? "Aceitar" : "Recusar"} Proposta`;
 
