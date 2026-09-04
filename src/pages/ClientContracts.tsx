@@ -979,19 +979,26 @@ const ClientContracts = () => {
       const selectedProposal = proposals.find(p => p.id === data.proposal_id);
       if (!selectedProposal) throw new Error("A proposta escolhida já não está disponível. Feche e volte a abrir o diálogo.");
       const resolvedEntityId = selectedProposal.entity_id || selectedProposal._resolvedEntityId;
-      const clientId = selectedProposal._resolvedClientId;
-      if (!clientId) {
-        // "Client not found." batia com /not found/i em friendlyError.ts:46 e saia
-        // ao utilizador como "Recurso nao encontrado." -- uma mensagem que nao diz
-        // nada a quem a le. Sao dois casos distintos, e ambos comuns: medido a
-        // 2026-09-02 no remoto, de 624 propostas activas ha 15 sem entidade nem
-        // pedido e 474 com entidade que nunca foi convertida em cliente.
-        // As mensagens abaixo estao em portugues de proposito: o mapFriendly
-        // devolve o texto cru quando nenhuma regra bate, e nenhuma bate nestas.
+      // Um contrato precisa de saber A QUEM se faz -- e isso e a entidade, nao o
+      // papel de cliente. Exigir que a entidade ja fosse cliente recusava tres em
+      // cada quatro propostas: medido a 2026-09-02 no remoto, de 624 propostas
+      // activas ha 474 com entidade que nunca foi convertida em cliente. E o
+      // papel de cliente costuma vir DEPOIS do contrato, nao antes -- assinar
+      // converte automaticamente (ver o aviso no dialogo de assinatura).
+      //
+      // client_id fica nulo quando ainda nao existe: a coluna e anulavel, e a
+      // rpc_create_client_contract nao o exige (20260814010000) -- limita-se a
+      // inserir o que recebe, depois de verificar identidade, permissao e
+      // organizacao.
+      //
+      // O unico caso que continua recusado e nao haver ninguem: sem entidade e
+      // sem cliente nao ha a quem fazer o contrato. Eram 15 das 624.
+      const clientId = selectedProposal._resolvedClientId ?? null;
+      if (!clientId && !resolvedEntityId) {
+        // Em portugues de proposito: o mapFriendly devolve o texto cru quando
+        // nenhuma regra bate, e nenhuma bate nesta.
         throw new Error(
-          resolvedEntityId
-            ? "Esta proposta está ligada a uma entidade que ainda não é cliente. Converta-a em cliente antes de criar o contrato."
-            : "Esta proposta não tem entidade nem pedido associado, por isso não há cliente para o contrato."
+          "Esta proposta não tem entidade nem pedido associado, por isso não há a quem fazer o contrato."
         );
       }
       const totalValue = selectedProposal.quotes?.reduce((sum: number, q: any) => sum + (q.total || 0), 0) || 0;
