@@ -117,6 +117,28 @@ export async function fetchDefaultQuotePdfTemplate(organizationId: string | null
   return templates.find((template) => template.is_default) || templates[0] || null;
 }
 
+/**
+ * O modelo que manda no aspecto (cores, logotipo, rodape, termos) do PDF de
+ * uma proposta.
+ *
+ * A copia congelada na propria proposta -- proposals.template_snapshot -- vem
+ * primeiro. E ela que impede uma proposta ja enviada de mudar de aspecto
+ * porque alguem editou o modelo partilhado: quem a recebeu reabre o PDF e ve
+ * o mesmo documento.
+ *
+ * O modelo vivo so e consultado quando nao ha copia -- linhas anteriores ao
+ * trigger que passou a congelar (20261116170000), ou propostas sem modelo
+ * nenhum escolhido.
+ */
+export async function resolveProposalBrandingTemplate(
+  proposal: { template_snapshot?: unknown; template_id?: string | null } | null | undefined,
+) {
+  if (proposal?.template_snapshot) {
+    return normalizeQuotePdfTemplate(proposal.template_snapshot as QuotePdfTemplate);
+  }
+  return fetchQuotePdfTemplateById(proposal?.template_id);
+}
+
 export async function fetchQuotePdfTemplateById(templateId: string | null | undefined) {
   if (!templateId) return null;
   const { data, error } = await supabase

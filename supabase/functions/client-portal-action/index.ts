@@ -482,7 +482,10 @@ serve(async (req) => {
 
         const { data: proposal } = await supabase
           .from("proposals")
-          .select("id, proposal_number, title, template_id, organization_id")
+          // template_snapshot vai junto: e ele que manda no aspecto do PDF
+          // (generateProposalPdfBlob), para o documento do portal nao mudar
+          // quando alguem edita o modelo partilhado.
+          .select("id, proposal_number, title, template_id, template_snapshot, organization_id")
           .eq("id", proposal_id)
           .maybeSingle();
 
