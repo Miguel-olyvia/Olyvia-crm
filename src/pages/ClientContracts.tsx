@@ -10,6 +10,7 @@ import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { resolveContractsScopeUserIds, canActOnContract } from "@/lib/contracts/scope";
+import { contractHasQuotes, contractQuotesRoute } from "@/lib/contracts/quoteNavigation";
 import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
@@ -372,7 +373,7 @@ const ClientContracts = () => {
 
       let contractsQuery = (supabase as any)
         .from("client_contracts")
-        .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
+        .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees, deleted_at) )`)
         .in("organization_id", subtreeIds)
         .is("deleted_at", null);
       if (scopeUserIds !== null) {
@@ -382,6 +383,21 @@ const ClientContracts = () => {
       const { data: rows, error } = await contractsQuery.order("created_at", { ascending: false });
       if (error) throw error;
       let data: any[] = rows || [];
+
+      // O `quote_id` do contrato pode apontar a um orcamento entretanto
+      // apagado — nesse caso a accao "Ver orcamentos" nao o deve abrir, porque
+      // a ficha ja nao existe. Os orcamentos que vem pela proposta ja trazem o
+      // `deleted_at`, o do contrato nao, por isso resolve-se aqui.
+      const contractQuoteIds = [...new Set(data.map((c: any) => c.quote_id).filter(Boolean))];
+      if (contractQuoteIds.length > 0) {
+        const { data: liveQuotes } = await (supabase as any)
+          .from("quotes")
+          .select("id")
+          .in("id", contractQuoteIds)
+          .is("deleted_at", null);
+        const liveQuoteIds = new Set((liveQuotes || []).map((q: any) => q.id));
+        data.forEach((c: any) => { c._contractQuoteAlive = !c.quote_id || liveQuoteIds.has(c.quote_id); });
+      }
 
       const entityIds = data.map((c: any) => c.entity_id).filter(Boolean);
       if (entityIds.length > 0) {
@@ -2087,12 +2103,8 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
-                                    onClick={() => navigate(
-                                      contract.quote_id
-                                        ? `/quotes?open=${contract.quote_id}`
-                                        : `/quotes?proposal=${contract.proposal_id}`,
-                                    )}
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2141,12 +2153,8 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
-                                    onClick={() => navigate(
-                                      contract.quote_id
-                                        ? `/quotes?open=${contract.quote_id}`
-                                        : `/quotes?proposal=${contract.proposal_id}`,
-                                    )}
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2188,12 +2196,8 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
-                                    onClick={() => navigate(
-                                      contract.quote_id
-                                        ? `/quotes?open=${contract.quote_id}`
-                                        : `/quotes?proposal=${contract.proposal_id}`,
-                                    )}
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                 </>
                               )}
@@ -2231,12 +2235,8 @@ const ClientContracts = () => {
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem
-                                    disabled={!contract.quote_id && !(contract.proposals?.quotes?.length > 0)}
-                                    onClick={() => navigate(
-                                      contract.quote_id
-                                        ? `/quotes?open=${contract.quote_id}`
-                                        : `/quotes?proposal=${contract.proposal_id}`,
-                                    )}
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />

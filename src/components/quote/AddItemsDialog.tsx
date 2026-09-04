@@ -58,6 +58,8 @@ interface CatalogItem {
   category_name: string | null;
   brand_name: string | null;
   retail_price: number | null;
+  /** Preço de compra definido do artigo, quando existe. Serve para a margem. */
+  cost_price: number | null;
   vat_rate: number | null;
   organization_id: string | null;
   type: "product" | "service";
@@ -451,17 +453,24 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
 
       if (activeTab === "products") {
         const ids = rows.map(r => r.id);
-        const pricesMap = new Map<string, { price: number | null; vat_rate: number | null }>();
+        const pricesMap = new Map<string, { price: number | null; vat_rate: number | null; cost: number | null }>();
         const BATCH = 200;
         for (let i = 0; i < ids.length; i += BATCH) {
           const batch = ids.slice(i, i + BATCH);
           if (batch.length === 0) continue;
           const { data: pd } = await supabase
             .from("product_prices")
-            .select("product_id, price, vat_rate")
-            .eq("price_type", "retail")
+            .select("product_id, price, vat_rate, price_type")
+            .in("price_type", ["retail", "purchase"])
             .in("product_id", batch);
-          (pd || []).forEach(p => pricesMap.set(p.product_id, { price: p.price, vat_rate: p.vat_rate }));
+          // O preço de compra vem junto com o de venda para que a linha do
+          // orçamento guarde o custo REAL, em vez de um custo inventado a
+          // partir do preço de venda dividido por uma margem por omissão.
+          (pd || []).forEach(p => {
+            const prev = pricesMap.get(p.product_id) || { price: null, vat_rate: null, cost: null };
+            if (p.price_type === "purchase") pricesMap.set(p.product_id, { ...prev, cost: p.price });
+            else pricesMap.set(p.product_id, { ...prev, price: p.price, vat_rate: p.vat_rate });
+          });
         }
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
@@ -473,6 +482,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             category_name: r.product_categories?.name ?? null,
             brand_name: r.brands?.name ?? null,
             retail_price: pi?.price ?? null,
+            cost_price: pi?.cost ?? null,
             vat_rate: pi?.vat_rate ?? 23,
             organization_id: r.organization_id ?? null,
             type: "product" as const,
@@ -482,17 +492,21 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
         });
       } else {
         const ids = rows.map(r => r.id);
-        const pricesMap = new Map<string, { price: number | null; vat_rate: number | null }>();
+        const pricesMap = new Map<string, { price: number | null; vat_rate: number | null; cost: number | null }>();
         const BATCH = 200;
         for (let i = 0; i < ids.length; i += BATCH) {
           const batch = ids.slice(i, i + BATCH);
           if (batch.length === 0) continue;
           const { data: pd } = await supabase
             .from("service_prices")
-            .select("service_id, price, vat_rate")
-            .eq("price_type", "retail")
+            .select("service_id, price, vat_rate, price_type")
+            .in("price_type", ["retail", "purchase"])
             .in("service_id", batch);
-          (pd || []).forEach(p => pricesMap.set(p.service_id, { price: p.price, vat_rate: p.vat_rate }));
+          (pd || []).forEach(p => {
+            const prev = pricesMap.get(p.service_id) || { price: null, vat_rate: null, cost: null };
+            if (p.price_type === "purchase") pricesMap.set(p.service_id, { ...prev, cost: p.price });
+            else pricesMap.set(p.service_id, { ...prev, price: p.price, vat_rate: p.vat_rate });
+          });
         }
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
@@ -504,6 +518,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             category_name: r.service_categories?.name ?? null,
             brand_name: null,
             retail_price: pi?.price ?? null,
+            cost_price: pi?.cost ?? null,
             vat_rate: pi?.vat_rate ?? 23,
             organization_id: r.organization_id ?? null,
             type: "service" as const,
@@ -1129,6 +1144,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           category_name: "Bundles",
           brand_name: null,
           retail_price: bundleUnitPrice, // Unit price (not multiplied by quantity)
+          cost_price: null,
           vat_rate: null,
           organization_id: selectedBundle.bundle.organization_id,
           type: "product",
@@ -1523,6 +1539,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           category_name: "Bundles",
           brand_name: null,
           retail_price: unitTotalPrice,
+          cost_price: null,
           vat_rate: 23,
           organization_id: bundle.organization_id,
           type: "product",
@@ -1608,6 +1625,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                   category_name: suggestion.category,
                   brand_name: null,
                   retail_price: suggestion.price || 0,
+          cost_price: null,
                   vat_rate: 23,
                   organization_id: activeCompany?.id || null,
                   type: suggestion.type || "product",

@@ -117,6 +117,7 @@ import { Sparkles } from "lucide-react";
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
+import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 interface WorkflowStage {
   id: string;
@@ -1993,12 +1994,9 @@ const Proposals = () => {
         }
 
         const linesToInsert = validLines.map(l => {
-          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-          const precoSemIvaBase = unitPrice * l.qt;
+          // Subtotal gravado pela fonte única do preço da linha.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const precoSemIva = getLineSubtotal(l);
           const ivaValor = precoSemIva * (l.iva_percent / 100);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
@@ -3244,7 +3242,7 @@ const Proposals = () => {
                                                     retailPrice = manualPrice;
                                                   }
                                                   
-                                                  const margin = costPrice > 0 && retailPrice > 0 ? ((retailPrice - costPrice) / costPrice) * 100 : 30;
+                                                  const margin = costPrice > 0 && retailPrice > 0 ? markupFromCostAndPrice(costPrice, retailPrice) : 30;
                                                   
                                                   return {
                                                     id: `temp_deal_${Date.now()}_${idx}`,

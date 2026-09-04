@@ -14,7 +14,7 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -54,7 +54,15 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     setGeneratedFromName(null);
   }, [contract?.id, contract?.contract_body_html]);
 
+  // Um contrato em vigor nao se edita a mao: o texto livre fica trancado.
   const isLocked = readOnly || ["signed", "active"].includes(contract?.status);
+
+  // Regenerar NAO se abre a contratos em vigor, de proposito: um documento
+  // assinado nao muda -- nem pela minuta, nem por quem o abre, nem por quem o
+  // manda gerar outra vez. O caminho de descongelamento existe no codigo e
+  // continua a servir contratos ainda por assinar; para os assinados nao ha
+  // porta, e e essa a intencao.
+  const contratoEmVigor = isContractInForce(contract);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-for-body", activeCompany?.id],
@@ -120,7 +128,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       }
       const { error } = await (supabase as any)
         .from("client_contracts")
-        .update({ contract_body_html: html })
+        // Regenerar (ou guardar o corpo a mao) e a UNICA forma de mudar um
+        // contrato assinado, e tem de ser pedida por alguem. Descongela-se: a
+        // proxima leitura produz o documento de novo e volta a congela-lo.
+        .update({ contract_body_html: html, ...UNFREEZE_CONTRACT_COLUMNS })
         .eq("id", contract.id);
       if (error) throw error;
     },
@@ -308,6 +319,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: signerName,
           company_signed_by_id: anewUser?.id || user.id,
+          // Assinar MUDA o documento (a assinatura passa a fazer parte dele).
+          // Descongela-se para a proxima leitura o reconstruir ja com ela --
+          // sem isto, uma empresa que assine depois do cliente ficaria com a
+          // sua assinatura de fora do documento congelado.
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
         .eq("id", contract.id);
 
@@ -343,6 +359,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: templateSignatoryUser.name || "Representante",
           company_signed_by_id: templateSignatoryUser.id,
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
         .eq("id", contract.id);
 
@@ -510,7 +527,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
               <PenTool className="h-3 w-3" /> Assinado pela empresa
             </Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setIsGenerateOpen(true)} disabled={isLocked} className="gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsGenerateOpen(true)}
+            disabled={isLocked}
+            className="gap-1.5"
+            title={contratoEmVigor ? "Um contrato assinado não pode ser regenerado." : undefined}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
             {bodyHtml ? "Regenerar" : "Gerar de Minuta"}
           </Button>

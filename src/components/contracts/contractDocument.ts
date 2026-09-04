@@ -1192,6 +1192,45 @@ export function applyQuoteItemsToken(
   return applyDataTableTokens(baseHtml, variableData, templateDocSettings, primaryColor, autoAppendIfMissing);
 }
 
+/**
+ * Um contrato assinado esta CONGELADO?
+ *
+ * O congelamento so acontece depois de o cliente assinar: e ai que o documento
+ * passa a ter valor legal e deixa de poder mudar. Antes disso ainda esta a ser
+ * trabalhado, e reflectir a minuta viva e o comportamento certo.
+ */
+export function hasFrozenBody(contract: any): boolean {
+  return typeof contract?.contract_body_frozen_html === "string"
+    && contract.contract_body_frozen_html.trim().length > 0;
+}
+
+/**
+ * Colunas a escrever para DESCONGELAR um contrato.
+ *
+ * Usado por quem altera legitimamente um contrato assinado -- assinar e
+ * regenerar. A proxima leitura volta a produzir o documento e a congela-lo,
+ * agora ja com a alteracao. Abrir NAO e uma alteracao, e por isso nunca passa
+ * por aqui.
+ */
+/**
+ * O contrato esta EM VIGOR, e por isso o seu documento nao pode continuar a
+ * mudar sozinho?
+ *
+ * A data de assinatura do cliente nao chega: medido no remoto, 14 contratos
+ * estao marcados como assinados ou activos SEM essa data -- assinou so a
+ * empresa. Sem os incluir ficavam de fora do congelamento e continuavam a mudar
+ * com a minuta, ao mesmo tempo que o ecra os trancava por estarem assinados.
+ */
+export function isContractInForce(contract: { signature_date?: string | null; status?: string | null } | null | undefined): boolean {
+  if (!contract) return false;
+  return !!contract.signature_date || ["signed", "active"].includes(contract.status ?? "");
+}
+
+export const UNFREEZE_CONTRACT_COLUMNS = {
+  contract_body_frozen_html: null,
+  contract_frozen_at: null,
+} as const;
+
 export async function resolveContractDocument(contract: any, orgId: string, activeCompanyName?: string): Promise<ResolvedContractDocument | null> {
   if (!contract || !orgId) return null;
 
@@ -1249,17 +1288,31 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   if (emailOverride) (variableData as any).empresa_email = emailOverride;
   if (trim(settings.company_website)) (variableData as any).empresa_website = trim(settings.company_website);
 
+  // ── Descarregar e LER, nao produzir ────────────────────────────────────
+  // Havendo copia congelada, e ela que e servida, tal e qual. Nao se substitui
+  // nada, nao se resolve nada, nao se injecta assinatura nenhuma: tudo isso ja
+  // esta la dentro, do momento em que foi congelada. E o que impede um contrato
+  // assinado em Julho de mudar hoje porque alguem editou a minuta -- ou porque
+  // alguem simplesmente o abriu.
+  const congelado = hasFrozenBody(contract);
+
   const usingContractBody = !!contract.contract_body_html;
-  let baseHtml = contract.contract_body_html || templateData?.body_html || "";
+  let baseHtml = congelado
+    ? (contract.contract_body_frozen_html as string)
+    : (contract.contract_body_html || templateData?.body_html || "");
   if (!baseHtml) return null;
 
+  let bodyHtml: string;
+  if (congelado) {
+    bodyHtml = baseHtml;
+  } else {
   // Pre-substitution: alias and quote items (must run BEFORE substituteVariables
   // so the fixed handler in contractVariables.ts cannot inject the default table).
   // Quando o body vem do contrato (já renderizado na geração), NÃO voltamos a
   // anexar a tabela de produtos no fim — evita duplicado no PDF.
   baseHtml = applyQuoteItemsToken(baseHtml, variableData, tplFlat, settings.primary_color || "#7C3AED", !usingContractBody);
 
-  let bodyHtml = substituteVariables(baseHtml, variableData);
+  bodyHtml = substituteVariables(baseHtml, variableData);
   // Safety net (should be a no-op).
   bodyHtml = bodyHtml.replace(/\{\{(orcamento_itens|tabela_artigos)\}\}/gi, "");
   // Resolver fórmulas inseridas em células de tabelas manuais (Corte 2C).
@@ -1283,6 +1336,31 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
       showOtpBadge: true,
     },
   );
+
+    // Assinado pelo cliente e ainda sem copia congelada: congela-se AGORA, na
+    // primeira vez que for lido. E assim que os contratos ja assinados passam a
+    // estar protegidos, sem precisarem de ser tocados um a um.
+    //
+    // Guardado sem esperar (nem falhar por isso): o documento devolvido a quem
+    // pediu e exactamente este, quer a gravacao resulte quer nao. Falhar a
+    // gravacao significa que se volta a tentar na leitura seguinte -- nunca que
+    // o utilizador fica sem documento.
+    // "Em vigor" por qualquer dos dois sinais, e nao so pela data de assinatura
+    // do cliente: medido no remoto, 14 contratos estao marcados como assinados
+    // ou activos SEM data de assinatura -- assinou so a empresa. Sem os incluir,
+    // ficavam de fora do congelamento e continuavam a mudar com a minuta, ao
+    // mesmo tempo que o ecra os trancava por estarem assinados.
+    if (isContractInForce(contract) && contract.id) {
+      void (supabase as any)
+        .from("client_contracts")
+        .update({ contract_body_frozen_html: bodyHtml, contract_frozen_at: new Date().toISOString() })
+        .eq("id", contract.id)
+        .is("contract_body_frozen_html", null)
+        .then(({ error }: { error: unknown }) => {
+          if (error) console.error("Nao foi possivel congelar o contrato assinado:", error);
+        });
+    }
+  }
 
   const companyName = settings.company_name_override || variableData.empresa_nome || organization?.name || activeCompanyName || "";
   const headerLineOne = [

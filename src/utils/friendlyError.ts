@@ -38,6 +38,12 @@ export function getLocalizedFallback(key: string): string {
 }
 
 const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
+  // Uma lead com cliente criado tem de ficar em "convertida" -- e a restricao
+  // anew_leads_conversao_coerente recusa mudar-lhe o estado. Sem esta entrada,
+  // mapFriendly devolvia o texto cru do Postgres ('violates check constraint
+  // "anew_leads_conversao_coerente"') a quem arrastasse a lead noutro estado.
+  // Vem primeiro por ser a regra mais especifica das que aqui estao.
+  { match: /anew_leads_conversao_coerente/i, key: "friendlyError.leadAlreadyConverted" },
   { match: /Nenhum SMTP ativo encontrado/i, key: "friendlyError.noSmtp" },
   { match: /SMTP/i, key: "friendlyError.smtpError" },
   { match: /rate limit|too many requests/i, key: "friendlyError.rateLimit" },

@@ -4,6 +4,7 @@ import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
 import { computeQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { getLineUnitPrice } from '@/utils/quotes/quoteLinePricing';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -369,18 +370,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     : fees.map((fee) => ({ name: fee.service_fee_types?.name || 'Taxa', value: parseFloat(String(fee.calculated_value || 0)) }));
 
 
-  // Calculate unit price from costs and margin
-  const calculateUnitPrice = (line: any) => {
-    const materialCost = parseFloat(String(line.custo_material_unit || 0));
-    const laborCost = parseFloat(String(line.custo_mao_obra_unit || 0));
-    const margin = parseFloat(String(line.margem_percent || 0));
-    const intermediary = parseFloat(String(line.int_percent || 0));
-    const totalCost = materialCost + laborCost;
-    if (totalCost === 0 && line.retail_price_unit) {
-      return parseFloat(String(line.retail_price_unit || 0));
-    }
-    return totalCost * (1 + margin / 100) * (1 + intermediary / 100);
-  };
+  // Preço unitário pela fonte única: o preço de venda definido manda mesmo
+  // quando a linha tem custo, e o valor vem fechado ao cêntimo.
+  const calculateUnitPrice = (line: any) => getLineUnitPrice(line);
 
   // Format client address
   const primaryAddress = client?.client_addresses?.find((addr: any) => addr.is_primary) 

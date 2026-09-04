@@ -832,6 +832,12 @@ serve(async (req) => {
           signature_ip: detectedIp,
           accepted_at: now,
           signed_by_name: clientName,
+          // Assinar muda o documento: a assinatura passa a fazer parte dele.
+          // Qualquer copia congelada anterior fica desactualizada, por isso e
+          // limpa -- a proxima leitura reconstroi o documento ja assinado e
+          // volta a congela-lo. A partir dai deixa de mudar por alguem o abrir.
+          contract_body_frozen_html: null,
+          contract_frozen_at: null,
         }).eq("id", contract_id));
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
