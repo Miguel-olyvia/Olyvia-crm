@@ -41,6 +41,20 @@ export async function selectInBatches<T>(
   return results.flatMap(r => r.data || []);
 }
 
+// Same batching, but a failed batch is an error and not an empty list.
+// Use this when the caller DECIDES something from the result: a listing that
+// filters its rows by what came back here will quietly show nothing at all if
+// the query failed, and look like a permission problem instead of a bug.
+export async function selectInBatchesOrThrow<T>(
+  ids: string[],
+  runQuery: (batch: string[]) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const results = await Promise.all(chunk(ids, ID_BATCH_SIZE).map(runQuery));
+  const failed = results.find(r => r.error);
+  if (failed?.error) throw new Error(failed.error.message);
+  return results.flatMap(r => r.data || []);
+}
+
 export function useEntityIdentity() {
   const [identityMap, setIdentityMap] = useState<Record<string, EntityIdentity>>({});
   // Mirrors identityMap so resolveEntities/getIdentity can read the latest
