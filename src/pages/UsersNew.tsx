@@ -76,6 +76,7 @@ import { UsersFAQDialog } from "@/components/users/UsersFAQDialog";
 import UserHistoryDialog from "@/components/users/UserHistoryDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity } from "@/hooks/usePermissionScope";
+import { selectInBatches, selectInBatchesOrThrow } from "@/hooks/useEntityIdentity";
 import { PhoneEntry } from "@/components/users/MultiValuePhoneInput";
 import { UsersTableColumns, UserColumnConfig } from "@/components/users/UsersTableColumns";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -564,19 +565,23 @@ export default function UsersNew() {
       const userIds = (usersData || []).map((u: any) => u.id);
       const membershipsMap: Record<string, any[]> = {};
       if (userIds.length > 0) {
-        const { data: membershipsData } = await (supabase as any)
-          .from("anew_memberships")
-          .select("id, user_id, organization_id, relationship_type, role_id, status, join_method")
-          .in("user_id", userIds);
+        // Em lotes: o filtro .in() viaja no URL, e um sistema com centenas de
+        // utilizadores passava o limite de comprimento do servidor. O pedido
+        // devolvia "Bad Request", o erro era deitado fora, e a lista ficava sem
+        // vinculos nenhuns -- o que fazia o filtro de baixo esconder toda a
+        // gente menos a propria pessoa. Parecia falta de permissoes; era isto.
+        const membershipsData = await selectInBatchesOrThrow<any>(userIds, (batch) =>
+          (supabase as any)
+            .from("anew_memberships")
+            .select("id, user_id, organization_id, relationship_type, role_id, status, join_method")
+            .in("user_id", batch));
 
         // Fetch roles for these memberships
         const roleIds = [...new Set((membershipsData || []).map((m: any) => m.role_id).filter(Boolean))];
         const rolesMap: Record<string, { code: string; name: string }> = {};
         if (roleIds.length > 0) {
-          const { data: rolesData } = await (supabase as any)
-            .from("anew_roles")
-            .select("id, code, name")
-            .in("id", roleIds);
+          const rolesData = await selectInBatchesOrThrow<any>(roleIds, (batch) =>
+            (supabase as any).from("anew_roles").select("id, code, name").in("id", batch));
           for (const r of (rolesData || [])) {
             rolesMap[r.id] = { code: r.code, name: r.name };
           }
@@ -586,10 +591,8 @@ export default function UsersNew() {
         const memberOrgIds = [...new Set((membershipsData || []).map((m: any) => m.organization_id).filter(Boolean))];
         const memberOrgsMap: Record<string, { id: string; name: string; type: string }> = {};
         if (memberOrgIds.length > 0) {
-          const { data: memberOrgsData } = await (supabase as any)
-            .from("anew_organizations")
-            .select("id, name, type")
-            .in("id", memberOrgIds);
+          const memberOrgsData = await selectInBatchesOrThrow<any>(memberOrgIds, (batch) =>
+            (supabase as any).from("anew_organizations").select("id, name, type").in("id", batch));
           for (const o of (memberOrgsData || [])) {
             memberOrgsMap[o.id] = { id: o.id, name: o.name, type: o.type };
           }
@@ -610,10 +613,11 @@ export default function UsersNew() {
       const entityIds = (usersData || []).map((u: any) => u.entity_id).filter(Boolean);
       const phonesMap: Record<string, any[]> = {};
       if (entityIds.length > 0) {
-        const { data: phonesData } = await (supabase as any)
-          .from("anew_entity_phones")
-          .select("entity_id, phone_number, country_code, is_primary")
-          .in("entity_id", entityIds);
+        const phonesData = await selectInBatches<any>(entityIds, (batch) =>
+          (supabase as any)
+            .from("anew_entity_phones")
+            .select("entity_id, phone_number, country_code, is_primary")
+            .in("entity_id", batch));
         for (const p of (phonesData || [])) {
           if (!phonesMap[p.entity_id]) phonesMap[p.entity_id] = [];
           phonesMap[p.entity_id].push(p);
