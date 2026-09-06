@@ -147,6 +147,15 @@ export interface AggregatedFeeEntry {
 export interface AggregatedTotals {
   /** Sum of every quote's subtotalBruto (pre-discount, gross product total). */
   subtotalBruto: number;
+  /** Sum of every quote's own global-discount value (subtotalBruto − discounted subtotal). */
+  discountValue: number;
+  /**
+   * The single global-discount percentage shared by every discounted quote, or
+   * `null` when the discounted quotes don't all use the same percentage (or
+   * when there is no discount at all). Never an "effective" percentage derived
+   * from the totals — only a percentage somebody actually typed.
+   */
+  discountPercent: number | null;
   /** Every fee from every quote, listed individually — never merged/summed by name. */
   fees: AggregatedFeeEntry[];
   /** Sum of each quote's own (post-discount subtotal + rounded fees total). */
@@ -175,6 +184,8 @@ export interface QuoteTotalsInput {
 export function aggregateQuoteTotals(quotesData: QuoteTotalsInput[]): AggregatedTotals {
   let subtotalBruto = 0;
   let subtotalWithFees = 0;
+  let discountValue = 0;
+  const discountPercents = new Set<number>();
   const fees: AggregatedFeeEntry[] = [];
   const vatByRateMap = new Map<number, { base: number; vat: number }>();
   const feeVatBreakdown: FeeVatEntry[] = [];
@@ -188,6 +199,10 @@ export function aggregateQuoteTotals(quotesData: QuoteTotalsInput[]): Aggregated
 
     const discountFactor = descontoPercent > 0 ? (1 - descontoPercent / 100) : 1;
     const quoteSubtotal = round2(quoteSubtotalBruto * discountFactor);
+    if (descontoPercent > 0) {
+      discountValue += quoteSubtotalBruto - quoteSubtotal;
+      discountPercents.add(descontoPercent);
+    }
     const quoteFeesTotal = round2(
       quoteFees.reduce((sum, fee) => sum + parseFloat(String(fee.calculated_value || 0)), 0)
     );
@@ -255,8 +270,17 @@ export function aggregateQuoteTotals(quotesData: QuoteTotalsInput[]): Aggregated
 
   const total = subtotalWithFees + totalIva;
 
+  // A percentagem só se mostra quando é a mesma em todos os orçamentos com
+  // desconto. Com percentagens diferentes não existe uma única percentagem
+  // verdadeira, e inventar uma "efectiva" sobre o total confundiria.
+  const discountPercent = discountPercents.size === 1
+    ? Array.from(discountPercents)[0]
+    : null;
+
   return {
     subtotalBruto,
+    discountValue: round2(discountValue),
+    discountPercent,
     fees,
     subtotalWithFees,
     vatBreakdown,
