@@ -69,10 +69,11 @@ export function getLineSubtotal(line: PricedQuoteLine): number {
  * um multiplicador do custo, não uma margem.
  *
  * Isto é o INVERSO de `getLineUnitPrice`, e tem de continuar a ser: o preço de
- * venda definido manda enquanto o orçamento está aberto, mas NÃO é gravado --
- * `retail_price_unit` não existe na base, só no ecrã. O que sobrevive a gravar
- * e reabrir é o custo e este markup, e é daí que o preço é reconstruído. Se a
- * inversão não fechar, o preço muda sozinho ao reabrir o orçamento.
+ * venda definido manda sempre que existe. `retail_price_unit` JÁ É GRAVADO em
+ * public.quote_lines (numeric(10,2), migration 20261117030000), mas continua a
+ * ser anulável: nas linhas antigas está a NULL, e para essas o que sobrevive a
+ * gravar e reabrir é o custo e este markup, e é daí que o preço é reconstruído.
+ * Se a inversão não fechar, o preço muda sozinho ao reabrir o orçamento.
  *
  * Por isso `intPercent` entra na conta: o preço leva a comissão de
  * intermediação por cima do markup, logo o markup que reproduz o preço tem de
