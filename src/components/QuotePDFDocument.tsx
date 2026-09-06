@@ -356,7 +356,13 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // passed in.
   const ownTotals = computeQuoteTotals(lines, fees, descontoPercent);
   const subtotalBruto = totalsOverride ? totalsOverride.subtotalBruto : ownTotals.subtotalBruto;
-  const discountValue = ownTotals.discountValue;
+  const discountValue = totalsOverride ? totalsOverride.discountValue : ownTotals.discountValue;
+  // Percentagem a mostrar entre parêntesis: a do orçamento único, ou — no
+  // agregado — só quando é a mesma em todos os orçamentos com desconto.
+  const discountPercentLabel = totalsOverride
+    ? totalsOverride.discountPercent
+    : (descontoPercent > 0 ? descontoPercent : null);
+  const showDiscountRow = totalsOverride ? discountValue > 0 : descontoPercent > 0;
   const vatBreakdown = totalsOverride ? totalsOverride.vatBreakdown : ownTotals.vatBreakdown;
   const roundedFeeVatBreakdown = totalsOverride ? totalsOverride.feeVatBreakdown : ownTotals.roundedFeeVatBreakdown;
   const totalIva = totalsOverride ? totalsOverride.totalIva : ownTotals.totalIva;
@@ -651,7 +657,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     return (
     <View style={styles.totalsSection} wrap={false} minPresenceAhead={95}>
       <View style={styles.totalsRow}><Text style={styles.totalLabel}>Subtotal Produtos (sem IVA):</Text><Text style={styles.totalValue}>€{subtotalBruto.toFixed(2)}</Text></View>
-      {!totalsOverride && descontoPercent > 0 && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global ({descontoPercent}%):</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
+      {showDiscountRow && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global{discountPercentLabel !== null ? ` (${discountPercentLabel}%)` : ''}:</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
       {feeRows.length > 0 && (() => {
         if (totalsOverride) {
           return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço:</Text></View>);
