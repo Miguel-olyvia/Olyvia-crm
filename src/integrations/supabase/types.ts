@@ -14909,6 +14909,7 @@ export type Database = {
           product_id: string | null
           qt: number | null
           quote_id: string
+          retail_price_unit: number | null
           section_name: string | null
           selected_attributes: Json | null
           service_id: string | null
@@ -14937,6 +14938,7 @@ export type Database = {
           product_id?: string | null
           qt?: number | null
           quote_id: string
+          retail_price_unit?: number | null
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null
@@ -14965,6 +14967,7 @@ export type Database = {
           product_id?: string | null
           qt?: number | null
           quote_id?: string
+          retail_price_unit?: number | null
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null

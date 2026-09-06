@@ -769,7 +769,7 @@ serve(async (req) => {
                         const desc = isP ? (pi?.name || "Produto") : (sm[item.service_id] || "Serviço");
                         const category = needTitleMap[item.deal_need_id] || "Geral";
                         const tsIva = up * qty;
-                        return { quote_id: q!.id, product_id: item.product_id || null, service_id: item.service_id || null, categoria: category, section_name: category, descricao_snapshot: desc, qt: qty, custo_material_unit: up, custo_mao_obra_unit: 0, margem_percent: 0, iva_percent: 23, int_percent: 0, total_sem_iva: tsIva, total_com_iva: tsIva * 1.23, total_com_desconto: tsIva * 1.23, ordem: item.sort_order || idx };
+                        return { quote_id: q!.id, product_id: item.product_id || null, service_id: item.service_id || null, categoria: category, section_name: category, descricao_snapshot: desc, qt: qty, custo_material_unit: up, custo_mao_obra_unit: 0, margem_percent: 0, retail_price_unit: up, iva_percent: 23, int_percent: 0, total_sem_iva: tsIva, total_com_iva: tsIva * 1.23, total_com_desconto: tsIva * 1.23, ordem: item.sort_order || idx };
                       });
                       if (lines.length > 0) {
                         const { error: linesError } = await supabase.from("quote_lines").insert(lines);
@@ -795,6 +795,7 @@ serve(async (req) => {
                       custo_material_unit: fallbackSubtotal,
                       custo_mao_obra_unit: 0,
                       margem_percent: 0,
+                      retail_price_unit: fallbackSubtotal,
                       iva_percent: 23,
                       int_percent: 0,
                       total_sem_iva: fallbackSubtotal,

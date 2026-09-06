@@ -1867,6 +1867,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           iva_percent: Number(line.iva_percent),
           int_percent: Number(line.int_percent),
           discount_percent: Number((line as any).discount_percent) || 0,
+          // Preço de venda definido gravado. Sem isto, reabrir o orçamento voltava
+          // a reconstruir o preço a partir do custo, mesmo já estando na base.
+          retail_price_unit: (line as any).retail_price_unit === null || (line as any).retail_price_unit === undefined
+            ? undefined
+            : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
         }))
@@ -2219,6 +2224,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             unidade: line.unidade || null,
             item_description: line.item_description || null,
             cost_price: line.cost_price || 0,
+            // O preço de venda definido manda no preço unitário. Sem ele gravado,
+            // o preço é reconstruído do custo arredondado e perde milésimos.
+            retail_price_unit: (line.retail_price_unit ?? null) || null,
           };
         });
 
@@ -2291,6 +2299,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 unidade: l.unidade || null,
                 item_description: l.item_description || null,
                 cost_price: l.cost_price || 0,
+                retail_price_unit: (l.retail_price_unit ?? null) || null,
               };
             });
 

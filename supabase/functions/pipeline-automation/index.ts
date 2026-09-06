@@ -546,6 +546,8 @@ serve(async (req) => {
                 custo_material_unit: unitPrice,
                 custo_mao_obra_unit: 0,
                 margem_percent: 0,
+                // unitPrice é o preço de venda do artigo (preço de catálogo).
+                retail_price_unit: unitPrice,
                 iva_percent: 23,
                 int_percent: 0,
                 total_sem_iva: totalSemIva,
@@ -581,6 +583,7 @@ serve(async (req) => {
             custo_material_unit: fallbackSubtotal,
             custo_mao_obra_unit: 0,
             margem_percent: 0,
+            retail_price_unit: fallbackSubtotal,
             iva_percent: 23,
             int_percent: 0,
             total_sem_iva: fallbackSubtotal,
