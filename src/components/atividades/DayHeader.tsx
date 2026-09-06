@@ -1,7 +1,9 @@
 import { format, type Locale } from "date-fns";
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+import { CalendarIcon, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { DaySummary } from "@/lib/agenda/summary";
 import { DayPulse } from "./DayPulse";
@@ -15,6 +17,8 @@ interface DayHeaderProps {
   onPreviousDay: () => void;
   onNextDay: () => void;
   onToday: () => void;
+  /** Salta para um dia qualquer, escolhido no calendario. */
+  onSelectDay: (next: Date) => void;
   onRefresh: () => void;
   /** Acção principal do ecrã (criar tarefa), no canto do cabeçalho. */
   action?: ReactNode;
@@ -38,15 +42,18 @@ export function DayHeader({
   onPreviousDay,
   onNextDay,
   onToday,
+  onSelectDay,
   onRefresh,
   action,
 }: DayHeaderProps) {
   const { t } = useTranslation();
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const dayNumber = format(day, "dd");
   const weekday = format(day, "EEEE", { locale });
   const monthAndYear = format(day, "MMMM yyyy", { locale });
   const fullLabel = format(day, "EEEE, d MMMM yyyy", { locale });
+  const shortLabel = format(day, "dd/MM/yyyy");
 
   return (
     <header className="relative overflow-hidden rounded-2xl border border-border/70 bg-card shadow-[var(--shadow-sm)]">
@@ -54,7 +61,7 @@ export function DayHeader({
           profundidade ao cabeçalho sem lhe acrescentar mais uma caixa. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-gradient-to-br from-primary via-accent to-primary opacity-[0.14] blur-3xl dark:opacity-25"
+        className="pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary opacity-[0.14] blur-3xl dark:opacity-25"
       />
 
       <div className="relative flex flex-col gap-6 p-5 sm:p-6">
@@ -105,7 +112,7 @@ export function DayHeader({
                 aria-current={isToday ? "date" : undefined}
                 className={`h-9 rounded-full px-4 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-95 ${
                   isToday
-                    ? "bg-gradient-to-br from-primary to-accent text-primary-foreground shadow-[var(--shadow-sm)]"
+                    ? "bg-primary text-primary-foreground shadow-[var(--shadow-sm)]"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
@@ -120,6 +127,38 @@ export function DayHeader({
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
+
+            {/* Saltar para qualquer dia. As setas resolvem "ontem/amanha"; para
+                ir a um dia distante e preciso um calendario, no mesmo padrao de
+                Popover + Calendar que os restantes ecras ja usam. O rotulo do
+                botao mostra sempre o dia seleccionado. */}
+            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label={t("activities.myDay.pickDate")}
+                  className="h-10 gap-2 rounded-full font-normal tabular-nums"
+                >
+                  <CalendarIcon className="h-4 w-4" aria-hidden="true" />
+                  {shortLabel}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="single"
+                  selected={day}
+                  defaultMonth={day}
+                  locale={locale}
+                  onSelect={(next) => {
+                    if (!next) return;
+                    onSelectDay(next);
+                    setPickerOpen(false);
+                  }}
+                  className="p-3 pointer-events-auto"
+                />
+              </PopoverContent>
+            </Popover>
 
             <Button
               variant="ghost"

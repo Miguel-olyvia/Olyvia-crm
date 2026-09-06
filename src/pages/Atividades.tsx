@@ -45,6 +45,7 @@ export default function Atividades() {
     goToPreviousDay,
     goToNextDay,
     goToToday,
+    goToDay,
     sections,
     loading,
     error,
@@ -130,6 +131,7 @@ export default function Atividades() {
         onPreviousDay={goToPreviousDay}
         onNextDay={goToNextDay}
         onToday={goToToday}
+        onSelectDay={goToDay}
         onRefresh={refreshAll}
         action={createButton}
       />

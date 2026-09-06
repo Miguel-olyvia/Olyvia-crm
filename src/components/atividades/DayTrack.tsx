@@ -5,7 +5,7 @@ type TrackTone = "task" | "meeting";
 
 const TONE: Record<TrackTone, { rule: string; chip: string; count: string }> = {
   task: {
-    rule: "bg-gradient-to-r from-primary via-accent to-transparent",
+    rule: "bg-gradient-to-r from-primary via-primary/40 to-transparent",
     chip: "bg-primary/10 text-primary",
     count: "text-primary",
   },

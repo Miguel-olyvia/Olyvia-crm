@@ -73,7 +73,7 @@ export function TaskCreateDialog({
         <Button
           size="sm"
           onClick={() => setOpen(true)}
-          className="h-10 gap-2 rounded-full bg-gradient-to-br from-primary to-accent px-4 text-primary-foreground shadow-[var(--shadow-sm)] transition-all hover:shadow-[var(--shadow-md)] active:scale-95"
+          className="h-10 gap-2 rounded-full bg-primary px-4 text-primary-foreground shadow-[var(--shadow-sm)] transition-all hover:shadow-[var(--shadow-md)] active:scale-95"
         >
           <Plus className="h-4 w-4" aria-hidden="true" />
           {t("activities.myDay.newTask")}
@@ -147,7 +147,7 @@ export function TaskCreateDialog({
               <Button
                 type="submit"
                 disabled={!canSubmit}
-                className="bg-gradient-to-br from-primary to-accent text-primary-foreground"
+                className="bg-primary text-primary-foreground"
               >
                 {t("activities.myDay.createTask")}
               </Button>

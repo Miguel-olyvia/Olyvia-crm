@@ -51,6 +51,8 @@ export interface UseMyDayResult {
   goToPreviousDay: () => void;
   goToNextDay: () => void;
   goToToday: () => void;
+  /** Salta directamente para um dia escolhido no calendario. */
+  goToDay: (next: Date) => void;
   sections: AgendaSections<AgendaItem>;
   totalCount: number;
   loading: boolean;
@@ -215,6 +217,7 @@ export function useMyDay(): UseMyDayResult {
   const goToPreviousDay = useCallback(() => setDay((current) => shiftDays(current, -1)), []);
   const goToNextDay = useCallback(() => setDay((current) => shiftDays(current, 1)), []);
   const goToToday = useCallback(() => setDay(new Date()), []);
+  const goToDay = useCallback((next: Date) => setDay(next), []);
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 
   return {
@@ -224,6 +227,7 @@ export function useMyDay(): UseMyDayResult {
     goToPreviousDay,
     goToNextDay,
     goToToday,
+    goToDay,
     sections,
     totalCount: sections.overdue.length + sections.timed.length + sections.allDay.length,
     loading: loading || scopeLoading,

@@ -107,7 +107,7 @@ export function DayPulse({ summary, loading = false }: DayPulseProps) {
           className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-muted"
         >
           <div
-            className="h-full rounded-full bg-gradient-to-r from-primary to-accent transition-[width] duration-500 ease-out"
+            className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
             style={{ width: `${percent}%` }}
           />
         </div>
