@@ -770,6 +770,10 @@ export async function resolveAndInsertQuoteLines(
       custo_material_unit: unitPrice,
       custo_mao_obra_unit: 0,
       margem_percent: 0,
+      // unitPrice AQUI JÁ É o preço de venda (preço de catálogo, ou a soma dos
+      // componentes do bundle). Gravá-lo em retail_price_unit fixa-o como preço
+      // definido, em vez de o deixar depender de custo × markup.
+      retail_price_unit: unitPrice,
       iva_percent: vatRate,
       int_percent: 0,
       discount_percent: discountPercent,
@@ -1385,6 +1389,9 @@ const updateQuoteLine: Handler = async (ctx, args): Promise<ToolResult> => {
     const v = Number(args.unit_price);
     if (!Number.isFinite(v) || v < 0) return { success: false, message: "unit_price inválido." };
     patch.custo_material_unit = v;
+    // O preço escrito manda: sem actualizar também retail_price_unit, um preço de
+    // venda definido gravado antes continuaria a mandar e a alteração não se veria.
+    patch.retail_price_unit = v > 0 ? v : null;
   }
   if (args.discount_percent !== undefined) {
     const v = Number(args.discount_percent);
@@ -1700,9 +1707,14 @@ async function loadFeeCalcContext(
       // Em DB, total_sem_iva = qt * custo_material_unit (recomputeLineTotals).
       // Para preservar paridade com a UI usamos o cálculo da UI:
       const custoUnit = Number(l.custo_material_unit || 0) + Number(l.custo_mao_obra_unit || 0);
-      const isManual = custoUnit === 0 && l.retail_price_unit !== null && l.retail_price_unit !== undefined;
-      const unitPrice = isManual
-        ? Number(l.retail_price_unit || 0)
+      // Mesma ordem de getLineUnitPrice(): o preço de venda DEFINIDO manda sempre,
+      // haja custo ou não. Só na sua ausência é que o preço vem do custo e do markup.
+      // (Até a coluna retail_price_unit existir, este select falhava inteiro e o
+      // cálculo das taxas ficava a zero.)
+      const temPrecoDefinido = l.retail_price_unit !== null && l.retail_price_unit !== undefined
+        && Number(l.retail_price_unit) > 0;
+      const unitPrice = temPrecoDefinido
+        ? Number(l.retail_price_unit)
         : custoUnit * (1 + Number(l.margem_percent || 0) / 100) * (1 + Number(l.int_percent || 0) / 100);
       const precoSemIvaBase = unitPrice * Number(l.qt || 0);
       const precoSemIva = precoSemIvaBase * (1 - Number(l.discount_percent || 0) / 100);

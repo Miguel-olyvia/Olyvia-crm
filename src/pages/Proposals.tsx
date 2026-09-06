@@ -2022,6 +2022,9 @@ const Proposals = () => {
             unidade: l.unidade || null,
             item_description: l.item_description || null,
             cost_price: l.cost_price || 0,
+            // O preço de venda definido manda no preço unitário; sem ele gravado,
+            // o preço é reconstruído do custo arredondado e perde milésimos.
+            retail_price_unit: (l.retail_price_unit ?? null) || null,
           };
         });
 
