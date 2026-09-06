@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useToast } from "@/hooks/use-toast";
-import { usePermissions } from "@/hooks/usePermissions";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { Button } from "@/components/ui/button";
@@ -208,7 +207,6 @@ function formatRequestedVisit(iso: string): string | null {
 interface ConflictCandidatesProps {
   candidates: ConflictCandidate[];
   linkedEntityId: string;
-  canResolve: boolean;
   onChoose: (entityId: string) => void;
 }
 
@@ -223,7 +221,7 @@ interface ConflictCandidatesProps {
  * outra fase. Até lá o botão dessa candidata está desativado e diz porquê, em
  * vez de fingir uma escolha que a base de dados não executa.
  */
-function ConflictCandidates({ candidates, linkedEntityId, canResolve, onChoose }: ConflictCandidatesProps) {
+function ConflictCandidates({ candidates, linkedEntityId, onChoose }: ConflictCandidatesProps) {
   return (
     <div className="rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 p-3 space-y-3">
       <div className="flex items-center gap-2">
@@ -273,7 +271,7 @@ function ConflictCandidates({ candidates, linkedEntityId, canResolve, onChoose }
                 )}
               </div>
 
-              {canResolve && (
+              {(
                 <Button
                   size="sm"
                   variant="outline"
@@ -304,8 +302,11 @@ export default function PendingFormSubmissions() {
   const navigate = useNavigate();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { toast } = useToast();
-  const { hasPermission } = usePermissions();
-  const canResolve = hasPermission("leads.create") || hasPermission("leads.edit");
+  // Sem segunda permissao. Quem chega aqui ja passou por
+  // `platform.pending_submissions.view`, e o servidor so devolve as submissoes
+  // cuja ficha esta dentro do ambito da pessoa -- o mesmo ambito das leads e
+  // dos clientes. Esta pagina nao cria leads nem as edita: escreve uma nota na
+  // ficha que ja existe e leva aos Agendamentos, que se protegem sozinhos.
 
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<PendingSubmissionRow[]>([]);
@@ -631,7 +632,7 @@ export default function PendingFormSubmissions() {
                           Não estava livre a essa hora. A visita a {row.targetName} é sua, por isso não foi
                           marcada a mais ninguém — combine outra hora e marque-a no agendamento.
                         </p>
-                        {canResolve && (
+                        {(
                           <Button
                             size="sm"
                             variant="outline"
@@ -688,12 +689,11 @@ export default function PendingFormSubmissions() {
                       <ConflictCandidates
                         candidates={row.candidates}
                         linkedEntityId={row.entity_id}
-                        canResolve={canResolve}
                         onChoose={(entityId) => setPendingAction({ submission: row, action: "merge", entityId })}
                       />
                     )}
 
-                    {canResolve && (
+                    {(
                       <div className="flex flex-wrap gap-2 pt-1">
                         {!isConflict && (
                           <Button
