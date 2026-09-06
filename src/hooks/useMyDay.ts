@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
-import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { classifyAgendaItems, type AgendaSections } from "@/lib/agenda/classify";
 import {
@@ -12,10 +12,8 @@ import {
   type DayWindow,
 } from "@/lib/agenda/dayWindow";
 import { getItemType, getLeadId } from "@/lib/agenda/itemType";
-import { resolveOwnerIdsForScope, selectItemsForOwners } from "@/lib/agenda/ownership";
+import { selectItemsForOwners } from "@/lib/agenda/ownership";
 import type { AgendaEntityRef, AgendaItem, AgendaItemRow } from "@/lib/agenda/types";
-
-export const MY_DAY_PERMISSION = "scheduling.items.view";
 
 /**
  * Colunas lidas de `schedule_items`.
@@ -53,11 +51,12 @@ export interface UseMyDayResult {
   goToPreviousDay: () => void;
   goToNextDay: () => void;
   goToToday: () => void;
+  /** Salta directamente para um dia escolhido no calendario. */
+  goToDay: (next: Date) => void;
   sections: AgendaSections<AgendaItem>;
   totalCount: number;
   loading: boolean;
   error: string | null;
-  scope: ScopeLevel;
   refresh: () => void;
 }
 
@@ -133,9 +132,7 @@ async function resolveEntities(rows: AgendaItemRow[]): Promise<Map<string, Agend
 export function useMyDay(): UseMyDayResult {
   const { activeCompany } = useCompany();
   const {
-    getPermissionScope,
     anewUserId,
-    teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
 
@@ -145,13 +142,13 @@ export function useMyDay(): UseMyDayResult {
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  const scope = getPermissionScope(MY_DAY_PERMISSION);
+  // As Atividades sao a agenda PESSOAL de cada um: mostram o que e seu, e mais
+  // nada. Nao ha ambito aqui de proposito -- a visao de equipa e da organizacao
+  // vive nos Agendamentos, que existem para isso. Ter as duas paginas a mostrar
+  // conjuntos diferentes conforme uma permissao era a origem da confusao.
+  const ownerIds = anewUserId ? [anewUserId] : [];
   const dayWindow = useMemo(() => getDayWindow(day), [day]);
   const organizationId = activeCompany?.id ?? null;
-
-  // Estabiliza a dependência: `teamMemberIds` é um array novo a cada render do
-  // hook de âmbito e faria o efeito correr em ciclo.
-  const teamKey = useMemo(() => [...teamMemberIds].sort().join(","), [teamMemberIds]);
 
   useEffect(() => {
     if (scopeLoading) return;
@@ -162,7 +159,7 @@ export function useMyDay(): UseMyDayResult {
       setLoading(true);
       setError(null);
 
-      if (!organizationId || scope === "NONE") {
+      if (!organizationId || !anewUserId) {
         if (!cancelled) {
           setRows([]);
           setLoading(false);
@@ -183,10 +180,7 @@ export function useMyDay(): UseMyDayResult {
         if (queryError) throw queryError;
 
         const fetched = (data ?? []) as unknown as AgendaItemRow[];
-
-        // Âmbito ORG não filtra do lado do cliente: a RLS já disse o que pode ver.
-        const ownerIds = resolveOwnerIdsForScope(scope, anewUserId, teamMemberIds);
-        const scoped = ownerIds === null ? fetched : selectItemsForOwners(fetched, ownerIds);
+        const scoped = selectItemsForOwners(fetched, ownerIds);
 
         const entities = await resolveEntities(scoped);
         if (cancelled) return;
@@ -212,9 +206,8 @@ export function useMyDay(): UseMyDayResult {
     return () => {
       cancelled = true;
     };
-    // `teamKey` substitui `teamMemberIds` de propósito — ver comentário acima.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId, scope, anewUserId, teamKey, dayWindow, scopeLoading, reloadToken]);
+  }, [organizationId, anewUserId, dayWindow, scopeLoading, reloadToken]);
 
   const sections = useMemo(
     () => (rows.length === 0 ? EMPTY_SECTIONS : classifyAgendaItems(rows, dayWindow)),
@@ -224,6 +217,7 @@ export function useMyDay(): UseMyDayResult {
   const goToPreviousDay = useCallback(() => setDay((current) => shiftDays(current, -1)), []);
   const goToNextDay = useCallback(() => setDay((current) => shiftDays(current, 1)), []);
   const goToToday = useCallback(() => setDay(new Date()), []);
+  const goToDay = useCallback((next: Date) => setDay(next), []);
   const refresh = useCallback(() => setReloadToken((token) => token + 1), []);
 
   return {
@@ -233,11 +227,11 @@ export function useMyDay(): UseMyDayResult {
     goToPreviousDay,
     goToNextDay,
     goToToday,
+    goToDay,
     sections,
     totalCount: sections.overdue.length + sections.timed.length + sections.allDay.length,
     loading: loading || scopeLoading,
     error,
-    scope,
     refresh,
   };
 }

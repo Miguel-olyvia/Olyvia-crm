@@ -151,7 +151,7 @@ interface UserFormEnhancedProps {
   onTemplateAttrKeysChange?: (keys: string[]) => void;
   pendingScopeChanges?: Record<string, PendingScopeEntry[]>;
   onPendingScopeChanges?: (changes: Record<string, PendingScopeEntry[]>) => void;
-  isRolesReadOnly?: boolean;
+  isSelfEdit?: boolean;
 }
 
 export function UserFormEnhanced({
@@ -185,8 +185,12 @@ export function UserFormEnhanced({
   onTemplateAttrKeysChange,
   pendingScopeChanges = {},
   onPendingScopeChanges,
-  isRolesReadOnly = false,
+  isSelfEdit = false,
 }: UserFormEnhancedProps) {
+  // Quem se edita a si proprio nunca mexe no que da poder: cargo,
+  // organizacoes e ambitos ficam em so-leitura. A trava antiga so valia para o
+  // criador da conta; agora vale para toda a gente, administradores incluidos.
+  const isRolesReadOnly = isSelfEdit;
   const { t } = useTranslation();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("basic");
@@ -1110,6 +1114,7 @@ export function UserFormEnhanced({
                 <Select
                   value={formData.status}
                   onValueChange={(v) => setFormData({ ...formData, status: v })}
+                  disabled={isSelfEdit}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -1831,7 +1836,7 @@ export function UserFormEnhanced({
                             );
                           })()}
                           {/* Scopes button - only show if membership is saved */}
-                          {membership.id && (
+                          {membership.id && !isRolesReadOnly && (
                             <Button
                               type="button"
                               variant="outline"

@@ -276,7 +276,7 @@ export default function UsersNew() {
 
   const canEditUser = (user: AnewUser) => {
     // Users can always edit themselves
-    if (isSelf(user)) return canEdit;
+    if (isSelf(user)) return true;
     // Account creator (self-signup super_admin) cannot be edited by anyone else
     if (isAccountCreator(user)) return false;
     // Other super_admins can only be edited by the account creator
@@ -1729,8 +1729,8 @@ export default function UsersNew() {
             onTemplateAttrKeysChange={setFormTemplateAttrKeys}
             pendingScopeChanges={pendingScopeChanges}
             onPendingScopeChanges={setPendingScopeChanges}
-            isRolesReadOnly={
-              isEditMode && !!selectedUser && isSelf(selectedUser) && isAccountCreator(selectedUser)
+            isSelfEdit={
+              isEditMode && !!selectedUser && isSelf(selectedUser)
             }
           />
         </SheetContent>

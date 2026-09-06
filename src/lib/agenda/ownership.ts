@@ -85,6 +85,11 @@ export function selectItemsForOwners<T extends AgendaItemRow>(
 /**
  * Ids de dono correspondentes ao âmbito da permissão.
  * ORG devolve `null`: não há filtro do lado do cliente, vale o que a RLS deixou passar.
+ *
+ * NOTA: as Atividades já NÃO chamam esta função. Passaram a ser a agenda
+ * PESSOAL — só o próprio, sem âmbito — por decisão de produto, não por
+ * esquecimento; a visão de equipa/organização vive nos Agendamentos. A função
+ * fica porque continua a ser a regra correcta de âmbito para quem a precise.
  */
 export function resolveOwnerIdsForScope(
   scope: "NONE" | "OWNED" | "TEAM" | "ORG",
