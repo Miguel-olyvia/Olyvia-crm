@@ -2228,9 +2228,7 @@ const AnewClients = () => {
               <PermissionGate permission="clients.edit">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkMarkVip}><Star className="w-3.5 h-3.5" />Marcar VIP</Button>
               </PermissionGate>
-              <PermissionGate permission="deals.create">
-                <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkCreateDeals}><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
-              </PermissionGate>
+              <Button size="sm" variant="outline" className="h-8 gap-1.5" disabled={bulkActionLoading} onClick={handleBulkCreateDeals}><FileText className="w-3.5 h-3.5" />Novo Pedido</Button>
               <PermissionGate permission="clients.export">
                 <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleExport}><Download className="w-3.5 h-3.5" />Exportar</Button>
               </PermissionGate>
