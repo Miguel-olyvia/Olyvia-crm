@@ -268,9 +268,10 @@ export default function Products() {
       return;
     }
     (async () => {
-      const { data: hierarchy } = await supabase
+      const { data: hierarchy, error: hierarchyErr } = await supabase
         .from("anew_hierarchy")
         .select("parent_org_id, child_org_id");
+      if (hierarchyErr) toast({ title: "Erro", description: "Não foi possível carregar a hierarquia de organizações.", variant: "destructive" });
       const childMap = new Map<string, string[]>();
       (hierarchy || []).forEach((h: any) => {
         const arr = childMap.get(h.parent_org_id) || [];
@@ -538,7 +539,8 @@ export default function Products() {
         if (activeCompany?.id) {
           suppQuery = suppQuery.eq("organization_id", activeCompany.id);
         }
-        const { data } = await suppQuery.order("name");
+        const { data, error } = await suppQuery.order("name");
+        if (error) throw error;
         return (data || []).map((s: any) => ({
           id: s.id,
           name: s.name || s.id,

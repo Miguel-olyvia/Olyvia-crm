@@ -298,6 +298,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         (supabase as any).from("client_contracts").select("id, title:contract_number, status, total_value, start_date, end_date, payment_terms").eq("entity_id", entityId).eq("organization_id", organizationId).order("created_at", { ascending: false }),
       ]);
 
+      if (interactionsRes.error || tagsRes.error || contractsRes.error) {
+        toast({ title: "Erro", description: "Não foi possível carregar os dados do cliente.", variant: "destructive" });
+      }
       setInteractions(interactionsRes.data || []);
       setTags(tagsRes.data || []);
       setContracts(contractsRes.data || []);
@@ -589,7 +592,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const stages = data || [];
       setDealStages(stages);
       setDealFormData(prev => prev.stage_id ? prev : { ...prev, stage_id: stages[0]?.id || "" });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast({ title: "Erro", description: "Não foi possível carregar as fases de negócio.", variant: "destructive" }); }
   };
 
   const loadClientDetails = async () => {
@@ -622,12 +625,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         setAddresses([]);
       }
 
-      const { data: dealsData } = await supabase
+      const { data: dealsData, error: dealsErr } = await supabase
         .from("deals")
         .select("id, title, value, stage_id, probability, created_at, assigned_to, stages:deal_stages(name, color)")
         .eq("entity_id", client?.entity_id || client?.id)
         .eq("organization_id", organizationId || "")
         .order("created_at", { ascending: false });
+      if (dealsErr) throw dealsErr;
       setDeals(dealsData || []);
 
       const dealIds = (dealsData || []).map(d => d.id);
