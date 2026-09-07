@@ -65,7 +65,6 @@ function buildFrom(routes: Record<string, { result: any; capture?: Capture }>) {
       is: () => chain,
       in: () => chain,
       limit: () => chain,
-      throwOnError: () => chain,
       then: (resolve: any) => Promise.resolve(route.result).then(resolve),
     };
     return chain;

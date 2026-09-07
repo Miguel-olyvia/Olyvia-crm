@@ -362,8 +362,7 @@ export function MemberEditDialog({
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
               .update({ fiscal_entity_id: fiscalEntityId })
-              .eq("id", existingLink.id)
-              .throwOnError();
+              .eq("id", existingLink.id);
           } else {
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
@@ -371,8 +370,7 @@ export function MemberEditDialog({
                 entity_id: entityIdForFiscal,
                 fiscal_entity_id: fiscalEntityId,
                 is_primary: true,
-              })
-              .throwOnError();
+              });
           }
         }
       }

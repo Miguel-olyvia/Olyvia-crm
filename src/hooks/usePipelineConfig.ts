@@ -94,18 +94,12 @@ export function usePipelineConfig(companyId: string | null) {
       updated_at: new Date().toISOString(),
     };
 
-    try {
-      if (config) {
-        await (supabase.from("organization_pipeline_config") as any)
-          .update({ template_id: template.id, modules: template.modules, updated_at: new Date().toISOString() })
-          .eq("organization_id", companyId)
-          .throwOnError();
-      } else {
-        await (supabase.from("organization_pipeline_config") as any).insert([payload]).throwOnError();
-      }
-    } catch (error: any) {
-      toast({ title: "Erro ao aplicar template", description: error.message, variant: "destructive" });
-      return;
+    if (config) {
+      await (supabase.from("organization_pipeline_config") as any)
+        .update({ template_id: template.id, modules: template.modules, updated_at: new Date().toISOString() })
+        .eq("organization_id", companyId);
+    } else {
+      await (supabase.from("organization_pipeline_config") as any).insert([payload]);
     }
 
     toast({ title: `Template "${template.name}" aplicado` });

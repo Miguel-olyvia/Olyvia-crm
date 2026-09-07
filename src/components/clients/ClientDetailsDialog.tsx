@@ -852,7 +852,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           organization_id: client.organization_id,
           root_organization_id: client.root_organization_id || client.organization_id,
           status: "active",
-        } as any).throwOnError();
+        } as any);
 
         // Save catalog line items as deal_needs + deal_need_items
         if (dealLineItems.length > 0) {
@@ -862,7 +862,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             status: "pending",
             created_by: businessUserId,
             sort_order: 0,
-          }).select("id").single().throwOnError();
+          }).select("id").single();
 
           if (dealNeed?.id) {
             const needItems = dealLineItems.map((item, idx) => ({
@@ -874,7 +874,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               notes: item.name,
               sort_order: idx,
             }));
-            await (supabase as any).from("deal_need_items").insert(needItems).throwOnError();
+            await (supabase as any).from("deal_need_items").insert(needItems);
           }
         }
       }
@@ -954,7 +954,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           unit_price: item.unit_price,
           sort_order: idx,
         }));
-        await (supabase as any).from("proposal_manual_items").insert(manualItems).throwOnError();
+        await (supabase as any).from("proposal_manual_items").insert(manualItems);
       }
 
       toast({ title: "Proposta criada com sucesso" });

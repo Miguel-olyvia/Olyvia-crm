@@ -325,8 +325,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           // sua assinatura de fora do documento congelado.
           ...UNFREEZE_CONTRACT_COLUMNS,
         })
-        .eq("id", contract.id)
-        .throwOnError();
+        .eq("id", contract.id);
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success("Contrato assinado pela empresa via SMS OTP!");
@@ -362,8 +361,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signed_by_id: templateSignatoryUser.id,
           ...UNFREEZE_CONTRACT_COLUMNS,
         })
-        .eq("id", contract.id)
-        .throwOnError();
+        .eq("id", contract.id);
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success(`Contrato assinado por ${templateSignatoryUser.name} (signatário já verificado nesta minuta).`);

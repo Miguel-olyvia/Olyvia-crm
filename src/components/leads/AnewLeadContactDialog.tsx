@@ -908,8 +908,7 @@ export function AnewLeadContactDialog({
               : {}),
             created_by: interactionCreatedBy,
             organization_id: companyId,
-          })
-          .throwOnError();
+          });
 
         // Emit event for timeline refresh
         window.dispatchEvent(

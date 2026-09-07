@@ -117,7 +117,7 @@ export function ProposalFlowchart({ stages, companyId }: Props) {
     if (!companyId) return;
     setSaving(true);
     try {
-      await (supabase.from("proposal_stage_transitions" as any) as any).delete().eq("organization_id", companyId).throwOnError();
+      await (supabase.from("proposal_stage_transitions" as any) as any).delete().eq("organization_id", companyId);
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not found for current auth user");
       const inserts = edges.map((e) => ({

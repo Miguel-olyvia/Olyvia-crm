@@ -99,22 +99,17 @@ export function DealFlowchart({ stages, companyId }: Props) {
   const handleSave = async () => {
     if (!companyId) return;
     setSaving(true);
-    try {
-      await (supabase.from("deal_stage_transitions") as any).delete().eq("organization_id", companyId);
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) throw new Error("User not authenticated");
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
-      const inserts = edges.map(e => ({ organization_id: companyId, from_stage_id: e.source, to_stage_id: e.target, created_by: businessUserId }));
-      if (inserts.length > 0) { await (supabase.from("deal_stage_transitions") as any).insert(inserts).throwOnError(); }
-      toast({ title: "Transições guardadas" });
-      setHasChanges(false);
-      resetHistory();
-    } catch (err: any) {
-      toast({ title: "Erro ao guardar", description: err?.message, variant: "destructive" });
-    } finally {
-      setSaving(false);
-    }
+    await (supabase.from("deal_stage_transitions") as any).delete().eq("organization_id", companyId);
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData?.user) throw new Error("User not authenticated");
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) throw new Error("Business user not resolved");
+    const inserts = edges.map(e => ({ organization_id: companyId, from_stage_id: e.source, to_stage_id: e.target, created_by: businessUserId }));
+    if (inserts.length > 0) { await (supabase.from("deal_stage_transitions") as any).insert(inserts); }
+    toast({ title: "Transições guardadas" });
+    setHasChanges(false);
+    resetHistory();
+    setSaving(false);
   };
 
   const handleUndo = useCallback(() => {
