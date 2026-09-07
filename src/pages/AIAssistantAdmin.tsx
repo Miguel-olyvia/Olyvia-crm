@@ -172,6 +172,7 @@ export default function AIAssistantAdmin() {
       });
     } catch (error) {
       console.error("Error loading stats:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as estatísticas.", variant: "destructive" });
     }
   };
 
@@ -190,6 +191,7 @@ export default function AIAssistantAdmin() {
       })));
     } catch (error) {
       console.error("Error loading messages:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as mensagens.", variant: "destructive" });
     }
   };
 

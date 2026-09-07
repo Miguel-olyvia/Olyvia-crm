@@ -67,6 +67,7 @@ export function useOrganizationTeams(orgId: string) {
       setTeams(result);
     } catch (error) {
       console.error("Error loading teams:", error);
+      toast.error("Não foi possível carregar as equipas.");
     } finally {
       setLoading(false);
     }

@@ -591,7 +591,7 @@ const AnewClients = () => {
         buildTree(activeCompany.id, 0);
         setOrgOptions(treeOrdered);
         setScopeOrgIds(Array.from(scopeIds));
-      } catch (err) { console.error("Error loading organizations:", err); }
+      } catch (err) { console.error("Error loading organizations:", err); toast({ title: "Erro", description: "Não foi possível carregar as organizações.", variant: "destructive" }); }
     };
     loadOrgs();
   }, [activeCompany?.id]);
@@ -992,6 +992,7 @@ const AnewClients = () => {
       }
     } catch (err) {
       console.error("Error loading all clients for analytics:", err);
+      toast({ title: "Erro", description: "Não foi possível carregar os clientes.", variant: "destructive" });
     }
   }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, scopedUserIds, resolveEntities, effectiveSearch, dateFrom, dateTo]);
 

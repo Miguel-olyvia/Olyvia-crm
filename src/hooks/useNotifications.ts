@@ -119,6 +119,7 @@ export function useNotifications(activeOrgId?: string | null) {
       setNotifications(notifs);
     } catch (error: any) {
       console.error('Error fetching notifications:', error);
+      toast.error('Não foi possível carregar as notificações.');
     } finally {
       setLoading(false);
     }

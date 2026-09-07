@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/lib/toast';
 
 export interface AdministrativeDivision {
   id: string;
@@ -36,6 +37,7 @@ export function useAdministrativeDivisions(countryCode: string) {
     } catch (err) {
       console.error('Error fetching districts:', err);
       setDistricts([]);
+      toast.error('Não foi possível carregar os distritos.');
     } finally {
       setLoading(false);
     }
@@ -61,6 +63,7 @@ export function useAdministrativeDivisions(countryCode: string) {
     } catch (err) {
       console.error('Error fetching municipalities:', err);
       setMunicipalities([]);
+      toast.error('Não foi possível carregar os concelhos.');
     }
   }, []);
 
