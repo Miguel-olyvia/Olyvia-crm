@@ -80,12 +80,13 @@ export function SlotEditDialog({ open, onOpenChange, slot, optionsCount, organiz
       return;
     }
     (async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("product_attributes")
         .select("id, label, value_type, pricing_type, is_measurement")
         .eq("organization_id", organizationId)
         .order("label")
         .limit(200);
+      if (error) { toast({ title: "Erro", description: "Não foi possível carregar os atributos.", variant: "destructive" }); return; }
       if (data) {
         const all = data as unknown as AttributeRow[];
         const filtered = slotType === "measure"

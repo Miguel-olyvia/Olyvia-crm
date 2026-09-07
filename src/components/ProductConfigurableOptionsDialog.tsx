@@ -146,17 +146,19 @@ export default function ProductConfigurableOptionsDialog({
     setLoading(true);
     try {
       // 1. Load ALL available attributes
-      const { data: allAttrsData } = await supabase
+      const { data: allAttrsData, error: allAttrsErr } = await supabase
         .from("product_attributes")
         .select("id, code, label, pricing_type, value_type, allowed_values, is_variant_option, has_hex_color, is_measurement, valorization_type, pricing_dimension")
         .eq("organization_id", companyId)
         .order("label");
+      if (allAttrsErr) throw allAttrsErr;
 
       // 2. Load assigned attributes for this product
-      const { data: assignedData } = await supabase
+      const { data: assignedData, error: assignedErr } = await supabase
         .from("product_attribute_values")
         .select("id, attribute_id")
         .eq("product_id", productId);
+      if (assignedErr) throw assignedErr;
 
       const assignedMap = new Map<string, string>();
       (assignedData || []).forEach((a: any) => {

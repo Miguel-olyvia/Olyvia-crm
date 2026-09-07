@@ -219,21 +219,23 @@ export default function AttributeOptionPalettesDialog({
       // Load values for each group
       const valuesMap: Record<string, GroupValue[]> = {};
       for (const group of groupsData || []) {
-        const { data: valuesData } = await (supabase as any)
+        const { data: valuesData, error: valuesErr } = await (supabase as any)
           .from('attribute_option_group_values')
           .select('*')
           .eq('group_id', group.id)
           .order('sort_order');
+        if (valuesErr) throw valuesErr;
         valuesMap[group.id] = valuesData || [];
       }
       setGroupValues(valuesMap);
 
       // Load categories (hierarchy)
-      const { data: categoriesData } = await supabase
+      const { data: categoriesData, error: categoriesErr } = await supabase
         .from('product_categories')
         .select('id, name, parent_category_id, parent_id')
         .eq('organization_id', activeCompany.id)
         .order('name');
+      if (categoriesErr) throw categoriesErr;
       
       // Build hierarchy with levels, supporting both legacy parent_category_id and current parent_id
       const buildHierarchy = (cats: Category[], parentId: string | null = null, level = 0): Category[] => {
@@ -249,10 +251,11 @@ export default function AttributeOptionPalettesDialog({
       setCategories(buildHierarchy(categoriesData || []));
 
       // Load category palettes for this attribute
-      const { data: palettesData } = await (supabase as any)
+      const { data: palettesData, error: palettesErr } = await (supabase as any)
         .from('category_attribute_palettes')
         .select('*')
         .eq('attribute_id', attributeId);
+      if (palettesErr) throw palettesErr;
       
       const palettesMap: Record<string, CategoryPalette> = {};
       for (const p of palettesData || []) {

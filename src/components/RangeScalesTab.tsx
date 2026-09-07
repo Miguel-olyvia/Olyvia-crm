@@ -98,12 +98,13 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
     if (!activeCompany?.id) return;
 
     if (contextType === 'category') {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('product_categories')
         .select('id, name, parent_id')
         .is('parent_id', null)
         .order('name');
 
+      if (error) toast({ title: 'Erro', description: 'Não foi possível carregar as categorias.', variant: 'destructive' });
       setEntities((data || []).map(c => ({ id: c.id, name: c.name, parent_id: null })));
     } else if (contextType === 'subcategory') {
       const { data } = await supabase
@@ -260,7 +261,8 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
       query = query.eq('product_id', entityId);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) toast({ title: 'Erro', description: 'Não foi possível carregar os intervalos.', variant: 'destructive' });
     return data;
   };
 

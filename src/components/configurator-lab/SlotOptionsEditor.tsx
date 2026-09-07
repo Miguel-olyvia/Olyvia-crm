@@ -124,12 +124,13 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
 
         const groupIds = (groups ?? []).map((g: any) => g.id);
         if (groupIds.length) {
-          const { data: gvals } = await supabase
+          const { data: gvals, error: gErr } = await supabase
             .from("attribute_option_group_values")
             .select("value_text, display_name, hex_color, sort_order")
             .in("group_id", groupIds)
             .eq("is_active", true)
             .order("sort_order", { ascending: true });
+          if (gErr) toast({ title: "Erro", description: "Não foi possível carregar as opções.", variant: "destructive" });
           for (const gv of gvals ?? []) {
             pushVal((gv as any).value_text, (gv as any).hex_color, (gv as any).display_name);
           }
@@ -140,7 +141,7 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
     }
     if (slot.slot_type === "component_product" && organizationId) {
       (async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("products")
           .select("id, name, sku, product_organizations!inner(organization_id)")
           .eq("product_kind", "component")
@@ -148,6 +149,7 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
           .is("deleted_at", null)
           .order("name")
           .limit(100);
+        if (error) toast({ title: "Erro", description: "Não foi possível carregar os componentes.", variant: "destructive" });
         setComponents((data ?? []) as unknown as ProductRow[]);
       })();
     }
