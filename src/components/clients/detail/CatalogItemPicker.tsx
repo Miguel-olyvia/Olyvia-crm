@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -95,6 +96,7 @@ export const CatalogItemPicker = ({ items, onChange, organizationId }: CatalogIt
       setResults(fetched);
     } catch (err) {
       console.error("Catalog search error:", err);
+      toast.error("Não foi possível pesquisar o catálogo.");
     } finally {
       setSearching(false);
     }

@@ -151,6 +151,7 @@ export function FormIntegrationsTab({
       setCampaigns(data || []);
     } catch (error) {
       console.error("Error loading campaigns:", error);
+      toast.error("Não foi possível carregar as campanhas.");
     } finally {
       setLoadingCampaigns(false);
     }
@@ -190,6 +191,7 @@ export function FormIntegrationsTab({
       setAllSources(data || []);
     } catch (error) {
       console.error("Error loading sources:", error);
+      toast.error("Não foi possível carregar as fontes.");
     } finally {
       setLoadingSources(false);
     }

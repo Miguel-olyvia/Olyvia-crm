@@ -440,6 +440,7 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
         setMemberActivities(data || []);
       } catch (e) {
         console.error(e);
+        toast.error("Não foi possível carregar as atividades do membro.");
       } finally {
         setLoadingActivities(false);
       }

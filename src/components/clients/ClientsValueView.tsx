@@ -8,6 +8,7 @@ import { formatCurrency } from "@/lib/utils";
 import { TrendingUp, Trophy, Rocket, Phone, FileText, DollarSign, Users, RefreshCw, Sparkles, Info } from "lucide-react";
 import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { format, subMonths, startOfMonth, endOfMonth, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -139,6 +140,7 @@ export function ClientsValueView({
         }
       } catch (err) {
         console.error("Error loading contracts for value view:", err);
+        toast.error("Não foi possível carregar os contratos.");
       } finally {
         if (!cancelled) setLoadingContracts(false);
       }
