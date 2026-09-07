@@ -401,11 +401,11 @@ export async function createEntityWithIdentity(params: {
   const entityId = entity.id;
 
   if (email) {
-    await supabase.from('anew_entity_emails').insert({ entity_id: entityId, email, email_type: 'work', is_primary: true, created_by: createdBy });
+    await supabase.from('anew_entity_emails').insert({ entity_id: entityId, email, email_type: 'work', is_primary: true, created_by: createdBy }).throwOnError();
   }
 
   if (phone) {
-    await supabase.from('anew_entity_phones').insert({ entity_id: entityId, phone_number: phone, country_code: phoneCountryCode || '+351', phone_type: 'work', is_primary: true, created_by: createdBy });
+    await supabase.from('anew_entity_phones').insert({ entity_id: entityId, phone_number: phone, country_code: phoneCountryCode || '+351', phone_type: 'work', is_primary: true, created_by: createdBy }).throwOnError();
   }
 
   if (vat) {
@@ -415,7 +415,7 @@ export async function createEntityWithIdentity(params: {
     });
     if (resolveError) throw resolveError;
     if (resolved) {
-      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: resolved.fiscalEntityId, is_primary: true, created_by: createdBy });
+      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: resolved.fiscalEntityId, is_primary: true, created_by: createdBy }).throwOnError();
     }
   }
 

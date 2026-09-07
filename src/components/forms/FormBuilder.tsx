@@ -866,12 +866,17 @@ export function FormBuilder({
       }
       
       const targetStep = otherSteps[0];
-      for (const f of stepFields) {
-        await supabase.from("form_fields").update({ step_number: targetStep.step_number }).eq("id", f.id);
+      try {
+        for (const f of stepFields) {
+          await supabase.from("form_fields").update({ step_number: targetStep.step_number }).eq("id", f.id).throwOnError();
+        }
+      } catch (error) {
+        toast({ title: "Erro ao mover campos", variant: "destructive" });
+        return;
       }
-      setFields(fields.map(f => 
-        stepFields.find(sf => sf.id === f.id) 
-          ? { ...f, step_number: targetStep.step_number } 
+      setFields(fields.map(f =>
+        stepFields.find(sf => sf.id === f.id)
+          ? { ...f, step_number: targetStep.step_number }
           : f
       ));
       toast({ title: `${stepFields.length} campo(s) movido(s) para "${targetStep.step_title}"` });

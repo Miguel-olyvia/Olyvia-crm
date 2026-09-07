@@ -377,7 +377,7 @@ export function UserTemplateManager({
             organization_id: orgId,
             sort_order: index,
           }));
-          await supabase.from("user_template_organizations").insert(orgsToInsert as any);
+          await supabase.from("user_template_organizations").insert(orgsToInsert as any).throwOnError();
         }
 
         // Insert fields

@@ -403,7 +403,8 @@ export function useCalendarScheduling(companyId?: string) {
           .insert({
             item_id: item.id,
             resource_id: resource.id,
-          });
+          })
+          .throwOnError();
       }
 
       toast.success(t('scheduling.visits.createSuccess'));
