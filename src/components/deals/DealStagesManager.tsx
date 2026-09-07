@@ -358,18 +358,24 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
     if (!userData?.user) throw new Error("User not authenticated");
     const businessUserId = await resolveCurrentBusinessUserId();
     if (!businessUserId) throw new Error("Business user not resolved");
-    for (const stage of templateStages) {
-      await (supabase.from("deal_stages") as any).insert({
-        name: stage.name,
-        label: stage.label,
-        color: stage.color,
-        order_index: stage.order_index,
-        is_final: stage.is_final,
-        is_won: stage.is_won,
-        is_lost: stage.is_lost,
-        organization_id: companyId,
-        created_by: businessUserId,
-      });
+    try {
+      for (const stage of templateStages) {
+        await (supabase.from("deal_stages") as any).insert({
+          name: stage.name,
+          label: stage.label,
+          color: stage.color,
+          order_index: stage.order_index,
+          is_final: stage.is_final,
+          is_won: stage.is_won,
+          is_lost: stage.is_lost,
+          organization_id: companyId,
+          created_by: businessUserId,
+        }).throwOnError();
+      }
+    } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
+      toast({ title: "Erro ao copiar template", description: error.message, variant: "destructive" });
+      return;
     }
     toast({ title: "Template copiado" });
     loadStages();
