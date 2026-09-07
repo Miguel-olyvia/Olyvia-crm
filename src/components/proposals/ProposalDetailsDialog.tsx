@@ -310,26 +310,22 @@ export function ProposalDetailsDialog({
       }
       setExtendedData(extendedRes.data);
       
-      // Resolve client/entity info via entity_id
-      const entityId = (extendedRes.data as any)?.entity_id;
-      if (entityId) {
-        const [entityRes, emailRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("id, display_name, first_name, last_name, type").eq("id", entityId).single(),
-          supabase.from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-          (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        if (entityRes.data) {
-          setClient({
-            id: entityRes.data.id,
-            first_name: entityRes.data.first_name,
-            last_name: entityRes.data.last_name,
-            company_name: entityRes.data.type === 'organization' ? entityRes.data.display_name : null,
-            email: emailRes.data?.email || null,
-            phone: phoneRes?.data?.phone_number || null,
-          });
-        } else {
-          setClient(null);
-        }
+      // O contacto viaja COM o documento: resolve_proposal_contact confirma que
+      // o utilizador pode ler esta proposta e devolve o contacto primario com
+      // privilegios de definer. A RLS de ambito de dono nos contactos deixa de
+      // esconder email/telefone a quem ve a proposta mas nao e dono da lead.
+      const { data: contact } = await (supabase as any)
+        .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
+        .maybeSingle();
+      if (contact) {
+        setClient({
+          id: contact.entity_id,
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          company_name: contact.entity_type === 'organization' ? contact.display_name : null,
+          email: contact.email || null,
+          phone: contact.phone_number || null,
+        });
       } else {
         setClient(null);
       }

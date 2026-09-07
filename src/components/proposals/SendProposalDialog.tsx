@@ -78,17 +78,20 @@ export function SendProposalDialog({ open, onOpenChange, proposal, onSent, initi
             resolvedEntityId = deal?.entity_id || null;
           }
 
-          if (resolvedEntityId) {
-            const [entityRes, emailRes] = await Promise.all([
-              supabase.from("anew_entities").select("display_name, first_name, last_name").eq("id", resolvedEntityId).maybeSingle(),
-              supabase.from("anew_entity_emails").select("email").eq("entity_id", resolvedEntityId).eq("is_primary", true).maybeSingle(),
-            ]);
-
-            if (entityRes.data) {
-              firstName = entityRes.data.first_name || "";
-              name = entityRes.data.display_name || `${entityRes.data.first_name || ""} ${entityRes.data.last_name || ""}`.trim();
-              email = emailRes.data?.email || "";
-            }
+          // O contacto viaja COM o documento: resolve_proposal_contact confirma
+          // que o utilizador pode ler esta proposta e devolve o email/telefone
+          // primarios com privilegios de definer. E o caso do "enviar": quem ve
+          // a proposta com ambito de organizacao mas OWNED na lead via o
+          // documento, mas a 2a consulta directa ao email era-lhe negada pela
+          // RLS de ambito de dono, deixando o envio sem destinatario.
+          const { data: contact } = await (supabase as any)
+            .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
+            .maybeSingle();
+          if (contact) {
+            firstName = contact.first_name || "";
+            name = contact.display_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim();
+            email = contact.email || "";
+            resolvedEntityId = contact.entity_id || resolvedEntityId;
           }
 
           setEntityId(resolvedEntityId);

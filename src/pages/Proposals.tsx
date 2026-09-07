@@ -1428,19 +1428,22 @@ const Proposals = () => {
       // Load entity if proposal has direct entity_id (no deal)
       const propEntityId = (proposal as any).entity_id;
       if (propEntityId) {
-        const [entRes, emailRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("id, display_name, type").eq("id", propEntityId).maybeSingle(),
-          supabase.from("anew_entity_emails").select("email").eq("entity_id", propEntityId).eq("is_primary", true).maybeSingle(),
-          supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", propEntityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        if (entRes.data) {
+        // O contacto viaja COM o documento: resolve_proposal_contact confirma
+        // que o utilizador pode ler esta proposta e devolve o contacto primario
+        // com privilegios de definer. Assim quem ve a proposta sem ambito de
+        // dono na lead continua a receber email/telefone (a 2a consulta directa
+        // a anew_entity_emails/phones e negada pela RLS de ambito de dono).
+        const { data: contact } = await (supabase as any)
+          .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
+          .maybeSingle();
+        if (contact) {
           setSelectedEntity({
-            type: entRes.data.type === "client" ? "client" : "lead",
+            type: contact.entity_type === "client" ? "client" : "lead",
             id: propEntityId,
             entityId: propEntityId,
-            name: entRes.data.display_name,
-            email: emailRes.data?.email,
-            phone: phoneRes.data?.phone_number,
+            name: contact.display_name,
+            email: contact.email ?? undefined,
+            phone: contact.phone_number ?? undefined,
           });
         } else {
           setSelectedEntity(null);

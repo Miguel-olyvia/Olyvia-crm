@@ -144,18 +144,18 @@ export function SendQuoteDialog({ open, onOpenChange, quote, onSent, initialSubj
             }
           }
 
-          // Fetch entity display_name + primary email (fallback to any email)
-          if (resolvedEntityId) {
-            const [entityRes, emailsRes] = await Promise.all([
-              (supabase as any).from("anew_entities").select("display_name, first_name, last_name").eq("id", resolvedEntityId).maybeSingle(),
-              (supabase as any).from("anew_entity_emails").select("email, is_primary").eq("entity_id", resolvedEntityId).order("is_primary", { ascending: false }).limit(1),
-            ]);
-            const ent = entityRes.data;
-            if (ent) {
-              name = ent.display_name || `${ent.first_name || ""} ${ent.last_name || ""}`.trim();
-              firstName = ent.first_name || (name ? name.split(" ")[0] : "");
-            }
-            email = emailsRes.data?.[0]?.email || "";
+          // O contacto viaja COM o documento: resolve_quote_contact confirma que
+          // o utilizador pode ler este orcamento e devolve o contacto primario
+          // com privilegios de definer. E o caso do "enviar": quem ve o
+          // orcamento mas nao e dono da lead via a 2a consulta directa ao email
+          // negada pela RLS de ambito de dono, ficando o envio sem destinatario.
+          const { data: contact } = await (supabase as any)
+            .rpc("resolve_quote_contact", { _quote_id: quote.id })
+            .maybeSingle();
+          if (contact) {
+            name = contact.display_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim();
+            firstName = contact.first_name || (name ? name.split(" ")[0] : "");
+            email = contact.email || "";
           }
 
           // Final fallback: lead field_values aliases (po_email, etc.)
