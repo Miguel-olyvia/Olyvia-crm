@@ -1405,13 +1405,16 @@ export default function Quotes() {
       // Resolve recipient via entity emails when available
       let recipientEmail = "—";
       let recipientName: string | null = null;
-      const entityId: string | null = (quote as any)?.entity_id ?? null;
-      if (entityId) {
-        const { data: emailRow } = await supabase.from("anew_entity_emails").select("email").eq("entity_id", entityId).order("is_primary", { ascending: false }).limit(1).maybeSingle();
-        if (emailRow?.email) recipientEmail = emailRow.email;
-        const { data: ent } = await supabase.from("anew_entities").select("display_name").eq("id", entityId).maybeSingle();
-        recipientName = ent?.display_name ?? null;
-      }
+      // O contacto viaja COM o documento: resolve_quote_contact confirma que o
+      // utilizador pode ler este orcamento e devolve o contacto primario com
+      // privilegios de definer. A 2a consulta directa a anew_entity_emails pelo
+      // entity_id era negada pela RLS de ambito de dono a quem ve o orcamento
+      // mas nao e dono da lead, deixando o envio manual sem destinatario.
+      const { data: contact } = await (supabase as any)
+        .rpc("resolve_quote_contact", { _quote_id: quoteId })
+        .maybeSingle();
+      if (contact?.email) recipientEmail = contact.email;
+      if (contact?.display_name) recipientName = contact.display_name;
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       await (supabase as any).from("quote_sends").insert({
         quote_id: quoteId,

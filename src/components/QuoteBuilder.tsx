@@ -1945,13 +1945,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
 
       if (entityId) {
-        const [entityRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("display_name").eq("id", entityId).single(),
-          supabase.from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        recipientName = entityRes.data?.display_name || "";
-        recipientPhone = phoneRes.data?.phone_number || "";
-        recipientPhoneCountryCode = phoneRes.data?.country_code || "";
+        // O contacto viaja COM o documento: resolve_quote_contact confirma que
+        // o utilizador pode ler este orcamento e devolve nome/telefone
+        // primarios com privilegios de definer. A 2a consulta directa a
+        // anew_entity_phones pelo entity_id era negada pela RLS de ambito de
+        // dono a quem ve o orcamento mas nao e dono da lead.
+        const { data: contact } = await (supabase as any)
+          .rpc("resolve_quote_contact", { _quote_id: quoteIdForCtx })
+          .maybeSingle();
+        recipientName = contact?.display_name || "";
+        recipientPhone = contact?.phone_number || "";
+        recipientPhoneCountryCode = contact?.country_code || "";
       }
 
       const ctx: WhatsAppContext = {
@@ -3615,7 +3619,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         </Button>
                       </div>
                     </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} />
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={quoteId} />
                   </div>
                   ) : (
                     <EntitySearchInput

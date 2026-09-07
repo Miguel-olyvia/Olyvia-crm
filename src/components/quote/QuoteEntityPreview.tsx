@@ -9,7 +9,7 @@ interface EntityInfo {
   location: string;
 }
 
-export function QuoteEntityPreview({ entityId }: { entityId: string | null | undefined }) {
+export function QuoteEntityPreview({ entityId, quoteId }: { entityId: string | null | undefined; quoteId?: string | null }) {
   const [info, setInfo] = useState<EntityInfo | null>(null);
 
   useEffect(() => {
@@ -23,15 +23,34 @@ export function QuoteEntityPreview({ entityId }: { entityId: string | null | und
         (supabase as any).from("anew_entity_addresses").select("is_primary, anew_addresses(city)").eq("entity_id", entityId).limit(1),
       ]);
       if (cancelled) return;
+      let name = entityRes.data?.display_name || "";
+      let email = emailsRes.data?.[0]?.email || "";
+      let phone = phonesRes.data?.[0]?.phone_number || "";
+      // Quando o orcamento ja existe, o contacto viaja PELO documento: a RLS
+      // de ambito de dono nos contactos nega a leitura directa a quem ve o
+      // orcamento mas nao e dono da lead. A RPC confirma a visibilidade do
+      // documento e devolve email/telefone primarios. Sem quoteId (orcamento
+      // novo) mantem-se a leitura directa, limitada ao ambito de quem cria.
+      if (quoteId) {
+        const { data: contact } = await (supabase as any)
+          .rpc("resolve_quote_contact", { _quote_id: quoteId })
+          .maybeSingle();
+        if (cancelled) return;
+        if (contact) {
+          name = contact.display_name || name;
+          email = contact.email || "";
+          phone = contact.phone_number || "";
+        }
+      }
       setInfo({
-        name: entityRes.data?.display_name || "",
-        email: emailsRes.data?.[0]?.email || "",
-        phone: phonesRes.data?.[0]?.phone_number || "",
+        name,
+        email,
+        phone,
         location: addrRes.data?.[0]?.anew_addresses?.city || "",
       });
     })();
     return () => { cancelled = true; };
-  }, [entityId]);
+  }, [entityId, quoteId]);
 
   if (!info || !info.name) return null;
 
