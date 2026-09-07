@@ -209,11 +209,45 @@ const LEADS_LIST_COLUMNS = `
   converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
   field_values, notes, source, source_id,
   last_contact_at, last_contact_result, contact_attempts,
+  last_activity_at,
   callback_scheduled_at, callback_notes,
   tags,
   qualification_type, qualified_at,
   campaigns(id, name)
 `;
+
+// Coluna pela qual a lista de Leads ordena. NAO e `created_at`: e a coluna
+// GERADA `list_sort_at` (= GREATEST(created_at, last_activity_at), criada em
+// supabase/migrations/20261119010000_leads_ordenacao_por_actividade.sql).
+// Quem ja era lead e volta a preencher o formulario publico nao gera ficha
+// nova -- carimba-se `last_activity_at` na ficha que ja ca estava --, e sem
+// esta chave a ficha continuava enterrada na data em que nasceu, que e o
+// oposto do que se quer: a lead ocupa a posicao do dia em que a pessoa
+// voltou a contactar. Quem nunca voltou ordena exactamente como antes
+// (GREATEST com last_activity_at NULL devolve created_at).
+//
+// DEPENDENCIA DE SCHEMA: sem essa migracao aplicada ao ambiente, o PostgREST
+// responde 42703 (`column anew_leads.list_sort_at does not exist`) e a lista
+// fica vazia com erro. Codigo e migracao andam juntos.
+const LEADS_LIST_SORT_COLUMN = "list_sort_at";
+
+// O mesmo GREATEST, do lado do cliente. A tabela re-ordena em memoria as
+// paginas ja carregadas (ver `filteredLeads`), por isso a ordenacao por
+// defeito do cliente tem de usar a MESMA chave que o servidor -- caso
+// contrario a ordem que o servidor entregou era desfeita aqui e a lead que
+// voltou a contactar caia outra vez para a data em que nasceu.
+// `list_sort_at` nao vem no SELECT (nada mais no ecra a le); calcula-se a
+// partir das duas colunas que vem.
+function leadListSortValue(
+  lead: { created_at?: string | null; last_activity_at?: string | null },
+): number {
+  const toMs = (value?: string | null) => {
+    if (!value) return 0;
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+  return Math.max(toMs(lead.created_at), toMs(lead.last_activity_at));
+}
 
 interface LeadsQueryFilters {
   statusFilter: string;
@@ -598,7 +632,12 @@ export default function AnewLeads() {
   // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
-  const [sortColumn, setSortColumn] = useState<string>("created_at");
+  // Por defeito, a mesma chave que o servidor usa (ver LEADS_LIST_SORT_COLUMN).
+  // Se ficasse em "created_at", `filteredLeads` re-ordenava as paginas ja
+  // carregadas por data de criacao e anulava a ordenacao do servidor. A coluna
+  // "Criado" continua a existir e a ordenar por `created_at` exacto quando se
+  // clica nela.
+  const [sortColumn, setSortColumn] = useState<string>(LEADS_LIST_SORT_COLUMN);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -1687,7 +1726,7 @@ export default function AnewLeads() {
               source_type: "lead",
               source_id: newLead.id,
               created_by: createdBy,
-            });
+            }).throwOnError();
 
             imported++;
           });
@@ -2008,8 +2047,24 @@ export default function AnewLeads() {
       },
     });
 
+    // Ordena por actividade e nao por data de criacao (ver
+    // LEADS_LIST_SORT_COLUMN): quem volta a contactar sobe para o dia em que
+    // voltou. O desempate por `id` mantem-se, para duas leads com o mesmo
+    // instante nao trocarem de lugar entre paginas.
+    //
+    // PAGINACAO -- risco conhecido, decidido e aceite, nao esquecido: isto
+    // pagina por deslocamento (`.range`, PAGE_SIZE de 25, scroll infinito) e
+    // a chave de ordenacao passou a poder MUDAR sozinha enquanto se percorre
+    // a lista: basta chegar uma re-submissao do formulario publico e essa
+    // lead salta para o topo. Se isso acontecer entre dois carregamentos do
+    // scroll, uma linha pode aparecer repetida ou ser saltada nessa sessao.
+    // Com `created_at` isso nunca acontecia, porque a chave era imutavel.
+    // Decidiu-se NAO reconstruir a paginacao nesta tarefa: a chave so muda
+    // numa re-submissao (raro) e o dano dura ate ao proximo recarregamento.
+    // Quem vier a seguir e quiser eliminar isto de vez: paginar por keyset,
+    // pedindo (list_sort_at, id) < ultimo par lido em vez de um offset.
     const { data, error } = await query
-      .order("created_at", { ascending: false })
+      .order(LEADS_LIST_SORT_COLUMN, { ascending: false })
       .order("id", { ascending: false })
       .range(from, to);
 
@@ -2413,8 +2468,13 @@ export default function AnewLeads() {
         },
       });
 
+      // Mesma chave de ordenacao da lista (ver LEADS_LIST_SORT_COLUMN): lista
+      // e kanban partilham `buildLeadsBaseQuery` de proposito, e ordenar por
+      // chaves diferentes fa-los-ia divergir -- com o tecto de
+      // KANBAN_LEADS_LIMIT, seriam 500 leads escolhidas por criterios
+      // diferentes dos das primeiras paginas da lista.
       const { data, error } = await query
-        .order("created_at", { ascending: false })
+        .order(LEADS_LIST_SORT_COLUMN, { ascending: false })
         .limit(KANBAN_LEADS_LIMIT);
 
       if (error) {
@@ -2578,6 +2638,7 @@ export default function AnewLeads() {
         converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
         field_values, notes, source, source_id,
         last_contact_at, last_contact_result, contact_attempts,
+        last_activity_at,
         callback_scheduled_at, callback_notes,
         tags,
         qualification_type, qualified_at,
@@ -4121,7 +4182,7 @@ export default function AnewLeads() {
       const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).eq("organization_id", activeCompanyId).single();
       const mergedValues = { ...(existingLead?.field_values || {}), ...cleanFieldValues };
       const newStatus = ["lost", "rejected"].includes(existingLead?.status) ? "new" : existingLead?.status;
-      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId);
+      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId).throwOnError();
       toast({
         title: t('leads.toast.leadUpdated'),
         description: t('leads.toast.leadUpdatedDesc', { name: match.displayName }),
@@ -4512,6 +4573,10 @@ export default function AnewLeads() {
       let aVal: any, bVal: any;
       
       switch (sortColumn) {
+        case LEADS_LIST_SORT_COLUMN:
+          aVal = leadListSortValue(a);
+          bVal = leadListSortValue(b);
+          break;
         case "created_at":
           aVal = new Date(a.created_at).getTime();
           bVal = new Date(b.created_at).getTime();

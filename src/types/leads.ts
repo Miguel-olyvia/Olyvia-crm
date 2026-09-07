@@ -46,6 +46,11 @@ export interface Lead {
   /** Quantas vezes se tentou contactar. Lido na lista, no detalhe, e incrementado
    *  ao registar um contacto. */
   contact_attempts?: number | null;
+  /** Instante em que alguém que JÁ era lead (ou já era cliente com lead activa)
+   *  voltou a preencher o formulário público. Escrito só pela Edge Function
+   *  create-lead; nunca ao ecrã. Nulo = nunca voltou a contactar. É o que a
+   *  lista mostra como "Voltou a contactar" e o que a ordena. */
+  last_activity_at?: string | null;
   /** Etiqueta SQL/MQL do cabeçalho, visível só quando a lead está em "Qualified".
    *  O tipo literal vem da CHECK constraint da base; o gerador de tipos do
    *  Supabase não a conhece e declara `string`, daí o cast no ponto de fronteira. */
