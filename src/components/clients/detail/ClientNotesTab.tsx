@@ -55,6 +55,7 @@ export function ClientNotesTab({ entityId, organizationId }: ClientNotesTabProps
       setNotes(data || []);
     } catch (e) {
       console.error("Error loading notes:", e);
+      toast({ title: "Erro", description: "Não foi possível carregar as notas.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

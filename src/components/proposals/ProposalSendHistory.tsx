@@ -5,6 +5,7 @@ import {
   Send, MessageSquare
 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -60,6 +61,8 @@ export function ProposalSendHistory({
   const [sends, setSends] = useState<ProposalSend[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const { toast } = useToast();
+
   useEffect(() => {
     if (open && proposalId) {
       loadSendHistory();
@@ -81,6 +84,7 @@ export function ProposalSendHistory({
       setSends(data || []);
     } catch (error) {
       console.error("Error loading send history:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar o histórico de envios.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
