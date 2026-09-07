@@ -275,11 +275,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [selectedServiceCategory, setSelectedServiceCategory] = useState<string>("all");
   const [selectedFilterOrganization, setSelectedFilterOrganization] = useState<string>("all");
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
-  // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
-  // quotes.manage ou super-admin. Ate agora o construtor so protegia a EDICAO
-  // (canEditCosts/canEditMargins); os numeros de margem calculados eram mostrados
-  // so por existirem dados de custo, sem permissao.
-  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const [productAttributes, setProductAttributes] = useState<Map<string, ProductAttribute[]>>(new Map());
   const [selectedItemAttributes, setSelectedItemAttributes] = useState<Record<string, Record<string, string>>>({});
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
@@ -324,6 +319,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { hasPermission } = usePermissions();
+  // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
+  // quotes.manage ou super-admin. O construtor so protegia a EDICAO
+  // (canEditCosts/canEditMargins); os numeros de margem calculados eram mostrados
+  // so por existirem dados de custo, sem permissao. Tem de vir DEPOIS de
+  // hasPermission ser declarado, senao rebenta com "before initialization".
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
     viewerScope: getPermissionScope("quotes.view"),
     viewerAnewUserId: scopeAnewUserId,
