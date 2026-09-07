@@ -104,10 +104,12 @@ export function useOrganizationTeams(orgId: string) {
 
       if (allMemberIds.size > 0) {
         // Remove these users from any other team first (unique constraint)
-        await (supabase as any)
+        const { error: cleanupError } = await (supabase as any)
           .from("organization_team_members")
           .delete()
           .in("user_id", Array.from(allMemberIds));
+
+        if (cleanupError) throw cleanupError;
 
         const inserts = Array.from(allMemberIds).map(uid => ({
           team_id: teamId,
@@ -151,17 +153,21 @@ export function useOrganizationTeams(orgId: string) {
       if (data.leader_id) allMemberIds.add(data.leader_id);
 
       // Delete existing members of this team
-      await (supabase as any)
+      const { error: deleteTeamMembersError } = await (supabase as any)
         .from("organization_team_members")
         .delete()
         .eq("team_id", teamId);
 
+      if (deleteTeamMembersError) throw deleteTeamMembersError;
+
       // Remove these users from other teams (unique constraint)
       if (allMemberIds.size > 0) {
-        await (supabase as any)
+        const { error: cleanupError } = await (supabase as any)
           .from("organization_team_members")
           .delete()
           .in("user_id", Array.from(allMemberIds));
+
+        if (cleanupError) throw cleanupError;
 
         const inserts = Array.from(allMemberIds).map(uid => ({
           team_id: teamId,
@@ -247,13 +253,15 @@ export function useOrganizationTeams(orgId: string) {
       // Ensure user is in the team
       const team = teams.find(t => t.id === teamId);
       if (team && !team.members.includes(userId)) {
-        await (supabase as any)
+        const { error: deleteMemberError } = await (supabase as any)
           .from("organization_team_members")
           .delete()
           .eq("user_id", userId);
-        await (supabase as any)
+        if (deleteMemberError) throw deleteMemberError;
+        const { error: insertMemberError } = await (supabase as any)
           .from("organization_team_members")
           .insert({ team_id: teamId, user_id: userId });
+        if (insertMemberError) throw insertMemberError;
       }
 
       toast.success(t('organizations.team.promoteLeaderSuccess'));

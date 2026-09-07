@@ -171,8 +171,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           .from("client_contracts")
           .update(updatePayload)
           .eq("id", contract.id)
-          .then(() => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }))
-          .catch((e: unknown) => console.error('[ContractBodyTab] finalizeGeneration update failed', e));
+          .then(({ error }: { error: unknown }) => {
+            if (error) throw error;
+            queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+          })
+          .catch((e: any) => {
+            console.error('[ContractBodyTab] finalizeGeneration update failed', e);
+            toast.error("Contrato gerado, mas não foi possível guardar a minuta/valores: " + (e?.message ?? e));
+          });
       if (uid) {
         supabase.rpc('set_audit_context', { p_user_id: uid, p_source: 'ui' }).then(doUpdate);
       } else {

@@ -1203,10 +1203,12 @@ export function AnewLeadContactDialog({
 
               // Sync lead assigned_to with visit assignee
               if (assignedTo && assignedTo !== lead.assigned_to) {
-                await supabase
+                const { error: syncAssignedError } = await supabase
                   .from("anew_leads")
                   .update({ assigned_to: assignedTo })
                   .eq("id", lead.id);
+
+                if (syncAssignedError) throw syncAssignedError;
               }
             }
           }

@@ -287,25 +287,38 @@ export default function SmtpManagement() {
 
   const handleSetDefault = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-    // Unset all defaults
-    if (mode === "user") {
-      await (supabase as any).from(table).update({ is_default: false }).eq("user_id", user?.id);
-    } else {
-      await (supabase as any).from(table).update({ is_default: false }).eq("organization_id", activeCompany?.id);
+      // Unset all defaults
+      if (mode === "user") {
+        const { error } = await (supabase as any).from(table).update({ is_default: false }).eq("user_id", user?.id);
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase as any).from(table).update({ is_default: false }).eq("organization_id", activeCompany?.id);
+        if (error) throw error;
+      }
+      // Set this as default
+      const { error: setError } = await (supabase as any).from(table).update({ is_default: true }).eq("id", smtp.id);
+      if (setError) throw setError;
+      loadSmtpConfigs();
+      toast({ title: "Atualizado", description: `"${smtp.name || smtp.from_email}" definido como SMTP padrão` });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      loadSmtpConfigs();
     }
-    // Set this as default
-    await (supabase as any).from(table).update({ is_default: true }).eq("id", smtp.id);
-    loadSmtpConfigs();
-    toast({ title: "Atualizado", description: `"${smtp.name || smtp.from_email}" definido como SMTP padrão` });
   };
 
   const handleDelete = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    await (supabase as any).from(table).delete().eq("id", smtp.id);
-    loadSmtpConfigs();
-    toast({ title: "Eliminado", description: "Configuração SMTP eliminada" });
+    try {
+      const { error } = await (supabase as any).from(table).delete().eq("id", smtp.id);
+      if (error) throw error;
+      loadSmtpConfigs();
+      toast({ title: "Eliminado", description: "Configuração SMTP eliminada" });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
   };
 
   const SmtpCard = ({ smtp, mode }: { smtp: SmtpConfig; mode: "user" | "org" }) => (

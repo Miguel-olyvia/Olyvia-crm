@@ -268,11 +268,12 @@ export default function Forms() {
 
       // If setting as primary, unset others
       if (formData.is_primary) {
-        await supabase
+        const { error: unsetError } = await supabase
           .from("forms")
           .update({ is_primary: false })
           .eq("organization_id", formData.organization_id || activeCompany?.id)
           .eq("form_type", formData.form_type);
+        if (unsetError) throw unsetError;
       }
 
       // Build i18n payload (only persist when at least one secondary locale is enabled)
@@ -486,7 +487,7 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (steps && steps.length > 0) {
-        await supabase.from("form_steps").insert(
+        const { error: stepsError } = await supabase.from("form_steps").insert(
           steps.map(s => ({
             form_id: newForm.id,
             step_number: s.step_number,
@@ -499,6 +500,7 @@ export default function Forms() {
             sort_order: s.sort_order,
           }))
         );
+        if (stepsError) throw stepsError;
       }
 
       // Copy fields
@@ -508,7 +510,7 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (fields && fields.length > 0) {
-        await supabase.from("form_fields").insert(
+        const { error: fieldsError } = await supabase.from("form_fields").insert(
           fields.map(f => ({
             form_id: newForm.id,
             step_number: f.step_number,
@@ -534,6 +536,7 @@ export default function Forms() {
             created_by: businessUserId,
           }))
         );
+        if (fieldsError) throw fieldsError;
       }
 
       // Copy branding
@@ -545,10 +548,11 @@ export default function Forms() {
 
       if (branding) {
         const { id, form_id, created_at, updated_at, ...brandingData } = branding;
-        await supabase.from("form_branding").insert({
+        const { error: brandingError } = await supabase.from("form_branding").insert({
           ...brandingData,
           form_id: newForm.id,
         });
+        if (brandingError) throw brandingError;
       }
 
       // Copy districts
@@ -558,12 +562,13 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (districts && districts.length > 0) {
-        await supabase.from("form_districts").insert(
+        const { error: districtsError } = await supabase.from("form_districts").insert(
           districts.map(d => ({
             form_id: newForm.id,
             district_id: d.district_id,
           }))
         );
+        if (districtsError) throw districtsError;
       }
 
       toast({ title: "Formulário duplicado" });

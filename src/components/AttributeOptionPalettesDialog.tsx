@@ -192,9 +192,10 @@ export default function AttributeOptionPalettesDialog({
             sort_order: i
           }));
           await withAuditContext(supabase, businessUserId, async () => {
-            await (supabase as any)
+            const { error } = await (supabase as any)
               .from('attribute_option_group_values')
               .insert(valuesToInsert);
+            if (error) throw error;
           });
         }
 
@@ -403,9 +404,10 @@ export default function AttributeOptionPalettesDialog({
           is_active: v.is_active,
         }));
         await withAuditContext(supabase, businessUserId, async () => {
-          await (supabase as any)
+          const { error } = await (supabase as any)
             .from('attribute_option_group_values')
             .insert(valuesToInsert);
+          if (error) throw error;
         });
       }
 

@@ -124,13 +124,14 @@ export function usePipelineConfig(companyId: string | null) {
     if (config) {
       await (supabase.from("organization_pipeline_config") as any)
         .update({ modules: newModules, updated_at: new Date().toISOString() })
-        .eq("organization_id", companyId);
+        .eq("organization_id", companyId)
+        .throwOnError();
     } else {
       await (supabase.from("organization_pipeline_config") as any).insert([{
         organization_id: companyId,
         modules: newModules,
         created_by: businessUserId,
-      }]);
+      }]).throwOnError();
     }
 
     setModules(newModules);

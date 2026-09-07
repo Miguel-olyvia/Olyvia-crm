@@ -353,7 +353,8 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
         deleteQuery = deleteQuery.eq('product_id', contextEntityId);
       }
 
-      await deleteQuery;
+      const { error } = await deleteQuery;
+      if (error) throw error;
       toast({ title: "Escalões próprios removidos — a herdar do nível superior" });
       loadRangesWithInheritance();
     } catch (error: any) {

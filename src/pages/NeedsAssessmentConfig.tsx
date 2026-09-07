@@ -185,12 +185,14 @@ export default function NeedsAssessmentConfig() {
     const options = fieldType === "dropdown" ? fieldOptions.split(",").map(o => o.trim()).filter(Boolean) : [];
     try {
       if (editingField) {
-        await supabase.from("needs_assessment_field_configs")
+        const { error } = await supabase.from("needs_assessment_field_configs")
           .update({ name: fieldName.trim(), field_type: fieldType, options, is_required: fieldRequired, updated_at: new Date().toISOString() })
           .eq("id", editingField.id);
+        if (error) throw error;
       } else {
-        await supabase.from("needs_assessment_field_configs")
+        const { error } = await supabase.from("needs_assessment_field_configs")
           .insert({ organization_id: organizationId, name: fieldName.trim(), field_type: fieldType, options, is_required: fieldRequired, sort_order: fields.length });
+        if (error) throw error;
       }
       toast({ title: editingField ? "Campo atualizado" : "Campo criado" });
       setFieldDialogOpen(false);
@@ -202,7 +204,8 @@ export default function NeedsAssessmentConfig() {
 
   const deleteField = async (id: string) => {
     try {
-      await supabase.from("needs_assessment_field_configs").delete().eq("id", id);
+      const { error } = await supabase.from("needs_assessment_field_configs").delete().eq("id", id);
+      if (error) throw error;
       toast({ title: "Campo eliminado" });
       loadData();
     } catch (err: any) {
@@ -244,15 +247,17 @@ export default function NeedsAssessmentConfig() {
       let templateId: string;
 
       if (editingTemplate) {
-        await supabase.from("needs_assessment_templates")
+        const { error: updateError } = await supabase.from("needs_assessment_templates")
           .update({
             name: templateName.trim(), description: templateDescription || null,
             show_measurements_tab: templateShowMeasurements, show_items_tab: templateShowItems,
             updated_at: new Date().toISOString()
           })
           .eq("id", editingTemplate.id);
+        if (updateError) throw updateError;
         templateId = editingTemplate.id;
-        await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId);
+        const { error: deleteError } = await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId);
+        if (deleteError) throw deleteError;
       } else {
         const { data, error } = await supabase.from("needs_assessment_templates")
           .insert({
@@ -268,7 +273,8 @@ export default function NeedsAssessmentConfig() {
         const rows = Array.from(templateFieldIds).map((fid, idx) => ({
           template_id: templateId, field_id: fid, sort_order: idx,
         }));
-        await (supabase.from("needs_assessment_template_fields") as any).insert(rows);
+        const { error: insertFieldsError } = await (supabase.from("needs_assessment_template_fields") as any).insert(rows);
+        if (insertFieldsError) throw insertFieldsError;
       }
 
       toast({ title: editingTemplate ? "Template atualizado" : "Template criado" });
@@ -282,7 +288,8 @@ export default function NeedsAssessmentConfig() {
 
   const deleteTemplate = async (id: string) => {
     try {
-      await supabase.from("needs_assessment_templates").delete().eq("id", id);
+      const { error } = await supabase.from("needs_assessment_templates").delete().eq("id", id);
+      if (error) throw error;
       toast({ title: "Template eliminado" });
       loadData();
     } catch (err: any) {

@@ -383,7 +383,8 @@ export async function parseServicesCSV(
               .insert({ name: catName, organization_id: organizationId, created_by: businessUserId })
               .select('id')
               .single();
-            if (!catErr && newCat) {
+            if (catErr) throw catErr;
+            if (newCat) {
               categoryId = newCat.id;
               catMap.set(catKey, newCat.id);
               createdCatCache.set(catKey, newCat.id);
@@ -404,7 +405,8 @@ export async function parseServicesCSV(
               .insert({ name: subName, organization_id: organizationId, created_by: businessUserId })
               .select('id')
               .single();
-            if (!subErr && newSub) {
+            if (subErr) throw subErr;
+            if (newSub) {
               subcategoryId = newSub.id;
               subMap.set(subKey, newSub.id);
               createdCatCache.set(subKey, newSub.id);

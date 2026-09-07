@@ -563,7 +563,7 @@ export default function Organizations() {
         for (const m of usersToAdd) {
           if (seenUsers.has(m.user_id)) continue;
           seenUsers.add(m.user_id);
-          await withAuditContext(supabase, businessUserId, () =>
+          const { error: insertError } = await withAuditContext(supabase, businessUserId, () =>
             supabase.from("anew_memberships").insert({
               user_id: m.user_id,
               organization_id: orgToUnlink.id,
@@ -571,6 +571,7 @@ export default function Organizations() {
               status: "active",
             })
           );
+          if (insertError) throw insertError;
         }
       }
 

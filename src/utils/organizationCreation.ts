@@ -64,13 +64,14 @@ async function ensureBaseRoles(
 
       const filtered = allPermissions.filter(p => roleDef.permissionFilter(p.code));
       if (filtered.length > 0) {
-        await supabase.from("anew_role_permissions").insert(
+        const { error: permError } = await supabase.from("anew_role_permissions").insert(
           filtered.map(p => ({
             role_id: roleId,
             permission_code: p.code,
             created_by: creatorBusinessUserId,
           }))
         );
+        if (permError) throw permError;
       }
     }
 

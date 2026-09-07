@@ -105,7 +105,8 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
     if (!companyId) return;
     setSaving(true);
     try {
-      await (supabase.from("lead_stage_transitions" as any) as any).delete().eq("organization_id", companyId);
+      const { error: deleteError } = await (supabase.from("lead_stage_transitions" as any) as any).delete().eq("organization_id", companyId);
+      if (deleteError) throw deleteError;
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       const inserts = edges.map((e) => ({

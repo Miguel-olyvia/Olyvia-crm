@@ -230,10 +230,12 @@ export default function MarketingIntegration() {
 
   const toggleToken = async (tokenId: string, isActive: boolean) => {
     try {
-      await supabase
+      const { error } = await supabase
         .from("scoped_api_tokens")
         .update({ is_active: !isActive })
         .eq("id", tokenId);
+
+      if (error) throw error;
 
       await fetchTokens();
       toast.success(isActive ? "Token desativado" : "Token ativado");
@@ -246,10 +248,12 @@ export default function MarketingIntegration() {
     if (!confirm("Tem a certeza que deseja eliminar este token?")) return;
 
     try {
-      await supabase
+      const { error } = await supabase
         .from("scoped_api_tokens")
         .delete()
         .eq("id", tokenId);
+
+      if (error) throw error;
 
       await fetchTokens();
       toast.success("Token eliminado");

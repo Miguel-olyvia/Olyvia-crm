@@ -298,11 +298,12 @@ export default function ProductConfigurableOptionsDialog({
         .delete()
         .eq("id", attr.assignedValueId);
       if (error) throw error;
-      await supabase
+      const { error: priceDeleteError } = await supabase
         .from("product_attribute_value_prices")
         .delete()
         .eq("product_id", productId)
         .eq("attribute_id", attrId);
+      if (priceDeleteError) throw priceDeleteError;
 
       if (selectedAttrId === attrId) setSelectedAttrId(null);
       toast({ title: "Atributo removido" });
@@ -453,11 +454,12 @@ export default function ProductConfigurableOptionsDialog({
         if (!hasDirtyTiers) continue;
 
         // Delete existing product-level ranges and re-insert
-        await (supabase as any)
+        const { error: rangeDeleteError } = await (supabase as any)
           .from("product_attribute_price_ranges")
           .delete()
           .eq("product_id", productId)
           .eq("attribute_id", attrId);
+        if (rangeDeleteError) throw rangeDeleteError;
 
         if (tiers.length > 0) {
           const rangeInserts = tiers.map(t => {
