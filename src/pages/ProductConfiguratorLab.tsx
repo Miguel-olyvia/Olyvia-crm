@@ -110,11 +110,12 @@ export default function ProductConfiguratorLab() {
       const filteredIds = filteredProds.map((p: any) => p.id);
       const tplMap = new Map<string, { has: boolean; activeVersion: number | null }>();
       if (filteredIds.length > 0) {
-        const { data: tpls } = await supabase
+        const { data: tpls, error: tplErr } = await supabase
           .from("product_configuration_templates")
           .select("product_id, version, is_active")
           .eq("organization_id", activeCompany.id)
           .in("product_id", filteredIds);
+        if (tplErr) throw tplErr;
         (tpls ?? []).forEach((t: any) => {
           const cur = tplMap.get(t.product_id) ?? { has: true, activeVersion: null };
           cur.has = true;

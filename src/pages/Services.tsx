@@ -201,10 +201,11 @@ export default function Services() {
       if (!user) throw new Error("User not authenticated");
 
       // Collect active company + descendants only (do not include sibling organizations)
-      const { data: hierarchy } = await supabase
+      const { data: hierarchy, error: hierarchyErr } = await supabase
         .from("anew_hierarchy")
         .select("parent_org_id, child_org_id")
         .order("created_at");
+      if (hierarchyErr) throw hierarchyErr;
 
       const childMap = new Map<string, string[]>();
       (hierarchy || []).forEach((h: any) => {

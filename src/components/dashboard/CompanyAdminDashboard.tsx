@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import DashboardCard from "./DashboardCard";
@@ -66,6 +67,10 @@ const CompanyAdminDashboard = () => {
           client.from("quotes").select("id").in("organization_id", companyIds),
           client.from("activities").select("id").in("organization_id", companyIds).neq("completed", true),
         ]);
+
+        if (membershipsResult.error || qualifiedLeadsResult.error || clientsResult.error || dealsResult.error || quotesResult.error || activitiesResult.error) {
+          toast.error("Não foi possível carregar as estatísticas.");
+        }
 
         const totalValue = dealsResult.data?.reduce((sum: number, deal: any) => sum + (Number(deal.value) || 0), 0) || 0;
 

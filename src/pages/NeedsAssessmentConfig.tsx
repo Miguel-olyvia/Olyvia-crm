@@ -113,6 +113,9 @@ export default function NeedsAssessmentConfig() {
           .select("*").eq("organization_id", organizationId).maybeSingle(),
       ]);
 
+      if (fieldsRes.error || templatesRes.error || settingsRes.error) {
+        toast({ title: "Erro", description: "Não foi possível carregar a configuração.", variant: "destructive" });
+      }
       setFields((fieldsRes.data || []).map((f: any) => ({ ...f, options: Array.isArray(f.options) ? f.options : [] })));
       setTemplates((templatesRes.data || []).map((t: any) => ({
         ...t,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import DashboardCard from "./DashboardCard";
 import DashboardGrid from "./DashboardGrid";
@@ -59,6 +60,9 @@ const WorkerDashboard = () => {
         const dealsResult = await client.from("deals").select("id").eq("assigned_to", filterId);
         const quotesResult = await client.from("quotes").select("id").eq("created_by", filterId);
 
+        if (tasksResult.error || dealsResult.error || quotesResult.error) {
+          toast.error("Não foi possível carregar as estatísticas.");
+        }
         setStats({
           pendingTasks: tasksResult.data?.length ?? 0,
           assignedDeals: dealsResult.data?.length ?? 0,
