@@ -237,7 +237,10 @@ export function EntryComments({ entryId, entryAuthorId, entryAuthorName, current
             }));
 
           if (notifications.length > 0) {
-            await (supabase as any).from("notifications").insert(notifications);
+            const { error: notifyError } = await (supabase as any).from("notifications").insert(notifications);
+            if (notifyError) {
+              toast({ title: "Aviso", description: "O comentário foi guardado, mas as notificações podem não ter sido enviadas." });
+            }
           }
         }
       }
@@ -246,7 +249,14 @@ export function EntryComments({ entryId, entryAuthorId, entryAuthorName, current
   };
 
   const handleDelete = async (commentId: string) => {
-    await (supabase as any).from("team_hub_comments").delete().eq("id", commentId);
+    const { error } = await (supabase as any)
+      .from("team_hub_comments")
+      .delete()
+      .eq("id", commentId);
+
+    if (error) {
+      toast({ title: "Erro", description: "Não foi possível apagar o comentário", variant: "destructive" });
+    }
   };
 
   // Render comment content with highlighted @mentions
