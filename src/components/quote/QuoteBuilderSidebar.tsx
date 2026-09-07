@@ -51,6 +51,9 @@ interface QuoteBuilderSidebarProps {
   downloadingPdf?: boolean;
   inlineQuotes?: InlineQuoteData[];
   onSaveAsTemplate?: () => void;
+  /** Mesma regra do resto da app: so quem pode ver custos/margens (quotes.manage
+   *  ou super-admin) ve o cartao de Margem Global / Custo / Lucro. */
+  canViewCosts: boolean;
 }
 
 function MarginBadge({ margin }: { margin: number }) {
@@ -76,6 +79,7 @@ export function QuoteBuilderSidebar({
   downloadingPdf = false,
   inlineQuotes = [],
   onSaveAsTemplate,
+  canViewCosts,
 }: QuoteBuilderSidebarProps) {
   const [dealBudget, setDealBudget] = useState<number | null>(null);
   const [dealEntityName, setDealEntityName] = useState<string>("");
@@ -317,8 +321,8 @@ export function QuoteBuilderSidebar({
               </div>
             )}
           </div>
-          {/* Margin Card - only shown when cost data exists */}
-          {hasCostData && (
+          {/* Margin Card - only for who may view costs, and only when cost data exists */}
+          {canViewCosts && hasCostData && (
             <div className={`rounded-lg p-4 text-center border ${globalMargin > 30 ? "bg-green-50 border-green-200" : globalMargin >= 15 ? "bg-yellow-50 border-yellow-200" : "bg-red-50 border-red-200"}`}>
               <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Margem Global</p>
               <p className={`text-3xl font-bold ${globalMargin > 30 ? "text-green-600" : globalMargin >= 15 ? "text-yellow-600" : "text-red-600"}`}>

@@ -34,6 +34,8 @@ import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { QuoteBuilderSidebar } from "@/components/quote/QuoteBuilderSidebar";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { usePermissions } from "@/hooks/usePermissions";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { QuoteConditions } from "@/components/quote/QuoteConditions";
@@ -273,6 +275,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [selectedServiceCategory, setSelectedServiceCategory] = useState<string>("all");
   const [selectedFilterOrganization, setSelectedFilterOrganization] = useState<string>("all");
   const [isSystemAdmin, setIsSystemAdmin] = useState(false);
+  // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
+  // quotes.manage ou super-admin. Ate agora o construtor so protegia a EDICAO
+  // (canEditCosts/canEditMargins); os numeros de margem calculados eram mostrados
+  // so por existirem dados de custo, sem permissao.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const [productAttributes, setProductAttributes] = useState<Map<string, ProductAttribute[]>>(new Map());
   const [selectedItemAttributes, setSelectedItemAttributes] = useState<Record<string, Record<string, string>>>({});
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
@@ -316,6 +323,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const { t } = useTranslation();
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { hasPermission } = usePermissions();
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
     viewerScope: getPermissionScope("quotes.view"),
     viewerAnewUserId: scopeAnewUserId,
@@ -3918,7 +3926,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-primary">{formatCurrency(sectionSubtotal)}</span>
-                        {hasSectionCostData && sectionLines.length > 0 && (
+                        {canViewCosts && hasSectionCostData && sectionLines.length > 0 && (
                           <Badge variant="secondary" className={`text-xs ${marginColor}`}>
                             Margem: {sectionMargin.toFixed(0)}%
                           </Badge>
@@ -4428,6 +4436,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               downloadingPdf={downloadingPdf}
               inlineQuotes={inlineQuotes}
               onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
+              canViewCosts={canViewCosts}
             />
           </div>
         </div>
