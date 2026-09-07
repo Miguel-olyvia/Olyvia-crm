@@ -230,6 +230,7 @@ export default function AILearning() {
       });
     } catch (error) {
       console.error("Error loading stats:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as estatísticas.", variant: "destructive" });
     }
   };
 

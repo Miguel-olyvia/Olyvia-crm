@@ -101,6 +101,7 @@ export function FormLocationConfig({
       }
     } catch (error) {
       console.error("Error loading data:", error);
+      toast.error("Não foi possível carregar a configuração de localização.");
     } finally {
       setLoading(false);
     }

@@ -287,6 +287,7 @@ export default function Gallery() {
     } catch (error: unknown) {
       console.error("Error loading assets:", error);
       setAssets([]);
+      toast({ title: "Erro", description: "Não foi possível carregar os ficheiros.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

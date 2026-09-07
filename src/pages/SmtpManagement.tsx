@@ -113,6 +113,7 @@ export default function SmtpManagement() {
       }
     } catch (error) {
       console.error("Error loading SMTP configs:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as configurações SMTP.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

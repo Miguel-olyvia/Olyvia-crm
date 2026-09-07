@@ -109,6 +109,7 @@ export function OrgAssociationsTab({ orgId, orgName, orgType, canManage }: OrgAs
       setInitialSelected(new Set(associatedIds));
     } catch (error) {
       console.error("Error loading associations:", error);
+      toast.error("Não foi possível carregar as associações.");
     } finally {
       setLoading(false);
     }

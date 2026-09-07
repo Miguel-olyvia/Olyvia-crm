@@ -172,6 +172,7 @@ export default function MarketingIntegration() {
       setTokens(mappedTokens);
     } catch (error) {
       console.error("Error fetching tokens:", error);
+      toast.error("Não foi possível carregar os tokens de API.");
     }
     setLoading(false);
   };
