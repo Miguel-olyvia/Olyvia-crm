@@ -1,0 +1,24 @@
+-- ============================================================================
+-- record_proposal_decision (achado a7 do raio-X): IDOR.
+--
+-- A funcao e SECURITY DEFINER e estava concedida a `authenticated` SEM nenhum
+-- check: recebe so p_proposal_id, so valida "existe?", e faz UPDATE de
+-- decided_snapshot/decided_snapshot_hash/decided_published_at na proposta. Como
+-- estava aberta a authenticated, qualquer utilizador autenticado -- de qualquer
+-- organizacao -- podia congelar/alterar o snapshot "decidido" de QUALQUER
+-- proposta so por adivinhar/obter o uuid. Esse snapshot alimenta a geracao de
+-- contrato, por isso adultera-lo desincroniza o "decidido" do proposto.
+--
+-- Os UNICOS chamadores legitimos sao edge functions -- accept-proposal
+-- (aceitacao publica via public_token) e client-portal-action (portal com SMS
+-- OTP) -- que VALIDAM a aceitacao ANTES de chamar esta funcao, e AMBAS a chamam
+-- com o cliente service_role (SUPABASE_SERVICE_ROLE_KEY). Nao ha nenhum caminho
+-- legitimo que a chame como `authenticated`.
+--
+-- Correccao: retirar o EXECUTE a PUBLIC/anon/authenticated e deixar so o
+-- service_role (que ja o tem). As edge functions continuam a funcionar; a
+-- chamada directa por um utilizador autenticado passa a ser recusada
+-- (permission denied), fechando o IDOR sem tocar na logica da funcao.
+-- ============================================================================
+
+REVOKE EXECUTE ON FUNCTION public.record_proposal_decision(uuid) FROM PUBLIC, anon, authenticated;
