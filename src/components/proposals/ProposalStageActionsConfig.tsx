@@ -153,6 +153,8 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
           action_config: (a.action_config || {}) as Record<string, unknown>,
         }))
       );
+    } else {
+      toast({ title: "Erro", description: "Não foi possível carregar as ações da fase.", variant: "destructive" });
     }
     hasLoadedOnceRef.current = true;
       setLoading(false);

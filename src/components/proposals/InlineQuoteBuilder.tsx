@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -193,6 +194,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         }));
       } catch (error) {
         console.error("Error loading catalog:", error);
+        toast.error("Não foi possível carregar o catálogo.");
       } finally {
         setCatalogLoading(false);
       }
@@ -278,6 +280,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
       setTemplates(data || []);
     } catch (e) {
       console.error("Error fetching templates:", e);
+      toast.error("Não foi possível carregar os modelos.");
     }
   };
 

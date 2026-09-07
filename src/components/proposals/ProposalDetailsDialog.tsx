@@ -423,6 +423,7 @@ export function ProposalDetailsDialog({
       setPipelineJourney(journey);
     } catch (error) {
       console.error("Error loading proposal details:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar os detalhes da proposta.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

@@ -158,6 +158,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
     setAllStages([...((allOrgData || []) as any[]), ...((allGlobalData || []) as any[])]);
     const { data, error } = await supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).eq("is_active", true).order("stage_order");
     if (!error) { setStages((data || []) as any[]); setIsUsingTemplate(((data || []) as any[]).length === 0); }
+    else { toast({ title: "Erro", description: "Não foi possível carregar as fases do workflow.", variant: "destructive" }); }
     setLoading(false);
   };
 
@@ -168,7 +169,8 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
 
   const loadProposalCounts = async () => {
     if (!companyId) return;
-    const { data } = await supabase.from("proposals").select("stage_id").eq("organization_id", companyId);
+    const { data, error } = await supabase.from("proposals").select("stage_id").eq("organization_id", companyId);
+    if (error) { toast({ title: "Erro", description: "Não foi possível carregar os contadores por fase.", variant: "destructive" }); return; }
     if (data) {
       const counts: Record<string, number> = {};
       data.forEach((p: any) => { if (p.stage_id) counts[p.stage_id] = (counts[p.stage_id] || 0) + 1; });

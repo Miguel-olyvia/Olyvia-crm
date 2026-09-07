@@ -8,6 +8,7 @@ import { Plus, Trash2, Package, Wrench, Search } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { escapeIlike } from "@/lib/clientSearch";
 
@@ -93,6 +94,7 @@ export default function ProposalItemsEditor({
       setCatalogResults(fetched);
     } catch (err) {
       console.error("Catalog search error:", err);
+      toast.error("Não foi possível pesquisar o catálogo.");
     } finally { setSearching(false); }
   }, [organizationId]);
 
