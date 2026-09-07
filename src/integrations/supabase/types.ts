@@ -1797,6 +1797,7 @@ export type Database = {
           entity_is_client: boolean | null
           field_values: Json
           id: string
+          last_activity_at: string | null
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
@@ -1844,6 +1845,7 @@ export type Database = {
           entity_is_client?: boolean | null
           field_values?: Json
           id?: string
+          last_activity_at?: string | null
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null
@@ -1891,6 +1893,7 @@ export type Database = {
           entity_is_client?: boolean | null
           field_values?: Json
           id?: string
+          last_activity_at?: string | null
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null

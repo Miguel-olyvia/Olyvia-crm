@@ -45,6 +45,7 @@ import {
   ensureEntityOrgLinkSR,
 } from '../_shared/entityScopedLookup.ts';
 import { classifyDedupOutcome, type DedupOutcome } from '../_shared/leadDedup.ts';
+import { resolveLeadToStamp, stampLeadActivity } from './leadActivityStamp.ts';
 import { deriveKeyFromEnv, hashNif } from '../_shared/nifCrypto.ts';
 import {
   sanitizeEmail,
@@ -682,12 +683,10 @@ Deno.serve(async (req) => {
     // a entidade ja tem lead activa (ou e cliente), a submissao acumula em
     // form_submissions apontada a esse registo, e nao nasce lead nenhuma.
     let existingTarget: { targetType: 'lead' | 'client'; targetId: string } | null = null;
-    // Uma lead SEM comercial (nem `assigned_to` nem `created_by`) que recebe
-    // uma submissao nova comporta-se como entrada nova: sobe ao topo da
-    // listagem. Nao nasce registo nenhum — carimba-se `last_activity_at` na
-    // lead que ja existe. `activeLeadAssigneeAnewUserId` e exactamente
-    // `assigned_to ?? created_by ?? null` (ver entityScopedLookup.ts).
-    let existingLeadIsUnowned = false;
+    // A lead activa que vai receber o carimbo de `last_activity_at`, se
+    // existir. Nao nasce registo nenhum: quem ja ca estava fica marcado como
+    // "voltou a contactar" na ficha que ja tem.
+    let existingActiveLeadId: string | null = null;
     // Comercial responsavel pelo registo que recebeu a submissao
     // (`assigned_to ?? created_by`), guardado aqui porque o `summary` do
     // classify vive num bloco interno e a notificacao so e escrita la a
@@ -735,8 +734,15 @@ Deno.serve(async (req) => {
         } else if (summary.activeLeadId) {
           existingTarget = { targetType: 'lead', targetId: summary.activeLeadId };
           existingTargetAssigneeAnewUserId = summary.activeLeadAssigneeAnewUserId ?? null;
-          existingLeadIsUnowned = summary.activeLeadAssigneeAnewUserId === null;
         }
+
+        // Fora do if/else de proposito: `activeLeadId` vem preenchido mesmo
+        // quando quem ganha o `targetType` e o CLIENTE (ver entityScopedLookup),
+        // e e a lead que aparece na lista de Leads. Antes so se carimbava a
+        // lead SEM comercial nenhum, e por isso o aviso nunca chegava a quem
+        // tem comercial atribuido — 8 das 11 leads da nike que ja receberam
+        // submissoes ficaram sem marca nenhuma.
+        existingActiveLeadId = resolveLeadToStamp(summary);
 
         // Best-effort side effects: merge new field values into the existing
         // record and notify the responsible commercial. A failure here must
@@ -1044,23 +1050,13 @@ Deno.serve(async (req) => {
           }
         }
 
-        // A lead sem comercial sobe ao topo: carimba-se `last_activity_at`.
-        // Best-effort e DEPOIS da submissao ja estar gravada — falhar aqui so
-        // custa a subida na ordenacao, nunca a submissao nem o visitante. A
-        // coluna so existe a partir da migration 20261116050000; enquanto ela
-        // nao estiver aplicada o PostgREST devolve PGRST204/42703, loga-se e
-        // segue. Nada mais na ficha da lead e tocado.
-        if (existingTarget.targetType === 'lead' && existingLeadIsUnowned) {
-          const { error: activityError } = await supabase
-            .from('anew_leads')
-            .update({ last_activity_at: new Date().toISOString() })
-            .eq('id', existingTarget.targetId);
-          if (activityError) {
-            console.error(
-              '[create-lead] nao foi possivel carimbar last_activity_at (a coluna pode nao existir ainda; continuando):',
-              activityError.message,
-            );
-          }
+        // Quem ja era lead voltou a contactar: carimba-se `last_activity_at`
+        // na ficha que ja existe, e e isso que poe o aviso na lista e a faz
+        // subir. Best-effort e DEPOIS da submissao ja estar gravada — falhar
+        // aqui so custa o aviso, nunca a submissao nem o visitante. Ver
+        // `leadActivityStamp.ts` (e os testes ao lado) para a regra exacta.
+        if (existingActiveLeadId) {
+          await stampLeadActivity(supabase, existingActiveLeadId);
         }
 
         // --- Notificacao do comercial (01 a 06) ---
