@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type QuotePdfTemplate = Record<string, unknown> & {
   id?: string;
@@ -148,6 +149,7 @@ export async function fetchQuotePdfTemplateById(templateId: string | null | unde
     .maybeSingle();
   if (error) {
     console.warn("[fetchQuotePdfTemplateById] error", error);
+    captureFlowError(error, "quote-document-export");
     return null;
   }
   return normalizeQuotePdfTemplate(data as any);

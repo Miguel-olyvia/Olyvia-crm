@@ -11,6 +11,7 @@ import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
 import { isBaseFieldCoveredByCampaignFields, stripCampaignCoveredBaseValues } from "@/lib/leads/campaignFieldCoverage";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
@@ -1157,6 +1158,7 @@ export default function AnewLeads() {
 
       if (error) {
         console.error("Error loading status counts:", error);
+        captureFlowError(error, "lead-lifecycle");
         return;
       }
 
@@ -1169,6 +1171,7 @@ export default function AnewLeads() {
       setStatusCounts(counts);
     } catch (error) {
       console.error("Error loading status counts:", error);
+      captureFlowError(error, "lead-lifecycle");
     }
   }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
@@ -1702,7 +1705,7 @@ export default function AnewLeads() {
               "create_lead_entity_for_org",
               { p_organization_id: activeCompanyId, p_display_name: name },
             );
-            if (entityError || !entityId) { skipped++; return; }
+            if (entityError || !entityId) { captureFlowError(entityError, "record-export-import"); skipped++; return; }
 
             const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
               .insert({
@@ -1716,7 +1719,7 @@ export default function AnewLeads() {
               })
               .select("id")
               .single();
-            if (leadError || !newLead) { skipped++; return; }
+            if (leadError || !newLead) { captureFlowError(leadError, "record-export-import"); skipped++; return; }
 
             await (supabase.from("anew_entity_roles") as any).upsert({
               organization_id: activeCompanyId,
@@ -1730,7 +1733,8 @@ export default function AnewLeads() {
 
             imported++;
           });
-        } catch {
+        } catch (rowError) {
+          captureFlowError(rowError, "record-export-import");
           skipped++;
         }
       }
@@ -1770,6 +1774,7 @@ export default function AnewLeads() {
         const globalStages = allStages.filter(s => !s.organization_id);
         return (orgStages.length > 0 ? orgStages : globalStages).map(mapStage);
       }
+      if (error) captureFlowError(error, "lead-lifecycle");
       return [];
     },
     enabled: !!activeCompanyId,
@@ -1787,7 +1792,10 @@ export default function AnewLeads() {
       const { data, error } = await supabase.rpc("get_lead_resolved_stage", {
         p_lead_id: selectedLead!.id,
       });
-      if (error) return null;
+      if (error) {
+        captureFlowError(error, "lead-lifecycle");
+        return null;
+      }
       return data as { resolved_stage_id: string | null; furthest_progress_stage_id: string | null } | null;
     },
     enabled: !!selectedLead?.id,
@@ -1953,6 +1961,7 @@ export default function AnewLeads() {
 
     if (error) {
       console.error("Error loading field definitions:", error);
+      captureFlowError(error, "campaign-lead-intake");
     } else {
       setFieldDefs(data || []);
       loadReferenceData(data || []);
@@ -1985,6 +1994,7 @@ export default function AnewLeads() {
 
       if (error) {
         console.error("Error loading campaigns:", error);
+        captureFlowError(error, "campaign-lead-intake");
         return [];
       }
       return (data || []).map(c => ({ id: c.id, name: c.name, form_id: c.form_id }));
@@ -2153,6 +2163,7 @@ export default function AnewLeads() {
         const dealSet = new Set<string>();
         if (healthError) {
           console.error("Error loading lead health aggregates:", healthError);
+          captureFlowError(healthError, "lead-lifecycle");
         } else {
           (healthData || []).forEach((row: {
             entity_id: string;
@@ -2177,6 +2188,7 @@ export default function AnewLeads() {
 
         if (pipelineError) {
           console.error("Error loading lead pipeline aggregates:", pipelineError);
+          captureFlowError(pipelineError, "lead-lifecycle");
         } else {
           const pipelineMap: Record<string, LeadPipelineEntry> = {};
           (pipelineRows || []).forEach((row: {
@@ -2662,6 +2674,7 @@ export default function AnewLeads() {
 
     if (error) {
       console.error("Error refreshing lead:", error);
+      captureFlowError(error, "lead-lifecycle");
       return;
     }
 
@@ -3592,6 +3605,7 @@ export default function AnewLeads() {
           });
         } catch (linkErr) {
           console.warn('[org-link] non-fatal failure', linkErr);
+          captureFlowError(linkErr, "lead-lifecycle");
         }
 
         // --- DUPLICATE CHECK: existing leads/contacts/clients with same entity in same org ---
@@ -3686,6 +3700,7 @@ export default function AnewLeads() {
           orgId: activeCompanyId!, email: emailValue || null, phone: phoneValue || null, nif: vatValue || null,
         }).catch((err) => {
           console.warn("[duplicate-check] findEntityMatches failed (non-fatal)", err);
+          captureFlowError(err, "lead-lifecycle");
           return [] as Awaited<ReturnType<typeof findEntityMatches>>;
         });
 
@@ -3817,6 +3832,7 @@ export default function AnewLeads() {
         });
         if (addr.decision === "error") {
           console.warn("[post-commit] address sync failed", addr.reason);
+          captureFlowError(new Error(addr.reason ?? "post-commit address sync failed"), "lead-lifecycle");
           toast({
             title: t('leads.toast.addressSyncFailed'),
             description: addr.reason ?? undefined,
@@ -3824,6 +3840,7 @@ export default function AnewLeads() {
         }
       } catch (e) {
         console.warn("[post-commit] address sync threw", e);
+        captureFlowError(e, "lead-lifecycle");
         const description = await getFriendlyErrorMessage(e);
         toast({
           title: t('leads.toast.addressSyncFailed'),
@@ -3843,6 +3860,7 @@ export default function AnewLeads() {
             .maybeSingle();
           if (fetchErr) {
             console.warn("[post-commit] entity rename: fetch current name failed", fetchErr.message);
+            captureFlowError(fetchErr, "lead-lifecycle");
           } else {
             const safeUpdate: Record<string, any> = {};
             if (!currentEntity?.first_name && entityRenamePayloadForPostCommit.first_name) {
@@ -3858,11 +3876,15 @@ export default function AnewLeads() {
               const { error } = await (supabase.from("anew_entities") as any)
                 .update(safeUpdate)
                 .eq("id", entityIdForPostCommit);
-              if (error) console.warn("[post-commit] entity rename failed", error.message);
+              if (error) {
+                console.warn("[post-commit] entity rename failed", error.message);
+                captureFlowError(error, "lead-lifecycle");
+              }
             }
           }
         } catch (e) {
           console.warn("[post-commit] entity rename threw", e);
+          captureFlowError(e, "lead-lifecycle");
         }
       }
 
@@ -3944,6 +3966,7 @@ export default function AnewLeads() {
         }
       } catch (revErr) {
         console.warn('[create-anyway] pre-write revalidation failed (non-fatal)', revErr);
+        captureFlowError(revErr, "lead-lifecycle");
       }
     }
 
@@ -4035,6 +4058,7 @@ export default function AnewLeads() {
             });
           } catch (linkErr) {
             console.warn('[org-link/create-anyway] non-fatal failure', linkErr);
+            captureFlowError(linkErr, "lead-lifecycle");
           }
         }
 
@@ -4087,10 +4111,12 @@ export default function AnewLeads() {
         });
         if (addr.decision === "error") {
           console.warn("[post-commit/create-anyway] address sync failed", addr.reason);
+          captureFlowError(new Error(addr.reason ?? "post-commit address sync failed"), "lead-lifecycle");
           toast({ title: t('leads.toast.addressSyncFailed'), description: addr.reason ?? undefined });
         }
       } catch (e) {
         console.warn("[post-commit/create-anyway] address sync threw", e);
+        captureFlowError(e, "lead-lifecycle");
         const description = await getFriendlyErrorMessage(e);
         toast({ title: t('leads.toast.addressSyncFailed'), description });
       }
@@ -4554,7 +4580,8 @@ export default function AnewLeads() {
             .map((row: { source?: string | null }) => row.source?.trim() || "")
             .filter(Boolean),
         );
-      } catch {
+      } catch (sourceErr) {
+        captureFlowError(sourceErr, "lead-lifecycle");
         if (!cancelled) setSourceOptions([]);
       }
     })();
@@ -4816,6 +4843,7 @@ export default function AnewLeads() {
         }
       } catch (e) {
         console.error("[AnewLeads] Failed to load entity email/name for row email action:", e);
+        captureFlowError(e, "entity-email-send");
       }
     }
     // Fallback to lead field_values aliases (po_email, nome, etc.)

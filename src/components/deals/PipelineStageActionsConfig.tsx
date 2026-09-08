@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface StageAction {
   id: string;
@@ -165,6 +166,12 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
           action_config: (a.action_config || {}) as Record<string, unknown>,
         }))
       );
+    } else {
+      // Read that fails and shows the empty state ("Nenhuma acção configurada"):
+      // report the raw cause to Sentry only. No toast — an empty panel is not
+      // catastrophic (the user can reopen), and a toast would blur "no actions"
+      // into "failed to load".
+      captureFlowError(error, "config-partial-write");
     }
     hasLoadedOnceRef.current = true;
       setLoading(false);
@@ -201,7 +208,9 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
     }]);
 
     if (error) {
-      toast({ title: "Erro ao adicionar", description: error.message, variant: "destructive" });
+      // Raw cause to Sentry; the user sees a normalized message only.
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Não foi possível adicionar a acção", variant: "destructive" });
     } else {
       toast({ title: "Acção adicionada" });
       resetForm();
@@ -214,7 +223,16 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
     const { error } = await (supabase.from(tableName as any) as any)
       .update({ is_active: !action.is_active })
       .eq("id", action.id);
-    if (!error) { loadActions(); onActionsChanged?.(); }
+    if (!error) {
+      loadActions();
+      onActionsChanged?.();
+    } else {
+      // User toggled active/inactive and it failed silently until now: report the
+      // raw cause to Sentry and tell the user, so they don't believe the switch
+      // took effect when it did not.
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Não foi possível actualizar a acção", variant: "destructive" });
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -223,6 +241,11 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
       toast({ title: "Acção removida" });
       loadActions();
       onActionsChanged?.();
+    } else {
+      // Destructive action that failed silently until now: raw cause to Sentry
+      // and a normalized destructive toast, symmetric to the success toast.
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Não foi possível remover a acção", variant: "destructive" });
     }
   };
 
