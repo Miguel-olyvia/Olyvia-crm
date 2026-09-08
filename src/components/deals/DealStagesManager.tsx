@@ -171,6 +171,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
       .eq("organization_id", companyId)
       .eq("is_active", true)
       .order("order_index");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (!error && data && data.length > 0) {
       const mapped = data.map((s: any) => ({ ...s, label: s.label || s.name }));
       setStages(mapped);
@@ -194,20 +195,22 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
   }, [companyId]);
 
   const loadTemplateStages = useCallback(async () => {
-    const { data } = await (supabase.from("deal_stages") as any)
+    const { data, error } = await (supabase.from("deal_stages") as any)
       .select("*")
       .is("organization_id", null)
       .eq("is_active", true)
       .order("order_index");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setTemplateStages((data || []).map((s: any) => ({ ...s, label: s.label || s.name })));
   }, []);
 
   const loadDealCounts = useCallback(async () => {
     if (!companyId) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("deals")
       .select("stage_id")
       .eq("organization_id", companyId);
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (data) {
       const counts: Record<string, number> = {};
       data.forEach((d: any) => {
@@ -345,9 +348,10 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
     const reordered = arrayMove(stages, oldIndex, newIndex);
     setStages(reordered);
     for (let i = 0; i < reordered.length; i++) {
-      await (supabase.from("deal_stages") as any)
+      const { error } = await (supabase.from("deal_stages") as any)
         .update({ order_index: i + 1 })
         .eq("id", reordered[i].id);
+      if (error) captureFlowError(error, "deal-lifecycle");
     }
     onStagesUpdated?.();
   };

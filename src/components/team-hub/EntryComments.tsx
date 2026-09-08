@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { Send, User, Loader2, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -54,6 +55,7 @@ export function EntryComments({ entryId, entryAuthorId, entryAuthorName, current
       .eq("entry_id", entryId)
       .order("created_at", { ascending: true });
 
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (!error) setComments(data || []);
     setLoading(false);
   };
@@ -215,11 +217,12 @@ export function EntryComments({ entryId, entryAuthorId, entryAuthorName, current
 
       // Send notifications
       if (notifyIds.size > 0) {
-        const { data: usersToNotify } = await (supabase as any)
+        const { data: usersToNotify, error: usersToNotifyError } = await (supabase as any)
           .from("anew_users")
           .select("id, auth_user_id")
           .in("id", [...notifyIds]);
 
+        if (usersToNotifyError) captureFlowError(usersToNotifyError, "db-error-leaked-to-ui");
         if (usersToNotify) {
           const notifications = usersToNotify
             .filter((u: any) => u.auth_user_id)
@@ -239,6 +242,7 @@ export function EntryComments({ entryId, entryAuthorId, entryAuthorName, current
           if (notifications.length > 0) {
             const { error: notifyError } = await (supabase as any).from("notifications").insert(notifications);
             if (notifyError) {
+              captureFlowError(notifyError, "db-error-leaked-to-ui");
               toast({ title: "Aviso", description: "O comentário foi guardado, mas as notificações podem não ter sido enviadas." });
             }
           }

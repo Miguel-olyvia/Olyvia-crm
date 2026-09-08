@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import DashboardCard from "./DashboardCard";
 import DashboardGrid from "./DashboardGrid";
@@ -69,6 +70,7 @@ const WorkerDashboard = () => {
           createdQuotes: quotesResult.data?.length ?? 0,
         });
       } catch (error) {
+        captureFlowError(error, "db-error-leaked-to-ui");
         console.error("Error loading worker stats:", error);
       } finally {
         setLoading(false);

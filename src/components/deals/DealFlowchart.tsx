@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import type { DealWorkflowStage } from "./DealStagesManager";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Props {
   stages: DealWorkflowStage[];
@@ -54,7 +55,8 @@ export function DealFlowchart({ stages, companyId }: Props) {
   useEffect(() => {
     if (!companyId) return;
     (async () => {
-      const { data } = await supabase.from("deals").select("stage_id").eq("organization_id", companyId);
+      const { data, error } = await supabase.from("deals").select("stage_id").eq("organization_id", companyId);
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       if (data) {
         const counts: Record<string, number> = {};
         data.forEach((d: any) => { if (d.stage_id) counts[d.stage_id] = (counts[d.stage_id] || 0) + 1; });
@@ -75,7 +77,8 @@ export function DealFlowchart({ stages, companyId }: Props) {
 
   const loadTransitions = useCallback(async () => {
     if (!companyId) return;
-    const { data } = await (supabase.from("deal_stage_transitions") as any).select("*").eq("organization_id", companyId);
+    const { data, error } = await (supabase.from("deal_stage_transitions") as any).select("*").eq("organization_id", companyId);
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     const loadedEdges: Edge[] = (data || []).map((t: any) => ({
       id: `${t.from_stage_id}-${t.to_stage_id}`, source: t.from_stage_id, target: t.to_stage_id,
       markerEnd: { type: MarkerType.ArrowClosed }, animated: true, style: { stroke: "hsl(var(--primary))", strokeWidth: 2 },

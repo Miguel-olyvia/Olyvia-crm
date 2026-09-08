@@ -418,6 +418,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         }
       }
     } catch (err: any) {
+      captureFlowError(err, "db-error-leaked-to-ui");
       console.error("Error loading deal needs:", err);
     } finally {
       hasLoadedOnceRef.current = true;
@@ -544,7 +545,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
             }
           }
         }
-      } catch (_) { /* ignore hierarchy errors */ }
+      } catch (e) { captureFlowError(e, "db-error-leaked-to-ui"); /* best-effort: hierarchy scope */ }
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');
 
@@ -577,7 +578,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         id: s.id, name: s.name, sku: s.sku,
         price: s.service_prices?.find((sp: any) => sp.price_type === 'retail')?.price ?? s.service_prices?.[0]?.price,
       })));
-    } catch (err) { console.error("Search error:", err); }
+    } catch (err) { captureFlowError(err, "db-error-leaked-to-ui"); console.error("Search error:", err); }
     finally { setSearchingItems(false); }
   }, [organizationId]);
 

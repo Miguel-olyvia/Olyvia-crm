@@ -29,6 +29,7 @@ import {
   BarChart3
 } from "lucide-react";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { supabase } from "@/integrations/supabase/client";
 import { TrackingPixelsManager } from "./TrackingPixelsManager";
 import { LANGUAGES } from "@/constants/languages";
@@ -107,6 +108,7 @@ export function FormIntegrationsTab({
           .select("source_id, is_default, lead_sources(id, name)")
           .eq("campaign_id", campaignId);
         
+        if (error) captureFlowError(error, "db-error-leaked-to-ui");
         if (!error && data) {
           const sources = (data as any[]).map((s: any) => s.lead_sources).filter(Boolean);
           setCampaignSources(sources);
@@ -172,6 +174,7 @@ export function FormIntegrationsTab({
       setDefaultLocale(def);
       setActiveLocales(locales.length ? locales : [DEFAULT_FORM_LOCALE]);
     } catch (error) {
+      captureFlowError(error, "db-error-leaked-to-ui");
       console.error("Error loading form locales:", error);
       setDefaultLocale(DEFAULT_FORM_LOCALE);
       setActiveLocales([DEFAULT_FORM_LOCALE]);

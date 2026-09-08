@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import DashboardCard from "./DashboardCard";
@@ -85,6 +86,7 @@ const CompanyAdminDashboard = () => {
           activities: activitiesResult.data?.length ?? 0,
         });
       } catch (error) {
+        captureFlowError(error, "db-error-leaked-to-ui");
         console.error("Error loading company admin stats:", error);
       } finally {
         setLoading(false);

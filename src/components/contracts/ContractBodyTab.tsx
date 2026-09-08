@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
 import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
@@ -74,6 +75,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         .eq("organization_id", activeCompany.id)
         .eq("is_active", true)
         .order("is_default", { ascending: false });
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data || [];
     },
     enabled: !!activeCompany?.id,
@@ -89,11 +91,12 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const { data: templateSignatoryUser } = useQuery({
     queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
     queryFn: async () => {
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("anew_users")
         .select("id, name")
         .eq("id", currentTemplate!.signatory_user_id)
         .maybeSingle();
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data;
     },
     enabled: !!currentTemplate?.signatory_user_id,
@@ -113,7 +116,8 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     queryKey: ["contract-org", activeCompany?.id],
     queryFn: async () => {
       if (!activeCompany?.id) return null;
-      const { data } = await (supabase as any).from("anew_organizations").select("name, metadata, logo_url").eq("id", activeCompany.id).single();
+      const { data, error } = await (supabase as any).from("anew_organizations").select("name, metadata, logo_url").eq("id", activeCompany.id).single();
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data;
     },
     enabled: !!activeCompany?.id,
@@ -221,6 +225,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         }
       }
     } catch (e) {
+      captureFlowError(e, "db-error-leaked-to-ui");
       console.error("Falha a detectar variáveis a preencher:", e);
     }
 
@@ -296,6 +301,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       // Sign the contract after OTP verification
       await handleCompanySignAfterOtp();
     } catch (err: any) {
+      captureFlowError(err, "db-error-leaked-to-ui");
       setOtpError(err.message);
       setOtpStep("input");
       setOtpCode("");
