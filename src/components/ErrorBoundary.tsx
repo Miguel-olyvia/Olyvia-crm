@@ -1,5 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import * as Sentry from "@sentry/react";
+import { isModuleLoadError } from "@/lib/sentry/scrub";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, LogOut } from "lucide-react";
 
@@ -33,8 +34,7 @@ class ErrorBoundary extends Component<Props, State> {
     // in src/main.tsx, kept in sync manually — no shared app-wide error
     // classifier module exists yet) so they land back on the same URL
     // instead of being stuck on a scary "Algo correu mal" screen.
-    const isModuleLoadError = /Failed to fetch dynamically imported module|Importing a module script failed/.test(error.message || "");
-    if (isModuleLoadError && !sessionStorage.getItem("olyvia-module-load-retried")) {
+    if (isModuleLoadError(error) && !sessionStorage.getItem("olyvia-module-load-retried")) {
       sessionStorage.setItem("olyvia-module-load-retried", "true");
       window.location.reload();
       return;
